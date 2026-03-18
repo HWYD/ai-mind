@@ -3,16 +3,16 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useOllamaStream } from './useOllamaStream'
 
-const ResponseDisplay = React.memo(({ response, isLoading }: { response: string; isLoading: boolean }) => {
+const ResponseDisplay = React.memo(({ response, thinking, isLoading }: { response: string; thinking: string; isLoading: boolean }) => {
   const responseRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (responseRef.current) {
       responseRef.current.scrollTop = responseRef.current.scrollHeight
     }
-  }, [response])
+  }, [response, thinking])
 
-  if (!response && !isLoading) return null
+  if (!response && !thinking && !isLoading) return null
 
   return (
     <div style={{ 
@@ -25,6 +25,9 @@ const ResponseDisplay = React.memo(({ response, isLoading }: { response: string;
       <h3 style={{ marginTop: 0 }}>Response:</h3>
       <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {response}
+        {!response && isLoading && (
+          <span style={{ opacity: 0.5 }}>Thinking: {thinking}</span>
+        )}
         {isLoading && <span style={{ opacity: 0.5 }}>▋</span>}
       </div>
     </div>
@@ -37,7 +40,7 @@ export default function Page() {
   const [prompt, setPrompt] = useState('')
   const responseContainerRef = useRef<HTMLDivElement>(null)
 
-  const { response, isLoading, error, sendMessage, cancel } = useOllamaStream()
+  const { response, thinking, isLoading, error, sendMessage, cancel } = useOllamaStream()
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault()
@@ -108,7 +111,7 @@ export default function Page() {
         </div>
       </form>
       
-      <ResponseDisplay response={response} isLoading={isLoading} />
+      <ResponseDisplay response={response} thinking={thinking} isLoading={isLoading} />
     </div>
   )
 }

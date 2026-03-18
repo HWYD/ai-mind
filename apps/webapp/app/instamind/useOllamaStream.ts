@@ -10,6 +10,7 @@ interface UseOllamaStreamOptions {
 
 export function useOllamaStream(options: UseOllamaStreamOptions = {}) {
   const [response, setResponse] = useState('')
+  const [thinking, setThinking] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -26,6 +27,7 @@ export function useOllamaStream(options: UseOllamaStreamOptions = {}) {
 
     setIsLoading(true)
     setResponse('')
+    setThinking('')
     setError(null)
     
     const controller = new AbortController()
@@ -49,13 +51,34 @@ export function useOllamaStream(options: UseOllamaStreamOptions = {}) {
       const decoder = new TextDecoder()
 
       if (reader) {
+        let buffer = ''
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
           
-          const chunk = decoder.decode(value)
-          setResponse(prev => prev + chunk)
-          options.onChunk?.(chunk)
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+          
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const data = JSON.parse(line)
+              if (data.response) {
+                setResponse(prev => prev + data.response)
+                options.onChunk?.(data.response)
+              }
+              // 显示思考过程
+              if (data.thinking) {
+                setThinking(prev => prev + data.thinking)
+              }
+              if (data.done) {
+                break
+              }
+            } catch {
+              continue
+            }
+          }
         }
       }
       
@@ -76,6 +99,7 @@ export function useOllamaStream(options: UseOllamaStreamOptions = {}) {
 
   return {
     response,
+    thinking,
     isLoading,
     error,
     sendMessage,
