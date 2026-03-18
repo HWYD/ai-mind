@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
 
     const encoder = new TextEncoder()
     const decoder = new TextDecoder()
+    
     const stream = new ReadableStream({
       async start(controller) {
         const reader = ollamaResponse.body?.getReader()
@@ -34,32 +35,40 @@ export async function POST(request: NextRequest) {
           return
         }
 
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-            
-            const chunk = decoder.decode(value, { stream: true })
-            const lines = chunk.split('\n').filter(line => line.trim())
-            
-            for (const line of lines) {
-              try {
-                const data = JSON.parse(line)
-                if (data.response) {
-                  controller.enqueue(encoder.encode(data.response))
+        const processStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+
+              const chunk = decoder.decode(value, { stream: true })
+              const lines = chunk.split('\n').filter(line => line.trim())
+              
+              for (const line of lines) {
+                try {
+                  const data = JSON.parse(line)
+                  console.log('data', data)
+                  if (data.response) {
+                    controller.enqueue(encoder.encode(data.response))
+                  }
+                  if (data.done) {
+                    controller.close()
+                    return
+                  }
+                } catch {
+                  continue
                 }
-                if (data.done) {
-                  break
-                }
-              } catch {
-                continue
               }
             }
+            controller.close()
+          } catch (error) {
+            controller.error(error)
+          } finally {
+            reader.releaseLock()
           }
-        } finally {
-          reader.releaseLock()
-          controller.close()
         }
+
+        processStream()
       },
     })
 
