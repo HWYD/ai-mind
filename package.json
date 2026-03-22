@@ -1,12 +1,62 @@
 {
-  "name": "ai-mind",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "hwy",
-  "license": "ISC",
-  "description": ""
+    "name": "ai-mind",
+    "version": "0.0.3",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "commit": "git-cz",
+        "prepare": "husky",
+        "lint": "eslint",
+        "lint:staged": "lint-staged"
+    },
+    "keywords": [],
+    "author": "hwy",
+    "license": "ISC",
+    "description": "",
+    "config": {
+        "commitizen": {
+            "path": "node_modules/cz-git"
+        }
+    },
+    "lint-staged": {
+        "*.{md,json}": [
+            "prettier --cache --write --no-error-on-unmatched-pattern"
+        ],
+        "*.{css,less}": [
+            "prettier --cache --write"
+        ],
+        "*.{js,jsx}": [
+            "eslint --fix",
+            "prettier --cache --write"
+        ],
+        "*.{ts,tsx}": [
+            "eslint --fix",
+            "prettier --cache --parser=typescript --write"
+        ]
+    },
+    "devDependencies": {
+        "@types/node": "22.15.0",
+        "eslint": "9.39.1",
+        "@eslint/js": "9.39.1",
+        "eslint-config-next": "16.0.5",
+        "typescript-eslint": "8.48.0",
+        "eslint-plugin-react-refresh": "0.4.24",
+        "eslint-plugin-react-hooks": "^7.0.1",
+        "globals": "16.5.0",
+        "typescript": "5.9.3",
+        "eslint-plugin-prettier": "5.5.4",
+        "eslint-plugin-simple-import-sort": "12.1.1",
+        "lint-staged": "16.2.7",
+        "prettier": "3.7.3",
+        "@commitlint/cli": "20.1.0",
+        "@commitlint/config-conventional": "20.0.0",
+        "commitizen": "4.3.1",
+        "fast-glob": "3.3.3",
+        "husky": "9.1.7",
+        "cz-git": "1.10.1",
+        "tsup": "8.3.5",
+        "turbo": "2.2.3",
+        "rimraf": "6.0.1",
+        "npm-run-all2": "7.0.1"
+    }
 }

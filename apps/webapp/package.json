@@ -1,22 +1,26 @@
 {
-  "name": "ai-mind",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "dev": "next dev"
-  },
-  "dependencies": {
-    "next": "16.1.6",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
-  },
-  "devDependencies": {
-    "@types/node": "25.5.0",
-    "@types/react": "19.2.14",
-    "typescript": "5.9.3"
-  },
-  "keywords": [],
-  "author": "hwy",
-  "license": "ISC",
-  "description": ""
+    "name": "ai-mind",
+    "version": "0.0.3",
+    "main": "index.js",
+    "scripts": {
+        "dev": "next dev"
+    },
+    "dependencies": {
+        "@langchain/core": "^1.1.34",
+        "@langchain/ollama": "^1.2.6",
+        "next": "16.1.6",
+        "react": "19.2.4",
+        "react-dom": "19.2.4",
+        "streamdown": "^2.5.0",
+        "zod": "^4.3.6"
+    },
+    "devDependencies": {
+        "@types/node": "25.5.0",
+        "@types/react": "19.2.14",
+        "typescript": "5.9.3"
+    },
+    "keywords": [],
+    "author": "hwy",
+    "license": "ISC",
+    "description": ""
 }

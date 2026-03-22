@@ -1,117 +1,85 @@
 'use client'
 
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react'
-import { useOllamaStream } from './useOllamaStream'
+import { useState } from 'react'
 
-const ResponseDisplay = React.memo(({ response, thinking, isLoading }: { response: string; thinking: string; isLoading: boolean }) => {
-  const responseRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (responseRef.current) {
-      responseRef.current.scrollTop = responseRef.current.scrollHeight
-    }
-  }, [response, thinking])
-
-  if (!response && !thinking && !isLoading) return null
-
-  return (
-    <div style={{ 
-      border: '1px solid #ccc', 
-      padding: '15px', 
-      borderRadius: '5px',
-      maxHeight: '400px',
-      overflowY: 'auto',
-    }} ref={responseRef}>
-      <h3 style={{ marginTop: 0 }}>Response:</h3>
-      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {response}
-        {!response && isLoading && (
-          <span style={{ opacity: 0.5 }}>Thinking: {thinking}</span>
-        )}
-        {isLoading && <span style={{ opacity: 0.5 }}>▋</span>}
-      </div>
-    </div>
-  )
-})
-
-ResponseDisplay.displayName = 'ResponseDisplay'
+import { ChatInputForm } from '../../components/chat/chat-input-form'
+import { ChatMessageList } from '../../components/chat/chat-message-list'
+import { useChatStream } from './use-chat-stream'
 
 export default function Page() {
-  const [prompt, setPrompt] = useState('')
-  const responseContainerRef = useRef<HTMLDivElement>(null)
+    const [input, setInput] = useState('')
+    const { messages, status, error, sendMessage, cancel } = useChatStream()
 
-  const { response, thinking, isLoading, error, sendMessage, cancel } = useOllamaStream()
+    async function handleSubmit() {
+        const nextInput = input.trim()
 
-  const handleSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault()
-    if (isLoading) {
-      cancel()
-    } else {
-      sendMessage(prompt)
+        if (!nextInput) {
+            return
+        }
+
+        setInput('')
+        const accepted = await sendMessage(nextInput)
+
+        if (!accepted) {
+            setInput(nextInput)
+        }
     }
-  }, [prompt, isLoading, sendMessage, cancel])
 
-  const containerStyle = useMemo(() => ({
-    maxWidth: '800px',
-    margin: '0 auto',
-    padding: '20px',
-  }), [])
+    return (
+        <main
+            style={{
+                minHeight: '100vh',
+                background:
+                    'radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 28%), linear-gradient(180deg, #fcfbf8 0%, #f8fafc 100%)',
+                color: '#0f172a',
+            }}
+        >
+            <div
+                style={{
+                    maxWidth: '960px',
+                    margin: '0 auto',
+                    padding: '40px 24px 28px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '22px',
+                    minHeight: '100vh',
+                }}
+            >
+                <header>
+                    <h1 style={{ margin: 0, fontSize: '34px' }}>InstantMind</h1>
+                    <p style={{ margin: '12px 0 0', color: '#64748b', lineHeight: 1.7 }}>
+                        LangChain.js + Ollama minimal chat loop with local multi-turn context.
+                    </p>
+                </header>
 
-  const textareaStyle = useMemo(() => ({
-    width: '100%',
-    minHeight: '100px',
-    padding: '10px',
-    marginBottom: '10px',
-    fontSize: '16px',
-    resize: 'vertical' as const,
-  }), [])
+                {error ? (
+                    <div
+                        style={{
+                            border: '1px solid rgba(248, 113, 113, 0.24)',
+                            background: '#fff1f2',
+                            color: '#b91c1c',
+                            borderRadius: '16px',
+                            padding: '12px 14px',
+                        }}
+                    >
+                        {error}
+                    </div>
+                ) : null}
 
-  const buttonStyle = useMemo(() => ({
-    padding: '10px 20px',
-    fontSize: '16px',
-    cursor: isLoading ? 'not-allowed' : 'pointer',
-    backgroundColor: isLoading ? '#ff4444' : '#0070f3',
-    color: 'white',
-    border: 'none',
-    borderRadius: '5px',
-    marginRight: '10px',
-  }), [isLoading])
+                <ChatMessageList messages={messages} status={status} />
 
-  return (
-    <div style={containerStyle}>
-      <h1>Hello InstantMind</h1>
-      
-      {error && (
-        <div style={{ 
-          backgroundColor: '#ffebee', 
-          color: '#c62828', 
-          padding: '10px', 
-          borderRadius: '5px', 
-          marginBottom: '15px' 
-        }}>
-          Error: {error}
-        </div>
-      )}
-      
-      <form onSubmit={handleSubmit} style={{ marginBottom: '20px' }}>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Enter your prompt here..."
-          style={textareaStyle}
-          disabled={isLoading}
-        />
-        <div>
-          <button
-            type="submit"
-            style={buttonStyle}
-          >
-            {isLoading ? 'Cancel' : 'Send'}
-          </button>
-        </div>
-      </form>
-      
-      <ResponseDisplay response={response} thinking={thinking} isLoading={isLoading} />
-    </div>
-  )
+                <div
+                    style={{
+                        position: 'sticky',
+                        bottom: 0,
+                        paddingTop: '10px',
+                        paddingBottom: '8px',
+                        background: 'linear-gradient(180deg, rgba(252, 251, 248, 0) 0%, rgba(248, 250, 252, 0.92) 22%, #f8fafc 100%)',
+                    }}
+                >
+                    <ChatInputForm input={input} status={status} onInputChange={setInput} onSubmit={handleSubmit} onStop={cancel} />
+                </div>
+            </div>
+        </main>
+    )
 }

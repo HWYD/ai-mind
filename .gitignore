@@ -71,4 +71,4 @@ dist-ssr
 .cspellcache
 .eslintcache
 
-blogs/*
+private-folder/*

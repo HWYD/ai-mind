@@ -1,7 +1,4 @@
-// import './globals.css'
-
 import type { Metadata } from 'next'
-// import { Toaster } from 'sonner'
 
 export const metadata: Metadata = {
     title: 'AI 应用 - WebApp',
@@ -10,15 +7,12 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
     children,
-}: Readonly<{s
+}: Readonly<{
     children: React.ReactNode
 }>) {
     return (
         <html lang="zh-CN">
-            <body className="min-h-screen antialiased">
-                {children}
-                {/* <Toaster position="top-center" richColors /> */}
-            </body>
+            <body className="min-h-screen antialiased">{children}</body>
         </html>
     )
 }

@@ -1,0 +1,20 @@
+{
+    // See http://go.microsoft.com/fwlink/?LinkId=827846
+    // for the documentation about the extensions.json format
+    "recommendations": [
+        "streetsidesoftware.code-spell-checker",
+        "pflannery.vscode-versionlens",
+        "matthewpi.caddyfile-support",
+        "editorconfig.editorconfig",
+        "usernamehw.errorlens",
+        "dbaeumer.vscode-eslint",
+        "codezombiech.gitignore",
+        "wix.vscode-import-cost",
+        "esbenp.prettier-vscode",
+        "stylelint.vscode-stylelint",
+        "chakrounanas.turbo-console-log",
+        "styled-components.vscode-styled-components",
+        "vue.volar",
+        "ms-vscode-remote.remote-containers"
+    ]
+}
