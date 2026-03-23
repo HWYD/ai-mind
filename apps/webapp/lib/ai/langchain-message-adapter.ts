@@ -10,7 +10,7 @@ function flattenInputParts(parts: MindMessageInput['parts']): string {
         .trim()
 }
 
-// 第一阶段只把 text part 发送给模型，其他 part 类型先保留扩展位。
+// 第一阶段只把 text part 发送给模型，其它 part 类型先保留扩展位。
 export function toLangChainMessages(messages: MindMessageInput[]): BaseMessage[] {
     const result: BaseMessage[] = []
 

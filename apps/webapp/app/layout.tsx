@@ -1,8 +1,10 @@
+import './globals.css'
+
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-    title: 'AI 应用 - WebApp',
-    description: '演示应用',
+    title: 'InstantMind',
+    description: '基于 LangChain.js 与 Ollama 的最小化聊天实践项目。',
 }
 
 export default function RootLayout({

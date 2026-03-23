@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { chatStreamChunkSchema } from '../../lib/ai/stream-chunk-schema'
 import type { ChatRequest, ChatStatus, MindMessageInput } from '../../lib/ai/types/chat'
-import type { MindMessage, MindMessagePart, MindRole, TextPart } from '../../lib/ai/types/message'
+import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart } from '../../lib/ai/types/message'
 import type { ChatStreamChunk } from '../../lib/ai/types/stream-chunk'
 
 const DEFAULT_MODEL = 'qwen3:4b'
@@ -14,6 +14,15 @@ function createTextPart(text: string): TextPart {
         type: 'text',
         text,
         format: 'markdown',
+    }
+}
+
+function createReasoningPart(text: string): ReasoningPart {
+    return {
+        type: 'reasoning',
+        text,
+        format: 'markdown',
+        visibility: 'collapsed',
     }
 }
 
@@ -38,11 +47,11 @@ function createAssistantPlaceholder(messageId: string): MindMessage {
 function toMessageInput(message: MindMessage): MindMessageInput {
     return {
         role: message.role,
-        parts: message.parts.filter((part): part is MindMessageInput['parts'][number] => part.type === 'text' || part.type === 'reasoning'),
+        parts: message.parts.filter((part): part is MindMessageInput['parts'][number] => part.type === 'text'),
     }
 }
 
-function appendTextPart(messages: MindMessage[], messageId: string): MindMessage[] {
+function appendPart(messages: MindMessage[], messageId: string, part: MindMessagePart): MindMessage[] {
     return messages.map(message => {
         if (message.id !== messageId) {
             return message
@@ -50,12 +59,12 @@ function appendTextPart(messages: MindMessage[], messageId: string): MindMessage
 
         return {
             ...message,
-            parts: [...message.parts, createTextPart('')],
+            parts: [...message.parts, part],
         }
     })
 }
 
-function appendTextDelta(messages: MindMessage[], messageId: string, delta: string): MindMessage[] {
+function appendPartDelta(messages: MindMessage[], messageId: string, partType: MindMessagePart['type'], delta: string): MindMessage[] {
     return messages.map(message => {
         if (message.id !== messageId) {
             return message
@@ -65,10 +74,12 @@ function appendTextDelta(messages: MindMessage[], messageId: string, delta: stri
         const lastIndex = parts.length - 1
         const lastPart = parts[lastIndex]
 
-        if (!lastPart || lastPart.type !== 'text') {
+        if (!lastPart || lastPart.type !== partType) {
+            const nextPart = partType === 'reasoning' ? createReasoningPart(delta) : createTextPart(delta)
+
             return {
                 ...message,
-                parts: [...message.parts, createTextPart(delta)],
+                parts: [...message.parts, nextPart],
             }
         }
 
@@ -163,10 +174,12 @@ export function useChatStream() {
     const abortControllerRef = useRef<AbortController | null>(null)
     const activeStreamRef = useRef<{
         messageId: string | null
-        partId: string | null
+        textPartId: string | null
+        reasoningPartId: string | null
     }>({
         messageId: null,
-        partId: null,
+        textPartId: null,
+        reasoningPartId: null,
     })
 
     useEffect(() => {
@@ -184,7 +197,8 @@ export function useChatStream() {
     function resetActiveStream() {
         activeStreamRef.current = {
             messageId: null,
-            partId: null,
+            textPartId: null,
+            reasoningPartId: null,
         }
     }
 
@@ -203,21 +217,34 @@ export function useChatStream() {
         switch (chunk.type) {
             case 'start':
                 activeStreamRef.current.messageId = chunk.messageId
-                activeStreamRef.current.partId = null
+                activeStreamRef.current.textPartId = null
+                activeStreamRef.current.reasoningPartId = null
                 updateMessages(current => [...current, createAssistantPlaceholder(chunk.messageId)])
                 return
             case 'text-start':
-                activeStreamRef.current.partId = chunk.partId
-                updateMessages(current => appendTextPart(current, activeStreamRef.current.messageId ?? ''))
+                activeStreamRef.current.textPartId = chunk.partId
+                updateMessages(current => appendPart(current, activeStreamRef.current.messageId ?? '', createTextPart('')))
                 return
             case 'text-delta':
-                if (activeStreamRef.current.partId !== chunk.partId) {
+                if (activeStreamRef.current.textPartId !== chunk.partId) {
                     return
                 }
 
-                updateMessages(current => appendTextDelta(current, activeStreamRef.current.messageId ?? '', chunk.delta))
+                updateMessages(current => appendPartDelta(current, activeStreamRef.current.messageId ?? '', 'text', chunk.delta))
+                return
+            case 'reasoning-start':
+                activeStreamRef.current.reasoningPartId = chunk.partId
+                updateMessages(current => appendPart(current, activeStreamRef.current.messageId ?? '', createReasoningPart('')))
+                return
+            case 'reasoning-delta':
+                if (activeStreamRef.current.reasoningPartId !== chunk.partId) {
+                    return
+                }
+
+                updateMessages(current => appendPartDelta(current, activeStreamRef.current.messageId ?? '', 'reasoning', chunk.delta))
                 return
             case 'text-end':
+            case 'reasoning-end':
                 return
             case 'finish':
                 resetActiveStream()
@@ -250,6 +277,7 @@ export function useChatStream() {
                 messages: nextMessages.map(toMessageInput),
                 options: {
                     model: DEFAULT_MODEL,
+                    enableReasoning: true,
                 },
             }
 

@@ -29,6 +29,16 @@ function getChunkText(chunk: AIMessageChunk): string {
         .join('')
 }
 
+function getReasoningText(chunk: AIMessageChunk): string {
+    const reasoningContent = chunk.additional_kwargs?.reasoning_content
+
+    if (typeof reasoningContent === 'string') {
+        return reasoningContent
+    }
+
+    return ''
+}
+
 function isAbortError(error: unknown): boolean {
     return (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
 }
@@ -57,7 +67,7 @@ export interface ChatServiceDependencies {
 
 export function createChatService(deps: ChatServiceDependencies) {
     return {
-        // 将 LangChain 的异步流转换为轻量 NDJSON 协议，供前端自定义 hook 增量消费。
+        // 把 LangChain 的异步消息流转换成轻量 NDJSON 协议，供前端自定义 hook 增量消费。
         async streamChat(request: ChatRequest, context: ChatExecutionContext) {
             const model = new ChatOllama({
                 model: request.options?.model ?? deps.defaultModel,
@@ -75,12 +85,16 @@ export function createChatService(deps: ChatServiceDependencies) {
 
             const encoder = new TextEncoder()
             const messageId = crypto.randomUUID()
-            const partId = crypto.randomUUID()
+            const textPartId = crypto.randomUUID()
+            const reasoningPartId = crypto.randomUUID()
 
             let closed = false
 
             const responseStream = new ReadableStream<Uint8Array>({
                 start(controller) {
+                    let textStarted = false
+                    let reasoningStarted = false
+
                     const closeStream = () => {
                         if (closed) {
                             return
@@ -114,15 +128,35 @@ export function createChatService(deps: ChatServiceDependencies) {
                         }
                     }
 
+                    const ensureTextPartStarted = () => {
+                        if (textStarted) {
+                            return
+                        }
+
+                        textStarted = true
+                        writeChunk({
+                            type: 'text-start',
+                            partId: textPartId,
+                        })
+                    }
+
+                    const ensureReasoningPartStarted = () => {
+                        if (reasoningStarted) {
+                            return
+                        }
+
+                        reasoningStarted = true
+                        writeChunk({
+                            type: 'reasoning-start',
+                            partId: reasoningPartId,
+                        })
+                    }
+
                     const run = async () => {
                         try {
                             writeChunk({
                                 type: 'start',
                                 messageId,
-                            })
-                            writeChunk({
-                                type: 'text-start',
-                                partId,
                             })
 
                             for await (const chunk of modelStream) {
@@ -133,12 +167,23 @@ export function createChatService(deps: ChatServiceDependencies) {
                                     return
                                 }
 
+                                const reasoning = getReasoningText(chunk)
                                 const text = getChunkText(chunk)
 
+                                if (reasoning) {
+                                    ensureReasoningPartStarted()
+                                    writeChunk({
+                                        type: 'reasoning-delta',
+                                        partId: reasoningPartId,
+                                        delta: reasoning,
+                                    })
+                                }
+
                                 if (text) {
+                                    ensureTextPartStarted()
                                     writeChunk({
                                         type: 'text-delta',
-                                        partId,
+                                        partId: textPartId,
                                         delta: text,
                                     })
                                 }
@@ -148,10 +193,20 @@ export function createChatService(deps: ChatServiceDependencies) {
                                 return
                             }
 
-                            writeChunk({
-                                type: 'text-end',
-                                partId,
-                            })
+                            if (reasoningStarted) {
+                                writeChunk({
+                                    type: 'reasoning-end',
+                                    partId: reasoningPartId,
+                                })
+                            }
+
+                            if (textStarted) {
+                                writeChunk({
+                                    type: 'text-end',
+                                    partId: textPartId,
+                                })
+                            }
+
                             writeChunk({
                                 type: 'finish',
                             })
@@ -177,6 +232,7 @@ export function createChatService(deps: ChatServiceDependencies) {
                             closeStream()
                             return
                         }
+
                         // eslint-disable-next-line no-console
                         console.error('Chat stream failed:', error)
                         closeStream()

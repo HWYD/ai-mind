@@ -45,48 +45,20 @@ export function ChatInputForm({
                     void onSubmit()
                 }
             }}
-            style={{
-                marginTop: 'auto',
-            }}
+            className="mt-auto"
         >
-            <div
-                style={{
-                    border: '1px solid #dbe4ef',
-                    background: '#ffffff',
-                    borderRadius: '24px',
-                    padding: '16px 18px',
-                    boxShadow: '0 18px 40px rgba(15, 23, 42, 0.06)',
-                }}
-            >
+            <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-4 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
                 <textarea
                     value={input}
                     onChange={event => onInputChange(event.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder="输入你的问题，Enter 发送，Shift + Enter 换行"
                     rows={3}
-                    style={{
-                        width: '100%',
-                        resize: 'none',
-                        border: 'none',
-                        outline: 'none',
-                        background: 'transparent',
-                        color: '#0f172a',
-                        fontSize: '16px',
-                        lineHeight: 1.6,
-                        minHeight: '84px',
-                    }}
+                    className="min-h-[84px] w-full resize-none border-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
                 />
 
-                <div
-                    style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        gap: '12px',
-                        marginTop: '12px',
-                    }}
-                >
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>
+                <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className="text-xs text-slate-500">
                         {status === 'streaming' ? '正在生成回答，可点击右侧停止。' : '当前只保留本会话内的多轮上下文。'}
                     </span>
 
@@ -94,20 +66,9 @@ export function ChatInputForm({
                         type="submit"
                         aria-label={status === 'streaming' ? 'Stop generation' : 'Send message'}
                         disabled={sendDisabled}
-                        style={{
-                            width: '42px',
-                            height: '42px',
-                            border: 'none',
-                            borderRadius: '999px',
-                            backgroundColor: status === 'streaming' ? '#ef4444' : '#111827',
-                            color: '#ffffff',
-                            cursor: sendDisabled ? 'not-allowed' : 'pointer',
-                            fontSize: '20px',
-                            fontWeight: 700,
-                            display: 'grid',
-                            placeItems: 'center',
-                            opacity: sendDisabled ? 0.55 : 1,
-                        }}
+                        className={`grid h-11 w-11 place-items-center rounded-full border-none text-lg font-semibold text-white transition ${
+                            status === 'streaming' ? 'bg-rose-500 hover:bg-rose-600' : 'bg-slate-900 hover:bg-slate-800'
+                        } ${sendDisabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer'}`}
                     >
                         {status === 'streaming' ? '■' : '↑'}
                     </button>

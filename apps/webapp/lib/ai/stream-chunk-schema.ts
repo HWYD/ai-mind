@@ -19,6 +19,19 @@ export const chatStreamChunkSchema = z.discriminatedUnion('type', [
         partId: z.string().min(1),
     }),
     z.object({
+        type: z.literal('reasoning-start'),
+        partId: z.string().min(1),
+    }),
+    z.object({
+        type: z.literal('reasoning-delta'),
+        partId: z.string().min(1),
+        delta: z.string(),
+    }),
+    z.object({
+        type: z.literal('reasoning-end'),
+        partId: z.string().min(1),
+    }),
+    z.object({
         type: z.literal('finish'),
     }),
     z.object({

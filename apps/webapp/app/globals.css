@@ -1,0 +1,84 @@
+@import 'tailwindcss';
+@import 'streamdown/styles.css';
+
+@source "../node_modules/streamdown/dist/*.js";
+
+@theme {
+    --font-sans: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+    --radius: 0.875rem;
+}
+
+html {
+    color-scheme: light;
+}
+
+body {
+    font-family: var(--font-sans);
+    background: #f8fafc;
+    color: #0f172a;
+}
+
+.markdown-body > * + * {
+    margin-top: 1rem;
+}
+
+.markdown-body p {
+    margin: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+    font-weight: 700;
+    line-height: 1.4;
+    color: #0f172a;
+}
+
+.markdown-body h1 {
+    margin-top: 2rem;
+    font-size: 1.875rem;
+}
+
+.markdown-body h2 {
+    margin-top: 1.75rem;
+    font-size: 1.5rem;
+}
+
+.markdown-body h3 {
+    margin-top: 1.5rem;
+    font-size: 1.25rem;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+    padding-left: 1.5rem;
+}
+
+.markdown-body li + li {
+    margin-top: 0.35rem;
+}
+
+.markdown-body a {
+    color: #2563eb;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.markdown-body blockquote {
+    border-left: 3px solid #cbd5e1;
+    padding-left: 1rem;
+    color: #475569;
+}

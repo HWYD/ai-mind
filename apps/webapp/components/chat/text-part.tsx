@@ -6,13 +6,7 @@ import type { TextPart } from '../../lib/ai/types/message'
 
 export function TextPartView({ part }: { part: TextPart }) {
     return (
-        <div
-            style={{
-                lineHeight: 1.8,
-                color: 'inherit',
-                fontSize: '16px',
-            }}
-        >
+        <div className="markdown-body text-[15px] leading-7 text-inherit">
             <Streamdown>{part.text}</Streamdown>
         </div>
     )

@@ -26,57 +26,20 @@ export default function Page() {
     }
 
     return (
-        <main
-            style={{
-                minHeight: '100vh',
-                background:
-                    'radial-gradient(circle at top, rgba(59, 130, 246, 0.08), transparent 28%), linear-gradient(180deg, #fcfbf8 0%, #f8fafc 100%)',
-                color: '#0f172a',
-            }}
-        >
-            <div
-                style={{
-                    maxWidth: '960px',
-                    margin: '0 auto',
-                    padding: '40px 24px 28px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '22px',
-                    minHeight: '100vh',
-                }}
-            >
+        <main className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(59,130,246,0.08),transparent_28%),linear-gradient(180deg,#fcfbf8_0%,#f8fafc_100%)] text-slate-900">
+            <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-6 pb-7 pt-10">
                 <header>
-                    <h1 style={{ margin: 0, fontSize: '34px' }}>InstantMind</h1>
-                    <p style={{ margin: '12px 0 0', color: '#64748b', lineHeight: 1.7 }}>
+                    <h1 className="m-0 text-4xl font-semibold tracking-tight">InstantMind</h1>
+                    <p className="mt-3 text-base leading-7 text-slate-500">
                         LangChain.js + Ollama minimal chat loop with local multi-turn context.
                     </p>
                 </header>
 
-                {error ? (
-                    <div
-                        style={{
-                            border: '1px solid rgba(248, 113, 113, 0.24)',
-                            background: '#fff1f2',
-                            color: '#b91c1c',
-                            borderRadius: '16px',
-                            padding: '12px 14px',
-                        }}
-                    >
-                        {error}
-                    </div>
-                ) : null}
+                {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-rose-700">{error}</div> : null}
 
                 <ChatMessageList messages={messages} status={status} />
 
-                <div
-                    style={{
-                        position: 'sticky',
-                        bottom: 0,
-                        paddingTop: '10px',
-                        paddingBottom: '8px',
-                        background: 'linear-gradient(180deg, rgba(252, 251, 248, 0) 0%, rgba(248, 250, 252, 0.92) 22%, #f8fafc 100%)',
-                    }}
-                >
+                <div className="sticky bottom-0 bg-gradient-to-b from-transparent via-slate-50/92 to-slate-50 pb-2 pt-3">
                     <ChatInputForm input={input} status={status} onInputChange={setInput} onSubmit={handleSubmit} onStop={cancel} />
                 </div>
             </div>
