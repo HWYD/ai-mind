@@ -2,23 +2,26 @@
 
 import { useEffect, useRef, useState } from 'react'
 
+import { createId } from '../../lib/ai/create-id'
 import { chatStreamChunkSchema } from '../../lib/ai/stream-chunk-schema'
 import type { ChatRequest, ChatStatus, MindMessageInput } from '../../lib/ai/types/chat'
-import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart } from '../../lib/ai/types/message'
+import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart, ToolPart } from '../../lib/ai/types/message'
 import type { ChatStreamChunk } from '../../lib/ai/types/stream-chunk'
 
-const DEFAULT_MODEL = 'qwen3:4b'
+const DEFAULT_MODEL = 'qwen3:8b'
 
-function createTextPart(text: string): TextPart {
+function createTextPart(text: string, id?: string): TextPart {
     return {
+        id,
         type: 'text',
         text,
         format: 'markdown',
     }
 }
 
-function createReasoningPart(text: string): ReasoningPart {
+function createReasoningPart(text: string, id?: string): ReasoningPart {
     return {
+        id,
         type: 'reasoning',
         text,
         format: 'markdown',
@@ -26,9 +29,19 @@ function createReasoningPart(text: string): ReasoningPart {
     }
 }
 
+function createToolPart(partId: string, toolName: string, input: string): ToolPart {
+    return {
+        id: partId,
+        type: 'tool',
+        toolName,
+        status: 'called',
+        input,
+    }
+}
+
 function createMessage(role: MindRole, parts: MindMessagePart[]): MindMessage {
     return {
-        id: crypto.randomUUID(),
+        id: createId(),
         role,
         parts,
         createdAt: new Date().toISOString(),
@@ -44,11 +57,39 @@ function createAssistantPlaceholder(messageId: string): MindMessage {
     }
 }
 
-function toMessageInput(message: MindMessage): MindMessageInput {
+function toMessageInput(message: MindMessage): MindMessageInput | null {
+    const parts = message.parts.filter(
+        (part): part is MindMessageInput['parts'][number] => part.type === 'text' && part.text.trim().length > 0
+    )
+
+    if (parts.length === 0) {
+        return null
+    }
+
     return {
         role: message.role,
-        parts: message.parts.filter((part): part is MindMessageInput['parts'][number] => part.type === 'text'),
+        parts,
     }
+}
+
+function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
+    return messages.filter(message => {
+        if (message.parts.length === 0) {
+            return false
+        }
+
+        return message.parts.some(part => {
+            if (part.type === 'tool') {
+                return true
+            }
+
+            return part.text.trim().length > 0
+        })
+    })
+}
+
+function toRequestMessages(messages: MindMessage[]): MindMessageInput[] {
+    return messages.map(toMessageInput).filter((message): message is MindMessageInput => message !== null)
 }
 
 function appendPart(messages: MindMessage[], messageId: string, part: MindMessagePart): MindMessage[] {
@@ -64,18 +105,24 @@ function appendPart(messages: MindMessage[], messageId: string, part: MindMessag
     })
 }
 
-function appendPartDelta(messages: MindMessage[], messageId: string, partType: MindMessagePart['type'], delta: string): MindMessage[] {
+// 文本类 part 使用增量拼接，保证流式返回时能持续合并到同一个消息片段。
+function appendTextualPartDelta(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    partType: 'text' | 'reasoning',
+    delta: string
+): MindMessage[] {
     return messages.map(message => {
         if (message.id !== messageId) {
             return message
         }
 
         const parts = [...message.parts]
-        const lastIndex = parts.length - 1
-        const lastPart = parts[lastIndex]
+        const targetIndex = parts.findIndex(part => part.id === partId && part.type === partType)
 
-        if (!lastPart || lastPart.type !== partType) {
-            const nextPart = partType === 'reasoning' ? createReasoningPart(delta) : createTextPart(delta)
+        if (targetIndex === -1) {
+            const nextPart = partType === 'reasoning' ? createReasoningPart(delta, partId) : createTextPart(delta, partId)
 
             return {
                 ...message,
@@ -83,14 +130,39 @@ function appendPartDelta(messages: MindMessage[], messageId: string, partType: M
             }
         }
 
-        parts[lastIndex] = {
-            ...lastPart,
-            text: lastPart.text + delta,
+        const targetPart = parts[targetIndex]
+
+        if (targetPart.type !== partType) {
+            return message
+        }
+
+        parts[targetIndex] = {
+            ...targetPart,
+            text: targetPart.text + delta,
         }
 
         return {
             ...message,
             parts,
+        }
+    })
+}
+
+function updateToolPart(messages: MindMessage[], messageId: string, partId: string, updater: (part: ToolPart) => ToolPart): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'tool' || part.id !== partId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
         }
     })
 }
@@ -170,7 +242,7 @@ export function useChatStream() {
     const [error, setError] = useState<string | null>(null)
 
     const messagesRef = useRef(messages)
-    const conversationIdRef = useRef(crypto.randomUUID())
+    const conversationIdRef = useRef(createId())
     const abortControllerRef = useRef<AbortController | null>(null)
     const activeStreamRef = useRef<{
         messageId: string | null
@@ -215,38 +287,104 @@ export function useChatStream() {
 
     function handleChunk(chunk: ChatStreamChunk) {
         switch (chunk.type) {
-            case 'start':
+            case 'start': {
                 activeStreamRef.current.messageId = chunk.messageId
                 activeStreamRef.current.textPartId = null
                 activeStreamRef.current.reasoningPartId = null
                 updateMessages(current => [...current, createAssistantPlaceholder(chunk.messageId)])
                 return
-            case 'text-start':
+            }
+            case 'text-start': {
+                const messageId = activeStreamRef.current.messageId
+
                 activeStreamRef.current.textPartId = chunk.partId
-                updateMessages(current => appendPart(current, activeStreamRef.current.messageId ?? '', createTextPart('')))
-                return
-            case 'text-delta':
-                if (activeStreamRef.current.textPartId !== chunk.partId) {
+                if (!messageId) {
                     return
                 }
 
-                updateMessages(current => appendPartDelta(current, activeStreamRef.current.messageId ?? '', 'text', chunk.delta))
+                updateMessages(current => appendPart(current, messageId, createTextPart('', chunk.partId)))
                 return
-            case 'reasoning-start':
+            }
+            case 'text-delta': {
+                const messageId = activeStreamRef.current.messageId
+                const textPartId = activeStreamRef.current.textPartId
+
+                if (!messageId || textPartId !== chunk.partId) {
+                    return
+                }
+
+                updateMessages(current => appendTextualPartDelta(current, messageId, chunk.partId, 'text', chunk.delta))
+                return
+            }
+            case 'reasoning-start': {
+                const messageId = activeStreamRef.current.messageId
+
                 activeStreamRef.current.reasoningPartId = chunk.partId
-                updateMessages(current => appendPart(current, activeStreamRef.current.messageId ?? '', createReasoningPart('')))
-                return
-            case 'reasoning-delta':
-                if (activeStreamRef.current.reasoningPartId !== chunk.partId) {
+                if (!messageId) {
                     return
                 }
 
-                updateMessages(current => appendPartDelta(current, activeStreamRef.current.messageId ?? '', 'reasoning', chunk.delta))
+                updateMessages(current => appendPart(current, messageId, createReasoningPart('', chunk.partId)))
                 return
+            }
+            case 'reasoning-delta': {
+                const messageId = activeStreamRef.current.messageId
+                const reasoningPartId = activeStreamRef.current.reasoningPartId
+
+                if (!messageId || reasoningPartId !== chunk.partId) {
+                    return
+                }
+
+                updateMessages(current => appendTextualPartDelta(current, messageId, chunk.partId, 'reasoning', chunk.delta))
+                return
+            }
+            case 'tool-start': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current => appendPart(current, messageId, createToolPart(chunk.partId, chunk.toolName, chunk.input)))
+                return
+            }
+            case 'tool-end': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    updateToolPart(current, messageId, chunk.partId, part => ({
+                        ...part,
+                        status: 'completed',
+                        output: chunk.output,
+                    }))
+                )
+                return
+            }
+            case 'tool-error': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    updateToolPart(current, messageId, chunk.partId, part => ({
+                        ...part,
+                        status: 'failed',
+                        error: chunk.message,
+                    }))
+                )
+                return
+            }
             case 'text-end':
             case 'reasoning-end':
                 return
             case 'finish':
+                updateMessages(current => pruneTransientMessages(current))
                 resetActiveStream()
                 return
             case 'error':
@@ -261,8 +399,9 @@ export function useChatStream() {
             return false
         }
 
+        const stableMessages = pruneTransientMessages(messagesRef.current)
         const userMessage = createMessage('user', [createTextPart(text)])
-        const nextMessages = [...messagesRef.current, userMessage]
+        const nextMessages = [...stableMessages, userMessage]
         const controller = new AbortController()
 
         messagesRef.current = nextMessages
@@ -274,7 +413,7 @@ export function useChatStream() {
         try {
             const payload: ChatRequest = {
                 conversationId: conversationIdRef.current,
-                messages: nextMessages.map(toMessageInput),
+                messages: toRequestMessages(nextMessages),
                 options: {
                     model: DEFAULT_MODEL,
                     enableReasoning: true,
@@ -313,6 +452,7 @@ export function useChatStream() {
             }
 
             discardActiveAssistantMessage()
+            updateMessages(current => pruneTransientMessages(current))
             setError(getErrorMessage(requestError))
             setStatus('error')
         } finally {

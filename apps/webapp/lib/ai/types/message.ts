@@ -1,6 +1,7 @@
 export type MindRole = 'system' | 'user' | 'assistant'
 
 export interface BasePart {
+    id?: string
     type: string
 }
 
@@ -17,7 +18,16 @@ export interface ReasoningPart extends BasePart {
     visibility?: 'collapsed' | 'expanded' | 'hidden'
 }
 
-export type MindMessagePart = TextPart | ReasoningPart
+export interface ToolPart extends BasePart {
+    type: 'tool'
+    toolName: string
+    status: 'called' | 'completed' | 'failed'
+    input: string
+    output?: string
+    error?: string
+}
+
+export type MindMessagePart = TextPart | ReasoningPart | ToolPart
 
 export interface MindMessage {
     id: string

@@ -1,20 +1,25 @@
-import type { AIMessageChunk } from '@langchain/core/messages'
+import { AIMessage, AIMessageChunk, type BaseMessage, SystemMessage, type ToolCall, ToolMessage } from '@langchain/core/messages'
 import { ChatOllama } from '@langchain/ollama'
+import { ZodError } from 'zod'
 
+import { createId } from './create-id'
 import { toLangChainMessages } from './langchain-message-adapter'
+import { toolResultSystemPrompt, toolUseSystemPrompt } from './prompts/tool-calling'
+import { createAuthoritativeToolAnswer, type ExecutedToolResult } from './strategies/tool-answer'
+import { getActiveChatToolDefinitions, getChatToolDefinition } from './tools'
 import type { ChatRequest } from './types/chat'
 import type { ChatStreamChunk } from './types/stream-chunk'
 
-function getChunkText(chunk: AIMessageChunk): string {
-    if (typeof chunk.content === 'string') {
-        return chunk.content
+function getContentText(content: unknown): string {
+    if (typeof content === 'string') {
+        return content
     }
 
-    if (!Array.isArray(chunk.content)) {
+    if (!Array.isArray(content)) {
         return ''
     }
 
-    return chunk.content
+    return content
         .map(part => {
             if (typeof part === 'string') {
                 return part
@@ -29,8 +34,16 @@ function getChunkText(chunk: AIMessageChunk): string {
         .join('')
 }
 
-function getReasoningText(chunk: AIMessageChunk): string {
-    const reasoningContent = chunk.additional_kwargs?.reasoning_content
+function getChunkText(chunk: AIMessageChunk): string {
+    return getContentText(chunk.content)
+}
+
+function getMessageText(message: AIMessage | ToolMessage): string {
+    return getContentText(message.content)
+}
+
+function getReasoningText(source: { additional_kwargs?: Record<string, unknown> }): string {
+    const reasoningContent = source.additional_kwargs?.reasoning_content
 
     if (typeof reasoningContent === 'string') {
         return reasoningContent
@@ -56,6 +69,537 @@ function logChatCancellation(reason: string) {
     console.info(`[chat] stream cancelled: ${reason}`)
 }
 
+function throwIfAborted(signal?: AbortSignal) {
+    if (signal?.aborted) {
+        throw new DOMException('Request aborted', 'AbortError')
+    }
+}
+
+function writeStaticTextPart(writeChunk: (chunk: ChatStreamChunk) => void, text: string) {
+    if (!text) {
+        return
+    }
+
+    const partId = createId()
+
+    writeChunk({
+        type: 'text-start',
+        partId,
+    })
+    writeChunk({
+        type: 'text-delta',
+        partId,
+        delta: text,
+    })
+    writeChunk({
+        type: 'text-end',
+        partId,
+    })
+}
+
+function writeStaticReasoningPart(writeChunk: (chunk: ChatStreamChunk) => void, reasoning: string) {
+    if (!reasoning) {
+        return
+    }
+
+    const partId = createId()
+
+    writeChunk({
+        type: 'reasoning-start',
+        partId,
+    })
+    writeChunk({
+        type: 'reasoning-delta',
+        partId,
+        delta: reasoning,
+    })
+    writeChunk({
+        type: 'reasoning-end',
+        partId,
+    })
+}
+
+async function streamAssistantParts(
+    modelStream: AsyncIterable<AIMessageChunk>,
+    context: ChatExecutionContext,
+    writeChunk: (chunk: ChatStreamChunk) => void,
+    isClosed: () => boolean
+) {
+    let textStarted = false
+    let reasoningStarted = false
+    const textPartId = createId()
+    const reasoningPartId = createId()
+
+    const ensureTextPartStarted = () => {
+        if (textStarted) {
+            return
+        }
+
+        textStarted = true
+        writeChunk({
+            type: 'text-start',
+            partId: textPartId,
+        })
+    }
+
+    const ensureReasoningPartStarted = () => {
+        if (reasoningStarted) {
+            return
+        }
+
+        reasoningStarted = true
+        writeChunk({
+            type: 'reasoning-start',
+            partId: reasoningPartId,
+        })
+    }
+
+    for await (const chunk of modelStream) {
+        if (context.signal?.aborted || isClosed()) {
+            if (context.signal?.aborted) {
+                logChatCancellation('request aborted by client')
+            }
+            return
+        }
+
+        const reasoning = getReasoningText(chunk)
+        const text = getChunkText(chunk)
+
+        if (reasoning) {
+            ensureReasoningPartStarted()
+            writeChunk({
+                type: 'reasoning-delta',
+                partId: reasoningPartId,
+                delta: reasoning,
+            })
+        }
+
+        if (text) {
+            ensureTextPartStarted()
+            writeChunk({
+                type: 'text-delta',
+                partId: textPartId,
+                delta: text,
+            })
+        }
+    }
+
+    if (reasoningStarted) {
+        writeChunk({
+            type: 'reasoning-end',
+            partId: reasoningPartId,
+        })
+    }
+
+    if (textStarted) {
+        writeChunk({
+            type: 'text-end',
+            partId: textPartId,
+        })
+    }
+}
+
+function toAIMessage(chunk: AIMessageChunk | null): AIMessage {
+    if (!chunk) {
+        return new AIMessage({
+            content: '',
+            tool_calls: [],
+            invalid_tool_calls: [],
+        })
+    }
+
+    return new AIMessage({
+        id: chunk.id,
+        content: chunk.content,
+        additional_kwargs: chunk.additional_kwargs,
+        response_metadata: chunk.response_metadata,
+        usage_metadata: chunk.usage_metadata,
+        tool_calls: chunk.tool_calls,
+        invalid_tool_calls: chunk.invalid_tool_calls,
+    })
+}
+
+// 第一阶段为真正的流式消费：普通问答可以自然流出；若后续出现 tool call，则停止继续透传正文。
+async function streamPlanningResponse(
+    modelStream: AsyncIterable<AIMessageChunk>,
+    context: ChatExecutionContext,
+    writeChunk: (chunk: ChatStreamChunk) => void,
+    isClosed: () => boolean
+) {
+    let combinedChunk: AIMessageChunk | null = null
+    let textStarted = false
+    let reasoningStarted = false
+    let encounteredToolCall = false
+    const textPartId = createId()
+    const reasoningPartId = createId()
+
+    const ensureTextPartStarted = () => {
+        if (textStarted) {
+            return
+        }
+
+        textStarted = true
+        writeChunk({
+            type: 'text-start',
+            partId: textPartId,
+        })
+    }
+
+    const ensureReasoningPartStarted = () => {
+        if (reasoningStarted) {
+            return
+        }
+
+        reasoningStarted = true
+        writeChunk({
+            type: 'reasoning-start',
+            partId: reasoningPartId,
+        })
+    }
+
+    for await (const chunk of modelStream) {
+        if (context.signal?.aborted || isClosed()) {
+            if (context.signal?.aborted) {
+                logChatCancellation('request aborted by client')
+            }
+            return toAIMessage(combinedChunk)
+        }
+
+        combinedChunk = combinedChunk ? combinedChunk.concat(chunk) : chunk
+
+        const reasoning = getReasoningText(chunk)
+
+        if (reasoning) {
+            ensureReasoningPartStarted()
+            writeChunk({
+                type: 'reasoning-delta',
+                partId: reasoningPartId,
+                delta: reasoning,
+            })
+        }
+
+        if (chunk.tool_call_chunks?.length || chunk.tool_calls?.length) {
+            encounteredToolCall = true
+        }
+
+        const text = getChunkText(chunk)
+
+        if (!encounteredToolCall && text) {
+            ensureTextPartStarted()
+            writeChunk({
+                type: 'text-delta',
+                partId: textPartId,
+                delta: text,
+            })
+        }
+    }
+
+    if (reasoningStarted) {
+        writeChunk({
+            type: 'reasoning-end',
+            partId: reasoningPartId,
+        })
+    }
+
+    if (textStarted) {
+        writeChunk({
+            type: 'text-end',
+            partId: textPartId,
+        })
+    }
+
+    return toAIMessage(combinedChunk)
+}
+
+function stripMessageText(message: AIMessage) {
+    return new AIMessage({
+        id: message.id,
+        content: '',
+        additional_kwargs: message.additional_kwargs,
+        response_metadata: message.response_metadata,
+        usage_metadata: message.usage_metadata,
+        tool_calls: message.tool_calls,
+        invalid_tool_calls: message.invalid_tool_calls,
+    })
+}
+
+function formatToolInput(toolCall: ToolCall): string {
+    const toolDefinition = getChatToolDefinition(toolCall.name)
+
+    if (!toolDefinition?.formatInput) {
+        return JSON.stringify(toolCall.args ?? {}, null, 2)
+    }
+
+    return toolDefinition.formatInput(toolCall.args)
+}
+
+function createToolValidationErrorMessage(toolCall: ToolCall, error: ZodError | string) {
+    if (typeof error === 'string') {
+        return error
+    }
+
+    const issueMessage = error.issues.map(issue => issue.message).join('；')
+
+    return `模型生成的 ${toolCall.name} 工具参数不合法：${issueMessage || '请检查 tool call 参数。'}`
+}
+
+function normalizeAndValidateToolCalls(message: AIMessage) {
+    const validatedToolCalls: ToolCall[] = []
+    const toolErrors: Array<{
+        id: string
+        toolName: string
+        input: string
+        message: string
+    }> = []
+
+    for (const rawToolCall of message.tool_calls ?? []) {
+        const toolCall = {
+            ...rawToolCall,
+            id: rawToolCall.id ?? createId(),
+        }
+
+        const toolDefinition = getChatToolDefinition(toolCall.name)
+
+        if (!toolDefinition) {
+            toolErrors.push({
+                id: toolCall.id,
+                toolName: toolCall.name,
+                input: formatToolInput(toolCall),
+                message: `工具 ${toolCall.name} 未注册。`,
+            })
+            continue
+        }
+
+        const normalizedArgs = toolDefinition.normalizeArgs ? toolDefinition.normalizeArgs(toolCall.args) : toolCall.args
+        const parsedArgs = toolDefinition.schema.safeParse(normalizedArgs)
+
+        if (!parsedArgs.success) {
+            toolErrors.push({
+                id: toolCall.id,
+                toolName: toolCall.name,
+                input: formatToolInput({
+                    ...toolCall,
+                    args: normalizedArgs,
+                }),
+                message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
+            })
+            continue
+        }
+
+        validatedToolCalls.push({
+            ...toolCall,
+            args: parsedArgs.data,
+        })
+    }
+
+    if (validatedToolCalls.length === 0) {
+        return {
+            planningMessage: message,
+            toolCalls: validatedToolCalls,
+            toolErrors,
+        }
+    }
+
+    return {
+        planningMessage: new AIMessage({
+            id: message.id,
+            content: '',
+            additional_kwargs: message.additional_kwargs,
+            response_metadata: message.response_metadata,
+            usage_metadata: message.usage_metadata,
+            tool_calls: validatedToolCalls,
+            invalid_tool_calls: message.invalid_tool_calls,
+        }),
+        toolCalls: validatedToolCalls,
+        toolErrors,
+    }
+}
+
+async function executeToolCall(
+    toolCall: ToolCall,
+    context: ChatExecutionContext,
+    writeChunk: (chunk: ChatStreamChunk) => void
+): Promise<ExecutedToolResult> {
+    throwIfAborted(context.signal)
+
+    const toolDefinition = getChatToolDefinition(toolCall.name)
+    const partId = createId()
+    const input = formatToolInput(toolCall)
+
+    writeChunk({
+        type: 'tool-start',
+        partId,
+        toolName: toolCall.name,
+        input,
+    })
+
+    if (!toolDefinition) {
+        const message = `工具 ${toolCall.name} 未注册。`
+
+        writeChunk({
+            type: 'tool-error',
+            partId,
+            toolName: toolCall.name,
+            input,
+            message,
+        })
+
+        const toolMessage = new ToolMessage({
+            content: message,
+            tool_call_id: toolCall.id ?? createId(),
+            status: 'error',
+            metadata: {
+                toolName: toolCall.name,
+            },
+        })
+
+        return {
+            toolCall,
+            toolMessage,
+            output: message,
+            success: false,
+        }
+    }
+
+    try {
+        const result = await toolDefinition.tool.invoke(
+            {
+                type: 'tool_call',
+                id: toolCall.id,
+                name: toolCall.name,
+                args: toolCall.args,
+            },
+            {
+                signal: context.signal,
+            }
+        )
+
+        const toolMessage = ToolMessage.isInstance(result)
+            ? result
+            : new ToolMessage({
+                  content: typeof result === 'string' ? result : JSON.stringify(result),
+                  tool_call_id: toolCall.id ?? createId(),
+                  status: 'success',
+                  metadata: {
+                      toolName: toolCall.name,
+                  },
+              })
+
+        const output = getMessageText(toolMessage)
+
+        writeChunk({
+            type: 'tool-end',
+            partId,
+            toolName: toolCall.name,
+            input,
+            output,
+        })
+
+        return {
+            toolCall,
+            toolMessage,
+            output,
+            success: true,
+        }
+    } catch (error) {
+        if (isAbortError(error) || context.signal?.aborted) {
+            throw error
+        }
+
+        const message = error instanceof Error ? error.message : '工具执行失败。'
+
+        writeChunk({
+            type: 'tool-error',
+            partId,
+            toolName: toolCall.name,
+            input,
+            message,
+        })
+
+        const toolMessage = new ToolMessage({
+            content: message,
+            tool_call_id: toolCall.id ?? createId(),
+            status: 'error',
+            metadata: {
+                toolName: toolCall.name,
+            },
+        })
+
+        return {
+            toolCall,
+            toolMessage,
+            output: message,
+            success: false,
+        }
+    }
+}
+
+function writeToolValidationErrors(
+    toolErrors: Array<{
+        id: string
+        toolName: string
+        input: string
+        message: string
+    }>,
+    writeChunk: (chunk: ChatStreamChunk) => void
+) {
+    return toolErrors.map(toolError => {
+        const partId = createId()
+
+        writeChunk({
+            type: 'tool-start',
+            partId,
+            toolName: toolError.toolName,
+            input: toolError.input,
+        })
+        writeChunk({
+            type: 'tool-error',
+            partId,
+            toolName: toolError.toolName,
+            input: toolError.input,
+            message: toolError.message,
+        })
+
+        return new ToolMessage({
+            content: toolError.message,
+            tool_call_id: toolError.id,
+            status: 'error',
+            metadata: {
+                toolName: toolError.toolName,
+            },
+        })
+    })
+}
+
+function createBaseModel(request: ChatRequest, deps: ChatServiceDependencies) {
+    return new ChatOllama({
+        model: request.options?.model ?? deps.defaultModel,
+        baseUrl: deps.baseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
+        temperature: request.options?.temperature ?? 0.3,
+        numPredict: request.options?.maxTokens,
+        think: request.options?.enableReasoning,
+        streaming: true,
+    })
+}
+
+function getActiveTools() {
+    return getActiveChatToolDefinitions()
+}
+
+async function streamDirectAnswer(
+    model: ChatOllama,
+    langChainMessages: BaseMessage[],
+    context: ChatExecutionContext,
+    writeChunk: (chunk: ChatStreamChunk) => void,
+    isClosed: () => boolean
+) {
+    const stream = await model.stream(langChainMessages, {
+        signal: context.signal,
+    })
+
+    await streamAssistantParts(stream, context, writeChunk, isClosed)
+}
+
 export interface ChatExecutionContext {
     signal?: AbortSignal
 }
@@ -67,34 +611,20 @@ export interface ChatServiceDependencies {
 
 export function createChatService(deps: ChatServiceDependencies) {
     return {
-        // 把 LangChain 的异步消息流转换成轻量 NDJSON 协议，供前端自定义 hook 增量消费。
+        // 统一模型接入层：是否挂载工具由当前可用工具集合决定，不再按问题类型做人工分流。
         async streamChat(request: ChatRequest, context: ChatExecutionContext) {
-            const model = new ChatOllama({
-                model: request.options?.model ?? deps.defaultModel,
-                baseUrl: deps.baseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
-                temperature: request.options?.temperature ?? 0.3,
-                numPredict: request.options?.maxTokens,
-                think: request.options?.enableReasoning,
-                streaming: true,
-            })
-
+            const baseModel = createBaseModel(request, deps)
+            const activeTools = getActiveTools()
+            const toolBoundModel =
+                activeTools.length > 0 ? baseModel.bindTools(activeTools.map(toolDefinition => toolDefinition.tool)) : null
             const langChainMessages = toLangChainMessages(request.messages)
-            const modelStream = await model.stream(langChainMessages, {
-                signal: context.signal,
-            })
-
             const encoder = new TextEncoder()
-            const messageId = crypto.randomUUID()
-            const textPartId = crypto.randomUUID()
-            const reasoningPartId = crypto.randomUUID()
+            const messageId = createId()
 
             let closed = false
 
             const responseStream = new ReadableStream<Uint8Array>({
                 start(controller) {
-                    let textStarted = false
-                    let reasoningStarted = false
-
                     const closeStream = () => {
                         if (closed) {
                             return
@@ -128,83 +658,80 @@ export function createChatService(deps: ChatServiceDependencies) {
                         }
                     }
 
-                    const ensureTextPartStarted = () => {
-                        if (textStarted) {
-                            return
-                        }
-
-                        textStarted = true
-                        writeChunk({
-                            type: 'text-start',
-                            partId: textPartId,
-                        })
-                    }
-
-                    const ensureReasoningPartStarted = () => {
-                        if (reasoningStarted) {
-                            return
-                        }
-
-                        reasoningStarted = true
-                        writeChunk({
-                            type: 'reasoning-start',
-                            partId: reasoningPartId,
-                        })
-                    }
-
                     const run = async () => {
                         try {
+                            throwIfAborted(context.signal)
+
                             writeChunk({
                                 type: 'start',
                                 messageId,
                             })
 
-                            for await (const chunk of modelStream) {
-                                if (context.signal?.aborted || closed) {
-                                    if (context.signal?.aborted) {
-                                        logChatCancellation('request aborted by client')
-                                    }
-                                    return
-                                }
+                            if (!toolBoundModel) {
+                                await streamDirectAnswer(baseModel, langChainMessages, context, writeChunk, () => closed)
 
-                                const reasoning = getReasoningText(chunk)
-                                const text = getChunkText(chunk)
-
-                                if (reasoning) {
-                                    ensureReasoningPartStarted()
+                                if (!context.signal?.aborted && !closed) {
                                     writeChunk({
-                                        type: 'reasoning-delta',
-                                        partId: reasoningPartId,
-                                        delta: reasoning,
+                                        type: 'finish',
                                     })
                                 }
-
-                                if (text) {
-                                    ensureTextPartStarted()
-                                    writeChunk({
-                                        type: 'text-delta',
-                                        partId: textPartId,
-                                        delta: text,
-                                    })
-                                }
-                            }
-
-                            if (context.signal?.aborted || closed) {
                                 return
                             }
 
-                            if (reasoningStarted) {
+                            const planningMessages: BaseMessage[] = [new SystemMessage(toolUseSystemPrompt), ...langChainMessages]
+                            const planningStream = await toolBoundModel.stream(planningMessages, {
+                                signal: context.signal,
+                            })
+                            const firstResponse = await streamPlanningResponse(planningStream, context, writeChunk, () => closed)
+
+                            const validationResult = normalizeAndValidateToolCalls(firstResponse)
+                            const planningMessage = validationResult.planningMessage
+                            const toolCalls = validationResult.toolCalls
+
+                            if (toolCalls.length === 0) {
                                 writeChunk({
-                                    type: 'reasoning-end',
-                                    partId: reasoningPartId,
+                                    type: 'finish',
                                 })
+                                return
                             }
 
-                            if (textStarted) {
+                            const toolMessages: ToolMessage[] = [...writeToolValidationErrors(validationResult.toolErrors, writeChunk)]
+                            const executedToolResults: ExecutedToolResult[] = []
+                            const strippedPlanningMessage = stripMessageText(planningMessage)
+
+                            for (const toolCall of toolCalls) {
+                                const executedToolResult = await executeToolCall(toolCall, context, writeChunk)
+                                executedToolResults.push(executedToolResult)
+                                toolMessages.push(executedToolResult.toolMessage)
+                            }
+
+                            const authoritativeAnswer = createAuthoritativeToolAnswer(executedToolResults, formatToolInput)
+
+                            if (authoritativeAnswer) {
+                                writeStaticTextPart(writeChunk, authoritativeAnswer)
                                 writeChunk({
-                                    type: 'text-end',
-                                    partId: textPartId,
+                                    type: 'finish',
                                 })
+                                return
+                            }
+
+                            throwIfAborted(context.signal)
+
+                            const finalMessages: BaseMessage[] = [
+                                new SystemMessage(toolUseSystemPrompt),
+                                new SystemMessage(toolResultSystemPrompt),
+                                ...langChainMessages,
+                                strippedPlanningMessage,
+                                ...toolMessages,
+                            ]
+                            const finalStream = await toolBoundModel.stream(finalMessages, {
+                                signal: context.signal,
+                            })
+
+                            await streamAssistantParts(finalStream, context, writeChunk, () => closed)
+
+                            if (context.signal?.aborted || closed) {
+                                return
                             }
 
                             writeChunk({

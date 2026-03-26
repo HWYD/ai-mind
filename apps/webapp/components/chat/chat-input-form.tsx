@@ -1,5 +1,6 @@
 'use client'
 
+import { ArrowUp, Square } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
 
 import type { ChatStatus } from '../../lib/ai/types/chat'
@@ -59,18 +60,22 @@ export function ChatInputForm({
 
                 <div className="mt-3 flex items-center justify-between gap-3">
                     <span className="text-xs text-slate-500">
-                        {status === 'streaming' ? '正在生成回答，可点击右侧停止。' : '当前只保留本会话内的多轮上下文。'}
+                        {status === 'streaming' ? '正在生成回答，可点击右侧按钮停止。' : '当前只保留本会话内的多轮上下文。'}
                     </span>
 
                     <button
                         type="submit"
                         aria-label={status === 'streaming' ? 'Stop generation' : 'Send message'}
                         disabled={sendDisabled}
-                        className={`grid h-11 w-11 place-items-center rounded-full border-none text-lg font-semibold text-white transition ${
+                        className={`grid h-11 w-11 place-items-center rounded-full border-none text-white transition ${
                             status === 'streaming' ? 'bg-rose-500 hover:bg-rose-600' : 'bg-slate-900 hover:bg-slate-800'
                         } ${sendDisabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer'}`}
                     >
-                        {status === 'streaming' ? '■' : '↑'}
+                        {status === 'streaming' ? (
+                            <Square className="h-4 w-4 fill-current" strokeWidth={2.4} />
+                        ) : (
+                            <ArrowUp className="h-5 w-5" strokeWidth={2.4} />
+                        )}
                     </button>
                 </div>
             </div>

@@ -7,7 +7,7 @@ import { createChatService } from '../../../lib/ai/chat-service'
 export const runtime = 'nodejs'
 
 const chatService = createChatService({
-    defaultModel: 'qwen3:4b',
+    defaultModel: 'qwen3:8b',
 })
 
 function isAbortError(error: unknown): boolean {

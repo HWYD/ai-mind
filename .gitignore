@@ -72,3 +72,5 @@ dist-ssr
 .eslintcache
 
 private-folder/*
+
+.trae/*
