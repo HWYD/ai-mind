@@ -4,9 +4,9 @@ import { ZodError } from 'zod'
 
 import { createId } from './create-id'
 import { toLangChainMessages } from './langchain-message-adapter'
-import { toolResultSystemPrompt, toolUseSystemPrompt } from './prompts/tool-calling'
+import { toolResultSystemPrompt, toolRetrySystemPrompt, toolUseSystemPrompt } from './prompts/tool-calling'
 import { createAuthoritativeToolAnswer, type ExecutedToolResult } from './strategies/tool-answer'
-import { getActiveChatToolDefinitions, getChatToolDefinition } from './tools'
+import { chatToolRegistry } from './tools'
 import type { ChatRequest } from './types/chat'
 import type { ChatStreamChunk } from './types/stream-chunk'
 
@@ -324,13 +324,33 @@ function stripMessageText(message: AIMessage) {
 }
 
 function formatToolInput(toolCall: ToolCall): string {
-    const toolDefinition = getChatToolDefinition(toolCall.name)
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
 
     if (!toolDefinition?.formatInput) {
         return JSON.stringify(toolCall.args ?? {}, null, 2)
     }
 
     return toolDefinition.formatInput(toolCall.args)
+}
+
+function getToolDisplayFields(toolCall: ToolCall) {
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
+    let displayConfig: ReturnType<NonNullable<typeof toolDefinition.getDisplayConfig>> | undefined
+
+    try {
+        displayConfig = toolDefinition?.getDisplayConfig?.(toolCall.args)
+    } catch {
+        displayConfig = undefined
+    }
+
+    return {
+        title: displayConfig?.title ?? toolCall.name,
+        action:
+            displayConfig?.action ??
+            (toolCall.args && typeof toolCall.args === 'object' && 'action' in toolCall.args && typeof toolCall.args.action === 'string'
+                ? toolCall.args.action
+                : undefined),
+    }
 }
 
 function createToolValidationErrorMessage(toolCall: ToolCall, error: ZodError | string) {
@@ -348,6 +368,8 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
     const toolErrors: Array<{
         id: string
         toolName: string
+        title?: string
+        action?: string
         input: string
         message: string
     }> = []
@@ -358,12 +380,16 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
             id: rawToolCall.id ?? createId(),
         }
 
-        const toolDefinition = getChatToolDefinition(toolCall.name)
+        const toolDefinition = chatToolRegistry.get(toolCall.name)
 
         if (!toolDefinition) {
+            const displayFields = getToolDisplayFields(toolCall)
+
             toolErrors.push({
                 id: toolCall.id,
                 toolName: toolCall.name,
+                title: displayFields.title,
+                action: displayFields.action,
                 input: formatToolInput(toolCall),
                 message: `工具 ${toolCall.name} 未注册。`,
             })
@@ -374,13 +400,18 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
         const parsedArgs = toolDefinition.schema.safeParse(normalizedArgs)
 
         if (!parsedArgs.success) {
+            const normalizedToolCall = {
+                ...toolCall,
+                args: normalizedArgs,
+            }
+            const displayFields = getToolDisplayFields(normalizedToolCall)
+
             toolErrors.push({
                 id: toolCall.id,
                 toolName: toolCall.name,
-                input: formatToolInput({
-                    ...toolCall,
-                    args: normalizedArgs,
-                }),
+                title: displayFields.title,
+                action: displayFields.action,
+                input: formatToolInput(normalizedToolCall),
                 message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
             })
             continue
@@ -422,14 +453,17 @@ async function executeToolCall(
 ): Promise<ExecutedToolResult> {
     throwIfAborted(context.signal)
 
-    const toolDefinition = getChatToolDefinition(toolCall.name)
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
     const partId = createId()
     const input = formatToolInput(toolCall)
+    const displayFields = getToolDisplayFields(toolCall)
 
     writeChunk({
         type: 'tool-start',
         partId,
         toolName: toolCall.name,
+        title: displayFields.title,
+        action: displayFields.action,
         input,
     })
 
@@ -440,6 +474,8 @@ async function executeToolCall(
             type: 'tool-error',
             partId,
             toolName: toolCall.name,
+            title: displayFields.title,
+            action: displayFields.action,
             input,
             message,
         })
@@ -491,6 +527,8 @@ async function executeToolCall(
             type: 'tool-end',
             partId,
             toolName: toolCall.name,
+            title: displayFields.title,
+            action: displayFields.action,
             input,
             output,
         })
@@ -512,6 +550,8 @@ async function executeToolCall(
             type: 'tool-error',
             partId,
             toolName: toolCall.name,
+            title: displayFields.title,
+            action: displayFields.action,
             input,
             message,
         })
@@ -538,6 +578,8 @@ function writeToolValidationErrors(
     toolErrors: Array<{
         id: string
         toolName: string
+        title?: string
+        action?: string
         input: string
         message: string
     }>,
@@ -550,12 +592,16 @@ function writeToolValidationErrors(
             type: 'tool-start',
             partId,
             toolName: toolError.toolName,
+            title: toolError.title,
+            action: toolError.action,
             input: toolError.input,
         })
         writeChunk({
             type: 'tool-error',
             partId,
             toolName: toolError.toolName,
+            title: toolError.title,
+            action: toolError.action,
             input: toolError.input,
             message: toolError.message,
         })
@@ -582,10 +628,6 @@ function createBaseModel(request: ChatRequest, deps: ChatServiceDependencies) {
     })
 }
 
-function getActiveTools() {
-    return getActiveChatToolDefinitions()
-}
-
 async function streamDirectAnswer(
     model: ChatOllama,
     langChainMessages: BaseMessage[],
@@ -598,6 +640,10 @@ async function streamDirectAnswer(
     })
 
     await streamAssistantParts(stream, context, writeChunk, isClosed)
+}
+
+function hasVisibleAssistantText(message: AIMessage) {
+    return getMessageText(message).trim().length > 0
 }
 
 export interface ChatExecutionContext {
@@ -614,7 +660,7 @@ export function createChatService(deps: ChatServiceDependencies) {
         // 统一模型接入层：是否挂载工具由当前可用工具集合决定，不再按问题类型做人工分流。
         async streamChat(request: ChatRequest, context: ChatExecutionContext) {
             const baseModel = createBaseModel(request, deps)
-            const activeTools = getActiveTools()
+            const activeTools = chatToolRegistry.listActive()
             const toolBoundModel =
                 activeTools.length > 0 ? baseModel.bindTools(activeTools.map(toolDefinition => toolDefinition.tool)) : null
             const langChainMessages = toLangChainMessages(request.messages)
@@ -684,11 +730,39 @@ export function createChatService(deps: ChatServiceDependencies) {
                             })
                             const firstResponse = await streamPlanningResponse(planningStream, context, writeChunk, () => closed)
 
-                            const validationResult = normalizeAndValidateToolCalls(firstResponse)
-                            const planningMessage = validationResult.planningMessage
-                            const toolCalls = validationResult.toolCalls
+                            let validationResult = normalizeAndValidateToolCalls(firstResponse)
+                            let planningMessage = validationResult.planningMessage
+                            let toolCalls = validationResult.toolCalls
+
+                            if (toolCalls.length === 0 && !hasVisibleAssistantText(firstResponse)) {
+                                const retryMessages: BaseMessage[] = [
+                                    new SystemMessage(toolUseSystemPrompt),
+                                    new SystemMessage(toolRetrySystemPrompt),
+                                    ...langChainMessages,
+                                ]
+                                const retryPlanningStream = await toolBoundModel.stream(retryMessages, {
+                                    signal: context.signal,
+                                })
+                                const retryResponse = await streamPlanningResponse(retryPlanningStream, context, writeChunk, () => closed)
+
+                                validationResult = normalizeAndValidateToolCalls(retryResponse)
+                                planningMessage = validationResult.planningMessage
+                                toolCalls = validationResult.toolCalls
+
+                                if (toolCalls.length === 0 && !hasVisibleAssistantText(retryResponse)) {
+                                    await streamDirectAnswer(baseModel, langChainMessages, context, writeChunk, () => closed)
+
+                                    if (!context.signal?.aborted && !closed) {
+                                        writeChunk({
+                                            type: 'finish',
+                                        })
+                                    }
+                                    return
+                                }
+                            }
 
                             if (toolCalls.length === 0) {
+                                writeToolValidationErrors(validationResult.toolErrors, writeChunk)
                                 writeChunk({
                                     type: 'finish',
                                 })

@@ -2,6 +2,8 @@ import { tool } from '@langchain/core/tools'
 import { evaluate } from 'mathjs'
 import { z } from 'zod'
 
+import type { ChatToolDefinition } from './registry'
+
 export const calculatorToolSchema = z.object({
     expression: z.string().min(1).max(200).describe('需要计算的数学表达式，例如 (12 + 8) * 3'),
 })
@@ -84,4 +86,18 @@ export function formatCalculatorToolInput(args: unknown): string {
     }
 
     return JSON.stringify(args, null, 2)
+}
+
+export const calculatorToolDefinition: ChatToolDefinition<z.infer<typeof calculatorToolSchema>> = {
+    name: 'calculator',
+    tool: calculatorTool,
+    schema: calculatorToolSchema,
+    normalizeArgs: normalizeCalculatorToolArgs,
+    formatInput: formatCalculatorToolInput,
+    getDisplayConfig: args => ({
+        title: 'calculator',
+        action: 'evaluate',
+        inputPreview: formatCalculatorToolInput(args),
+    }),
+    resultIsAuthoritative: true,
 }

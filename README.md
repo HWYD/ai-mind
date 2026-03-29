@@ -137,8 +137,6 @@ private-folder/
 
 ```bash
 pnpm install
-cd apps/webapp
-npm install
 ```
 
 ### 2. 启动本地 Ollama
@@ -154,8 +152,7 @@ npm install
 ### 3. 启动前端应用
 
 ```bash
-cd apps/webapp
-npm run dev
+pnpm dev
 ```
 
 然后打开：

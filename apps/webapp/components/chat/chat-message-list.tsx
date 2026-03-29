@@ -1,9 +1,9 @@
 'use client'
 
-import { ChevronRight, CircleAlert, CircleCheckBig, LoaderCircle, Wrench } from 'lucide-react'
+import { Calculator, CalendarClock, ChevronRight, CircleAlert, CircleCheckBig, FileText, LoaderCircle, Wrench } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
-import type { MindMessage, MindMessagePart, ReasoningPart } from '../../lib/ai/types/message'
+import type { MindMessage, MindMessagePart, ReasoningPart, ToolPart } from '../../lib/ai/types/message'
 import { TextPartView } from './text-part'
 
 function hasVisibleContent(part: MindMessagePart) {
@@ -35,6 +35,75 @@ function buildCombinedReasoning(reasoningParts: ReasoningPart[]) {
         })
         .filter(Boolean)
         .join('\n\n')
+}
+
+function getToolIcon(toolName: string) {
+    switch (toolName) {
+        case 'calculator':
+            return Calculator
+        case 'datetime':
+            return CalendarClock
+        case 'text-transform':
+            return FileText
+        default:
+            return Wrench
+    }
+}
+
+function getToolTitle(part: ToolPart) {
+    return part.title ?? part.toolName
+}
+
+function getActionLabel(action?: string) {
+    if (!action) {
+        return null
+    }
+
+    const labelMap: Record<string, string> = {
+        evaluate: '计算',
+        now: '当前时间',
+        add: '日期偏移',
+        weekday: '星期判断',
+        'markdown-to-text': 'Markdown 转文本',
+        'extract-links': '提取链接',
+        'extract-code-blocks': '提取代码块',
+        'json-pretty': 'JSON 格式化',
+    }
+
+    return labelMap[action] ?? action
+}
+
+function getStatusClasses(status: ToolPart['status']) {
+    switch (status) {
+        case 'completed':
+            return 'bg-emerald-100 text-emerald-700'
+        case 'failed':
+            return 'bg-rose-100 text-rose-700'
+        default:
+            return 'bg-amber-100 text-amber-700'
+    }
+}
+
+function renderStatusIcon(status: ToolPart['status']) {
+    switch (status) {
+        case 'completed':
+            return <CircleCheckBig className="h-3.5 w-3.5" strokeWidth={2.2} />
+        case 'failed':
+            return <CircleAlert className="h-3.5 w-3.5" strokeWidth={2.2} />
+        default:
+            return <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={2.2} />
+    }
+}
+
+function getStatusLabel(status: ToolPart['status']) {
+    switch (status) {
+        case 'completed':
+            return '已完成'
+        case 'failed':
+            return '失败'
+        default:
+            return '执行中'
+    }
 }
 
 export function ChatMessageList({ messages, status }: { messages: MindMessage[]; status: 'ready' | 'submitted' | 'streaming' | 'error' }) {
@@ -114,50 +183,43 @@ export function ChatMessageList({ messages, status }: { messages: MindMessage[];
                                 }
 
                                 if (part.type === 'tool') {
+                                    const Icon = getToolIcon(part.toolName)
+                                    const actionLabel = getActionLabel(part.action)
+
                                     return (
                                         <section
                                             key={`${message.id}:tool:${part.id ?? index}`}
                                             className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 shadow-sm shadow-slate-200/30"
                                         >
-                                            <div className="flex items-center justify-between gap-3">
+                                            <div className="flex flex-wrap items-center justify-between gap-3">
                                                 <div className="flex items-center gap-2 font-medium text-slate-900">
-                                                    <Wrench className="h-4 w-4 text-slate-500" strokeWidth={2.1} />
-                                                    <span>工具调用：{part.toolName}</span>
+                                                    <Icon className="h-4 w-4 text-slate-500" strokeWidth={2.1} />
+                                                    <span>工具调用：{getToolTitle(part)}</span>
                                                 </div>
-                                                <span
-                                                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
-                                                        part.status === 'completed'
-                                                            ? 'bg-emerald-100 text-emerald-700'
-                                                            : part.status === 'failed'
-                                                              ? 'bg-rose-100 text-rose-700'
-                                                              : 'bg-amber-100 text-amber-700'
-                                                    }`}
-                                                >
-                                                    {part.status === 'completed' ? (
-                                                        <CircleCheckBig className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                                    ) : part.status === 'failed' ? (
-                                                        <CircleAlert className="h-3.5 w-3.5" strokeWidth={2.2} />
-                                                    ) : (
-                                                        <LoaderCircle className="h-3.5 w-3.5 animate-spin" strokeWidth={2.2} />
-                                                    )}
-                                                    <span>
-                                                        {part.status === 'completed'
-                                                            ? '已完成'
-                                                            : part.status === 'failed'
-                                                              ? '失败'
-                                                              : '执行中'}
+
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    {actionLabel ? (
+                                                        <span className="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600">
+                                                            {actionLabel}
+                                                        </span>
+                                                    ) : null}
+                                                    <span
+                                                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${getStatusClasses(part.status)}`}
+                                                    >
+                                                        {renderStatusIcon(part.status)}
+                                                        <span>{getStatusLabel(part.status)}</span>
                                                     </span>
-                                                </span>
+                                                </div>
                                             </div>
 
                                             <div className="mt-3 rounded-xl bg-white px-3 py-2 text-slate-600">
-                                                <div className="text-xs uppercase tracking-[0.12em] text-slate-400">输入</div>
+                                                <div className="text-xs font-medium tracking-[0.12em] text-slate-400">输入</div>
                                                 <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-6">{part.input}</pre>
                                             </div>
 
                                             {part.output ? (
                                                 <div className="mt-3 rounded-xl bg-white px-3 py-2 text-slate-600">
-                                                    <div className="text-xs uppercase tracking-[0.12em] text-slate-400">结果</div>
+                                                    <div className="text-xs font-medium tracking-[0.12em] text-slate-400">结果</div>
                                                     <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-6">
                                                         {part.output}
                                                     </pre>
@@ -166,7 +228,7 @@ export function ChatMessageList({ messages, status }: { messages: MindMessage[];
 
                                             {part.error ? (
                                                 <div className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-rose-700">
-                                                    <div className="flex items-center gap-1.5 text-xs uppercase tracking-[0.12em] text-rose-400">
+                                                    <div className="flex items-center gap-1.5 text-xs font-medium tracking-[0.12em] text-rose-400">
                                                         <CircleAlert className="h-3.5 w-3.5" strokeWidth={2.2} />
                                                         <span>错误</span>
                                                     </div>

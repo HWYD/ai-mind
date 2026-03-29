@@ -1,8 +1,13 @@
 {
     "name": "ai-mind",
-    "version": "0.0.5",
+    "version": "0.0.6",
+    "packageManager": "pnpm@10.18.3",
     "main": "index.js",
     "scripts": {
+        "dev": "pnpm --dir apps/webapp dev",
+        "build": "pnpm --dir apps/webapp build",
+        "start": "pnpm --dir apps/webapp start",
+        "typecheck": "pnpm --dir apps/webapp typecheck",
         "test": "echo \"Error: no test specified\" && exit 1",
         "commit": "git-cz",
         "prepare": "husky",

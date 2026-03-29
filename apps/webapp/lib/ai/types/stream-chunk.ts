@@ -39,6 +39,8 @@ export interface ToolStartChunk {
     type: 'tool-start'
     partId: string
     toolName: string
+    title?: string
+    action?: string
     input: string
 }
 
@@ -46,6 +48,8 @@ export interface ToolEndChunk {
     type: 'tool-end'
     partId: string
     toolName: string
+    title?: string
+    action?: string
     input: string
     output: string
 }
@@ -54,6 +58,8 @@ export interface ToolErrorChunk {
     type: 'tool-error'
     partId: string
     toolName: string
+    title?: string
+    action?: string
     input: string
     message: string
 }

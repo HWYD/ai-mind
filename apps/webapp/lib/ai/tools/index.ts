@@ -1,39 +1,24 @@
-import type { ZodType } from 'zod'
+import { calculatorToolDefinition } from './calculator-tool'
+import { datetimeToolDefinition } from './datetime-tool'
+import { type ChatToolDefinition, createChatToolRegistry } from './registry'
+import { textTransformToolDefinition } from './text-transform-tool'
 
-import { calculatorTool, calculatorToolSchema, formatCalculatorToolInput, normalizeCalculatorToolArgs } from './calculator-tool'
+const chatToolDefinitions: ChatToolDefinition[] = [calculatorToolDefinition, datetimeToolDefinition, textTransformToolDefinition]
 
-export interface ChatToolDefinition {
-    name: string
-    tool: typeof calculatorTool
-    schema: ZodType
-    normalizeArgs?: (args: unknown) => unknown
-    formatInput?: (args: unknown) => string
-    resultIsAuthoritative?: boolean
-    isAvailable?: () => boolean
-}
+export const chatToolRegistry = createChatToolRegistry(chatToolDefinitions)
 
-const calculatorToolDefinition: ChatToolDefinition = {
-    name: 'calculator',
-    tool: calculatorTool,
-    schema: calculatorToolSchema,
-    normalizeArgs: normalizeCalculatorToolArgs,
-    formatInput: formatCalculatorToolInput,
-    resultIsAuthoritative: true,
-}
-
-const chatToolDefinitions = [calculatorToolDefinition]
-const chatToolDefinitionMap = new Map(chatToolDefinitions.map(toolDefinition => [toolDefinition.name, toolDefinition]))
-
-// 统一从这里注册工具，当前版本只保留一个 calculator，后续版本再扩展更多工具。
+// 当前版本先通过统一 registry 管理工具，后续新增 text-transform 时只扩这里即可。
 export function getChatToolDefinitions(): ChatToolDefinition[] {
-    return chatToolDefinitions
+    return chatToolRegistry.list()
 }
 
-// 运行时只返回当前真正可用的工具集合。
 export function getActiveChatToolDefinitions(): ChatToolDefinition[] {
-    return chatToolDefinitions.filter(toolDefinition => toolDefinition.isAvailable?.() ?? true)
+    return chatToolRegistry.listActive()
 }
 
 export function getChatToolDefinition(toolName: string): ChatToolDefinition | undefined {
-    return chatToolDefinitionMap.get(toolName)
+    return chatToolRegistry.get(toolName)
 }
+
+export { calculatorToolDefinition, datetimeToolDefinition, textTransformToolDefinition }
+export type { ChatToolDefinition, ChatToolRegistry, ToolDisplayConfig, ToolExecutionResult } from './registry'

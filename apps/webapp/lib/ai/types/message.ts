@@ -21,6 +21,8 @@ export interface ReasoningPart extends BasePart {
 export interface ToolPart extends BasePart {
     type: 'tool'
     toolName: string
+    title?: string
+    action?: string
     status: 'called' | 'completed' | 'failed'
     input: string
     output?: string

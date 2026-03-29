@@ -9,6 +9,7 @@ import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart, T
 import type { ChatStreamChunk } from '../../lib/ai/types/stream-chunk'
 
 const DEFAULT_MODEL = 'qwen3:8b'
+const MAX_CONTEXT_TURNS = 8
 
 function createTextPart(text: string, id?: string): TextPart {
     return {
@@ -29,11 +30,13 @@ function createReasoningPart(text: string, id?: string): ReasoningPart {
     }
 }
 
-function createToolPart(partId: string, toolName: string, input: string): ToolPart {
+function createToolPart(partId: string, toolName: string, input: string, title?: string, action?: string): ToolPart {
     return {
         id: partId,
         type: 'tool',
         toolName,
+        title,
+        action,
         status: 'called',
         input,
     }
@@ -90,6 +93,37 @@ function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
 
 function toRequestMessages(messages: MindMessage[]): MindMessageInput[] {
     return messages.map(toMessageInput).filter((message): message is MindMessageInput => message !== null)
+}
+
+function getRecentContextWindow(messages: MindMessage[]): MindMessage[] {
+    const systemMessages = messages.filter(message => message.role === 'system')
+    const conversationalMessages = messages.filter(message => message.role !== 'system')
+
+    if (conversationalMessages.length === 0) {
+        return systemMessages
+    }
+
+    const recentMessages: MindMessage[] = []
+    let userTurnCount = 0
+
+    for (let index = conversationalMessages.length - 1; index >= 0; index -= 1) {
+        const message = conversationalMessages[index]
+        recentMessages.unshift(message)
+
+        if (message.role === 'user') {
+            userTurnCount += 1
+
+            if (userTurnCount >= MAX_CONTEXT_TURNS) {
+                break
+            }
+        }
+    }
+
+    return [...systemMessages, ...recentMessages]
+}
+
+function buildRequestMessages(messages: MindMessage[]): MindMessageInput[] {
+    return toRequestMessages(getRecentContextWindow(messages))
 }
 
 function appendPart(messages: MindMessage[], messageId: string, part: MindMessagePart): MindMessage[] {
@@ -345,7 +379,9 @@ export function useChatStream() {
                     return
                 }
 
-                updateMessages(current => appendPart(current, messageId, createToolPart(chunk.partId, chunk.toolName, chunk.input)))
+                updateMessages(current =>
+                    appendPart(current, messageId, createToolPart(chunk.partId, chunk.toolName, chunk.input, chunk.title, chunk.action))
+                )
                 return
             }
             case 'tool-end': {
@@ -358,6 +394,8 @@ export function useChatStream() {
                 updateMessages(current =>
                     updateToolPart(current, messageId, chunk.partId, part => ({
                         ...part,
+                        title: chunk.title ?? part.title,
+                        action: chunk.action ?? part.action,
                         status: 'completed',
                         output: chunk.output,
                     }))
@@ -374,6 +412,8 @@ export function useChatStream() {
                 updateMessages(current =>
                     updateToolPart(current, messageId, chunk.partId, part => ({
                         ...part,
+                        title: chunk.title ?? part.title,
+                        action: chunk.action ?? part.action,
                         status: 'failed',
                         error: chunk.message,
                     }))
@@ -413,7 +453,7 @@ export function useChatStream() {
         try {
             const payload: ChatRequest = {
                 conversationId: conversationIdRef.current,
-                messages: toRequestMessages(nextMessages),
+                messages: buildRequestMessages(nextMessages),
                 options: {
                     model: DEFAULT_MODEL,
                     enableReasoning: true,
