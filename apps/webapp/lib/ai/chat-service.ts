@@ -1,14 +1,17 @@
-import { AIMessage, AIMessageChunk, type BaseMessage, SystemMessage, type ToolCall, ToolMessage } from '@langchain/core/messages'
+﻿import { AIMessage, AIMessageChunk, type BaseMessage, SystemMessage, type ToolCall, ToolMessage } from '@langchain/core/messages'
 import { ChatOllama } from '@langchain/ollama'
 import { ZodError } from 'zod'
 
 import { createId } from './create-id'
 import { toLangChainMessages } from './langchain-message-adapter'
 import { toolResultSystemPrompt, toolRetrySystemPrompt, toolUseSystemPrompt } from './prompts/tool-calling'
+import { getChatSkillDefinition, type SkillDefinition } from './skills'
 import { createAuthoritativeToolAnswer, type ExecutedToolResult } from './strategies/tool-answer'
-import { chatToolRegistry } from './tools'
+import { type ChatToolDefinition, chatToolRegistry } from './tools'
 import type { ChatRequest } from './types/chat'
 import type { ChatStreamChunk } from './types/stream-chunk'
+
+const INVALID_SKILL_ERROR_NAME = 'InvalidSkillError'
 
 function getContentText(content: unknown): string {
     if (typeof content === 'string') {
@@ -119,6 +122,48 @@ function writeStaticReasoningPart(writeChunk: (chunk: ChatStreamChunk) => void, 
     })
 }
 
+function buildSystemMessages(...prompts: Array<string | undefined>): BaseMessage[] {
+    return prompts
+        .filter((prompt): prompt is string => typeof prompt === 'string' && prompt.trim().length > 0)
+        .map(prompt => new SystemMessage(prompt))
+}
+
+function createInvalidSkillError(skillName: string) {
+    const error = new Error(`Skill ${skillName} 未注册或当前不可用。`)
+
+    error.name = INVALID_SKILL_ERROR_NAME
+
+    return error
+}
+
+function resolveRequestedSkill(request: ChatRequest): SkillDefinition | undefined {
+    const skillName = request.options?.skill?.trim()
+
+    if (!skillName) {
+        return undefined
+    }
+
+    const skillDefinition = getChatSkillDefinition(skillName)
+
+    if (!skillDefinition || !(skillDefinition.isAvailable?.() ?? true)) {
+        throw createInvalidSkillError(skillName)
+    }
+
+    return skillDefinition
+}
+
+function getActiveToolDefinitions(skillDefinition?: SkillDefinition): ChatToolDefinition[] {
+    const activeToolDefinitions = chatToolRegistry.listActive()
+
+    if (!skillDefinition) {
+        return activeToolDefinitions
+    }
+
+    const allowedToolNames = new Set(skillDefinition.allowedTools)
+
+    return activeToolDefinitions.filter(toolDefinition => allowedToolNames.has(toolDefinition.name))
+}
+
 async function streamAssistantParts(
     modelStream: AsyncIterable<AIMessageChunk>,
     context: ChatExecutionContext,
@@ -219,12 +264,15 @@ function toAIMessage(chunk: AIMessageChunk | null): AIMessage {
     })
 }
 
-// 第一阶段为真正的流式消费：普通问答可以自然流出；若后续出现 tool call，则停止继续透传正文。
+// 第一阶段是真正的流式消费：普通问答可以自然流出；如果后续出现 tool call，则停止继续透传正文。
 async function streamPlanningResponse(
     modelStream: AsyncIterable<AIMessageChunk>,
     context: ChatExecutionContext,
     writeChunk: (chunk: ChatStreamChunk) => void,
-    isClosed: () => boolean
+    isClosed: () => boolean,
+    options?: {
+        suppressText?: boolean
+    }
 ) {
     let combinedChunk: AIMessageChunk | null = null
     let textStarted = false
@@ -284,7 +332,7 @@ async function streamPlanningResponse(
 
         const text = getChunkText(chunk)
 
-        if (!encounteredToolCall && text) {
+        if (!encounteredToolCall && text && !options?.suppressText) {
             ensureTextPartStarted()
             writeChunk({
                 type: 'text-delta',
@@ -391,7 +439,7 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
                 title: displayFields.title,
                 action: displayFields.action,
                 input: formatToolInput(toolCall),
-                message: `工具 ${toolCall.name} 未注册。`,
+                message: '工具 ' + toolCall.name + ' 未注册。',
             })
             continue
         }
@@ -468,7 +516,7 @@ async function executeToolCall(
     })
 
     if (!toolDefinition) {
-        const message = `工具 ${toolCall.name} 未注册。`
+        const message = '工具 ' + toolCall.name + ' 未注册。'
 
         writeChunk({
             type: 'tool-error',
@@ -657,13 +705,16 @@ export interface ChatServiceDependencies {
 
 export function createChatService(deps: ChatServiceDependencies) {
     return {
-        // 统一模型接入层：是否挂载工具由当前可用工具集合决定，不再按问题类型做人工分流。
+        // 统一模型接入层：是否挂载工具由当前可用工具集合决定，不再按问题类型做人为分流。
         async streamChat(request: ChatRequest, context: ChatExecutionContext) {
             const baseModel = createBaseModel(request, deps)
-            const activeTools = chatToolRegistry.listActive()
+            const skillDefinition = resolveRequestedSkill(request)
+            const skillSystemPrompt = skillDefinition?.systemPrompt
+            const activeTools = getActiveToolDefinitions(skillDefinition)
             const toolBoundModel =
                 activeTools.length > 0 ? baseModel.bindTools(activeTools.map(toolDefinition => toolDefinition.tool)) : null
             const langChainMessages = toLangChainMessages(request.messages)
+            const directAnswerMessages: BaseMessage[] = [...buildSystemMessages(skillSystemPrompt), ...langChainMessages]
             const encoder = new TextEncoder()
             const messageId = createId()
 
@@ -714,7 +765,7 @@ export function createChatService(deps: ChatServiceDependencies) {
                             })
 
                             if (!toolBoundModel) {
-                                await streamDirectAnswer(baseModel, langChainMessages, context, writeChunk, () => closed)
+                                await streamDirectAnswer(baseModel, directAnswerMessages, context, writeChunk, () => closed)
 
                                 if (!context.signal?.aborted && !closed) {
                                     writeChunk({
@@ -724,7 +775,10 @@ export function createChatService(deps: ChatServiceDependencies) {
                                 return
                             }
 
-                            const planningMessages: BaseMessage[] = [new SystemMessage(toolUseSystemPrompt), ...langChainMessages]
+                            const planningMessages: BaseMessage[] = [
+                                ...buildSystemMessages(skillSystemPrompt, toolUseSystemPrompt),
+                                ...langChainMessages,
+                            ]
                             const planningStream = await toolBoundModel.stream(planningMessages, {
                                 signal: context.signal,
                             })
@@ -736,8 +790,7 @@ export function createChatService(deps: ChatServiceDependencies) {
 
                             if (toolCalls.length === 0 && !hasVisibleAssistantText(firstResponse)) {
                                 const retryMessages: BaseMessage[] = [
-                                    new SystemMessage(toolUseSystemPrompt),
-                                    new SystemMessage(toolRetrySystemPrompt),
+                                    ...buildSystemMessages(skillSystemPrompt, toolUseSystemPrompt, toolRetrySystemPrompt),
                                     ...langChainMessages,
                                 ]
                                 const retryPlanningStream = await toolBoundModel.stream(retryMessages, {
@@ -750,7 +803,7 @@ export function createChatService(deps: ChatServiceDependencies) {
                                 toolCalls = validationResult.toolCalls
 
                                 if (toolCalls.length === 0 && !hasVisibleAssistantText(retryResponse)) {
-                                    await streamDirectAnswer(baseModel, langChainMessages, context, writeChunk, () => closed)
+                                    await streamDirectAnswer(baseModel, directAnswerMessages, context, writeChunk, () => closed)
 
                                     if (!context.signal?.aborted && !closed) {
                                         writeChunk({
@@ -792,8 +845,7 @@ export function createChatService(deps: ChatServiceDependencies) {
                             throwIfAborted(context.signal)
 
                             const finalMessages: BaseMessage[] = [
-                                new SystemMessage(toolUseSystemPrompt),
-                                new SystemMessage(toolResultSystemPrompt),
+                                ...buildSystemMessages(skillSystemPrompt, toolUseSystemPrompt, toolResultSystemPrompt),
                                 ...langChainMessages,
                                 strippedPlanningMessage,
                                 ...toolMessages,

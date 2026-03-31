@@ -1,45 +1,69 @@
 # AI Mind
 
-> 一个面向未来智能体形态持续演进的 AI Native 实验项目。  
-> 它从最小可用的本地大模型聊天开始，逐步向多 Tool、Skill、MCP、Agent Runtime 演进。
+> 一个按版本持续演进的 AI Native Runtime Skeleton。  
+> 它从本地聊天闭环出发，逐步长成支持 Tool、Skill、MCP、Agent 的可扩展运行时骨架。
 
 ## 项目定位
 
 `AI Mind` 不是一次性做完的大而全产品，而是一条清晰的版本化演进路线：
 
-- 从本地大模型对话出发
-- 逐步接入结构化流式协议
-- 再引入 Tool Calling
-- 然后扩展到多 Tool、Skill、MCP 与更完整的智能体能力
+- 本地聊天闭环
+- 结构化流式协议
+- Tool Calling
+- Multi-Tool Runtime
+- Skill Runtime
+- MCP 能力接入
+- Agent Runtime
+- 持久化与业务系统集成
 
-这个仓库更像一个持续生长的 AI 应用骨架，而不是单点功能 Demo。
+当前代码库更适合理解成一个持续生长的 Runtime Skeleton，而不是单点 Demo。
 
 ## 当前状态
 
-当前版本：`v0.0.6`
+当前版本：`v0.0.7`
 
-已完成的核心能力：
+这一版已经完成的核心能力：
 
 - `LangChain.js + Ollama` 本地模型接入
-- 自定义流式聊天链路与 `useChatStream`
+- 自定义流式协议与 `useChatStream`
 - `Markdown + typed parts + Streamdown` 内容渲染
-- `Zod` 驱动的请求、协议、Tool 参数校验
-- 多 Tool Runtime：统一 `registry + schema + normalizeArgs + display config`
-- 已接入 3 个工具：`calculator`、`datetime`、`text-transform`
-- `reasoning / tool / text` 三段式前后端消息协议
-- 本地会话内多轮上下文
-- Runtime 兜底：工具未注册、参数非法、执行失败、流式取消等场景都有结构化收口
+- `Zod` 驱动的请求、流式 chunk、Tool 参数校验
+- Multi-Tool Runtime
+    - `calculator`
+    - `datetime`
+    - `text-transform`
+    - `unit-convert`
+- 第一层 Skill Runtime
+    - `utility-skill`
+- Tool Registry + Skill Registry 的轻插件化骨架
+- `reasoning / tool / text` 三段式前后端协议
+- 最近 `N=8` 轮上下文窗口
+- Runtime 错误收束
+    - 非法 tool call
+    - tool 参数不合法
+    - tool 执行失败
+    - 请求取消
+    - 流式错误收束
 
-这意味着项目已经从“最小 Tool Calling 闭环”继续升级成“具备多 Tool Runtime 雏形”的 AI 应用骨架。
+当前项目已经从“能跑通聊天和单 Tool Calling”的原型，继续升级成“具备 Skill 雏形的可扩展 AI Runtime”。
 
-## 核心理念
+## 当前版本主题
 
-这个项目坚持几个原则：
+`v0.0.7` 的重点不是继续增加更多 Tool，也不是直接跳到 Agent，而是：
 
-- 最小可实现：每个版本只解决一个真正重要的问题
-- 可扩展：当前实现必须能自然长到下一版本
-- 可解释：协议、运行时、前端展示尽量清晰分层
-- 面向真实工程：校验、流式、异常兜底和状态污染问题优先于炫技
+> 在 `v0.0.6` Multi-Tool Runtime 的基础上，引入第一层 Skill Runtime，并验证“高层能力封装”是否成立。
+
+这一版只落了一个正式 Skill：
+
+- `utility-skill`
+
+它对应的是一类稳定的日常确定性实用任务：
+
+- 精确计算
+- 时间与日期处理
+- 文本转换与提取
+- 单位换算
+- 上述任务之间的轻量组合
 
 ## 架构概览
 
@@ -49,25 +73,82 @@
 User
   -> Web Chat UI
     -> /api/chat
-      -> LangChain ChatOllama
-        -> Tool Calling Runtime
-          -> Local Tools
-            -> Structured Stream Response
-              -> typed parts rendering
+      -> chat-service
+        -> ChatOllama
+          -> Tool Registry / Skill Registry
+            -> Tool Calling Runtime
+              -> Structured NDJSON Stream
+                -> useChatStream
+                  -> reasoning / tool / text 渲染
 ```
 
 分层来看：
 
 - 模型接入层：`LangChain.js + Ollama`
-- 运行时层：Tool Calling、参数归一化、工具执行、结果回填、错误兜底
-- 协议层：NDJSON + `reasoning / tool / text`
+- Runtime 层：planning、tool calling、参数校验、执行、回填、错误收束
+- Tool 层：独立 definition + registry
+- Skill 层：高层约束、允许工具集合、输出策略
+- 协议层：NDJSON + typed parts
 - 前端展示层：`useChatStream + Streamdown + Tailwind CSS`
+
+## 当前支持的 Tool
+
+### `calculator`
+
+负责确定性数值计算：
+
+- 四则运算
+- 括号运算
+- 连续追问中的继续计算
+
+### `datetime`
+
+负责时间与日期相关任务：
+
+- 当前时间
+- 当前日期
+- 星期判断
+- 日期加减
+- 相对日期表达
+
+### `text-transform`
+
+负责文本转换与提取：
+
+- `markdown-to-text`
+- `extract-links`
+- `extract-code-blocks`
+- `json-pretty`
+
+### `unit-convert`
+
+负责第一版单位换算：
+
+- 长度：`mm / cm / m / km`
+- 重量：`mg / g / kg`
+- 温度：`C / F / K`
+
+## 当前支持的 Skill
+
+### `utility-skill`
+
+这是 `v0.0.7` 新引入的第一层 Skill Runtime。
+它不是简单的 prompt 片段，而是一种稳定能力模式：
+
+- 定义高层任务域
+- 约束允许使用的 Tool 集
+- 提供统一输出风格
+- 保持普通开放式对话仍可自然回答
+
+当前 `/instamind` 默认启用：
+
+- `options.skill = 'utility-skill'`
 
 ## 版本演进
 
 ### `v0.0.4`
 
-完成最小聊天系统闭环：
+最小聊天闭环：
 
 - 本地模型对话
 - 自定义流式输出
@@ -76,74 +157,40 @@ User
 
 ### `v0.0.5`
 
-完成最小 Tool Calling 实践：
+最小 Tool Calling 闭环：
 
 - 接入 `calculator`
-- 建立 `tool_calls -> Zod 校验 -> ToolMessage 回填 -> 最终回答` 的闭环
-- 前端支持 `reasoning / tool / text` 三类结构化展示
+- 跑通 `tool_calls -> 校验 -> 执行 -> ToolMessage 回填 -> 最终回答`
 
 ### `v0.0.6`
 
-完成多 Tool Runtime 的初步扩展：
+Multi-Tool Runtime：
 
-- 引入统一 Tool Registry，主运行时不再依赖某个具体工具文件
-- 新增 `datetime` 与 `text-transform`
-- 支持工具参数归一化、展示配置与结构化 tool part 展示
-- 增强 Runtime 兜底，包括参数非法、工具未注册、工具执行失败、流式取消等场景
-- 为后续 `Skill / MCP / Agent` 继续预留清晰边界
+- Tool Registry
+- `calculator / datetime / text-transform`
+- 前端多 Tool 展示
+- 最近 `N=8` 轮上下文窗口
+- 更完整的 Runtime 错误收束
 
-## 接下来会往哪里走
+### `v0.0.7`
 
-后续演进会重点围绕这几个方向展开：
+第一层 Skill Runtime：
 
-### Multi-Tool
+- Skill Definition / Skill Registry
+- `utility-skill`
+- `unit-convert`
+- Skill 下按 `allowedTools` 过滤工具
+- Skill prompt 注入主聊天链路
 
-从当前多 Tool Runtime 继续往更稳定的能力层演进，包括：
+## 核心设计原则
 
-- 工具注册与发现
-- 工具选择策略
-- 更稳的结果合成与错误隔离
-- 更清晰的 runtime 分层与测试覆盖
+这个项目始终坚持几条原则：
 
-### Skill
-
-在 Tool 之上引入更高层的能力封装：
-
-- 把一组提示词、约束、工具协作模式抽象为 Skill
-- 让模型从“调用单个工具”升级为“调用一类稳定能力”
-
-### MCP
-
-把外部系统能力接入为标准上下文与执行通道：
-
-- 文件系统
-- 搜索
-- 开发工具
-- 知识源
-
-这会让项目从本地实验进一步走向更开放的能力网络。
-
-### Agent Runtime
-
-当 Tool、Skill、MCP 都逐步稳定之后，项目会继续向更完整的智能体运行时演进，例如：
-
-- 多步决策
-- 长短期记忆协作
-- 任务拆解与回放
-- 可观测性与运行记录
-
-## 仓库结构
-
-```text
-apps/
-  webapp/            # 当前主应用，Next.js + React
-
-blogs/               # 对外博客与阶段总结
-private-folder/
-  plans/             # 各版本方案与设计文档
-  blogs/             # 草稿与内部博客文档
-  runtime/           # Runtime 相关说明、兜底与运行时设计记录
-```
+- 版本主题单一：每个版本只解决一个真正重要的问题
+- Runtime 边界清晰：优先 registry、schema、结构化错误，而不是主流程特例
+- 最小但稳定：先做最小可实现，再把边界做稳
+- 普通问答主链不退化：新能力不能明显破坏开放式对话
+- 为后续 Skill / MCP / Agent 留出自然演进空间
 
 ## 快速开始
 
@@ -153,9 +200,9 @@ private-folder/
 pnpm install
 ```
 
-### 2. 启动本地 Ollama
+### 2. 准备本地 Ollama
 
-请确保本地已经安装并启动 Ollama，并准备好模型，例如：
+请确保本地已安装并启动 Ollama，并准备好模型，例如：
 
 - `qwen3:8b`
 
@@ -163,7 +210,7 @@ pnpm install
 
 - `http://127.0.0.1:11434`
 
-### 3. 启动前端应用
+### 3. 启动应用
 
 ```bash
 pnpm dev
@@ -173,53 +220,40 @@ pnpm dev
 
 - [http://localhost:3000/instamind](http://localhost:3000/instamind)
 
-## 当前已支持的工具
+### 4. 常用验证命令
 
-- `calculator`
-  适用于数学表达式、四则运算、括号运算和继续追问的精确计算
-- `datetime`
-  适用于当前时间、日期、星期、相对日期、日期加减和时间偏移
-- `text-transform`
-  适用于 Markdown 转纯文本、提取链接、提取代码块、JSON 格式化
-
-这些工具统一通过 Tool Registry 注册，并通过同一套 Runtime 执行、校验和展示。
-
-## Runtime 特性
-
-当前版本除了功能扩展，也开始补 Runtime 的稳定性：
-
-- tool 参数先归一化，再做 schema 校验
-- 未注册工具会被拦截并转成结构化 `tool-error`
-- tool 执行失败会收敛成可展示的错误结果
-- 确定性工具结果支持更高优先级的最终答案策略
-- 流式响应支持取消，并将 `AbortSignal` 一路传到底层模型调用
-
-这部分能力的目标不是让系统“更炫”，而是让它在真实工程里更稳。
+```bash
+pnpm typecheck
+pnpm build
+```
 
 ## 为什么值得关注这个项目
 
-因为它并不试图一步到位做一个“全能 AI 产品”，而是沿着一条更可信的路径前进：
+因为它不是试图一步做成“全能 AI 产品”，而是沿着一条更可信的路径往前走：
 
 - 先把聊天做稳
 - 再把 Tool Calling 做对
-- 再把多 Tool、Skill、MCP 和 Agent Runtime 一层层搭上去
+- 再把 Multi-Tool Runtime 做清楚
+- 再引入 Skill
+- 再往 MCP 和 Agent 演进
 
-如果你也在思考：
+如果你也在思考这些问题：
 
 - 本地大模型应用怎么做成真正可演进的工程
 - Tool Calling 之后的下一层抽象应该是什么
-- AI 应用如何从对话升级为可执行系统
+- AI 应用如何从聊天升级成运行时系统
 
 这个仓库会持续给出一条真实、渐进、可复盘的实现路径。
 
 ## Roadmap
 
 - [x] `v0.0.4` 最小聊天闭环
-- [x] `v0.0.5` 最小 Tool Calling 闭环
-- [x] `v0.0.6` 多 Tool 初步扩展
-- [ ] `v0.0.7` Runtime / Skill 方向继续演进
-- [ ] `v0.0.x` Skill / MCP 能力接入
-- [ ] `v0.1.0` 面向智能体运行时的基础骨架
+- [x] `v0.0.5` 最小 Tool Calling
+- [x] `v0.0.6` Multi-Tool Runtime
+- [x] `v0.0.7` 第一层 Skill Runtime
+- [ ] `v0.0.x` Skill 稳定性收口
+- [ ] `v0.0.x` MCP 能力接入
+- [ ] `v0.1.0` Agent Runtime 基础骨架
 
 ## License
 

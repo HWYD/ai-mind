@@ -14,6 +14,10 @@ function isAbortError(error: unknown): boolean {
     return (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
 }
 
+function isInvalidSkillError(error: unknown) {
+    return error instanceof Error && error.name === 'InvalidSkillError'
+}
+
 export async function POST(request: NextRequest) {
     try {
         const json = await request.json()
@@ -32,6 +36,15 @@ export async function POST(request: NextRequest) {
                 {
                     error: 'Invalid chat request',
                     issues: error.issues,
+                },
+                { status: 400 }
+            )
+        }
+
+        if (isInvalidSkillError(error)) {
+            return Response.json(
+                {
+                    error: error.message,
                 },
                 { status: 400 }
             )

@@ -6,6 +6,7 @@ export interface MindMessageInput {
 }
 
 export interface ChatRequestOptions {
+    skill?: string
     model?: string
     temperature?: number
     maxTokens?: number

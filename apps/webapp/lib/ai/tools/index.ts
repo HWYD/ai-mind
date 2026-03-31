@@ -2,8 +2,14 @@ import { calculatorToolDefinition } from './calculator-tool'
 import { datetimeToolDefinition } from './datetime-tool'
 import { type ChatToolDefinition, createChatToolRegistry } from './registry'
 import { textTransformToolDefinition } from './text-transform-tool'
+import { unitConvertToolDefinition } from './unit-convert-tool'
 
-const chatToolDefinitions: ChatToolDefinition[] = [calculatorToolDefinition, datetimeToolDefinition, textTransformToolDefinition]
+const chatToolDefinitions: ChatToolDefinition[] = [
+    calculatorToolDefinition,
+    datetimeToolDefinition,
+    textTransformToolDefinition,
+    unitConvertToolDefinition,
+]
 
 export const chatToolRegistry = createChatToolRegistry(chatToolDefinitions)
 
@@ -20,5 +26,5 @@ export function getChatToolDefinition(toolName: string): ChatToolDefinition | un
     return chatToolRegistry.get(toolName)
 }
 
-export { calculatorToolDefinition, datetimeToolDefinition, textTransformToolDefinition }
+export { calculatorToolDefinition, datetimeToolDefinition, textTransformToolDefinition, unitConvertToolDefinition }
 export type { ChatToolDefinition, ChatToolRegistry, ToolDisplayConfig, ToolExecutionResult } from './registry'

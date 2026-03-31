@@ -10,6 +10,7 @@ import type { ChatStreamChunk } from '../../lib/ai/types/stream-chunk'
 
 const DEFAULT_MODEL = 'qwen3:8b'
 const MAX_CONTEXT_TURNS = 8
+const DEFAULT_SKILL = 'utility-skill'
 
 function createTextPart(text: string, id?: string): TextPart {
     return {
@@ -455,6 +456,7 @@ export function useChatStream() {
                 conversationId: conversationIdRef.current,
                 messages: buildRequestMessages(nextMessages),
                 options: {
+                    skill: DEFAULT_SKILL,
                     model: DEFAULT_MODEL,
                     enableReasoning: true,
                 },

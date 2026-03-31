@@ -74,3 +74,5 @@ dist-ssr
 private-folder/*
 
 .trae/*
+
+AGENTS.md

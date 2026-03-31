@@ -23,6 +23,7 @@ export const chatRequestSchema = z.object({
     messages: z.array(messageInputSchema).min(1),
     options: z
         .object({
+            skill: z.string().min(1).optional(),
             model: z.string().optional(),
             temperature: z.number().optional(),
             maxTokens: z.number().int().positive().optional(),
