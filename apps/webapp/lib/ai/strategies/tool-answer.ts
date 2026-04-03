@@ -1,6 +1,6 @@
 import type { ToolCall, ToolMessage } from '@langchain/core/messages'
 
-import { getChatToolDefinition } from '../tools'
+import { getChatToolDefinition } from '@/lib/ai/tools'
 
 export interface ExecutedToolResult {
     toolCall: ToolCall

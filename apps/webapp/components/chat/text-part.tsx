@@ -2,7 +2,7 @@
 
 import { Streamdown } from 'streamdown'
 
-import type { TextPart } from '../../lib/ai/types/message'
+import type { TextPart } from '@/lib/ai/types/message'
 
 export function TextPartView({ part }: { part: TextPart }) {
     return (

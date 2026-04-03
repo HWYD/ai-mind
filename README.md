@@ -1,259 +1,208 @@
-# AI Mind
+﻿# AI Mind
 
-> 一个按版本持续演进的 AI Native Runtime Skeleton。  
-> 它从本地聊天闭环出发，逐步长成支持 Tool、Skill、MCP、Agent 的可扩展运行时骨架。
+一个按版本持续演进的 AI Native Runtime Skeleton。
 
-## 项目定位
+它从本地聊天闭环起步，逐步演进到：
 
-`AI Mind` 不是一次性做完的大而全产品，而是一条清晰的版本化演进路线：
-
-- 本地聊天闭环
 - 结构化流式协议
 - Tool Calling
 - Multi-Tool Runtime
 - Skill Runtime
-- MCP 能力接入
-- Agent Runtime
-- 持久化与业务系统集成
-
-当前代码库更适合理解成一个持续生长的 Runtime Skeleton，而不是单点 Demo。
+- MCP / Agent / 数据层
 
 ## 当前状态
 
-当前版本：`v0.0.7`
+当前版本：`v0.0.8`
 
-这一版已经完成的核心能力：
+这一版的主线已经收敛为两条：
 
-- `LangChain.js + Ollama` 本地模型接入
-- 自定义流式协议与 `useChatStream`
-- `Markdown + typed parts + Streamdown` 内容渲染
-- `Zod` 驱动的请求、流式 chunk、Tool 参数校验
-- Multi-Tool Runtime
-    - `calculator`
-    - `datetime`
-    - `text-transform`
-    - `unit-convert`
-- 第一层 Skill Runtime
-    - `utility-skill`
-- Tool Registry + Skill Registry 的轻插件化骨架
-- `reasoning / tool / text` 三段式前后端协议
-- 最近 `N=8` 轮上下文窗口
-- Runtime 错误收束
-    - 非法 tool call
-    - tool 参数不合法
-    - tool 执行失败
-    - 请求取消
-    - 流式错误收束
+- Runtime：以 `utility-skill + reader-skill` 验证第二个正式 Skill
+- 前端：建立正式 `shadcn/ui` 基线，并统一输入区、推理面板、Tool 卡片与错误提示
 
-当前项目已经从“能跑通聊天和单 Tool Calling”的原型，继续升级成“具备 Skill 雏形的可扩展 AI Runtime”。
+## 当前能力
 
-## 当前版本主题
+### Chat Runtime
 
-`v0.0.7` 的重点不是继续增加更多 Tool，也不是直接跳到 Agent，而是：
+- `LangChain.js + Ollama`
+- NDJSON 流式协议
+- `reasoning / tool / text` 三段式 parts
+- 最近 `N=8` 轮会话上下文
+- `useChatStream` 前端流式消费
 
-> 在 `v0.0.6` Multi-Tool Runtime 的基础上，引入第一层 Skill Runtime，并验证“高层能力封装”是否成立。
+### Tools
 
-这一版只落了一个正式 Skill：
+- `calculator`
+- `datetime`
+- `text-transform`
+- `unit-convert`
+- `city-weather`
+- `local-text-read`
+
+### Skills
 
 - `utility-skill`
+- `reader-skill`
 
-它对应的是一类稳定的日常确定性实用任务：
+### 前端交互
 
-- 精确计算
-- 时间与日期处理
-- 文本转换与提取
-- 单位换算
-- 上述任务之间的轻量组合
+- Skill 模式：
+    - `自动`
+    - `实用`
+    - `读取`
+- 模型选择器
+- “深度思考”开关
+- 推理过程折叠面板
+- Tool 调用卡片
+- 顶部错误提示
 
-## 架构概览
+## v0.0.8 主题
 
-当前主链路可以概括为：
+`v0.0.8` 不再继续围绕 `writer-skill` 展开，而是收敛成：
 
-```text
-User
-  -> Web Chat UI
-    -> /api/chat
-      -> chat-service
-        -> ChatOllama
-          -> Tool Registry / Skill Registry
-            -> Tool Calling Runtime
-              -> Structured NDJSON Stream
-                -> useChatStream
-                  -> reasoning / tool / text 渲染
-```
+> 用 `reader-skill` 验证 Skill Runtime 对“模型自身没有的外部上下文能力”的承载方式。
 
-分层来看：
+这一版要验证的是：
 
-- 模型接入层：`LangChain.js + Ollama`
-- Runtime 层：planning、tool calling、参数校验、执行、回填、错误收束
-- Tool 层：独立 definition + registry
-- Skill 层：高层约束、允许工具集合、输出策略
-- 协议层：NDJSON + typed parts
-- 前端展示层：`useChatStream + Streamdown + Tailwind CSS`
+- 模型拿不到的实时天气，能否通过 Tool 稳定补上
+- 模型看不到的本地根目录文本，能否通过 Tool 安全读取
+- 自动模式、显式 Skill、普通聊天回退，能否同时保持边界清晰
 
-## 当前支持的 Tool
+## reader-skill
 
-### `calculator`
+`reader-skill` 是一个“外部上下文获取 Skill”，只负责：
 
-负责确定性数值计算：
+- 查询城市实时天气
+- 读取项目根目录下的文本文件
+- 基于 Tool 结果做简洁说明、总结或提取
 
-- 四则运算
-- 括号运算
-- 连续追问中的继续计算
+它不负责：
 
-### `datetime`
+- 通用写作
+- 网页抓取
+- 搜索
+- Agent 式多步任务
 
-负责时间与日期相关任务：
+允许使用的 Tool：
 
-- 当前时间
-- 当前日期
-- 星期判断
-- 日期加减
-- 相对日期表达
+- `city-weather`
+- `local-text-read`
 
-### `text-transform`
+## Tool 简介
 
-负责文本转换与提取：
+### city-weather
 
-- `markdown-to-text`
-- `extract-links`
-- `extract-code-blocks`
-- `json-pretty`
+用途：
 
-### `unit-convert`
+- 查询指定城市的实时天气
 
-负责第一版单位换算：
+输入：
 
-- 长度：`mm / cm / m / km`
-- 重量：`mg / g / kg`
-- 温度：`C / F / K`
+- `city`
 
-## 当前支持的 Skill
+特点：
 
-### `utility-skill`
+- 使用 `wttr.in`
+- 免费
+- 无 API Key
+- 适合为本地模型补实时信息
 
-这是 `v0.0.7` 新引入的第一层 Skill Runtime。
-它不是简单的 prompt 片段，而是一种稳定能力模式：
+### local-text-read
 
-- 定义高层任务域
-- 约束允许使用的 Tool 集
-- 提供统一输出风格
-- 保持普通开放式对话仍可自然回答
+用途：
 
-当前 `/instamind` 默认启用：
+- 读取项目根目录下的文本文件
 
-- `options.skill = 'utility-skill'`
+输入：
+
+- `filename`
+
+边界：
+
+- 只允许根目录直接文件
+- 不允许子目录
+- 不允许绝对路径
+- 不允许 `../`
+- 只允许文本类文件
+
+## Skill 路由
+
+当前策略：
+
+1. 显式 `options.skill` 优先
+2. 未传 `skill` 时走轻量规则路由
+3. 高置信实用请求 -> `utility-skill`
+4. 高置信天气 / 文件读取请求 -> `reader-skill`
+5. 未命中 -> 回退普通聊天链路
+
+## 前端 UI 基线
+
+`v0.0.8` 这一轮同时把前端组件收进正式 `shadcn/ui` 基线。
+
+当前约定：
+
+- style：`radix-vega`
+- primitive：`Radix`
+- icon：`lucide-react`
+- theme：`cssVariables=true`
+
+当前已统一的区域：
+
+- 输入区控制条
+- 顶部错误条
+- 推理过程面板
+- Tool 结果卡片
+- 空状态
+
+这一轮还补了几项交互细节：
+
+- 输入框上下边距收紧
+- 推理面板上下边距收紧
+- Tool 状态色区分：
+    - 完成：绿色
+    - 执行中：蓝色
+    - 失败：红色
+- `实用` / `读取` 模式下的输入提示文案分开
 
 ## 版本演进
 
-### `v0.0.4`
+- `v0.0.4`：本地聊天 + Streamdown
+- `v0.0.5`：最小 Tool Calling
+- `v0.0.6`：Multi-Tool Runtime
+- `v0.0.7`：第一层 Skill Runtime（`utility-skill`）
+- `v0.0.8`：`reader-skill` + 正式前端组件基线
 
-最小聊天闭环：
+## 开发
 
-- 本地模型对话
-- 自定义流式输出
-- Markdown 渲染
-- 本地多轮上下文
-
-### `v0.0.5`
-
-最小 Tool Calling 闭环：
-
-- 接入 `calculator`
-- 跑通 `tool_calls -> 校验 -> 执行 -> ToolMessage 回填 -> 最终回答`
-
-### `v0.0.6`
-
-Multi-Tool Runtime：
-
-- Tool Registry
-- `calculator / datetime / text-transform`
-- 前端多 Tool 展示
-- 最近 `N=8` 轮上下文窗口
-- 更完整的 Runtime 错误收束
-
-### `v0.0.7`
-
-第一层 Skill Runtime：
-
-- Skill Definition / Skill Registry
-- `utility-skill`
-- `unit-convert`
-- Skill 下按 `allowedTools` 过滤工具
-- Skill prompt 注入主聊天链路
-
-## 核心设计原则
-
-这个项目始终坚持几条原则：
-
-- 版本主题单一：每个版本只解决一个真正重要的问题
-- Runtime 边界清晰：优先 registry、schema、结构化错误，而不是主流程特例
-- 最小但稳定：先做最小可实现，再把边界做稳
-- 普通问答主链不退化：新能力不能明显破坏开放式对话
-- 为后续 Skill / MCP / Agent 留出自然演进空间
-
-## 快速开始
-
-### 1. 安装依赖
+安装依赖：
 
 ```bash
 pnpm install
 ```
 
-### 2. 准备本地 Ollama
-
-请确保本地已安装并启动 Ollama，并准备好模型，例如：
-
-- `qwen3:8b`
-
-默认地址：
-
-- `http://127.0.0.1:11434`
-
-### 3. 启动应用
+启动开发环境：
 
 ```bash
 pnpm dev
 ```
 
-然后打开：
-
-- [http://localhost:3000/instamind](http://localhost:3000/instamind)
-
-### 4. 常用验证命令
+常用验证：
 
 ```bash
 pnpm typecheck
 pnpm build
 ```
 
-## 为什么值得关注这个项目
-
-因为它不是试图一步做成“全能 AI 产品”，而是沿着一条更可信的路径往前走：
-
-- 先把聊天做稳
-- 再把 Tool Calling 做对
-- 再把 Multi-Tool Runtime 做清楚
-- 再引入 Skill
-- 再往 MCP 和 Agent 演进
-
-如果你也在思考这些问题：
-
-- 本地大模型应用怎么做成真正可演进的工程
-- Tool Calling 之后的下一层抽象应该是什么
-- AI 应用如何从聊天升级成运行时系统
-
-这个仓库会持续给出一条真实、渐进、可复盘的实现路径。
-
 ## Roadmap
 
-- [x] `v0.0.4` 最小聊天闭环
-- [x] `v0.0.5` 最小 Tool Calling
-- [x] `v0.0.6` Multi-Tool Runtime
-- [x] `v0.0.7` 第一层 Skill Runtime
-- [ ] `v0.0.x` Skill 稳定性收口
-- [ ] `v0.0.x` MCP 能力接入
-- [ ] `v0.1.0` Agent Runtime 基础骨架
+- [x] 本地聊天闭环
+- [x] Tool Calling
+- [x] Multi-Tool Runtime
+- [x] 第一层 Skill Runtime
+- [x] `reader-skill`
+- [x] `shadcn/ui` 前端基线接入
+- [ ] `reader-skill` 稳定性收口
+- [ ] 网页读取 / MCP 接入
+- [ ] Agent Runtime 骨架
 
 ## License
 

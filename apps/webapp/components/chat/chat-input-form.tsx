@@ -1,20 +1,45 @@
-'use client'
+﻿'use client'
 
-import { ArrowUp, Square } from 'lucide-react'
+import { ArrowUp, Brain, Square } from 'lucide-react'
 import type { KeyboardEvent } from 'react'
 
-import type { ChatStatus } from '../../lib/ai/types/chat'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { Toggle } from '@/components/ui/toggle'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import { type ChatModel, chatModelOptions } from '@/lib/ai/models'
+import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+
+const skillModeLabels: Record<ChatSkillMode, string> = {
+    auto: '自动',
+    utility: '实用',
+    reader: '读取',
+}
 
 export function ChatInputForm({
     input,
     status,
+    skillMode,
+    model,
+    enableReasoning,
     onInputChange,
+    onSkillModeChange,
+    onModelChange,
+    onEnableReasoningChange,
     onSubmit,
     onStop,
 }: {
     input: string
     status: ChatStatus
+    skillMode: ChatSkillMode
+    model: ChatModel
+    enableReasoning: boolean
     onInputChange: (value: string) => void
+    onSkillModeChange: (mode: ChatSkillMode) => void
+    onModelChange: (model: ChatModel) => void
+    onEnableReasoningChange: (enabled: boolean) => void
     onSubmit: () => void | Promise<void>
     onStop: () => void
 }) {
@@ -34,6 +59,20 @@ export function ChatInputForm({
     }
 
     const sendDisabled = status === 'submitted' || (status !== 'streaming' && !input.trim())
+    const placeholder =
+        skillMode === 'reader'
+            ? '可以问天气或读取根目录文本文件，例如：读取 README.md'
+            : skillMode === 'utility'
+              ? '可以问计算、时间日期或单位换算，例如：357×28+999 等于多少'
+              : '输入你的问题，Enter 发送，Shift + Enter 换行'
+    const footerText =
+        status === 'streaming'
+            ? '正在生成回答，可点击右侧按钮停止。'
+            : skillMode === 'reader'
+              ? '读取模式支持示例：README.md / package.json / notes.txt'
+              : skillMode === 'utility'
+                ? '实用模式适合计算、时间日期、文本转换和单位换算。'
+                : '当前只保留本会话内的多轮上下文。'
 
     return (
         <form
@@ -48,36 +87,84 @@ export function ChatInputForm({
             }}
             className="mt-auto"
         >
-            <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-4 shadow-[0_18px_40px_rgba(15,23,42,0.06)]">
-                <textarea
-                    value={input}
-                    onChange={event => onInputChange(event.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder="输入你的问题，Enter 发送，Shift + Enter 换行"
-                    rows={3}
-                    className="min-h-[84px] w-full resize-none border-none bg-transparent text-base leading-7 text-slate-900 outline-none placeholder:text-slate-400"
-                />
+            <Card className="border-border/60 bg-card py-0 shadow-sm">
+                <CardContent className="space-y-2 px-4 py-3">
+                    <Textarea
+                        value={input}
+                        onChange={event => onInputChange(event.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder={placeholder}
+                        rows={3}
+                        className="min-h-[72px] resize-none border-0 bg-transparent px-0 py-0 text-sm leading-6 shadow-none focus-visible:ring-0"
+                    />
 
-                <div className="mt-3 flex items-center justify-between gap-3">
-                    <span className="text-xs text-slate-500">
-                        {status === 'streaming' ? '正在生成回答，可点击右侧按钮停止。' : '当前只保留本会话内的多轮上下文。'}
-                    </span>
+                    <div className="flex flex-wrap items-center justify-between gap-2.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Select value={model} onValueChange={value => onModelChange(value as ChatModel)}>
+                                <SelectTrigger className="min-w-[128px]">
+                                    <SelectValue placeholder="选择模型" />
+                                </SelectTrigger>
+                                <SelectContent position="popper" sideOffset={6}>
+                                    <SelectGroup>
+                                        <SelectLabel>选择模型</SelectLabel>
+                                        {chatModelOptions.map(option => (
+                                            <SelectItem key={option} value={option}>
+                                                {option}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
 
-                    <button
-                        type="submit"
-                        aria-label={status === 'streaming' ? 'Stop generation' : 'Send message'}
-                        disabled={sendDisabled}
-                        className={`grid h-11 w-11 place-items-center rounded-full border-none text-white transition ${
-                            status === 'streaming' ? 'bg-rose-500 hover:bg-rose-600' : 'bg-slate-900 hover:bg-slate-800'
-                        } ${sendDisabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer'}`}
-                    >
-                        {status === 'streaming' ? (
-                            <Square className="h-4 w-4 fill-current" strokeWidth={2.4} />
-                        ) : (
-                            <ArrowUp className="h-5 w-5" strokeWidth={2.4} />
-                        )}
-                    </button>
-                </div>
+                            <Toggle
+                                variant="outline"
+                                size="sm"
+                                pressed={enableReasoning}
+                                onPressedChange={onEnableReasoningChange}
+                                aria-label="切换深度思考"
+                            >
+                                <Brain className="size-4" strokeWidth={2.1} />
+                                <span>深度思考</span>
+                            </Toggle>
+
+                            <ToggleGroup
+                                type="single"
+                                variant="outline"
+                                size="sm"
+                                value={skillMode}
+                                onValueChange={value => {
+                                    if (value) {
+                                        onSkillModeChange(value as ChatSkillMode)
+                                    }
+                                }}
+                            >
+                                {(Object.keys(skillModeLabels) as ChatSkillMode[]).map(mode => (
+                                    <ToggleGroupItem key={mode} value={mode} aria-label={`切换到${skillModeLabels[mode]}模式`}>
+                                        {skillModeLabels[mode]}
+                                    </ToggleGroupItem>
+                                ))}
+                            </ToggleGroup>
+                        </div>
+
+                        <Button
+                            type="submit"
+                            size="icon-lg"
+                            aria-label={status === 'streaming' ? '停止生成' : '发送消息'}
+                            disabled={sendDisabled}
+                            className="rounded-full"
+                        >
+                            {status === 'streaming' ? (
+                                <Square className="size-4 fill-current" strokeWidth={2.4} />
+                            ) : (
+                                <ArrowUp className="size-4" strokeWidth={2.4} />
+                            )}
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+
+            <div className="mt-2.5 text-center">
+                <span className="text-xs text-muted-foreground">{footerText}</span>
             </div>
         </form>
     )

@@ -20,3 +20,4 @@ export interface ChatRequest {
 }
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
+export type ChatSkillMode = 'auto' | 'utility' | 'reader'

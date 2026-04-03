@@ -1,4 +1,4 @@
-export type SkillOutputPolicy = 'concise-utility'
+export type SkillOutputPolicy = 'concise-utility' | 'context-reader'
 export type SkillResultPolicy = 'tool-first'
 
 export interface SkillDefinition {
@@ -10,11 +10,11 @@ export interface SkillDefinition {
     systemPrompt: string
     // 当前 Skill 允许使用的 Tool 名称列表。
     allowedTools: string[]
-    // 预留后续扩展的输出策略标记。
+    // 输出风格策略：当前已由 Runtime 消费，会补充额外的 system prompt 约束。
     outputPolicy?: SkillOutputPolicy
-    // 预留后续扩展的结果优先策略标记。
+    // 结果优先策略：当前仅保留字段定义，尚未在 Runtime 中独立消费。
     resultPolicy?: SkillResultPolicy
-    // 预留给后续 Skill 路由或调试使用的提示信息。
+    // 路由或调试提示：当前主要作为声明信息保留，尚未直接参与自动路由。
     routingHints?: string[]
     // 用于按环境或功能开关决定 Skill 是否可用。
     isAvailable?: () => boolean

@@ -1,6 +1,6 @@
 {
     "name": "ai-mind",
-    "version": "0.0.7",
+    "version": "0.0.8",
     "packageManager": "pnpm@10.18.3",
     "main": "index.js",
     "scripts": {
@@ -8,11 +8,14 @@
         "build": "pnpm --dir apps/webapp build",
         "start": "pnpm --dir apps/webapp start",
         "typecheck": "pnpm --dir apps/webapp typecheck",
+        "lint:webapp": "pnpm --dir apps/webapp lint",
+        "lint:webapp:fix": "pnpm --dir apps/webapp lint:fix",
         "test": "echo \"Error: no test specified\" && exit 1",
         "commit": "git-cz",
         "prepare": "husky",
         "lint": "eslint",
-        "lint:staged": "lint-staged"
+        "lint:staged": "lint-staged",
+        "lint:fix": "eslint . --fix"
     },
     "keywords": [],
     "author": "hwy",

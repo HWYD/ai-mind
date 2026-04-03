@@ -1,7 +1,8 @@
+import { readerSkillDefinition } from './reader-skill'
 import { createChatSkillRegistry, type SkillDefinition } from './registry'
 import { utilitySkillDefinition } from './utility-skill'
 
-const chatSkillDefinitions: SkillDefinition[] = [utilitySkillDefinition]
+const chatSkillDefinitions: SkillDefinition[] = [utilitySkillDefinition, readerSkillDefinition]
 
 export const chatSkillRegistry = createChatSkillRegistry(chatSkillDefinitions)
 
@@ -17,5 +18,5 @@ export function getChatSkillDefinition(skillName: string): SkillDefinition | und
     return chatSkillRegistry.get(skillName)
 }
 
-export { utilitySkillDefinition }
+export { readerSkillDefinition, utilitySkillDefinition }
 export type { ChatSkillRegistry, SkillDefinition, SkillOutputPolicy, SkillResultPolicy } from './registry'

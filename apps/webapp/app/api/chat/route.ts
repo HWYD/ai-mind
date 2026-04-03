@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server'
 import { ZodError } from 'zod'
 
-import { chatRequestSchema } from '../../../lib/ai/chat-schema'
-import { createChatService } from '../../../lib/ai/chat-service'
+import { chatRequestSchema } from '@/lib/ai/chat-schema'
+import { createChatService } from '@/lib/ai/chat-service'
 
 export const runtime = 'nodejs'
 

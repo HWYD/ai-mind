@@ -4,7 +4,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
     title: 'InstantMind',
-    description: '基于 LangChain.js 与 Ollama 的最小化聊天实践项目。',
+    description: '基于 LangChain.js 与 Ollama 的最小运行时实验项目。',
 }
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
     children: React.ReactNode
 }>) {
     return (
-        <html lang="zh-CN">
+        <html lang="zh-CN" className="font-sans">
             <body className="min-h-screen antialiased">{children}</body>
         </html>
     )

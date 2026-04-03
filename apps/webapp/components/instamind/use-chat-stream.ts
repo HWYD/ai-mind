@@ -2,15 +2,14 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { createId } from '../../lib/ai/create-id'
-import { chatStreamChunkSchema } from '../../lib/ai/stream-chunk-schema'
-import type { ChatRequest, ChatStatus, MindMessageInput } from '../../lib/ai/types/chat'
-import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart, ToolPart } from '../../lib/ai/types/message'
-import type { ChatStreamChunk } from '../../lib/ai/types/stream-chunk'
+import { createId } from '@/lib/ai/create-id'
+import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
+import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
+import type { ChatRequest, ChatSkillMode, ChatStatus, MindMessageInput } from '@/lib/ai/types/chat'
+import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart, ToolPart } from '@/lib/ai/types/message'
+import type { ChatStreamChunk } from '@/lib/ai/types/stream-chunk'
 
-const DEFAULT_MODEL = 'qwen3:8b'
 const MAX_CONTEXT_TURNS = 8
-const DEFAULT_SKILL = 'utility-skill'
 
 function createTextPart(text: string, id?: string): TextPart {
     return {
@@ -215,7 +214,7 @@ function getErrorMessage(error: unknown): string {
         return error.message
     }
 
-    return 'Chat request failed.'
+    return '聊天请求失败。'
 }
 
 function isAbortError(error: unknown): boolean {
@@ -227,7 +226,7 @@ async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: 
     const decoder = new TextDecoder()
     let buffer = ''
 
-    // 按行读取自定义 NDJSON 协议，这样前端可以一边接收一边合并消息片段。
+    // 按行读取自定义 NDJSON 协议，前端可以一边接收一边合并消息片段。
     while (true) {
         const { done, value } = await reader.read()
 
@@ -249,7 +248,7 @@ async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: 
             const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(trimmedLine))
 
             if (!parsedChunk.success) {
-                throw new Error('Invalid chat stream chunk.')
+                throw new Error('无效的聊天流数据。')
             }
 
             onChunk(parsedChunk.data)
@@ -265,13 +264,34 @@ async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: 
     const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(finalLine))
 
     if (!parsedChunk.success) {
-        throw new Error('Invalid chat stream chunk.')
+        throw new Error('无效的聊天流数据。')
     }
 
     onChunk(parsedChunk.data)
 }
 
-export function useChatStream() {
+function toRequestSkill(skillMode: ChatSkillMode) {
+    switch (skillMode) {
+        case 'utility':
+            return 'utility-skill'
+        case 'reader':
+            return 'reader-skill'
+        default:
+            return undefined
+    }
+}
+
+interface UseChatStreamOptions {
+    skillMode?: ChatSkillMode
+    model?: ChatModel
+    enableReasoning?: boolean
+}
+
+export function useChatStream(options: UseChatStreamOptions = {}) {
+    const skillMode = options.skillMode ?? 'auto'
+    const model = options.model ?? defaultChatModel
+    const enableReasoning = options.enableReasoning ?? true
+
     const [messages, setMessages] = useState<MindMessage[]>([])
     const [status, setStatus] = useState<ChatStatus>('ready')
     const [error, setError] = useState<string | null>(null)
@@ -452,13 +472,14 @@ export function useChatStream() {
         abortControllerRef.current = controller
 
         try {
+            const skill = toRequestSkill(skillMode)
             const payload: ChatRequest = {
                 conversationId: conversationIdRef.current,
                 messages: buildRequestMessages(nextMessages),
                 options: {
-                    skill: DEFAULT_SKILL,
-                    model: DEFAULT_MODEL,
-                    enableReasoning: true,
+                    model,
+                    enableReasoning,
+                    ...(skill ? { skill } : {}),
                 },
             }
 
@@ -473,11 +494,11 @@ export function useChatStream() {
 
             if (!response.ok) {
                 const responseJson = await response.json().catch(() => null)
-                throw new Error(responseJson?.error ?? `Chat request failed with status ${response.status}.`)
+                throw new Error(responseJson?.error ?? `聊天请求失败，状态码：${response.status}`)
             }
 
             if (!response.body) {
-                throw new Error('Chat response stream is unavailable.')
+                throw new Error('聊天响应流不可用。')
             }
 
             setStatus('streaming')
