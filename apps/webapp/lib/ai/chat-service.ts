@@ -9,6 +9,7 @@ import type { SkillDefinition } from './skills'
 import { resolveSkillDefinitionForRequest } from './skills/router'
 import { createAuthoritativeToolAnswer, type ExecutedToolResult } from './strategies/tool-answer'
 import { type ChatToolDefinition, chatToolRegistry } from './tools'
+import { MAX_PROJECT_RESOURCE_PREVIEW_CHARS } from './tools/local-text-read-shared'
 import type { ChatRequest } from './types/chat'
 import type { ChatStreamChunk } from './types/stream-chunk'
 
@@ -259,7 +260,8 @@ function toAIMessage(chunk: AIMessageChunk | null): AIMessage {
     })
 }
 
-// 第一阶段是真正的流式消费：普通问答可以自然流出；如果后续出现 tool call，则停止继续透传正文。
+// 第一阶段是真正的流式规划：一边接收模型的 reasoning / text，一边累计完整 AIMessage。
+// 如果流中出现 tool call，正文将停止继续透传，但 reasoning 仍保留用于调试。
 async function streamPlanningResponse(
     modelStream: AsyncIterable<AIMessageChunk>,
     context: ChatExecutionContext,
@@ -363,46 +365,12 @@ function stripMessageText(message: AIMessage) {
     })
 }
 
-function formatToolInput(toolCall: ToolCall): string {
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
-
-    if (!toolDefinition?.formatInput) {
-        return JSON.stringify(toolCall.args ?? {}, null, 2)
-    }
-
-    return toolDefinition.formatInput(toolCall.args)
-}
-
-function getToolDisplayFields(toolCall: ToolCall) {
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
-    let displayConfig: ReturnType<NonNullable<typeof toolDefinition.getDisplayConfig>> | undefined
-
-    try {
-        displayConfig = toolDefinition?.getDisplayConfig?.(toolCall.args)
-    } catch {
-        displayConfig = undefined
-    }
-
-    return {
-        title: displayConfig?.title ?? toolCall.name,
-        action:
-            displayConfig?.action ??
-            (toolCall.args && typeof toolCall.args === 'object' && 'action' in toolCall.args && typeof toolCall.args.action === 'string'
-                ? toolCall.args.action
-                : undefined),
-    }
-}
-
-function createToolValidationErrorMessage(toolCall: ToolCall, error: ZodError | string) {
-    if (typeof error === 'string') {
-        return error
-    }
-
-    const issueMessage = error.issues.map(issue => issue.message).join('；')
-
-    return `模型生成的 ${toolCall.name} 工具参数不合法：${issueMessage || '请检查 tool call 参数。'}`
-}
-
+/**
+ * 对模型产出的 tool calls 做统一的参数归一化、schema 校验和展示字段补齐。
+ * 返回结果分成两路：
+ * - validatedToolCalls：可以真正进入执行阶段的调用
+ * - toolErrors：需要直接下发给前端的结构化错误
+ */
 function normalizeAndValidateToolCalls(message: AIMessage) {
     const validatedToolCalls: ToolCall[] = []
     const toolErrors: Array<{
@@ -412,6 +380,11 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
         action?: string
         input: string
         message: string
+        outputPartType: 'resource' | 'tool'
+        resourceName?: string
+        serverId?: string
+        source: 'internal' | 'mcp'
+        uri?: string
     }> = []
 
     for (const rawToolCall of message.tool_calls ?? []) {
@@ -421,10 +394,10 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
         }
 
         const toolDefinition = chatToolRegistry.get(toolCall.name)
+        const displayFields = getToolDisplayFields(toolCall)
+        const resourceDisplayFields = displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall) : undefined
 
         if (!toolDefinition) {
-            const displayFields = getToolDisplayFields(toolCall)
-
             toolErrors.push({
                 id: toolCall.id,
                 toolName: toolCall.name,
@@ -432,6 +405,11 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
                 action: displayFields.action,
                 input: formatToolInput(toolCall),
                 message: '工具 ' + toolCall.name + ' 未注册。',
+                outputPartType: displayFields.outputPartType,
+                resourceName: resourceDisplayFields?.resourceName,
+                serverId: displayFields.serverId,
+                source: displayFields.source,
+                uri: resourceDisplayFields?.uri,
             })
             continue
         }
@@ -444,15 +422,22 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
                 ...toolCall,
                 args: normalizedArgs,
             }
-            const displayFields = getToolDisplayFields(normalizedToolCall)
+            const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall)
+            const normalizedResourceDisplayFields =
+                normalizedDisplayFields.outputPartType === 'resource' ? getResourceDisplayFields(normalizedToolCall) : undefined
 
             toolErrors.push({
                 id: toolCall.id,
                 toolName: toolCall.name,
-                title: displayFields.title,
-                action: displayFields.action,
+                title: normalizedDisplayFields.title,
+                action: normalizedDisplayFields.action,
                 input: formatToolInput(normalizedToolCall),
                 message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
+                outputPartType: normalizedDisplayFields.outputPartType,
+                resourceName: normalizedResourceDisplayFields?.resourceName,
+                serverId: normalizedDisplayFields.serverId,
+                source: normalizedDisplayFields.source,
+                uri: normalizedResourceDisplayFields?.uri,
             })
             continue
         }
@@ -485,7 +470,6 @@ function normalizeAndValidateToolCalls(message: AIMessage) {
         toolErrors,
     }
 }
-
 async function executeToolCall(
     toolCall: ToolCall,
     context: ChatExecutionContext,
@@ -497,28 +481,53 @@ async function executeToolCall(
     const partId = createId()
     const input = formatToolInput(toolCall)
     const displayFields = getToolDisplayFields(toolCall)
+    const resourceDisplayFields = displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall) : undefined
+    const resourceServerId = displayFields.serverId ?? 'mcp-resource'
 
-    writeChunk({
-        type: 'tool-start',
-        partId,
-        toolName: toolCall.name,
-        title: displayFields.title,
-        action: displayFields.action,
-        input,
-    })
-
-    if (!toolDefinition) {
-        const message = '工具 ' + toolCall.name + ' 未注册。'
-
+    if (displayFields.outputPartType === 'resource' && resourceDisplayFields) {
         writeChunk({
-            type: 'tool-error',
+            type: 'resource-start',
+            partId,
+            resourceName: resourceDisplayFields.resourceName,
+            uri: resourceDisplayFields.uri,
+            serverId: resourceServerId,
+        })
+    } else {
+        writeChunk({
+            type: 'tool-start',
             partId,
             toolName: toolCall.name,
             title: displayFields.title,
             action: displayFields.action,
+            source: displayFields.source,
+            serverId: displayFields.serverId,
             input,
-            message,
         })
+    }
+    if (!toolDefinition) {
+        const message = '工具 ' + toolCall.name + ' 未注册。'
+        if (displayFields.outputPartType === 'resource' && resourceDisplayFields) {
+            writeChunk({
+                type: 'resource-error',
+                partId,
+                resourceName: resourceDisplayFields.resourceName,
+                uri: resourceDisplayFields.uri,
+                serverId: resourceServerId,
+                message,
+            })
+        } else {
+            writeChunk({
+                type: 'tool-error',
+                partId,
+                toolName: toolCall.name,
+                title: displayFields.title,
+                action: displayFields.action,
+                source: displayFields.source,
+                serverId: displayFields.serverId,
+                input,
+                message,
+            })
+        }
 
         const toolMessage = new ToolMessage({
             content: message,
@@ -550,10 +559,11 @@ async function executeToolCall(
             }
         )
 
+        const output = formatToolExecutionOutput(toolDefinition, result)
         const toolMessage = ToolMessage.isInstance(result)
             ? result
             : new ToolMessage({
-                  content: typeof result === 'string' ? result : JSON.stringify(result),
+                  content: output,
                   tool_call_id: toolCall.id ?? createId(),
                   status: 'success',
                   metadata: {
@@ -561,17 +571,32 @@ async function executeToolCall(
                   },
               })
 
-        const output = getMessageText(toolMessage)
+        if (displayFields.outputPartType === 'resource') {
+            const resourceResultFields = getResourceResultFields(toolCall, result, output)
 
-        writeChunk({
-            type: 'tool-end',
-            partId,
-            toolName: toolCall.name,
-            title: displayFields.title,
-            action: displayFields.action,
-            input,
-            output,
-        })
+            writeChunk({
+                type: 'resource-end',
+                partId,
+                resourceName: resourceResultFields.resourceName,
+                uri: resourceResultFields.uri,
+                serverId: resourceServerId,
+                contentPreview: resourceResultFields.contentPreview,
+                isTruncated: resourceResultFields.isTruncated,
+                previewChars: resourceResultFields.previewChars,
+            })
+        } else {
+            writeChunk({
+                type: 'tool-end',
+                partId,
+                toolName: toolCall.name,
+                title: displayFields.title,
+                action: displayFields.action,
+                source: displayFields.source,
+                serverId: displayFields.serverId,
+                input,
+                output,
+            })
+        }
 
         return {
             toolCall,
@@ -586,15 +611,28 @@ async function executeToolCall(
 
         const message = error instanceof Error ? error.message : '工具执行失败。'
 
-        writeChunk({
-            type: 'tool-error',
-            partId,
-            toolName: toolCall.name,
-            title: displayFields.title,
-            action: displayFields.action,
-            input,
-            message,
-        })
+        if (displayFields.outputPartType === 'resource' && resourceDisplayFields) {
+            writeChunk({
+                type: 'resource-error',
+                partId,
+                resourceName: resourceDisplayFields.resourceName,
+                uri: resourceDisplayFields.uri,
+                serverId: resourceServerId,
+                message,
+            })
+        } else {
+            writeChunk({
+                type: 'tool-error',
+                partId,
+                toolName: toolCall.name,
+                title: displayFields.title,
+                action: displayFields.action,
+                source: displayFields.source,
+                serverId: displayFields.serverId,
+                input,
+                message,
+            })
+        }
 
         const toolMessage = new ToolMessage({
             content: message,
@@ -622,29 +660,56 @@ function writeToolValidationErrors(
         action?: string
         input: string
         message: string
+        outputPartType: 'resource' | 'tool'
+        resourceName?: string
+        serverId?: string
+        source: 'internal' | 'mcp'
+        uri?: string
     }>,
     writeChunk: (chunk: ChatStreamChunk) => void
 ) {
     return toolErrors.map(toolError => {
         const partId = createId()
 
-        writeChunk({
-            type: 'tool-start',
-            partId,
-            toolName: toolError.toolName,
-            title: toolError.title,
-            action: toolError.action,
-            input: toolError.input,
-        })
-        writeChunk({
-            type: 'tool-error',
-            partId,
-            toolName: toolError.toolName,
-            title: toolError.title,
-            action: toolError.action,
-            input: toolError.input,
-            message: toolError.message,
-        })
+        if (toolError.outputPartType === 'resource') {
+            writeChunk({
+                type: 'resource-start',
+                partId,
+                resourceName: toolError.resourceName ?? toolError.toolName,
+                uri: toolError.uri ?? 'resource://unknown',
+                serverId: toolError.serverId ?? 'mcp-resource',
+            })
+            writeChunk({
+                type: 'resource-error',
+                partId,
+                resourceName: toolError.resourceName ?? toolError.toolName,
+                uri: toolError.uri ?? 'resource://unknown',
+                serverId: toolError.serverId ?? 'mcp-resource',
+                message: toolError.message,
+            })
+        } else {
+            writeChunk({
+                type: 'tool-start',
+                partId,
+                toolName: toolError.toolName,
+                title: toolError.title,
+                action: toolError.action,
+                source: toolError.source,
+                serverId: toolError.serverId,
+                input: toolError.input,
+            })
+            writeChunk({
+                type: 'tool-error',
+                partId,
+                toolName: toolError.toolName,
+                title: toolError.title,
+                action: toolError.action,
+                source: toolError.source,
+                serverId: toolError.serverId,
+                input: toolError.input,
+                message: toolError.message,
+            })
+        }
 
         return new ToolMessage({
             content: toolError.message,
@@ -656,7 +721,6 @@ function writeToolValidationErrors(
         })
     })
 }
-
 function createBaseModel(request: ChatRequest, deps: ChatServiceDependencies) {
     return new ChatOllama({
         model: request.options?.model ?? deps.defaultModel,
@@ -697,7 +761,7 @@ export interface ChatServiceDependencies {
 
 export function createChatService(deps: ChatServiceDependencies) {
     return {
-        // 统一模型接入层：是否挂载工具由当前可用工具集合决定，不再按问题类型做人为分流。
+        // 聊天主链负责：解析 Skill、绑定可用 Tool、完成 planning / execution / final answer 三段式流式输出。
         async streamChat(request: ChatRequest, context: ChatExecutionContext) {
             const baseModel = createBaseModel(request, deps)
             const skillDefinition = resolveSkillDefinitionForRequest(request)
@@ -939,4 +1003,130 @@ export function createChatService(deps: ChatServiceDependencies) {
             })
         },
     }
+}
+
+/**
+ * 统一格式化模型传回的 tool args，优先复用 Tool 自己声明的 `formatInput`。
+ */
+function formatToolInput(toolCall: ToolCall) {
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
+
+    try {
+        return toolDefinition?.formatInput ? toolDefinition.formatInput(toolCall.args) : JSON.stringify(toolCall.args)
+    } catch {
+        return JSON.stringify(toolCall.args)
+    }
+}
+
+/**
+ * 从 Tool Definition 中提取展示层元信息。
+ * 这里做容错是为了避免单个 Tool 的展示配置异常打断整条主链。
+ */
+function getToolDisplayFields(toolCall: ToolCall) {
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
+
+    try {
+        const displayConfig = toolDefinition?.getDisplayConfig?.(toolCall.args)
+
+        return {
+            title: displayConfig?.title,
+            action: displayConfig?.action,
+            outputPartType: toolDefinition?.outputPartType ?? 'tool',
+            source: toolDefinition?.source ?? 'internal',
+            serverId: toolDefinition?.serverId,
+        } as const
+    } catch {
+        return {
+            title: toolCall.name,
+            action:
+                typeof toolCall.args === 'object' && toolCall.args && 'action' in toolCall.args
+                    ? String((toolCall.args as { action?: unknown }).action)
+                    : undefined,
+            outputPartType: toolDefinition?.outputPartType ?? 'tool',
+            source: toolDefinition?.source ?? 'internal',
+            serverId: toolDefinition?.serverId,
+        } as const
+    }
+}
+
+/**
+ * 为 Resource 类能力生成基础展示字段。
+ * 如果 Tool 没有提供专门的 Resource 展示配置，这里会给出兜底值。
+ */
+function getResourceDisplayFields(toolCall: ToolCall) {
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
+
+    try {
+        const resourceDisplayConfig = toolDefinition?.getResourceDisplayConfig?.(toolCall.args)
+        const toolDisplayConfig = toolDefinition?.getDisplayConfig?.(toolCall.args)
+
+        return {
+            resourceName: resourceDisplayConfig?.resourceName ?? toolDisplayConfig?.title ?? toolCall.name,
+            uri: resourceDisplayConfig?.uri ?? 'resource://unknown',
+        }
+    } catch {
+        return {
+            resourceName: toolCall.name,
+            uri: 'resource://unknown',
+        }
+    }
+}
+
+/**
+ * 把 Tool 的实际执行结果压成前端 Resource card 需要的字段。
+ * 如果 Tool 没有提供结构化 Resource 结果，就退化成基于输出文本的预览。
+ */
+function getResourceResultFields(toolCall: ToolCall, result: unknown, output: string) {
+    const toolDefinition = chatToolRegistry.get(toolCall.name)
+
+    if (toolDefinition?.getResourceResult) {
+        const resourceResult = toolDefinition.getResourceResult(toolCall.args, result)
+
+        if (resourceResult) {
+            return resourceResult
+        }
+    }
+
+    const displayFields = getResourceDisplayFields(toolCall)
+
+    return {
+        resourceName: displayFields.resourceName,
+        uri: displayFields.uri,
+        contentPreview: output.slice(0, MAX_PROJECT_RESOURCE_PREVIEW_CHARS),
+        isTruncated: output.length > MAX_PROJECT_RESOURCE_PREVIEW_CHARS,
+        previewChars: MAX_PROJECT_RESOURCE_PREVIEW_CHARS,
+    }
+}
+
+/**
+ * 统一把 Tool 的执行结果转成字符串。
+ * 对有自定义 `formatOutput` 的 Tool，优先使用 Tool 自己的结果格式化逻辑。
+ */
+function formatToolExecutionOutput(toolDefinition: ChatToolDefinition, result: unknown) {
+    if (toolDefinition.formatOutput) {
+        return toolDefinition.formatOutput(result)
+    }
+
+    if (typeof result === 'string') {
+        return result
+    }
+
+    if (ToolMessage.isInstance(result)) {
+        return getMessageText(result)
+    }
+
+    return JSON.stringify(result)
+}
+
+/**
+ * 把 schema 校验错误整理成更适合日志与前端展示的可读文案。
+ */
+function createToolValidationErrorMessage(toolCall: ToolCall, error: ZodError | string) {
+    if (typeof error === 'string') {
+        return error
+    }
+
+    const issueMessage = error.issues.map(issue => issue.message).join('；')
+
+    return `模型生成的 ${toolCall.name} 工具参数不合法：${issueMessage || '请检查 tool call 参数。'}`
 }

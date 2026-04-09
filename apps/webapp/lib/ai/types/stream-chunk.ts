@@ -41,6 +41,8 @@ export interface ToolStartChunk {
     toolName: string
     title?: string
     action?: string
+    source?: 'internal' | 'mcp'
+    serverId?: string
     input: string
 }
 
@@ -50,6 +52,8 @@ export interface ToolEndChunk {
     toolName: string
     title?: string
     action?: string
+    source?: 'internal' | 'mcp'
+    serverId?: string
     input: string
     output: string
 }
@@ -60,7 +64,37 @@ export interface ToolErrorChunk {
     toolName: string
     title?: string
     action?: string
+    source?: 'internal' | 'mcp'
+    serverId?: string
     input: string
+    message: string
+}
+
+export interface ResourceStartChunk {
+    type: 'resource-start'
+    partId: string
+    resourceName: string
+    uri: string
+    serverId: string
+}
+
+export interface ResourceEndChunk {
+    type: 'resource-end'
+    partId: string
+    resourceName: string
+    uri: string
+    serverId: string
+    contentPreview?: string
+    isTruncated?: boolean
+    previewChars?: number
+}
+
+export interface ResourceErrorChunk {
+    type: 'resource-error'
+    partId: string
+    resourceName: string
+    uri: string
+    serverId: string
     message: string
 }
 
@@ -84,5 +118,8 @@ export type ChatStreamChunk =
     | ToolStartChunk
     | ToolEndChunk
     | ToolErrorChunk
+    | ResourceStartChunk
+    | ResourceEndChunk
+    | ResourceErrorChunk
     | FinishChunk
     | ErrorChunk

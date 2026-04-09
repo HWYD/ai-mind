@@ -1,4 +1,4 @@
-import type { ChatRequest } from '@/lib/ai/types/chat'
+﻿import type { ChatRequest } from '@/lib/ai/types/chat'
 
 import { getChatSkillDefinition } from './index'
 import type { SkillDefinition } from './registry'

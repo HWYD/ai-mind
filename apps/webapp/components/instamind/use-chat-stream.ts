@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import { useEffect, useRef, useState } from 'react'
 
@@ -6,7 +6,7 @@ import { createId } from '@/lib/ai/create-id'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
 import type { ChatRequest, ChatSkillMode, ChatStatus, MindMessageInput } from '@/lib/ai/types/chat'
-import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, TextPart, ToolPart } from '@/lib/ai/types/message'
+import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, ResourcePart, TextPart, ToolPart } from '@/lib/ai/types/message'
 import type { ChatStreamChunk } from '@/lib/ai/types/stream-chunk'
 
 const MAX_CONTEXT_TURNS = 8
@@ -30,15 +30,36 @@ function createReasoningPart(text: string, id?: string): ReasoningPart {
     }
 }
 
-function createToolPart(partId: string, toolName: string, input: string, title?: string, action?: string): ToolPart {
+function createToolPart(
+    partId: string,
+    toolName: string,
+    input: string,
+    title?: string,
+    action?: string,
+    source?: ToolPart['source'],
+    serverId?: string
+): ToolPart {
     return {
         id: partId,
         type: 'tool',
         toolName,
         title,
         action,
+        source,
+        serverId,
         status: 'called',
         input,
+    }
+}
+
+function createResourcePart(partId: string, resourceName: string, uri: string, serverId: string): ResourcePart {
+    return {
+        id: partId,
+        type: 'resource',
+        resourceName,
+        uri,
+        serverId,
+        status: 'loading',
     }
 }
 
@@ -82,7 +103,7 @@ function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
         }
 
         return message.parts.some(part => {
-            if (part.type === 'tool') {
+            if (part.type === 'tool' || part.type === 'resource') {
                 return true
             }
 
@@ -93,6 +114,13 @@ function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
 
 function toRequestMessages(messages: MindMessage[]): MindMessageInput[] {
     return messages.map(toMessageInput).filter((message): message is MindMessageInput => message !== null)
+}
+
+function getMessageTextContent(message: MindMessage): string {
+    return message.parts
+        .filter((part): part is TextPart => part.type === 'text' && part.text.trim().length > 0)
+        .map(part => part.text)
+        .join('\n\n')
 }
 
 function getRecentContextWindow(messages: MindMessage[]): MindMessage[] {
@@ -139,7 +167,7 @@ function appendPart(messages: MindMessage[], messageId: string, part: MindMessag
     })
 }
 
-// 文本类 part 使用增量拼接，保证流式返回时能持续合并到同一个消息片段。
+// 通过 partId 精确追加文本增量，避免并发流式更新时把内容拼到错误的 part 中。
 function appendTextualPartDelta(
     messages: MindMessage[],
     messageId: string,
@@ -201,6 +229,30 @@ function updateToolPart(messages: MindMessage[], messageId: string, partId: stri
     })
 }
 
+function updateResourcePart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    updater: (part: ResourcePart) => ResourcePart
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'resource' || part.id !== partId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
+        }
+    })
+}
+
 function removeMessage(messages: MindMessage[], messageId: string | null): MindMessage[] {
     if (!messageId) {
         return messages
@@ -209,12 +261,66 @@ function removeMessage(messages: MindMessage[], messageId: string | null): MindM
     return messages.filter(message => message.id !== messageId)
 }
 
+function removeUserTurnPair(messages: MindMessage[], userMessageId: string): MindMessage[] {
+    const userMessageIndex = messages.findIndex(message => message.id === userMessageId && message.role === 'user')
+
+    if (userMessageIndex === -1) {
+        return messages
+    }
+
+    const messageIdsToRemove = new Set<string>([userMessageId])
+
+    for (let index = userMessageIndex + 1; index < messages.length; index += 1) {
+        const message = messages[index]
+
+        if (message.role === 'user') {
+            break
+        }
+
+        if (message.role === 'assistant') {
+            messageIdsToRemove.add(message.id)
+            break
+        }
+    }
+
+    return messages.filter(message => !messageIdsToRemove.has(message.id))
+}
+
+function getLastUserTurnForRegeneration(messages: MindMessage[]) {
+    const stableMessages = pruneTransientMessages(messages)
+    let lastUserIndex = -1
+
+    for (let index = stableMessages.length - 1; index >= 0; index -= 1) {
+        if (stableMessages[index].role === 'user') {
+            lastUserIndex = index
+            break
+        }
+    }
+
+    if (lastUserIndex === -1) {
+        return null
+    }
+
+    const lastUserMessage = stableMessages[lastUserIndex]
+    const userText = getMessageTextContent(lastUserMessage).trim()
+    const hasAssistantAfterUser = stableMessages.slice(lastUserIndex + 1).some(message => message.role === 'assistant')
+
+    if (!userText || !hasAssistantAfterUser) {
+        return null
+    }
+
+    return {
+        baseMessages: stableMessages.slice(0, lastUserIndex),
+        userText,
+    }
+}
+
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error && error.message) {
         return error.message
     }
 
-    return '聊天请求失败。'
+    return '请求失败，请稍后重试。'
 }
 
 function isAbortError(error: unknown): boolean {
@@ -226,7 +332,7 @@ async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: 
     const decoder = new TextDecoder()
     let buffer = ''
 
-    // 按行读取自定义 NDJSON 协议，前端可以一边接收一边合并消息片段。
+    // 按 NDJSON 协议逐行消费流，避免把半截 JSON 提前交给解析层。
     while (true) {
         const { done, value } = await reader.read()
 
@@ -248,7 +354,7 @@ async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: 
             const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(trimmedLine))
 
             if (!parsedChunk.success) {
-                throw new Error('无效的聊天流数据。')
+                throw new Error('服务端返回了无法解析的流式数据。')
             }
 
             onChunk(parsedChunk.data)
@@ -264,7 +370,7 @@ async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: 
     const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(finalLine))
 
     if (!parsedChunk.success) {
-        throw new Error('无效的聊天流数据。')
+        throw new Error('服务端返回了无法解析的流式数据。')
     }
 
     onChunk(parsedChunk.data)
@@ -401,7 +507,11 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
 
                 updateMessages(current =>
-                    appendPart(current, messageId, createToolPart(chunk.partId, chunk.toolName, chunk.input, chunk.title, chunk.action))
+                    appendPart(
+                        current,
+                        messageId,
+                        createToolPart(chunk.partId, chunk.toolName, chunk.input, chunk.title, chunk.action, chunk.source, chunk.serverId)
+                    )
                 )
                 return
             }
@@ -417,6 +527,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                         ...part,
                         title: chunk.title ?? part.title,
                         action: chunk.action ?? part.action,
+                        source: chunk.source ?? part.source,
+                        serverId: chunk.serverId ?? part.serverId,
                         status: 'completed',
                         output: chunk.output,
                     }))
@@ -435,6 +547,60 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                         ...part,
                         title: chunk.title ?? part.title,
                         action: chunk.action ?? part.action,
+                        source: chunk.source ?? part.source,
+                        serverId: chunk.serverId ?? part.serverId,
+                        status: 'failed',
+                        error: chunk.message,
+                    }))
+                )
+                return
+            }
+            case 'resource-start': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    appendPart(current, messageId, createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId))
+                )
+                return
+            }
+            case 'resource-end': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    updateResourcePart(current, messageId, chunk.partId, part => ({
+                        ...part,
+                        resourceName: chunk.resourceName,
+                        uri: chunk.uri,
+                        serverId: chunk.serverId,
+                        status: 'completed',
+                        contentPreview: chunk.contentPreview,
+                        isTruncated: chunk.isTruncated,
+                        previewChars: chunk.previewChars,
+                    }))
+                )
+                return
+            }
+            case 'resource-error': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    updateResourcePart(current, messageId, chunk.partId, part => ({
+                        ...part,
+                        resourceName: chunk.resourceName,
+                        uri: chunk.uri,
+                        serverId: chunk.serverId,
                         status: 'failed',
                         error: chunk.message,
                     }))
@@ -453,16 +619,16 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
     }
 
-    async function sendMessage(input: string) {
+    async function submitTurn(baseMessages: MindMessage[], input: string) {
         const text = input.trim()
 
         if (!text || abortControllerRef.current) {
             return false
         }
 
-        const stableMessages = pruneTransientMessages(messagesRef.current)
+        const stableBaseMessages = pruneTransientMessages(baseMessages)
         const userMessage = createMessage('user', [createTextPart(text)])
-        const nextMessages = [...stableMessages, userMessage]
+        const nextMessages = [...stableBaseMessages, userMessage]
         const controller = new AbortController()
 
         messagesRef.current = nextMessages
@@ -491,14 +657,13 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 body: JSON.stringify(payload),
                 signal: controller.signal,
             })
-
             if (!response.ok) {
                 const responseJson = await response.json().catch(() => null)
                 throw new Error(responseJson?.error ?? `聊天请求失败，状态码：${response.status}`)
             }
 
             if (!response.body) {
-                throw new Error('聊天响应流不可用。')
+                throw new Error('响应缺少可读取的流式内容。')
             }
 
             setStatus('streaming')
@@ -527,6 +692,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         return true
     }
 
+    async function sendMessage(input: string) {
+        return submitTurn(messagesRef.current, input)
+    }
+
     function cancel() {
         if (!abortControllerRef.current) {
             return
@@ -535,11 +704,36 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         abortControllerRef.current.abort()
     }
 
+    function deleteUserTurn(userMessageId: string) {
+        if (status === 'submitted' || status === 'streaming') {
+            return false
+        }
+
+        updateMessages(current => removeUserTurnPair(pruneTransientMessages(current), userMessageId))
+        return true
+    }
+
+    async function regenerateLastTurn() {
+        if (status === 'submitted' || status === 'streaming') {
+            return false
+        }
+
+        const lastTurn = getLastUserTurnForRegeneration(messagesRef.current)
+
+        if (!lastTurn) {
+            return false
+        }
+
+        return submitTurn(lastTurn.baseMessages, lastTurn.userText)
+    }
+
     return {
         messages,
         status,
         error,
         sendMessage,
         cancel,
+        deleteUserTurn,
+        regenerateLastTurn,
     }
 }
