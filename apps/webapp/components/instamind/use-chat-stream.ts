@@ -1,15 +1,17 @@
 ﻿'use client'
 
+import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { useEffect, useRef, useState } from 'react'
 
 import { createId } from '@/lib/ai/create-id'
+import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
 import type { ChatRequest, ChatSkillMode, ChatStatus, MindMessageInput } from '@/lib/ai/types/chat'
 import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, ResourcePart, TextPart, ToolPart } from '@/lib/ai/types/message'
-import type { ChatStreamChunk } from '@/lib/ai/types/stream-chunk'
 
 const MAX_CONTEXT_TURNS = 8
+const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
 
 function createTextPart(text: string, id?: string): TextPart {
     return {
@@ -323,10 +325,6 @@ function getErrorMessage(error: unknown): string {
     return '请求失败，请稍后重试。'
 }
 
-function isAbortError(error: unknown): boolean {
-    return (error instanceof DOMException && error.name === 'AbortError') || (error instanceof Error && error.name === 'AbortError')
-}
-
 async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: (chunk: ChatStreamChunk) => void) {
     const reader = stream.getReader()
     const decoder = new TextDecoder()
@@ -393,6 +391,13 @@ interface UseChatStreamOptions {
     enableReasoning?: boolean
 }
 
+interface PendingTextDelta {
+    messageId: string
+    partId: string
+    partType: 'text' | 'reasoning'
+    delta: string
+}
+
 export function useChatStream(options: UseChatStreamOptions = {}) {
     const skillMode = options.skillMode ?? 'auto'
     const model = options.model ?? defaultChatModel
@@ -414,10 +419,25 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         textPartId: null,
         reasoningPartId: null,
     })
+    const pendingTextDeltasRef = useRef<Map<string, PendingTextDelta>>(new Map())
+    const flushTimerRef = useRef<number | null>(null)
+    const flushRafRef = useRef<number | null>(null)
 
     useEffect(() => {
         messagesRef.current = messages
     }, [messages])
+
+    useEffect(() => {
+        return () => {
+            if (flushTimerRef.current !== null) {
+                window.clearTimeout(flushTimerRef.current)
+            }
+
+            if (flushRafRef.current !== null) {
+                window.cancelAnimationFrame(flushRafRef.current)
+            }
+        }
+    }, [])
 
     function updateMessages(updater: (current: MindMessage[]) => MindMessage[]) {
         setMessages(current => {
@@ -425,6 +445,90 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             messagesRef.current = next
             return next
         })
+    }
+
+    function clearScheduledTextFlushes() {
+        if (flushTimerRef.current !== null) {
+            window.clearTimeout(flushTimerRef.current)
+            flushTimerRef.current = null
+        }
+
+        if (flushRafRef.current !== null) {
+            window.cancelAnimationFrame(flushRafRef.current)
+            flushRafRef.current = null
+        }
+    }
+
+    function clearPendingTextDeltas() {
+        pendingTextDeltasRef.current.clear()
+        clearScheduledTextFlushes()
+    }
+
+    function flushPendingTextDeltas() {
+        clearScheduledTextFlushes()
+
+        if (pendingTextDeltasRef.current.size === 0) {
+            return
+        }
+
+        const pending = Array.from(pendingTextDeltasRef.current.values())
+        pendingTextDeltasRef.current.clear()
+
+        updateMessages(current =>
+            pending.reduce(
+                (nextMessages, deltaItem) =>
+                    appendTextualPartDelta(nextMessages, deltaItem.messageId, deltaItem.partId, deltaItem.partType, deltaItem.delta),
+                current
+            )
+        )
+    }
+
+    function scheduleTextFlushByTimer() {
+        if (flushTimerRef.current !== null) {
+            return
+        }
+
+        flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null
+            flushPendingTextDeltas()
+        }, STREAM_TEXT_FLUSH_INTERVAL_MS)
+    }
+
+    function scheduleTextFlushByAnimationFrame() {
+        if (flushRafRef.current !== null) {
+            return
+        }
+
+        flushRafRef.current = window.requestAnimationFrame(() => {
+            flushRafRef.current = null
+            flushPendingTextDeltas()
+        })
+    }
+
+    function enqueueTextDelta(messageId: string, partId: string, partType: 'text' | 'reasoning', delta: string) {
+        if (!delta) {
+            return
+        }
+
+        const pendingKey = `${messageId}:${partType}:${partId}`
+        const existing = pendingTextDeltasRef.current.get(pendingKey)
+
+        if (existing) {
+            existing.delta += delta
+        } else {
+            pendingTextDeltasRef.current.set(pendingKey, {
+                messageId,
+                partId,
+                partType,
+                delta,
+            })
+        }
+
+        scheduleTextFlushByTimer()
+
+        if (delta.includes('\n') || delta.includes('```')) {
+            scheduleTextFlushByAnimationFrame()
+        }
     }
 
     function resetActiveStream() {
@@ -442,11 +546,24 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return
         }
 
+        clearPendingTextDeltas()
         updateMessages(current => removeMessage(current, messageId))
         resetActiveStream()
     }
 
+    function finalizeAbortedAssistantMessage() {
+        // 用户主动中止时，保留已经收到的正文 / 推理 / 工具卡片，只清掉空占位消息，
+        // 避免前端把“已看到的半截回答”整条删除。
+        clearPendingTextDeltas()
+        updateMessages(current => pruneTransientMessages(current))
+        resetActiveStream()
+    }
+
     function handleChunk(chunk: ChatStreamChunk) {
+        if (chunk.type !== 'text-delta' && chunk.type !== 'reasoning-delta') {
+            flushPendingTextDeltas()
+        }
+
         switch (chunk.type) {
             case 'start': {
                 activeStreamRef.current.messageId = chunk.messageId
@@ -474,7 +591,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                     return
                 }
 
-                updateMessages(current => appendTextualPartDelta(current, messageId, chunk.partId, 'text', chunk.delta))
+                enqueueTextDelta(messageId, chunk.partId, 'text', chunk.delta)
                 return
             }
             case 'reasoning-start': {
@@ -496,7 +613,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                     return
                 }
 
-                updateMessages(current => appendTextualPartDelta(current, messageId, chunk.partId, 'reasoning', chunk.delta))
+                enqueueTextDelta(messageId, chunk.partId, 'reasoning', chunk.delta)
                 return
             }
             case 'tool-start': {
@@ -535,26 +652,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 )
                 return
             }
-            case 'tool-error': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    updateToolPart(current, messageId, chunk.partId, part => ({
-                        ...part,
-                        title: chunk.title ?? part.title,
-                        action: chunk.action ?? part.action,
-                        source: chunk.source ?? part.source,
-                        serverId: chunk.serverId ?? part.serverId,
-                        status: 'failed',
-                        error: chunk.message,
-                    }))
-                )
-                return
-            }
             case 'resource-start': {
                 const messageId = activeStreamRef.current.messageId
 
@@ -588,25 +685,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 )
                 return
             }
-            case 'resource-error': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    updateResourcePart(current, messageId, chunk.partId, part => ({
-                        ...part,
-                        resourceName: chunk.resourceName,
-                        uri: chunk.uri,
-                        serverId: chunk.serverId,
-                        status: 'failed',
-                        error: chunk.message,
-                    }))
-                )
-                return
-            }
             case 'text-end':
             case 'reasoning-end':
                 return
@@ -614,8 +692,49 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 updateMessages(current => pruneTransientMessages(current))
                 resetActiveStream()
                 return
-            case 'error':
+            case 'error': {
+                const messageId = activeStreamRef.current.messageId
+
+                // 统一错误协议下，tool/resource 错误走部件更新，runtime/request 错误走全局失败。
+                if (chunk.scope === 'tool') {
+                    if (!messageId || !chunk.partId) {
+                        return
+                    }
+
+                    updateMessages(current =>
+                        updateToolPart(current, messageId, chunk.partId, part => ({
+                            ...part,
+                            toolName: chunk.toolName ?? part.toolName,
+                            source: chunk.source ?? part.source,
+                            serverId: chunk.serverId ?? part.serverId,
+                            input: chunk.input ?? part.input,
+                            status: 'failed',
+                            error: chunk.message,
+                        }))
+                    )
+                    return
+                }
+
+                if (chunk.scope === 'resource') {
+                    if (!messageId || !chunk.partId) {
+                        return
+                    }
+
+                    updateMessages(current =>
+                        updateResourcePart(current, messageId, chunk.partId, part => ({
+                            ...part,
+                            resourceName: chunk.resourceName ?? part.resourceName,
+                            uri: chunk.uri ?? part.uri,
+                            serverId: chunk.serverId ?? part.serverId,
+                            status: 'failed',
+                            error: chunk.message,
+                        }))
+                    )
+                    return
+                }
+
                 throw new Error(chunk.message)
+            }
         }
     }
 
@@ -626,6 +745,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return false
         }
 
+        clearPendingTextDeltas()
         const stableBaseMessages = pruneTransientMessages(baseMessages)
         const userMessage = createMessage('user', [createTextPart(text)])
         const nextMessages = [...stableBaseMessages, userMessage]
@@ -659,7 +779,9 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             })
             if (!response.ok) {
                 const responseJson = await response.json().catch(() => null)
-                throw new Error(responseJson?.error ?? `聊天请求失败，状态码：${response.status}`)
+                const errorMessage = responseJson?.error ?? `聊天请求失败，状态码：${response.status}`
+                const errorCode = typeof responseJson?.code === 'string' ? responseJson.code : null
+                throw new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage)
             }
 
             if (!response.body) {
@@ -673,8 +795,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 setStatus('ready')
             }
         } catch (requestError) {
+            flushPendingTextDeltas()
+
             if (isAbortError(requestError)) {
-                discardActiveAssistantMessage()
+                finalizeAbortedAssistantMessage()
                 setStatus('ready')
                 return true
             }
@@ -684,6 +808,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             setError(getErrorMessage(requestError))
             setStatus('error')
         } finally {
+            flushPendingTextDeltas()
+
             if (abortControllerRef.current === controller) {
                 abortControllerRef.current = null
             }

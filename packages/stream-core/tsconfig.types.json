@@ -1,0 +1,16 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "module": "ESNext",
+        "outDir": "build/types",
+        "rootDir": "src",
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "declarationMap": false,
+        "inlineSources": false,
+        "noEmit": false,
+        "sourceMap": false
+    },
+    "include": ["src/**/*.ts"],
+    "exclude": ["build", "dist", "node_modules", "tests"]
+}

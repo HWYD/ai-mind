@@ -9,6 +9,7 @@ const tseslint = require('typescript-eslint')
 
 const ignores = [
     'dist',
+    '**/dist/**',
     'build',
     '**/*.js',
     '**/*.mjs',

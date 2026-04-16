@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowDown, CircleAlert } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ChatInputForm } from '@/components/chat/chat-input-form'
 import { ChatMessageList } from '@/components/chat/chat-message-list'
@@ -71,6 +71,8 @@ export default function InstantMindPage() {
     const userScrollIntentRef = useRef(false)
     const userScrollIntentTimeoutRef = useRef<number | null>(null)
     const autoScrollLockedForCurrentTurnRef = useRef(false)
+    const scrollSyncRafRef = useRef<number | null>(null)
+    const scrollSyncAutoFollowRef = useRef(false)
     const [bottomSpacing, setBottomSpacing] = useState(220 + EXTRA_BOTTOM_SCROLL_SPACING)
     const [showScrollToBottom, setShowScrollToBottom] = useState(false)
     const { messages, status, error, sendMessage, cancel, deleteUserTurn, regenerateLastTurn } = useChatStream({
@@ -84,6 +86,42 @@ export default function InstantMindPage() {
     useEffect(() => {
         isStreamingOutputRef.current = isStreamingOutput
     }, [isStreamingOutput])
+
+    const scheduleScrollSync = useCallback((allowAutoFollow = false) => {
+        scrollSyncAutoFollowRef.current = scrollSyncAutoFollowRef.current || allowAutoFollow
+
+        if (scrollSyncRafRef.current !== null) {
+            return
+        }
+
+        scrollSyncRafRef.current = window.requestAnimationFrame(() => {
+            scrollSyncRafRef.current = null
+            const shouldAutoFollow = scrollSyncAutoFollowRef.current
+            scrollSyncAutoFollowRef.current = false
+
+            const scroller = getPageScroller()
+            const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+            const shouldShowScrollToBottom = distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD
+
+            setShowScrollToBottom(current => (current === shouldShowScrollToBottom ? current : shouldShowScrollToBottom))
+
+            if (!shouldAutoFollow || !isStreamingOutputRef.current || autoScrollLockedForCurrentTurnRef.current) {
+                return
+            }
+
+            scrollPageToBottom()
+            setShowScrollToBottom(current => (current ? false : current))
+        })
+    }, [])
+
+    useEffect(() => {
+        return () => {
+            if (scrollSyncRafRef.current !== null) {
+                window.cancelAnimationFrame(scrollSyncRafRef.current)
+                scrollSyncRafRef.current = null
+            }
+        }
+    }, [])
 
     useEffect(() => {
         if (!inputContainerRef.current) {
@@ -108,20 +146,17 @@ export default function InstantMindPage() {
     }, [])
 
     useEffect(() => {
-        const updateScrollButtonVisibility = () => {
-            const scroller = getPageScroller()
-            const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
-
-            setShowScrollToBottom(distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD)
+        const handleResize = () => {
+            scheduleScrollSync(false)
         }
 
-        updateScrollButtonVisibility()
-        window.addEventListener('resize', updateScrollButtonVisibility)
+        handleResize()
+        window.addEventListener('resize', handleResize)
 
         return () => {
-            window.removeEventListener('resize', updateScrollButtonVisibility)
+            window.removeEventListener('resize', handleResize)
         }
-    }, [])
+    }, [scheduleScrollSync])
 
     useEffect(() => {
         const clearUserScrollIntentTimeout = () => {
@@ -170,14 +205,10 @@ export default function InstantMindPage() {
         }
 
         const handleScroll = () => {
-            const scroller = getPageScroller()
-            const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
-
-            setShowScrollToBottom(distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD)
-
             if (!isStreamingOutputRef.current) {
                 userScrollIntentRef.current = false
                 clearUserScrollIntentTimeout()
+                scheduleScrollSync(false)
                 return
             }
 
@@ -187,6 +218,7 @@ export default function InstantMindPage() {
 
             userScrollIntentRef.current = false
             clearUserScrollIntentTimeout()
+            scheduleScrollSync(false)
         }
 
         window.addEventListener('wheel', handleWheel, { passive: true })
@@ -201,39 +233,11 @@ export default function InstantMindPage() {
             window.removeEventListener('scroll', handleScroll)
             clearUserScrollIntentTimeout()
         }
-    }, [])
+    }, [scheduleScrollSync])
 
     useEffect(() => {
-        if (!isStreamingOutput || autoScrollLockedForCurrentTurnRef.current) {
-            return
-        }
-
-        const animationFrameId = window.requestAnimationFrame(() => {
-            if (autoScrollLockedForCurrentTurnRef.current) {
-                return
-            }
-
-            scrollPageToBottom()
-            setShowScrollToBottom(false)
-        })
-
-        return () => window.cancelAnimationFrame(animationFrameId)
-    }, [bottomSpacing, isStreamingOutput, messages])
-
-    useEffect(() => {
-        const animationFrameId = window.requestAnimationFrame(() => {
-            const scroller = getPageScroller()
-            const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
-
-            setShowScrollToBottom(distanceFromBottom > SCROLL_TO_BOTTOM_THRESHOLD)
-
-            if (distanceFromBottom <= SCROLL_TO_BOTTOM_THRESHOLD && !autoScrollLockedForCurrentTurnRef.current) {
-                scrollPageToBottom()
-            }
-        })
-
-        return () => window.cancelAnimationFrame(animationFrameId)
-    }, [bottomSpacing, messages])
+        scheduleScrollSync(isStreamingOutput)
+    }, [bottomSpacing, isStreamingOutput, messages, scheduleScrollSync])
 
     async function handleSubmit() {
         const nextInput = input.trim()
@@ -276,9 +280,11 @@ export default function InstantMindPage() {
         }
 
         scrollPageToBottom()
+        setShowScrollToBottom(current => (current ? false : current))
 
         window.requestAnimationFrame(() => {
             scrollPageToBottom()
+            setShowScrollToBottom(current => (current ? false : current))
         })
     }
 
@@ -288,15 +294,14 @@ export default function InstantMindPage() {
                 <header>
                     <h1 className="m-0 text-4xl font-semibold tracking-tight">InstantMind</h1>
                     <p className="mt-3 text-base leading-7 text-muted-foreground">
-                        鍩轰簬 LangChain.js 涓?Ollama 鐨勬渶灏忚繍琛屾椂瀹為獙锛屾敮鎸佸伐鍏疯皟鐢ㄣ€乺eader skill
-                        鍜屾湰鍦板杞笂涓嬫枃銆?{' '}
+                        基于 LangChain.js 与 Ollama 的最小运行时实验，支持工具调用、reader skill 和本地多轮上下文。
                     </p>
                 </header>
 
                 {error ? (
                     <Alert variant="destructive">
                         <CircleAlert className="size-4" strokeWidth={2.2} />
-                        <AlertTitle>璇锋眰閿欒</AlertTitle>
+                        <AlertTitle>请求错误</AlertTitle>
                         <AlertDescription>{error}</AlertDescription>
                     </Alert>
                 ) : null}
@@ -321,7 +326,7 @@ export default function InstantMindPage() {
                             type="button"
                             variant="outline"
                             size="icon-lg"
-                            aria-label="鍥炲埌搴曢儴"
+                            aria-label="回到底部"
                             aria-hidden={!showScrollToBottom}
                             disabled={!showScrollToBottom}
                             onClick={handleScrollToBottomClick}

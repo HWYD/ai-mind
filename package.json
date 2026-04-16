@@ -1,25 +1,26 @@
 {
     "name": "ai-mind",
-    "version": "0.0.8",
+    "version": "0.0.10",
     "packageManager": "pnpm@10.18.3",
     "main": "index.js",
     "scripts": {
-        "dev": "pnpm --dir apps/webapp dev",
+        "dev": "run-p build:watch dev:webapp",
+        "dev:webapp": "pnpm --dir apps/webapp dev",
         "build": "pnpm --dir apps/webapp build",
+        "build:watch": "pnpm --filter @ai-mind/* build:watch",
         "start": "pnpm --dir apps/webapp start",
         "typecheck": "pnpm --dir apps/webapp typecheck",
-        "lint:webapp": "pnpm --dir apps/webapp lint",
-        "lint:webapp:fix": "pnpm --dir apps/webapp lint:fix",
-        "test": "echo \"Error: no test specified\" && exit 1",
+        "test": "pnpm --dir apps/webapp test",
         "commit": "git-cz",
         "prepare": "husky",
-        "lint": "eslint",
-        "lint:staged": "lint-staged",
-        "lint:fix": "eslint . --fix"
+        "lint": "eslint .",
+        "lint:fix": "eslint . --fix",
+        "lint:webapp:fix": "pnpm --dir apps/webapp lint:fix",
+        "lint:packages:fix": "pnpm -r --filter \"./packages/*\" lint:fix"
     },
     "keywords": [],
     "author": "hwy",
-    "license": "ISC",
+    "license": "MIT",
     "description": "",
     "config": {
         "commitizen": {

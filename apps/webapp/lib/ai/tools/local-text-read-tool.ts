@@ -184,6 +184,7 @@ export const localTextReadToolDefinition: ChatToolDefinition<z.infer<typeof loca
     }),
     getResourceDisplayConfig: args => createLocalTextReadResourceDisplayConfig(args),
     getResourceResult: (_args, result) => toLocalTextReadResourceResult(result),
+    resourcePreviewChars: MAX_PROJECT_RESOURCE_PREVIEW_CHARS,
     outputPartType: 'resource',
     source: 'mcp',
     serverId: 'project-files-server',

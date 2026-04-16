@@ -58,3 +58,17 @@ export function resolveSkillDefinitionForRequest(request: ChatRequest): SkillDef
 
     return inferredSkill
 }
+
+export function validateExplicitSkillForRequest(request: ChatRequest) {
+    const explicitSkillName = request.options?.skill?.trim()
+
+    if (!explicitSkillName) {
+        return
+    }
+
+    const explicitSkill = getChatSkillDefinition(explicitSkillName)
+
+    if (!explicitSkill || !(explicitSkill.isAvailable?.() ?? true)) {
+        throw createInvalidSkillError(explicitSkillName)
+    }
+}

@@ -41,10 +41,12 @@ export interface ChatToolDefinition<TArgs = unknown> {
     formatOutput?: (result: unknown) => string
     // 为前端 tool part 生成展示配置。
     getDisplayConfig?: (args: TArgs) => ToolDisplayConfig
-    // 为 resource-start / resource-error 生成最小展示信息。
+    // 为 resource-start / error(scope=resource) 生成最小展示信息。
     getResourceDisplayConfig?: (args: TArgs) => ResourceDisplayConfig
     // 将工具执行结果映射成 ResourcePart 需要的数据。
     getResourceResult?: (args: TArgs, result: unknown) => ResourceResultDisplay | null
+    // 当 resource 结果未提供结构化预览时，指定 runtime 退化预览的最大字符数。
+    resourcePreviewChars?: number
     // 标记当前工具更适合渲染为 tool 还是 resource。
     outputPartType?: ToolOutputPartType
     // 标记工具来源，前端可据此展示内建 / MCP。

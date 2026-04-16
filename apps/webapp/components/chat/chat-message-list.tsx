@@ -203,7 +203,7 @@ function getFeedbackButtonClassName(active: boolean, tone: 'up' | 'down') {
         : 'bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-700'
 }
 
-function ReasoningPanel({ combinedReasoning }: { combinedReasoning: string }) {
+function ReasoningPanel({ combinedReasoning, isThinking }: { combinedReasoning: string; isThinking: boolean }) {
     const [open, setOpen] = useState(false)
 
     if (!combinedReasoning) {
@@ -216,7 +216,7 @@ function ReasoningPanel({ combinedReasoning }: { combinedReasoning: string }) {
                 <CardContent className="px-4">
                     <CollapsibleTrigger className="flex w-full items-center gap-2 text-left text-xs font-medium text-muted-foreground outline-none">
                         <ChevronRight className={`size-4 transition-transform ${open ? 'rotate-90' : ''}`} strokeWidth={2.2} />
-                        <span>推理过程</span>
+                        <span>{isThinking ? '深度思考中' : '已完成思考'}</span>
                     </CollapsibleTrigger>
                     {open ? (
                         <CollapsibleContent forceMount className="overflow-hidden">
@@ -410,6 +410,8 @@ export function ChatMessageList({
                 const hasTextContent = messageTextContent.trim().length > 0
                 const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messages.length - 1
                 const isAssistantReplyCompleted = !isLatestAssistantMessage || (status !== 'submitted' && status !== 'streaming')
+                const hasNonReasoningContent = contentParts.length > 0
+                const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted && !hasNonReasoningContent
                 const feedbackState = assistantFeedback[message.id] ?? null
                 const isDeleteDisabled = status === 'submitted' || status === 'streaming'
                 const isCopied = copiedMessageId === message.id
@@ -480,7 +482,7 @@ export function ChatMessageList({
                 return (
                     <article key={message.id} className="flex justify-start">
                         <div className="w-full max-w-[51rem] text-foreground">
-                            <ReasoningPanel combinedReasoning={combinedReasoning} />
+                            <ReasoningPanel combinedReasoning={combinedReasoning} isThinking={isThinking} />
 
                             {contentParts.map((part, index) => {
                                 if (part.type === 'text') {
