@@ -8,7 +8,17 @@ import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
 import type { ChatRequest, ChatSkillMode, ChatStatus, MindMessageInput } from '@/lib/ai/types/chat'
-import type { MindMessage, MindMessagePart, MindRole, ReasoningPart, ResourcePart, TextPart, ToolPart } from '@/lib/ai/types/message'
+import type {
+    MindMessage,
+    MindMessagePart,
+    MindRole,
+    PromptPart,
+    ReasoningPart,
+    ResourcePart,
+    SkillPart,
+    TextPart,
+    ToolPart,
+} from '@/lib/ai/types/message'
 
 const MAX_CONTEXT_TURNS = 8
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
@@ -39,6 +49,7 @@ function createToolPart(
     title?: string,
     action?: string,
     source?: ToolPart['source'],
+    location?: ToolPart['location'],
     serverId?: string
 ): ToolPart {
     return {
@@ -48,20 +59,61 @@ function createToolPart(
         title,
         action,
         source,
+        location,
         serverId,
         status: 'called',
         input,
     }
 }
 
-function createResourcePart(partId: string, resourceName: string, uri: string, serverId: string): ResourcePart {
+function createResourcePart(
+    partId: string,
+    resourceName: string,
+    uri: string,
+    serverId: string,
+    source?: ResourcePart['source'],
+    location?: ResourcePart['location']
+): ResourcePart {
     return {
         id: partId,
         type: 'resource',
         resourceName,
         uri,
+        source,
+        location,
         serverId,
         status: 'loading',
+    }
+}
+
+function createSkillPart(skillId: string, name: string, description?: string): SkillPart {
+    return {
+        id: `skill:${skillId}`,
+        type: 'skill',
+        skillId,
+        name,
+        description,
+    }
+}
+
+function createPromptPart(
+    partId: string,
+    promptName: string,
+    status: PromptPart['status'],
+    source?: PromptPart['source'],
+    location?: PromptPart['location'],
+    serverId?: string,
+    input?: string
+): PromptPart {
+    return {
+        id: partId,
+        type: 'prompt',
+        promptName,
+        source,
+        location,
+        serverId,
+        status,
+        input,
     }
 }
 
@@ -105,7 +157,7 @@ function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
         }
 
         return message.parts.some(part => {
-            if (part.type === 'tool' || part.type === 'resource') {
+            if (part.type === 'tool' || part.type === 'resource' || part.type === 'skill' || part.type === 'prompt') {
                 return true
             }
 
@@ -246,6 +298,30 @@ function updateResourcePart(
             ...message,
             parts: message.parts.map(part => {
                 if (part.type !== 'resource' || part.id !== partId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
+        }
+    })
+}
+
+function updatePromptPart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    updater: (part: PromptPart) => PromptPart
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'prompt' || part.id !== partId) {
                     return part
                 }
 
@@ -572,6 +648,16 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 updateMessages(current => [...current, createAssistantPlaceholder(chunk.messageId)])
                 return
             }
+            case 'skill-selected': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current => appendPart(current, messageId, createSkillPart(chunk.skillId, chunk.name, chunk.description)))
+                return
+            }
             case 'text-start': {
                 const messageId = activeStreamRef.current.messageId
 
@@ -627,7 +713,16 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                     appendPart(
                         current,
                         messageId,
-                        createToolPart(chunk.partId, chunk.toolName, chunk.input, chunk.title, chunk.action, chunk.source, chunk.serverId)
+                        createToolPart(
+                            chunk.partId,
+                            chunk.toolName,
+                            chunk.input,
+                            chunk.title,
+                            chunk.action,
+                            chunk.source,
+                            chunk.location,
+                            chunk.serverId
+                        )
                     )
                 )
                 return
@@ -645,9 +740,54 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                         title: chunk.title ?? part.title,
                         action: chunk.action ?? part.action,
                         source: chunk.source ?? part.source,
+                        location: chunk.location ?? part.location,
                         serverId: chunk.serverId ?? part.serverId,
                         status: 'completed',
                         output: chunk.output,
+                    }))
+                )
+                return
+            }
+            case 'prompt-start': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    appendPart(
+                        current,
+                        messageId,
+                        createPromptPart(
+                            chunk.partId,
+                            chunk.promptName,
+                            'called',
+                            chunk.source,
+                            chunk.location,
+                            chunk.serverId,
+                            chunk.input
+                        )
+                    )
+                )
+                return
+            }
+            case 'prompt-end': {
+                const messageId = activeStreamRef.current.messageId
+
+                if (!messageId) {
+                    return
+                }
+
+                updateMessages(current =>
+                    updatePromptPart(current, messageId, chunk.partId, part => ({
+                        ...part,
+                        promptName: chunk.promptName,
+                        source: chunk.source ?? part.source,
+                        location: chunk.location ?? part.location,
+                        serverId: chunk.serverId ?? part.serverId,
+                        status: chunk.status,
+                        messageCount: chunk.messageCount,
                     }))
                 )
                 return
@@ -660,7 +800,11 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
 
                 updateMessages(current =>
-                    appendPart(current, messageId, createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId))
+                    appendPart(
+                        current,
+                        messageId,
+                        createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId, chunk.source, chunk.location)
+                    )
                 )
                 return
             }
@@ -676,6 +820,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                         ...part,
                         resourceName: chunk.resourceName,
                         uri: chunk.uri,
+                        source: chunk.source ?? part.source,
+                        location: chunk.location ?? part.location,
                         serverId: chunk.serverId,
                         status: 'completed',
                         contentPreview: chunk.contentPreview,
@@ -706,6 +852,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                             ...part,
                             toolName: chunk.toolName ?? part.toolName,
                             source: chunk.source ?? part.source,
+                            location: chunk.location ?? part.location,
                             serverId: chunk.serverId ?? part.serverId,
                             input: chunk.input ?? part.input,
                             status: 'failed',
@@ -725,7 +872,28 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                             ...part,
                             resourceName: chunk.resourceName ?? part.resourceName,
                             uri: chunk.uri ?? part.uri,
+                            source: chunk.source ?? part.source,
+                            location: chunk.location ?? part.location,
                             serverId: chunk.serverId ?? part.serverId,
+                            status: 'failed',
+                            error: chunk.message,
+                        }))
+                    )
+                    return
+                }
+
+                if (chunk.scope === 'prompt') {
+                    if (!messageId || !chunk.partId) {
+                        return
+                    }
+
+                    updateMessages(current =>
+                        updatePromptPart(current, messageId, chunk.partId, part => ({
+                            ...part,
+                            source: chunk.source ?? part.source,
+                            location: chunk.location ?? part.location,
+                            serverId: chunk.serverId ?? part.serverId,
+                            promptName: chunk.promptName ?? part.promptName,
                             status: 'failed',
                             error: chunk.message,
                         }))

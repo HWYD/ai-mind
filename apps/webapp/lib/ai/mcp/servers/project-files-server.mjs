@@ -4,10 +4,13 @@ import path from 'node:path'
 
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { z } from 'zod'
 
 const MAX_FILE_BYTES = 128 * 1024
 const MAX_RESOURCE_CONTENT_CHARS = 12000
 const ALLOWED_EXTENSIONS = new Set(['.md', '.txt', '.json', '.yaml', '.yml', '.js', '.ts', '.tsx'])
+const LOCAL_FILE_SUMMARY_TEMPLATE_RELATIVE_PATH = path.join('assets', 'local-prompt', 'local-file-summary.md')
+const LOCAL_FILE_SUMMARY_PROMPT_NAME = 'local-file-summary'
 
 function resolveProjectRoot() {
     let currentDir = process.cwd()
@@ -64,6 +67,34 @@ function assertSafeRootFilename(filename) {
 
 function createProjectResourceUri(filename) {
     return `project://${filename}`
+}
+
+let localFileSummaryTemplateCache = null
+
+async function loadLocalFileSummaryTemplate(projectRoot) {
+    if (localFileSummaryTemplateCache) {
+        return localFileSummaryTemplateCache
+    }
+
+    const templatePath = path.join(projectRoot, LOCAL_FILE_SUMMARY_TEMPLATE_RELATIVE_PATH)
+    const template = await readFile(templatePath, 'utf8')
+
+    if (!template.trim()) {
+        throw new Error(`Prompt 模板为空：${templatePath}`)
+    }
+
+    localFileSummaryTemplateCache = template
+
+    return localFileSummaryTemplateCache
+}
+
+function renderLocalFileSummaryPrompt(template, input) {
+    const userGoal = input.userGoal?.trim() || '未提供'
+
+    return template
+        .replaceAll('{{filename}}', input.filename)
+        .replaceAll('{{content}}', input.content)
+        .replaceAll('{{userGoal}}', userGoal)
 }
 
 function toMimeType(filename) {
@@ -146,7 +177,7 @@ async function readProjectTextFile(projectRoot, filename) {
 const projectRoot = resolveProjectRoot()
 const server = new McpServer({
     name: 'project-files-server',
-    version: '0.0.9',
+    version: '0.0.11',
 })
 const projectFileTemplate = new ResourceTemplate('project://{filename}', {
     list: async () => ({
@@ -176,6 +207,35 @@ server.registerResource(
                     mimeType: result.mimeType,
                     text: result.text,
                     uri: uri.toString(),
+                },
+            ],
+        }
+    }
+)
+
+server.registerPrompt(
+    LOCAL_FILE_SUMMARY_PROMPT_NAME,
+    {
+        description: '对单个本地文件生成结构化摘要提示词。',
+        argsSchema: {
+            filename: z.string().trim().min(1),
+            content: z.string().trim().min(1),
+            userGoal: z.string().trim().optional(),
+        },
+    },
+    async input => {
+        const template = await loadLocalFileSummaryTemplate(projectRoot)
+        const text = renderLocalFileSummaryPrompt(template, input)
+
+        return {
+            description: '基于单个本地文件生成结构化摘要的 Prompt。',
+            messages: [
+                {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text,
+                    },
                 },
             ],
         }

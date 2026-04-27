@@ -83,12 +83,30 @@ export class MCPClientManager {
     }
 
     /**
+     * 对外暴露 Prompt 列表读取入口。
+     */
+    async listPrompts(serverId: MCPServerId) {
+        const client = this.getOrCreateClient(serverId)
+
+        return client.listPrompts()
+    }
+
+    /**
      * 对外暴露 Tool 列表读取入口。
      */
     async listTools(serverId: MCPServerId) {
         const client = this.getOrCreateClient(serverId)
 
         return client.listTools()
+    }
+
+    /**
+     * 对外暴露单个 Prompt 获取入口。
+     */
+    async getPrompt(serverId: MCPServerId, ...args: Parameters<MCPClient['getPrompt']>) {
+        const client = this.getOrCreateClient(serverId)
+
+        return client.getPrompt(...args)
     }
 
     /**

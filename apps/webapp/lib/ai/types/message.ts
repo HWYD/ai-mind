@@ -1,4 +1,6 @@
 export type MindRole = 'system' | 'user' | 'assistant'
+export type CapabilitySource = 'internal' | 'mcp'
+export type CapabilityLocation = 'local' | 'remote'
 
 export interface BasePart {
     id?: string
@@ -23,7 +25,8 @@ export interface ToolPart extends BasePart {
     toolName: string
     title?: string
     action?: string
-    source?: 'internal' | 'mcp'
+    source?: CapabilitySource
+    location?: CapabilityLocation
     serverId?: string
     status: 'called' | 'completed' | 'failed'
     input: string
@@ -35,6 +38,8 @@ export interface ResourcePart extends BasePart {
     type: 'resource'
     resourceName: string
     uri: string
+    source?: CapabilitySource
+    location?: CapabilityLocation
     serverId: string
     status: 'loading' | 'completed' | 'failed'
     contentPreview?: string
@@ -43,7 +48,26 @@ export interface ResourcePart extends BasePart {
     error?: string
 }
 
-export type MindMessagePart = TextPart | ReasoningPart | ToolPart | ResourcePart
+export interface SkillPart extends BasePart {
+    type: 'skill'
+    skillId: string
+    name: string
+    description?: string
+}
+
+export interface PromptPart extends BasePart {
+    type: 'prompt'
+    promptName: string
+    source?: CapabilitySource
+    location?: CapabilityLocation
+    serverId?: string
+    status: 'called' | 'completed' | 'failed'
+    input?: string
+    messageCount?: number
+    error?: string
+}
+
+export type MindMessagePart = TextPart | ReasoningPart | ToolPart | ResourcePart | SkillPart | PromptPart
 
 export interface MindMessage {
     id: string

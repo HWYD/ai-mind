@@ -1,13 +1,16 @@
 import { StreamLifecycle, writeStaticTextPart } from '@ai-mind/stream-core'
 import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '@langchain/core/messages'
 
+import { createId } from '@/lib/ai/create-id'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, stripMessageText } from './assistant-stream'
 import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from './authoritative-answer'
+import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
 import { buildSystemMessages, createChatSession } from './chat-session'
-import { logSkillRuntime, throwIfAborted } from './stream-errors'
+import { PromptRuntimeError, resolvePromptContextInvocation } from './prompt-context'
+import { logSkillRuntime, throwIfAborted, writeStreamErrorChunk } from './stream-errors'
 import { executeToolCall, formatToolInput, normalizeAndValidateToolCalls, writeToolValidationErrors } from './tool-runtime'
 import type { ChatExecutionContext, ChatServiceDependencies, ExecutedToolResult, ToolValidationResult, WriteChunk } from './types'
 
@@ -96,10 +99,10 @@ export class ChatOrchestrator {
             throw new Error('toolBoundModel is required for planning stage')
         }
 
-        // planning 阶段先消费一轮绑定了 tools 的模型输出，再把结果统一收敛成：
-        // 1. 可执行的 tool calls
-        // 2. 结构化校验错误
-        // 3. 是否已包含可直接展示给用户的正文
+        // Planning stage consumes one bound-model stream and folds it into:
+        // 1. executable tool calls
+        // 2. normalized validation errors
+        // 3. visibility status for assistant text content
         const planningStream = await session.toolBoundModel.stream(this.buildPlanningMessages(session, withRetryPrompt), {
             signal: this.context.signal,
         })
@@ -108,7 +111,7 @@ export class ChatOrchestrator {
         const hasVisibleText = hasVisibleAssistantText(response)
 
         logSkillRuntime(withRetryPrompt ? 'retry-finished' : 'planning-finished', {
-            skill: session.skillDefinition?.name ?? null,
+            skill: session.skillDefinition?.skillId ?? null,
             toolCalls: validationResult.toolCalls.map(toolCall => toolCall.name),
             hasVisibleText,
             validationErrors: validationResult.toolErrors.length,
@@ -121,7 +124,6 @@ export class ChatOrchestrator {
     }
 
     private toPlanningStageResult(attempt: PlanningAttemptResult): PlanningStageResult {
-        // 规划阶段如果没有有效 tool call，就按“仅校验”或“纯直出”两类收口。
         if (attempt.validationResult.toolCalls.length === 0) {
             return {
                 kind: 'validation-only',
@@ -138,7 +140,6 @@ export class ChatOrchestrator {
     }
 
     private async runPlanningStage(session: ReturnType<typeof createChatSession>): Promise<PlanningStageResult> {
-        // 先走第一轮规划；如果既没有 tool call 也没有可见文本，再补一次 retry prompt。
         const firstAttempt = await this.runPlanningAttempt(session, false)
 
         if (firstAttempt.validationResult.toolCalls.length === 0 && !firstAttempt.hasVisibleText) {
@@ -160,7 +161,6 @@ export class ChatOrchestrator {
         toolCalls: ToolCall[],
         toolErrors: ToolValidationResult['toolErrors']
     ): Promise<ToolExecutionStageResult> {
-        // 先把规划阶段产生的校验错误写回流，再逐个执行真正可用的 tool call。
         const toolMessages: ToolMessage[] = [...writeToolValidationErrors(toolErrors, { writeChunk: this.writeChunk, stage: 'planning' })]
         const executedToolResults: ExecutedToolResult[] = []
 
@@ -181,11 +181,78 @@ export class ChatOrchestrator {
     private async runFinalAnswerStage(
         session: ReturnType<typeof createChatSession>,
         planningMessage: AIMessage,
+        executedToolResults: ExecutedToolResult[],
         toolMessages: ToolMessage[]
     ) {
         throwIfAborted(this.context.signal)
 
-        // final-answer 阶段只负责把规划结果和 tool 结果整理成自然语言收口，不再允许模型二次调 tool。
+        let promptContextMessages: BaseMessage[] = []
+        const promptInvocation = resolvePromptContextInvocation(this.request, executedToolResults)
+
+        if (promptInvocation) {
+            const promptPartId = createId()
+
+            this.writeChunk({
+                type: 'prompt-start',
+                partId: promptPartId,
+                promptName: promptInvocation.promptName,
+                source: promptInvocation.source,
+                location: promptInvocation.location,
+                serverId: promptInvocation.serverId,
+                input: promptInvocation.input,
+            })
+
+            try {
+                promptContextMessages = await promptInvocation.execute()
+                this.writeChunk({
+                    type: 'prompt-end',
+                    partId: promptPartId,
+                    promptName: promptInvocation.promptName,
+                    source: promptInvocation.source,
+                    location: promptInvocation.location,
+                    serverId: promptInvocation.serverId,
+                    status: 'completed',
+                    messageCount: promptContextMessages.length,
+                })
+            } catch (error) {
+                const promptError =
+                    error instanceof PromptRuntimeError
+                        ? error
+                        : new PromptRuntimeError(
+                              'PROMPT_FETCH_FAILED',
+                              error instanceof Error ? error.message : 'Prompt context build failed.',
+                              {
+                                  promptName: promptInvocation.promptName,
+                                  serverId: promptInvocation.serverId,
+                              }
+                          )
+
+                writeStreamErrorChunk(this.writeChunk, {
+                    scope: 'prompt',
+                    errorCode: promptError.code,
+                    retryable: true,
+                    message: promptError.message,
+                    stage: 'final-answer',
+                    partId: promptPartId,
+                    source: promptInvocation.source,
+                    location: promptInvocation.location,
+                    serverId: promptError.serverId,
+                    promptName: promptError.promptName,
+                })
+                this.writeChunk({
+                    type: 'prompt-end',
+                    partId: promptPartId,
+                    promptName: promptInvocation.promptName,
+                    source: promptInvocation.source,
+                    location: promptInvocation.location,
+                    serverId: promptInvocation.serverId,
+                    status: 'failed',
+                    messageCount: 0,
+                })
+            }
+        }
+
+        // Final-answer stage turns planning + tool outputs into natural-language closure.
         const finalMessages: BaseMessage[] = [
             ...buildSystemMessages(
                 session.skillSystemPrompt,
@@ -196,12 +263,45 @@ export class ChatOrchestrator {
             ...session.langChainMessages,
             stripMessageText(planningMessage),
             ...toolMessages,
+            ...promptContextMessages,
         ]
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
 
         await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
+    }
+
+    private async runCapabilityContextAnswerStage(session: ReturnType<typeof createChatSession>) {
+        // Step 3.5 的能力消费入口：先判断本轮是否命中固定 remote capability 场景。
+        // 命中后由 runtime 主动获取上下文，再进入最终回答阶段；未命中则继续原有 tool/direct-answer 链路。
+        const capabilityInvocations = resolveCapabilityContextInvocations(this.request, session.skillDefinition)
+
+        if (capabilityInvocations.length === 0) {
+            return false
+        }
+
+        const capabilityContextMessages = await executeCapabilityContextInvocations(capabilityInvocations, {
+            context: this.context,
+            writeChunk: this.writeChunk,
+        })
+        const finalMessages: BaseMessage[] = [
+            ...buildSystemMessages(
+                session.skillSystemPrompt,
+                session.skillOutputPolicyPrompt,
+                // 这条 prompt 只约束 Step 3.5 的最终回答阶段，避免模型把内部注入状态暴露给用户。
+                '请优先基于本轮 runtime 已获取的 capability 结果或 Prompt 指令回答；不要向用户暴露“已注入/未注入上下文”等内部执行状态。如果某个 capability 调用失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
+            ),
+            ...session.langChainMessages,
+            ...capabilityContextMessages,
+        ]
+        const finalStream = await session.baseModel.stream(finalMessages, {
+            signal: this.context.signal,
+        })
+
+        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
+
+        return true
     }
 
     async run() {
@@ -216,40 +316,48 @@ export class ChatOrchestrator {
 
             throwIfAborted(this.context.signal)
 
-            // 记录一次请求级上下文，便于后续定位 resolved skill 和激活工具。
             logSkillRuntime('request-start', {
                 requestedSkill: this.request.options?.skill ?? null,
-                resolvedSkill: session.skillDefinition?.name ?? null,
+                resolvedSkill: session.skillDefinition?.skillId ?? null,
                 activeTools: session.activeToolNames,
             })
 
             lifecycle.emitStartOnce()
 
-            // 没有可用 tool 时，直接走普通问答流。
+            if (session.skillDefinition) {
+                this.writeChunk({
+                    type: 'skill-selected',
+                    skillId: session.skillDefinition.skillId,
+                    name: session.skillDefinition.name,
+                    description: session.skillDefinition.description,
+                })
+            }
+
+            if (await this.runCapabilityContextAnswerStage(session)) {
+                lifecycle.emitFinishIfOpen()
+                return
+            }
+
             if (!session.toolBoundModel) {
                 await streamDirectAnswer(session.baseModel, session.directAnswerMessages, this.context, this.writeChunk, this.isClosed)
                 lifecycle.emitFinishIfOpen()
                 return
             }
 
-            // 有 tool 时先做规划，决定是直出、仅校验，还是进入 tool 执行。
             const planningStage = await this.runPlanningStage(session)
 
-            // 规划阶段完全没有有效产物时，回退到 direct answer。
             if (planningStage.kind === 'direct-fallback') {
                 await streamDirectAnswer(session.baseModel, session.directAnswerMessages, this.context, this.writeChunk, this.isClosed)
                 lifecycle.emitFinishIfOpen()
                 return
             }
 
-            // 只有校验错误、没有可执行 tool 时，直接把校验结果回流并结束。
             if (planningStage.kind === 'validation-only') {
                 writeToolValidationErrors(planningStage.toolErrors, { writeChunk: this.writeChunk, stage: 'planning' })
                 lifecycle.emitFinishIfOpen()
                 return
             }
 
-            // 先执行所有可用 tool，再决定是否可以 authoritative 直出。
             const toolExecutionResult = await this.runToolExecutionStage(planningStage.toolCalls, planningStage.toolErrors)
             const canBypassModel = shouldBypassAuthoritativeAnswer({
                 request: this.request,
@@ -262,10 +370,9 @@ export class ChatOrchestrator {
                       toolNames: toolExecutionResult.executedToolResults.map(result => result.toolCall.name),
                   }
 
-            // 如果结果足够确定，就跳过最终模型整理，直接写静态答案。
             if (authoritativeDecision.shouldBypassModel) {
                 logSkillRuntime('authoritative-answer', {
-                    skill: session.skillDefinition?.name ?? null,
+                    skill: session.skillDefinition?.skillId ?? null,
                     reason: authoritativeDecision.reason ?? null,
                     tools: authoritativeDecision.toolNames,
                 })
@@ -274,8 +381,12 @@ export class ChatOrchestrator {
                 return
             }
 
-            // 需要模型整理时，进入 final answer 阶段。
-            await this.runFinalAnswerStage(session, planningStage.planningMessage, toolExecutionResult.toolMessages)
+            await this.runFinalAnswerStage(
+                session,
+                planningStage.planningMessage,
+                toolExecutionResult.executedToolResults,
+                toolExecutionResult.toolMessages
+            )
             lifecycle.emitFinishIfOpen()
         } catch (error) {
             if (isAbortError(error) || this.context.signal?.aborted || this.isClosed()) {

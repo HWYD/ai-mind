@@ -1,8 +1,11 @@
 import { StdioClientTransport, type StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js'
 
-import type { MCPServerDefinition } from '@/lib/ai/mcp/protocol/types'
+import type { MCPStdioServerDefinition } from '@/lib/ai/mcp/protocol/types'
 
-export function createStdioClientTransport(serverDefinition: MCPServerDefinition): StdioClientTransport {
+/**
+ * 把本地 stdio server definition 转成官方 SDK transport。
+ */
+export function createStdioClientTransport(serverDefinition: MCPStdioServerDefinition): StdioClientTransport {
     const serverParameters: StdioServerParameters = {
         args: serverDefinition.args,
         command: serverDefinition.command,

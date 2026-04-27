@@ -30,6 +30,20 @@ const WEATHER_PATTERNS = [
 ]
 const ROOT_TEXT_FILE_PATTERN = /[A-Za-z0-9._-]+\.(?:md|txt|json|yaml|yml|js|ts|tsx)/i
 const READ_FILE_PATTERNS = [/读取/, /读一下/, /看一下/, /查看/, /总结/, /提取/, /打开/]
+const REMOTE_PROJECT_CONTEXT_PATTERNS = [
+    // v0.0.11 Step 3.5 的高置信 reader 场景，只覆盖 remote MCP 最小闭环验证问题。
+    /latest-context/i,
+    /当前项目上下文/,
+    /项目上下文/,
+    /项目状态/,
+    /项目.*最近在做什么/,
+    /tasklist/i,
+    /任务清单/,
+    /执行清单/,
+    /文档一致性/,
+    /检查.*文档.*一致/,
+    /文档.*不一致/,
+]
 
 function normalizeText(text: string) {
     return text.trim().replace(/\s+/g, ' ')
@@ -55,6 +69,10 @@ function hasRootFileReadIntent(text: string) {
     return ROOT_TEXT_FILE_PATTERN.test(text) && matchesAny(text, READ_FILE_PATTERNS)
 }
 
+function hasRemoteProjectContextIntent(text: string) {
+    return matchesAny(text, REMOTE_PROJECT_CONTEXT_PATTERNS)
+}
+
 export function matchesUtilityIntent(text: string) {
     const normalizedText = normalizeText(text)
 
@@ -64,7 +82,7 @@ export function matchesUtilityIntent(text: string) {
 export function matchesReaderIntent(text: string) {
     const normalizedText = normalizeText(text)
 
-    return hasWeatherIntent(normalizedText) || hasRootFileReadIntent(normalizedText)
+    return hasWeatherIntent(normalizedText) || hasRootFileReadIntent(normalizedText) || hasRemoteProjectContextIntent(normalizedText)
 }
 
 export function selectSkillByRules(text: string): 'utility-skill' | 'reader-skill' | undefined {

@@ -26,7 +26,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Separator } from '@/components/ui/separator'
-import type { MindMessage, MindMessagePart, ReasoningPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
+import type { MindMessage, MindMessagePart, PromptPart, ReasoningPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
 
 import { TextPartView } from './text-part'
 
@@ -37,6 +37,8 @@ function hasVisibleContent(part: MindMessagePart) {
             return part.text.trim().length > 0
         case 'tool':
         case 'resource':
+        case 'skill':
+        case 'prompt':
             return true
         default:
             return false
@@ -128,6 +130,52 @@ function getResourceStatusLabel(status: ResourcePart['status']) {
     }
 }
 
+function getPromptStatusLabel(status: PromptPart['status']) {
+    switch (status) {
+        case 'completed':
+            return '已完成'
+        case 'failed':
+            return '失败'
+        default:
+            return '处理中'
+    }
+}
+
+const promptInputLabelMap: Record<string, string> = {
+    goal: '目标',
+    theme: '主题',
+    filename: '文件名',
+    userGoal: '用户目标',
+}
+
+function parsePromptInputRows(input: string) {
+    return input
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+            const separatorIndex = line.indexOf('=')
+
+            if (separatorIndex <= 0) {
+                return null
+            }
+
+            const key = line.slice(0, separatorIndex).trim()
+            const value = line.slice(separatorIndex + 1).trim()
+
+            if (!key || !value) {
+                return null
+            }
+
+            return {
+                key,
+                label: promptInputLabelMap[key] ?? key,
+                value,
+            }
+        })
+        .filter((row): row is { key: string; label: string; value: string } => row !== null)
+}
+
 function renderStatusIcon(status: 'called' | 'completed' | 'failed' | 'loading') {
     switch (status) {
         case 'completed':
@@ -163,6 +211,10 @@ function getStatusClassName(status: 'called' | 'completed' | 'failed' | 'loading
 
 function getSourceLabel(source?: ToolPart['source']) {
     return source === 'mcp' ? 'MCP' : '内建'
+}
+
+function getLocationLabel(location?: ToolPart['location']) {
+    return location === 'remote' ? 'remote' : 'local'
 }
 
 function getMessageTextContent(message: MindMessage) {
@@ -231,6 +283,91 @@ function ReasoningPanel({ combinedReasoning, isThinking }: { combinedReasoning: 
     )
 }
 
+function SkillPanel({ part }: { part: SkillPart }) {
+    return (
+        <Card size="sm" className="mb-3 border-border/60 shadow-xs">
+            <CardHeader className="gap-2 border-b border-border/60 pb-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <CardTitle className="flex items-center gap-2">
+                        <Wrench className="size-4 text-muted-foreground" strokeWidth={2.1} />
+                        <span>Skill 命中：{part.name}</span>
+                    </CardTitle>
+                    <Badge variant="outline">ID：{part.skillId}</Badge>
+                </div>
+            </CardHeader>
+            {part.description ? (
+                <CardContent className="py-0.5">
+                    <p className="text-xs leading-3 text-muted-foreground">{part.description}</p>
+                </CardContent>
+            ) : null}
+        </Card>
+    )
+}
+
+function PromptPanel({ part }: { part: PromptPart }) {
+    const inputRows = part.input ? parsePromptInputRows(part.input) : []
+
+    return (
+        <Card size="sm" className="mb-3 border-border/60 shadow-xs">
+            <CardHeader className="gap-2 border-b border-border/60 pb-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <CardTitle className="flex items-center gap-2">
+                        <FileText className="size-4 text-muted-foreground" strokeWidth={2.1} />
+                        <span>Prompt 注入：{part.promptName}</span>
+                    </CardTitle>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="outline">来源：{getSourceLabel(part.source ?? 'mcp')}</Badge>
+                        <Badge variant="outline">位置：{getLocationLabel(part.location)}</Badge>
+                        {part.serverId ? <Badge variant="outline">服务：{part.serverId}</Badge> : null}
+                        <Badge variant={getStatusVariant(part.status)} className={getStatusClassName(part.status)}>
+                            {renderStatusIcon(part.status)}
+                            <span>{getPromptStatusLabel(part.status)}</span>
+                        </Badge>
+                    </div>
+                </div>
+            </CardHeader>
+            <CardContent className="space-y-2.5 pt-4">
+                {part.input ? (
+                    <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-1.5">
+                        <div className="text-[0.7rem] font-medium text-muted-foreground">输入</div>
+                        <Separator className="my-2" />
+                        {inputRows.length > 0 ? (
+                            <div className="space-y-1.5 text-sm leading-6 text-foreground">
+                                {inputRows.map(row => (
+                                    <p key={`${row.key}:${row.value}`}>
+                                        <span className="text-muted-foreground">{row.label}：</span>
+                                        <span>{row.value}</span>
+                                    </p>
+                                ))}
+                            </div>
+                        ) : (
+                            <pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-foreground">{part.input}</pre>
+                        )}
+                    </div>
+                ) : null}
+
+                {typeof part.messageCount === 'number' ? (
+                    <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-1.5">
+                        <div className="text-[0.7rem] font-medium text-muted-foreground">注入结果</div>
+                        <Separator className="my-2" />
+                        <p className="text-sm leading-6 text-foreground">已注入 {part.messageCount} 条 Prompt 上下文消息。</p>
+                    </div>
+                ) : null}
+
+                {part.error ? (
+                    <Alert variant="destructive">
+                        <CircleAlert className="size-4" strokeWidth={2.2} />
+                        <AlertTitle>错误</AlertTitle>
+                        <AlertDescription>
+                            <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{part.error}</pre>
+                        </AlertDescription>
+                    </Alert>
+                ) : null}
+            </CardContent>
+        </Card>
+    )
+}
+
 function ToolPanel({ part }: { part: ToolPart }) {
     const Icon = getToolIcon(part.toolName)
     const actionLabel = getActionLabel(part.action)
@@ -245,7 +382,8 @@ function ToolPanel({ part }: { part: ToolPart }) {
                     </CardTitle>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">来源：{getSourceLabel(part.source)}</Badge>
+                        <Badge variant="outline">来源：{getSourceLabel(part.source ?? 'mcp')}</Badge>
+                        <Badge variant="outline">位置：{getLocationLabel(part.location)}</Badge>
                         {part.serverId ? <Badge variant="outline">服务：{part.serverId}</Badge> : null}
                         {actionLabel ? <Badge variant="outline">{actionLabel}</Badge> : null}
                         <Badge variant={getStatusVariant(part.status)} className={getStatusClassName(part.status)}>
@@ -296,7 +434,8 @@ function ResourcePanel({ part }: { part: ResourcePart }) {
                     </CardTitle>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="outline">来源：MCP</Badge>
+                        <Badge variant="outline">来源：{getSourceLabel(part.source)}</Badge>
+                        <Badge variant="outline">位置：{getLocationLabel(part.location)}</Badge>
                         <Badge variant="outline">服务：{part.serverId}</Badge>
                         <Badge variant={getStatusVariant(part.status)} className={getStatusClassName(part.status)}>
                             {renderStatusIcon(part.status)}
@@ -319,7 +458,7 @@ function ResourcePanel({ part }: { part: ResourcePart }) {
                             内容预览（最多显示前 {part.previewChars ?? 3000} 字）
                         </div>
                         <Separator className="my-2" />
-                        <div className="max-h-96 overflow-y-auto pr-2">
+                        <div className="max-h-24 overflow-y-auto pr-2">
                             <pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-foreground">{part.contentPreview}</pre>
                         </div>
                         {part.isTruncated ? (
@@ -396,7 +535,7 @@ export function ChatMessageList({
             {messages.length === 0 ? (
                 <Card size="sm" className="border-dashed border-border/70 bg-card/80 shadow-none">
                     <CardContent className="px-4 py-12 text-center text-sm leading-7 text-muted-foreground">
-                        发送第一条消息后，这里会展示多轮上下文下的回答、推理过程、工具调用和资源读取结果。
+                        发送一条消息后，这里会展示回答过程（思考、工具调用、资源读取）及最终结果。
                     </CardContent>
                 </Card>
             ) : null}
@@ -495,6 +634,14 @@ export function ChatMessageList({
 
                                 if (part.type === 'resource') {
                                     return <ResourcePanel key={`${message.id}:resource:${part.id ?? index}`} part={part} />
+                                }
+
+                                if (part.type === 'skill') {
+                                    return <SkillPanel key={`${message.id}:skill:${part.id ?? index}`} part={part} />
+                                }
+
+                                if (part.type === 'prompt') {
+                                    return <PromptPanel key={`${message.id}:prompt:${part.id ?? index}`} part={part} />
                                 }
 
                                 return null

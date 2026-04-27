@@ -44,6 +44,7 @@ export interface ToolValidationError {
     resourceName?: string
     serverId?: string
     source: 'internal' | 'mcp'
+    location: 'local' | 'remote'
     uri?: string
 }
 

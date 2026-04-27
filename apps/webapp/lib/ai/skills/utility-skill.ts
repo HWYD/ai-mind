@@ -1,7 +1,12 @@
 import type { SkillDefinition } from './registry'
 
+/**
+ * `utility-skill`：承接“确定性实用任务”的默认能力面。
+ * 重点是工具优先（计算、时间、文本转换、单位换算），并保证普通问答仍可直答。
+ */
 export const utilitySkillDefinition: SkillDefinition = {
-    name: 'utility-skill',
+    skillId: 'utility-skill',
+    name: '实用技能',
     description: '处理日常确定性实用任务的稳定能力层，优先使用可用工具完成精确计算、时间处理、文本转换和单位换算。',
     systemPrompt: `
 你当前工作在 utility-skill 模式下。
@@ -34,4 +39,15 @@ export const utilitySkillDefinition: SkillDefinition = {
         'json-format',
         'unit-conversion',
     ],
+    triggerExamples: ['357x28+999 等于多少', '明天是星期几', '把 markdown 转成纯文本', '180 cm 等于多少 m'],
+    sourceKinds: ['internal'],
+    capabilitySelectors: [
+        {
+            providerKind: 'internal',
+            location: 'local',
+            capabilityType: 'tool',
+            names: ['calculator', 'datetime', 'text-transform', 'unit-convert'],
+        },
+    ],
+    fallbackPolicy: 'direct-answer',
 }

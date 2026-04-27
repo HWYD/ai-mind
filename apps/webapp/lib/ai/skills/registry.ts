@@ -1,8 +1,28 @@
+import type { CapabilityLocation, CapabilityProviderKind, CapabilityType } from '@/lib/ai/capabilities/types'
+
+/**
+ * Skill Registry 的核心类型定义。
+ * v0.0.11 起 Skill 通过结构化字段声明可承接能力范围，供 runtime 与路由层消费。
+ */
 export type SkillOutputPolicy = 'concise-utility' | 'context-reader'
 export type SkillResultPolicy = 'tool-first'
 
+export type SkillFallbackPolicy = 'direct-answer'
+export type SkillSourceKind = CapabilityProviderKind
+
+export interface SkillCapabilitySelector {
+    capabilityIds?: string[]
+    capabilityType?: CapabilityType
+    location?: CapabilityLocation
+    names?: string[]
+    providerKind?: CapabilityProviderKind
+    serverId?: string
+}
+
 export interface SkillDefinition {
-    // Skill 唯一标识，供请求层和 Runtime 做映射。
+    // Skill 的机器标识，供请求层和 Runtime 做映射（例如 utility-skill）。
+    skillId: string
+    // Skill 的展示名称，可用于中文或其他本地化名称。
     name: string
     // Skill 的自然语言描述，用于文档、调试和后续扩展。
     description: string
@@ -18,16 +38,28 @@ export interface SkillDefinition {
     routingHints?: string[]
     // 用于按环境或功能开关决定 Skill 是否可用。
     isAvailable?: () => boolean
+    // 命中示例，用于路由调试和后续展示。
+    triggerExamples?: string[]
+    // 声明该 Skill 主要消费哪些能力来源类型。
+    sourceKinds?: SkillSourceKind[]
+    // 声明该 Skill 可承接的 capability 选择范围。
+    capabilitySelectors?: SkillCapabilitySelector[]
+    // 声明能力不可用时的回退策略。
+    fallbackPolicy?: SkillFallbackPolicy
 }
 
 export interface ChatSkillRegistry {
     list(): SkillDefinition[]
     listActive(): SkillDefinition[]
-    get(name: string): SkillDefinition | undefined
+    get(skillId: string): SkillDefinition | undefined
 }
 
+/**
+ * 创建内存态 Skill Registry。
+ * 当前版本使用静态定义数组初始化，后续可平滑扩展到配置驱动加载。
+ */
 export function createChatSkillRegistry(skillDefinitions: SkillDefinition[]): ChatSkillRegistry {
-    const skillDefinitionMap = new Map(skillDefinitions.map(skillDefinition => [skillDefinition.name, skillDefinition]))
+    const skillDefinitionMap = new Map(skillDefinitions.map(skillDefinition => [skillDefinition.skillId, skillDefinition]))
 
     return {
         // Registry 统一管理 Skill 定义，运行时只通过这里列出和查询 Skill。
@@ -37,8 +69,8 @@ export function createChatSkillRegistry(skillDefinitions: SkillDefinition[]): Ch
         listActive() {
             return skillDefinitions.filter(skillDefinition => skillDefinition.isAvailable?.() ?? true)
         },
-        get(name: string) {
-            return skillDefinitionMap.get(name)
+        get(skillId: string) {
+            return skillDefinitionMap.get(skillId)
         },
     }
 }

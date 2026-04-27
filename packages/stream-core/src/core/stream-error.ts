@@ -12,8 +12,10 @@ export interface StreamErrorPayload {
     resourceName?: string
     uri?: string
     source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
     serverId?: string
     input?: string
+    promptName?: string
 }
 
 export function createStreamErrorChunk(payload: StreamErrorPayload): ErrorChunk {

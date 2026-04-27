@@ -292,9 +292,9 @@ export default function InstantMindPage() {
         <main className="min-h-screen bg-background text-foreground">
             <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-5 px-6 pt-9" style={{ paddingBottom: `${bottomSpacing}px` }}>
                 <header>
-                    <h1 className="m-0 text-4xl font-semibold tracking-tight">InstantMind</h1>
+                    <h1 className="m-0 text-4xl font-semibold tracking-tight">AI Mind</h1>
                     <p className="mt-3 text-base leading-7 text-muted-foreground">
-                        基于 LangChain.js 与 Ollama 的最小运行时实验，支持工具调用、reader skill 和本地多轮上下文。
+                        AI Runtime 实验台：支持普通问答、深度思考、Tool 调用与多来源上下文读取。
                     </p>
                 </header>
 

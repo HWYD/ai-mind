@@ -3,7 +3,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-    title: 'InstantMind',
+    title: 'AI Mind',
     description: '基于 LangChain.js 与 Ollama 的最小运行时实验项目。',
 }
 

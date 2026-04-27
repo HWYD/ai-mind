@@ -3,6 +3,13 @@ export interface StartChunk {
     messageId: string
 }
 
+export interface SkillSelectedChunk {
+    type: 'skill-selected'
+    skillId: string
+    name: string
+    description?: string
+}
+
 export interface TextStartChunk {
     type: 'text-start'
     partId: string
@@ -42,6 +49,7 @@ export interface ToolStartChunk {
     title?: string
     action?: string
     source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
     serverId?: string
     input: string
 }
@@ -53,9 +61,31 @@ export interface ToolEndChunk {
     title?: string
     action?: string
     source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
     serverId?: string
     input: string
     output: string
+}
+
+export interface PromptStartChunk {
+    type: 'prompt-start'
+    partId: string
+    promptName: string
+    source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
+    serverId?: string
+    input?: string
+}
+
+export interface PromptEndChunk {
+    type: 'prompt-end'
+    partId: string
+    promptName: string
+    source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
+    serverId?: string
+    status: 'completed' | 'failed'
+    messageCount?: number
 }
 
 export interface ResourceStartChunk {
@@ -63,6 +93,8 @@ export interface ResourceStartChunk {
     partId: string
     resourceName: string
     uri: string
+    source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
     serverId: string
 }
 
@@ -71,13 +103,15 @@ export interface ResourceEndChunk {
     partId: string
     resourceName: string
     uri: string
+    source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
     serverId: string
     contentPreview?: string
     isTruncated?: boolean
     previewChars?: number
 }
 
-export const streamErrorScopes = ['tool', 'resource', 'runtime', 'request'] as const
+export const streamErrorScopes = ['tool', 'resource', 'prompt', 'runtime', 'request'] as const
 export type StreamErrorScope = (typeof streamErrorScopes)[number]
 
 export const streamErrorStages = ['planning', 'tool-execution', 'final-answer', 'runtime'] as const
@@ -89,6 +123,13 @@ export const streamErrorCodes = [
     'MODEL_STREAM_FAILED',
     'TOOL_VALIDATION_FAILED',
     'TOOL_EXECUTION_FAILED',
+    'PROMPT_FETCH_FAILED',
+    'PROMPT_INJECTION_FAILED',
+    'MCP_UNAUTHORIZED',
+    'MCP_FORBIDDEN',
+    'MCP_NOT_FOUND',
+    'MCP_TIMEOUT',
+    'MCP_EXECUTION_FAILED',
     'RUNTIME_INVARIANT_FAILED',
 ] as const
 export type StreamErrorCode = (typeof streamErrorCodes)[number]
@@ -109,12 +150,15 @@ export interface ErrorChunk {
     resourceName?: string
     uri?: string
     source?: 'internal' | 'mcp'
+    location?: 'local' | 'remote'
     serverId?: string
     input?: string
+    promptName?: string
 }
 
 export type ChatStreamChunk =
     | StartChunk
+    | SkillSelectedChunk
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk
@@ -123,6 +167,8 @@ export type ChatStreamChunk =
     | ReasoningEndChunk
     | ToolStartChunk
     | ToolEndChunk
+    | PromptStartChunk
+    | PromptEndChunk
     | ResourceStartChunk
     | ResourceEndChunk
     | FinishChunk

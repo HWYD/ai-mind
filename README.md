@@ -12,17 +12,23 @@
 - MCP 能力接入
 - Agent / 数据层等更长线能力
 
+## 系列博客
+
+- 掘金专栏（持续更新各版本实现与取舍）：
+  [AI Mind 系列博客](https://juejin.cn/column/7619152366395195401)
+
 ## 当前状态
 
-当前版本：`v0.0.10`
+当前版本：`v0.0.11`
 
-这版的主线不是新增一个单点功能，而是把聊天主链和稳定流式内核的结构正式收口：
+这版的主线不是继续重构聊天主链，而是在 `v0.0.10` 已稳定的 facade / runtime / stream-core 基础上，补齐 capability model、skill metadata、local/remote MCP 能力面，并验证单个 remote MCP server 的最小闭环：
 
-- `chat-service` 收口为薄 facade（稳定外部入口）
-- `apps/webapp/lib/ai/runtime/` 成为正式聊天运行时编排层
-- `error` 协议与流终态语义统一
-- 新建内部复用包 `@ai-mind/stream-core`
-- 测试目录与版本文档资产统一
+- 建立统一 `Capability Model`，覆盖 `Tool / Resource / Prompt`
+- 扩展 `reader-skill` / `utility-skill` 的结构化 skill metadata
+- 通过本地 MCP 暴露 `local-file-summary` Prompt
+- 新增独立服务 `project-assistant-service`，验证 remote MCP Resource / Prompt / Tool
+- 补齐最小 capability runtime 消费闭环
+- 前端展示 Skill 命中、capability 类型、local / remote 来源和 server 信息
 
 ## 当前能力
 
@@ -31,9 +37,11 @@
 - `LangChain.js + Ollama`
 - NDJSON 流式协议
 - `reasoning / tool / resource / text` 多段式消息流
+- `skill / prompt` 执行事实展示
 - 统一 `error` chunk 语义
 - `authoritative answer` 运行时策略
 - 最近 `N=8` 轮上下文
+- 最小 capability runtime 消费闭环
 
 ### Skills
 
@@ -53,9 +61,12 @@
 
 - `@modelcontextprotocol/sdk`
 - 本地 `stdio` MCP Host
+- remote `Streamable HTTP` MCP Host
 - `weather-server`
 - `project-files-server`
+- `project-assistant-service`
 - MCP Tool / MCP Resource adapter
+- MCP Prompt adapter
 
 ### 工程化边界
 
@@ -74,6 +85,8 @@
     - 薄 facade，负责创建内部流、构造中间 `StreamResult` 并包装 `Response`
 - `apps/webapp/lib/ai/runtime/`
     - 正式聊天运行时编排层
+- `apps/project-assistant-service/`
+    - NestJS remote MCP 服务，当前用于验证单 server 最小闭环
 - `apps/webapp/tests/`
     - Webapp 自动化测试
 
@@ -88,17 +101,20 @@
 - `packages/stream-core/tests/`
     - package 单测
 
-## v0.0.10 的关键判断
+## v0.0.11 的关键判断
 
-这版有两个重要原则：
+这版有三个重要原则：
 
-1. 先在应用内收口 runtime，再抽稳定内核
-2. 不为“拆得更细”而继续过度拆分
+1. capability model 是统一描述层，不是统一执行链
+2. Skill metadata 只描述承接范围和输出风格，不扩张成 Agent
+3. Remote MCP 只验证单 server 最小闭环，不做 workflow、多 server 或真实业务数据
 
 因此：
 
-- `ChatOrchestrator`、`chat-session`、`tool-runtime` 仍然留在 `apps/webapp`
-- `ChatStreamChunk`、`StreamLifecycle`、NDJSON writer 等稳定基础能力下沉到 `@ai-mind/stream-core`
+- `Tool / Resource / Prompt` 保持各自执行语义
+- `reader-skill` 只承接本版固定的 local / remote MCP capability
+- `project-assistant-service` 当前只提供 mock Resource / Prompt / Tool
+- 普通问答主链不因 MCP 扩展退化
 
 ## 开发
 
@@ -112,6 +128,12 @@ pnpm install
 
 ```bash
 pnpm dev
+```
+
+如果需要同时验证 remote MCP 服务：
+
+```bash
+pnpm dev:pas
 ```
 
 上面的命令会同时：
@@ -139,6 +161,14 @@ pnpm build:watch
 pnpm --dir apps/webapp test
 pnpm --dir apps/webapp typecheck
 pnpm --dir apps/webapp build
+```
+
+### Project Assistant Service
+
+```bash
+pnpm dev:pas
+pnpm typecheck:pas
+pnpm build:pas
 ```
 
 ### Stream Core

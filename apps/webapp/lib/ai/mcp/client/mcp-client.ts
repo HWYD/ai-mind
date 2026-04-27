@@ -1,22 +1,35 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import type { CallToolRequest, ReadResourceRequest } from '@modelcontextprotocol/sdk/types.js'
-
-import { MCPHostError, toErrorMessage } from '@/lib/ai/mcp/protocol/errors'
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import {
+    type CallToolRequest,
+    ErrorCode,
+    type GetPromptRequest,
+    McpError,
+    type ReadResourceRequest,
+} from '@modelcontextprotocol/sdk/types.js'
+
+import { MCPHostError, type MCPHostErrorCode, toErrorMessage } from '@/lib/ai/mcp/protocol/errors'
+import {
+    isMCPStdioServerDefinition,
+    isMCPStreamableHttpServerDefinition,
     MCP_CLIENT_CAPABILITIES,
     MCP_CLIENT_INFO,
     MCP_CLIENT_TIMEOUTS,
     type MCPCallToolResponse,
     type MCPConnectionState,
+    type MCPGetPromptResponse,
     type MCPInitializeResult,
+    type MCPListPromptsResult,
     type MCPListResourcesResult,
     type MCPListToolsResult,
     type MCPReadResourceResponse,
     type MCPServerDefinition,
 } from '@/lib/ai/mcp/protocol/types'
 import { createStdioClientTransport } from '@/lib/ai/mcp/transport/stdio-transport'
+import { createStreamableHttpClientTransport } from '@/lib/ai/mcp/transport/streamable-http-transport'
 
 type MCPRequestOptions = Parameters<Client['callTool']>[2]
+type MCPClientTransport = ReturnType<typeof createStdioClientTransport> | ReturnType<typeof createStreamableHttpClientTransport>
 
 /**
  * 给单次 MCP SDK 异步调用统一加超时，避免某个 server 卡住后拖慢整条主链。
@@ -38,12 +51,66 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: s
 }
 
 /**
- * `MCPClient` 只封装单个 MCP Server 的连接、状态和请求生命周期。
+ * 把底层 SDK / 传输层异常统一翻译成 MCP Host 层错误码。
+ * 这里的目标是沉淀稳定语义，避免上层依赖错误文案字符串。
+ */
+function resolveHostErrorCode(error: unknown, fallback: MCPHostErrorCode): MCPHostErrorCode {
+    if (error instanceof MCPHostError) {
+        return error.code
+    }
+
+    if (error instanceof StreamableHTTPError) {
+        if (error.code === 401) {
+            return 'UNAUTHORIZED'
+        }
+
+        if (error.code === 403) {
+            return 'FORBIDDEN'
+        }
+
+        if (error.code === 404) {
+            return 'NOT_FOUND'
+        }
+    }
+
+    if (error instanceof McpError) {
+        if (error.code === ErrorCode.RequestTimeout) {
+            return 'TIMEOUT'
+        }
+
+        if (error.code === ErrorCode.MethodNotFound) {
+            return 'NOT_FOUND'
+        }
+    }
+
+    const message = toErrorMessage(error).toLowerCase()
+
+    if (message.includes('unauthorized') || message.includes('未授权')) {
+        return 'UNAUTHORIZED'
+    }
+
+    if (message.includes('forbidden') || message.includes('禁止访问')) {
+        return 'FORBIDDEN'
+    }
+
+    if (message.includes('not found') || message.includes('未找到')) {
+        return 'NOT_FOUND'
+    }
+
+    if (message.includes('timeout') || message.includes('timed out') || message.includes('超时')) {
+        return 'TIMEOUT'
+    }
+
+    return fallback
+}
+
+/**
+ * `MCPClient` 只封装单个 MCP Server 的连接、状态与请求生命周期。
  * 它不处理 Skill、Tool Adapter 或业务语义，只负责：
  * 1. 初始化连接
  * 2. 调用官方 SDK 能力
  * 3. 翻译超时和底层错误
- * 4. 输出统一的 Host 层结果
+ * 4. 输出统一的 Host 层结构
  */
 export class MCPClient {
     private client = new Client(MCP_CLIENT_INFO, {
@@ -65,9 +132,22 @@ export class MCPClient {
      */
     private state: MCPConnectionState = 'idle'
 
-    private transport = createStdioClientTransport(this.serverDefinition)
+    private transport: MCPClientTransport
 
     constructor(private readonly serverDefinition: MCPServerDefinition) {
+        if (isMCPStdioServerDefinition(serverDefinition)) {
+            this.transport = createStdioClientTransport(serverDefinition)
+        } else if (isMCPStreamableHttpServerDefinition(serverDefinition)) {
+            this.transport = createStreamableHttpClientTransport(serverDefinition)
+        } else {
+            const unsupportedServerDefinition = serverDefinition as { displayName: string; transport: string }
+
+            throw new MCPHostError(
+                'UNSUPPORTED_TRANSPORT',
+                `${unsupportedServerDefinition.displayName} 使用了当前版本尚未接入的 transport：${unsupportedServerDefinition.transport}`
+            )
+        }
+
         this.client.onerror = error => {
             this.lastError = error
             this.state = 'error'
@@ -79,8 +159,27 @@ export class MCPClient {
         }
 
         this.transport.onclose = () => {
+            this.connectPromise = null
             this.state = 'closed'
         }
+    }
+
+    /**
+     * 按 server definition 返回本次请求应使用的超时。
+     * remote streamable-http 可按 server 级别覆盖 request/list/initialize 超时。
+     */
+    private getTimeoutMs(kind: 'initialize' | 'list' | 'request') {
+        const fallbackMap = {
+            initialize: MCP_CLIENT_TIMEOUTS.initializeMs,
+            list: MCP_CLIENT_TIMEOUTS.listMs,
+            request: MCP_CLIENT_TIMEOUTS.requestMs,
+        } as const
+
+        if (!isMCPStreamableHttpServerDefinition(this.serverDefinition) || !this.serverDefinition.timeoutMs) {
+            return fallbackMap[kind]
+        }
+
+        return this.serverDefinition.timeoutMs
     }
 
     /**
@@ -93,7 +192,7 @@ export class MCPClient {
         try {
             const result = await withTimeout(
                 this.client.callTool(params, undefined, options),
-                MCP_CLIENT_TIMEOUTS.requestMs,
+                this.getTimeoutMs('request'),
                 `${this.serverDefinition.serverId} tools/call`
             )
 
@@ -102,9 +201,41 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError('REQUEST_FAILED', `${this.serverDefinition.displayName} Tool 调用失败：${toErrorMessage(error)}`, {
-                cause: error,
-            })
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'EXECUTION_FAILED'),
+                `${this.serverDefinition.displayName} Tool 调用失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
+        }
+    }
+
+    /**
+     * 获取 MCP Prompt 列表。
+     */
+    async listPrompts(): Promise<MCPListPromptsResult> {
+        await this.connect()
+
+        try {
+            const result = await withTimeout(
+                this.client.listPrompts(),
+                this.getTimeoutMs('list'),
+                `${this.serverDefinition.serverId} prompts/list`
+            )
+
+            return {
+                prompts: result.prompts,
+                serverDefinition: this.serverDefinition,
+            }
+        } catch (error) {
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'LIST_FAILED'),
+                `${this.serverDefinition.displayName} Prompt 列表获取失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
         }
     }
 
@@ -115,9 +246,13 @@ export class MCPClient {
         try {
             await withTimeout(this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} close`)
         } catch (error) {
-            throw new MCPHostError('REQUEST_FAILED', `${this.serverDefinition.displayName} 关闭失败：${toErrorMessage(error)}`, {
-                cause: error,
-            })
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'REQUEST_FAILED'),
+                `${this.serverDefinition.displayName} 关闭失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
         } finally {
             this.connectPromise = null
             this.state = 'closed'
@@ -155,16 +290,20 @@ export class MCPClient {
                     serverVersion: this.client.getServerVersion(),
                 }
             }),
-            MCP_CLIENT_TIMEOUTS.initializeMs,
+            this.getTimeoutMs('initialize'),
             `${this.serverDefinition.serverId} initialize`
         ).catch(error => {
             this.lastError = error instanceof Error ? error : new Error(toErrorMessage(error))
             this.state = 'error'
             this.connectPromise = null
 
-            throw new MCPHostError('CONNECT_FAILED', `${this.serverDefinition.displayName} 初始化失败：${toErrorMessage(error)}`, {
-                cause: error,
-            })
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'CONNECT_FAILED'),
+                `${this.serverDefinition.displayName} 初始化失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
         })
 
         return this.connectPromise
@@ -193,7 +332,7 @@ export class MCPClient {
         try {
             const result = await withTimeout(
                 this.client.listResources(),
-                MCP_CLIENT_TIMEOUTS.listMs,
+                this.getTimeoutMs('list'),
                 `${this.serverDefinition.serverId} resources/list`
             )
 
@@ -202,9 +341,13 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError('LIST_FAILED', `${this.serverDefinition.displayName} 资源列表获取失败：${toErrorMessage(error)}`, {
-                cause: error,
-            })
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'LIST_FAILED'),
+                `${this.serverDefinition.displayName} 资源列表获取失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
         }
     }
 
@@ -217,7 +360,7 @@ export class MCPClient {
         try {
             const result = await withTimeout(
                 this.client.listTools(),
-                MCP_CLIENT_TIMEOUTS.listMs,
+                this.getTimeoutMs('list'),
                 `${this.serverDefinition.serverId} tools/list`
             )
 
@@ -226,9 +369,41 @@ export class MCPClient {
                 tools: result.tools,
             }
         } catch (error) {
-            throw new MCPHostError('LIST_FAILED', `${this.serverDefinition.displayName} 工具列表获取失败：${toErrorMessage(error)}`, {
-                cause: error,
-            })
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'LIST_FAILED'),
+                `${this.serverDefinition.displayName} 工具列表获取失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
+        }
+    }
+
+    /**
+     * 获取具体 Prompt 内容。
+     */
+    async getPrompt(params: GetPromptRequest['params'], options?: MCPRequestOptions): Promise<MCPGetPromptResponse> {
+        await this.connect()
+
+        try {
+            const result = await withTimeout(
+                this.client.getPrompt(params, options),
+                this.getTimeoutMs('request'),
+                `${this.serverDefinition.serverId} prompts/get`
+            )
+
+            return {
+                result,
+                serverDefinition: this.serverDefinition,
+            }
+        } catch (error) {
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'REQUEST_FAILED'),
+                `${this.serverDefinition.displayName} Prompt 获取失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
         }
     }
 
@@ -242,7 +417,7 @@ export class MCPClient {
         try {
             const result = await withTimeout(
                 this.client.readResource(params, options),
-                MCP_CLIENT_TIMEOUTS.requestMs,
+                this.getTimeoutMs('request'),
                 `${this.serverDefinition.serverId} resources/read`
             )
 
@@ -251,9 +426,13 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError('REQUEST_FAILED', `${this.serverDefinition.displayName} 资源读取失败：${toErrorMessage(error)}`, {
-                cause: error,
-            })
+            throw new MCPHostError(
+                resolveHostErrorCode(error, 'REQUEST_FAILED'),
+                `${this.serverDefinition.displayName} 资源读取失败：${toErrorMessage(error)}`,
+                {
+                    cause: error,
+                }
+            )
         }
     }
 }

@@ -50,6 +50,8 @@ function writeToolExecutionError(options: ToolExecutionErrorOptions) {
             partId: options.partId,
             resourceName: options.resourceDisplayFields.resourceName,
             uri: options.resourceDisplayFields.uri,
+            source: options.displayFields.source,
+            location: options.displayFields.location,
             serverId: resourceServerId,
         })
         return
@@ -64,6 +66,7 @@ function writeToolExecutionError(options: ToolExecutionErrorOptions) {
         partId: options.partId,
         toolName: options.toolCall.name,
         source: options.displayFields.source,
+        location: options.displayFields.location,
         serverId: options.displayFields.serverId,
         input: options.input,
     })
@@ -79,6 +82,8 @@ export function writeToolValidationErrors(toolErrors: ToolValidationError[], opt
                 partId,
                 resourceName: toolError.resourceName ?? toolError.toolName,
                 uri: toolError.uri ?? 'resource://unknown',
+                source: toolError.source,
+                location: toolError.location,
                 serverId: toolError.serverId ?? 'mcp-resource',
             })
             writeStreamErrorChunk(options.writeChunk, {
@@ -90,6 +95,8 @@ export function writeToolValidationErrors(toolErrors: ToolValidationError[], opt
                 partId,
                 resourceName: toolError.resourceName ?? toolError.toolName,
                 uri: toolError.uri ?? 'resource://unknown',
+                source: toolError.source,
+                location: toolError.location,
                 serverId: toolError.serverId ?? 'mcp-resource',
             })
         } else {
@@ -100,6 +107,7 @@ export function writeToolValidationErrors(toolErrors: ToolValidationError[], opt
                 title: toolError.title,
                 action: toolError.action,
                 source: toolError.source,
+                location: toolError.location,
                 serverId: toolError.serverId,
                 input: toolError.input,
             })
@@ -112,6 +120,7 @@ export function writeToolValidationErrors(toolErrors: ToolValidationError[], opt
                 partId,
                 toolName: toolError.toolName,
                 source: toolError.source,
+                location: toolError.location,
                 serverId: toolError.serverId,
                 input: toolError.input,
             })
@@ -150,6 +159,8 @@ export async function executeToolCall(
             partId,
             resourceName: resourceDisplayFields.resourceName,
             uri: resourceDisplayFields.uri,
+            source: displayFields.source,
+            location: displayFields.location,
             serverId: resourceServerId,
         })
     } else {
@@ -160,6 +171,7 @@ export async function executeToolCall(
             title: displayFields.title,
             action: displayFields.action,
             source: displayFields.source,
+            location: displayFields.location,
             serverId: displayFields.serverId,
             input,
         })
@@ -229,6 +241,8 @@ export async function executeToolCall(
                 partId,
                 resourceName: resourceResultFields.resourceName,
                 uri: resourceResultFields.uri,
+                source: displayFields.source,
+                location: displayFields.location,
                 serverId: resourceServerId,
                 contentPreview: resourceResultFields.contentPreview,
                 isTruncated: resourceResultFields.isTruncated,
@@ -242,6 +256,7 @@ export async function executeToolCall(
                 title: displayFields.title,
                 action: displayFields.action,
                 source: displayFields.source,
+                location: displayFields.location,
                 serverId: displayFields.serverId,
                 input,
                 output,

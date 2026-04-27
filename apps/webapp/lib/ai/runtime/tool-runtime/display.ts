@@ -1,5 +1,7 @@
 import { type ToolCall, ToolMessage } from '@langchain/core/messages'
 
+import type { MCPServerId } from '@/lib/ai/mcp/protocol/types'
+import { mcpServerRegistry } from '@/lib/ai/mcp/registry/mcp-server-registry'
 import { type ChatToolDefinition, chatToolRegistry } from '@/lib/ai/tools'
 
 import { getMessageContentText } from '../message-content'
@@ -12,6 +14,7 @@ export interface ToolDisplayFields {
     action?: string
     outputPartType: 'resource' | 'tool'
     source: 'internal' | 'mcp'
+    location: 'local' | 'remote'
     serverId?: string
 }
 
@@ -26,6 +29,18 @@ function normalizePreviewChars(value: number | undefined) {
     }
 
     return Math.max(1, Math.floor(value))
+}
+
+function resolveToolLocation(source: 'internal' | 'mcp', serverId?: string): 'local' | 'remote' {
+    if (source !== 'mcp') {
+        return 'local'
+    }
+
+    if (!serverId) {
+        return 'local'
+    }
+
+    return mcpServerRegistry.get(serverId as MCPServerId)?.location ?? 'local'
 }
 
 /**
@@ -55,9 +70,13 @@ export function getToolDisplayFields(toolCall: ToolCall): ToolDisplayFields {
             action: displayConfig?.action,
             outputPartType: toolDefinition?.outputPartType ?? 'tool',
             source: toolDefinition?.source ?? 'internal',
+            location: resolveToolLocation(toolDefinition?.source ?? 'internal', toolDefinition?.serverId),
             serverId: toolDefinition?.serverId,
         }
     } catch {
+        const source = toolDefinition?.source ?? 'internal'
+        const serverId = toolDefinition?.serverId
+
         return {
             title: toolCall.name,
             action:
@@ -65,8 +84,9 @@ export function getToolDisplayFields(toolCall: ToolCall): ToolDisplayFields {
                     ? String((toolCall.args as { action?: unknown }).action)
                     : undefined,
             outputPartType: toolDefinition?.outputPartType ?? 'tool',
-            source: toolDefinition?.source ?? 'internal',
-            serverId: toolDefinition?.serverId,
+            source,
+            location: resolveToolLocation(source, serverId),
+            serverId,
         }
     }
 }

@@ -38,6 +38,7 @@ export function normalizeAndValidateToolCalls(message: AIMessage): ToolValidatio
                 resourceName: resourceDisplayFields?.resourceName,
                 serverId: displayFields.serverId,
                 source: displayFields.source,
+                location: displayFields.location,
                 uri: resourceDisplayFields?.uri,
             })
             continue
@@ -66,6 +67,7 @@ export function normalizeAndValidateToolCalls(message: AIMessage): ToolValidatio
                 resourceName: normalizedResourceDisplayFields?.resourceName,
                 serverId: normalizedDisplayFields.serverId,
                 source: normalizedDisplayFields.source,
+                location: normalizedDisplayFields.location,
                 uri: normalizedResourceDisplayFields?.uri,
             })
             continue
