@@ -24,7 +24,6 @@ export const utilitySkillDefinition: SkillDefinition = {
 9. 如果用户要求单位换算，例如长度、重量、温度换算，必须优先调用 unit-convert，不要手工换算。
 10. 如果用户要求精确数值计算，必须优先调用 calculator，不要先自己口算再决定是否调工具。
 `.trim(),
-    allowedTools: ['calculator', 'datetime', 'text-transform', 'unit-convert'],
     outputPolicy: 'concise-utility',
     resultPolicy: 'tool-first',
     routingHints: [

@@ -16,6 +16,7 @@ export class MCPClientManager {
      * 同一个 `serverId` 在进程里只保留一个 client，避免重复拉起多个 MCP 子进程。
      */
     private clientMap = new Map<MCPServerId, MCPClient>()
+    private toolListPromiseMap = new Map<MCPServerId, Promise<Awaited<ReturnType<MCPClient['listTools']>>>>()
 
     /**
      * 对外暴露 MCP Tool 调用入口。
@@ -39,6 +40,7 @@ export class MCPClientManager {
 
         await client.close()
         this.clientMap.delete(serverId)
+        this.toolListPromiseMap.delete(serverId)
     }
 
     /**
@@ -95,9 +97,21 @@ export class MCPClientManager {
      * 对外暴露 Tool 列表读取入口。
      */
     async listTools(serverId: MCPServerId) {
-        const client = this.getOrCreateClient(serverId)
+        const existingToolListPromise = this.toolListPromiseMap.get(serverId)
 
-        return client.listTools()
+        if (existingToolListPromise) {
+            return existingToolListPromise
+        }
+
+        const client = this.getOrCreateClient(serverId)
+        const toolListPromise = client.listTools().catch(error => {
+            this.toolListPromiseMap.delete(serverId)
+            throw error
+        })
+
+        this.toolListPromiseMap.set(serverId, toolListPromise)
+
+        return toolListPromise
     }
 
     /**

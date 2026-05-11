@@ -3,11 +3,19 @@
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { useEffect, useRef, useState } from 'react'
 
+import { resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
-import type { ChatRequest, ChatSkillMode, ChatStatus, MindMessageInput } from '@/lib/ai/types/chat'
+import type {
+    ChatComposerDisplaySegment,
+    ChatComposerPayload,
+    ChatRequest,
+    ChatSkillMode,
+    ChatStatus,
+    MindMessageInput,
+} from '@/lib/ai/types/chat'
 import type {
     MindMessage,
     MindMessagePart,
@@ -23,12 +31,13 @@ import type {
 const MAX_CONTEXT_TURNS = 8
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
 
-function createTextPart(text: string, id?: string): TextPart {
+function createTextPart(text: string, id?: string, displaySegments?: ChatComposerDisplaySegment[]): TextPart {
     return {
         id,
         type: 'text',
         text,
         format: 'markdown',
+        ...(displaySegments?.length ? { displaySegments } : {}),
     }
 }
 
@@ -117,12 +126,14 @@ function createPromptPart(
     }
 }
 
-function createMessage(role: MindRole, parts: MindMessagePart[]): MindMessage {
+function createMessage(role: MindRole, parts: MindMessagePart[], composer?: ChatComposerPayload): MindMessage {
     return {
         id: createId(),
         role,
         parts,
         createdAt: new Date().toISOString(),
+        // composer 只表达本轮结构化输入语义；用户气泡的 chip 位置由 text part displaySegments 承接。
+        ...(composer ? { composer } : {}),
     }
 }
 
@@ -146,7 +157,12 @@ function toMessageInput(message: MindMessage): MindMessageInput | null {
 
     return {
         role: message.role,
-        parts,
+        parts: parts.map(part => ({
+            type: part.type,
+            text: part.text,
+            format: part.format,
+            ...(part.type === 'reasoning' && part.visibility ? { visibility: part.visibility } : {}),
+        })),
     }
 }
 
@@ -389,6 +405,8 @@ function getLastUserTurnForRegeneration(messages: MindMessage[]) {
 
     return {
         baseMessages: stableMessages.slice(0, lastUserIndex),
+        composer: lastUserMessage.composer,
+        displaySegments: lastUserMessage.parts.find((part): part is TextPart => part.type === 'text')?.displaySegments,
         userText,
     }
 }
@@ -906,8 +924,13 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
     }
 
-    async function submitTurn(baseMessages: MindMessage[], input: string) {
-        const text = input.trim()
+    async function submitTurn(
+        baseMessages: MindMessage[],
+        input: string,
+        composer?: ChatComposerPayload,
+        displaySegments?: ChatComposerDisplaySegment[]
+    ) {
+        const text = resolveComposerSubmissionText(input, composer)
 
         if (!text || abortControllerRef.current) {
             return false
@@ -915,7 +938,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
 
         clearPendingTextDeltas()
         const stableBaseMessages = pruneTransientMessages(baseMessages)
-        const userMessage = createMessage('user', [createTextPart(text)])
+        const userMessage = createMessage('user', [createTextPart(text, undefined, displaySegments)], composer)
         const nextMessages = [...stableBaseMessages, userMessage]
         const controller = new AbortController()
 
@@ -929,6 +952,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             const skill = toRequestSkill(skillMode)
             const payload: ChatRequest = {
                 conversationId: conversationIdRef.current,
+                // composer 是本轮请求的结构化输入补充，后端主输入仍由 messages 中的 plainText 兼容承载。
+                ...(composer ? { composer } : {}),
                 messages: buildRequestMessages(nextMessages),
                 options: {
                     model,
@@ -986,8 +1011,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         return true
     }
 
-    async function sendMessage(input: string) {
-        return submitTurn(messagesRef.current, input)
+    async function sendMessage(input: string, composer?: ChatComposerPayload, displaySegments?: ChatComposerDisplaySegment[]) {
+        return submitTurn(messagesRef.current, input, composer, displaySegments)
     }
 
     function cancel() {
@@ -1018,7 +1043,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return false
         }
 
-        return submitTurn(lastTurn.baseMessages, lastTurn.userText)
+        return submitTurn(lastTurn.baseMessages, lastTurn.userText, lastTurn.composer, lastTurn.displaySegments)
     }
 
     return {

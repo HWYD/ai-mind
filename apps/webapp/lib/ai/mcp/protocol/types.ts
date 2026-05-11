@@ -14,7 +14,7 @@ import type {
  * MCP 协议层公共类型定义。
  * 该文件负责统一 server 定义、client 返回结构与 host 默认配置。
  */
-export type MCPServerId = 'project-assistant-service' | 'project-files-server' | 'weather-server'
+export type MCPServerId = 'project-assistant-service' | 'project-docs-server' | 'weather-server'
 
 export type MCPTransportKind = 'stdio' | 'streamable-http'
 export type MCPProviderKind = 'mcp'
@@ -178,7 +178,7 @@ export function isMCPStreamableHttpServerDefinition(
  */
 export const MCP_CLIENT_INFO: Implementation = {
     name: 'ai-mind-mcp-host',
-    version: '0.0.11',
+    version: '0.0.12',
 }
 
 export const MCP_CLIENT_CAPABILITIES: ClientCapabilities = {}

@@ -2,17 +2,16 @@ import { AIMessage, type ToolCall } from '@langchain/core/messages'
 import { ZodError } from 'zod'
 
 import { createId } from '@/lib/ai/create-id'
-import { chatToolRegistry } from '@/lib/ai/tools'
 
 import type { ToolValidationResult } from '../types'
-import { formatToolInput, getResourceDisplayFields, getToolDisplayFields } from './display'
+import { formatToolInput, getResourceDisplayFields, getToolDisplayFields, type ToolDefinitionMap } from './display'
 
 /**
  * 对模型返回的 tool calls 做统一归一化与 schema 校验，拆分成：
  * 1. 可执行调用
  * 2. 可展示校验错误
  */
-export function normalizeAndValidateToolCalls(message: AIMessage): ToolValidationResult {
+export function normalizeAndValidateToolCalls(message: AIMessage, toolDefinitionMap: ToolDefinitionMap): ToolValidationResult {
     const validatedToolCalls: ToolCall[] = []
     const toolErrors: ToolValidationResult['toolErrors'] = []
 
@@ -22,9 +21,10 @@ export function normalizeAndValidateToolCalls(message: AIMessage): ToolValidatio
             id: rawToolCall.id ?? createId(),
         }
 
-        const toolDefinition = chatToolRegistry.get(toolCall.name)
-        const displayFields = getToolDisplayFields(toolCall)
-        const resourceDisplayFields = displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall) : undefined
+        const toolDefinition = toolDefinitionMap.get(toolCall.name)
+        const displayFields = getToolDisplayFields(toolCall, toolDefinitionMap)
+        const resourceDisplayFields =
+            displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, toolDefinitionMap) : undefined
 
         if (!toolDefinition) {
             toolErrors.push({
@@ -32,7 +32,7 @@ export function normalizeAndValidateToolCalls(message: AIMessage): ToolValidatio
                 toolName: toolCall.name,
                 title: displayFields.title,
                 action: displayFields.action,
-                input: formatToolInput(toolCall),
+                input: formatToolInput(toolCall, toolDefinitionMap),
                 message: '工具 ' + toolCall.name + ' 未注册。',
                 outputPartType: displayFields.outputPartType,
                 resourceName: resourceDisplayFields?.resourceName,
@@ -52,16 +52,18 @@ export function normalizeAndValidateToolCalls(message: AIMessage): ToolValidatio
                 ...toolCall,
                 args: normalizedArgs,
             }
-            const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall)
+            const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall, toolDefinitionMap)
             const normalizedResourceDisplayFields =
-                normalizedDisplayFields.outputPartType === 'resource' ? getResourceDisplayFields(normalizedToolCall) : undefined
+                normalizedDisplayFields.outputPartType === 'resource'
+                    ? getResourceDisplayFields(normalizedToolCall, toolDefinitionMap)
+                    : undefined
 
             toolErrors.push({
                 id: toolCall.id,
                 toolName: toolCall.name,
                 title: normalizedDisplayFields.title,
                 action: normalizedDisplayFields.action,
-                input: formatToolInput(normalizedToolCall),
+                input: formatToolInput(normalizedToolCall, toolDefinitionMap),
                 message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
                 outputPartType: normalizedDisplayFields.outputPartType,
                 resourceName: normalizedResourceDisplayFields?.resourceName,

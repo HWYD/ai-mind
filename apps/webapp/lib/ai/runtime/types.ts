@@ -24,6 +24,8 @@ export interface ChatSession {
     skillDefinition?: SkillDefinition
     skillSystemPrompt?: string
     skillOutputPolicyPrompt?: string
+    activeToolCapabilityIds: Record<string, string>
+    activeToolDefinitionMap: Map<string, ChatToolDefinition>
     activeTools: ChatToolDefinition[]
     activeToolNames: string[]
     langChainMessages: BaseMessage[]

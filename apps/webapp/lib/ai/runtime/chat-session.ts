@@ -2,11 +2,11 @@ import type { BaseMessage } from '@langchain/core/messages'
 import { SystemMessage } from '@langchain/core/messages'
 import { ChatOllama } from '@langchain/ollama'
 
+import { resolveToolBindingForSkill } from '@/lib/ai/capabilities'
 import { toLangChainMessages } from '@/lib/ai/langchain-message-adapter'
 import { getToolResultSystemPrompt, getToolRetrySystemPrompt, getToolUseSystemPrompt } from '@/lib/ai/prompts/tool-calling'
 import type { SkillDefinition } from '@/lib/ai/skills'
 import { resolveSkillDefinitionForRequest } from '@/lib/ai/skills/router'
-import { type ChatToolDefinition, chatToolRegistry } from '@/lib/ai/tools'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 import type { ChatServiceDependencies, ChatSession } from './types'
@@ -30,16 +30,6 @@ function getSkillOutputPolicyPrompt(skillDefinition?: SkillDefinition) {
     }
 }
 
-function getActiveToolDefinitions(skillDefinition?: SkillDefinition): ChatToolDefinition[] {
-    if (!skillDefinition) {
-        return []
-    }
-
-    const allowedToolNames = new Set(skillDefinition.allowedTools)
-
-    return chatToolRegistry.listActive().filter(toolDefinition => allowedToolNames.has(toolDefinition.name))
-}
-
 function createBaseModel(request: ChatRequest, deps: ChatServiceDependencies) {
     return new ChatOllama({
         model: request.options?.model ?? deps.defaultModel,
@@ -51,13 +41,13 @@ function createBaseModel(request: ChatRequest, deps: ChatServiceDependencies) {
     })
 }
 
-export function createChatSession(request: ChatRequest, deps: ChatServiceDependencies): ChatSession {
+export async function createChatSession(request: ChatRequest, deps: ChatServiceDependencies): Promise<ChatSession> {
     const baseModel = createBaseModel(request, deps)
     const skillDefinition = resolveSkillDefinitionForRequest(request)
     const skillSystemPrompt = skillDefinition?.systemPrompt
     const skillOutputPolicyPrompt = getSkillOutputPolicyPrompt(skillDefinition)
-    const activeTools = getActiveToolDefinitions(skillDefinition)
-    const activeToolNames = activeTools.map(toolDefinition => toolDefinition.name)
+    const toolBinding = await resolveToolBindingForSkill(skillDefinition)
+    const { activeToolCapabilityIds, activeToolDefinitionMap, activeToolNames, activeTools } = toolBinding
     const toolUseSystemPrompt = getToolUseSystemPrompt(activeToolNames)
     const toolRetrySystemPrompt = getToolRetrySystemPrompt(activeToolNames)
     const toolResultSystemPrompt = getToolResultSystemPrompt(activeToolNames)
@@ -73,6 +63,8 @@ export function createChatSession(request: ChatRequest, deps: ChatServiceDepende
         skillSystemPrompt,
         skillOutputPolicyPrompt,
         activeTools,
+        activeToolCapabilityIds,
+        activeToolDefinitionMap,
         activeToolNames,
         langChainMessages,
         directAnswerMessages,

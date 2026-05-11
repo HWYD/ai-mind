@@ -3,12 +3,13 @@
 import { ArrowDown, CircleAlert } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { ChatInputForm } from '@/components/chat/chat-input-form'
-import { ChatMessageList } from '@/components/chat/chat-message-list'
+import { ChatComposer } from '@/components/chat/composer/chat-composer'
+import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
+import type { EmptyStateSuggestion } from '@/components/chat/message-list/empty-state-suggestion-options'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
-import type { ChatSkillMode } from '@/lib/ai/types/chat'
+import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatSkillMode } from '@/lib/ai/types/chat'
 
 import { useChatStream } from './use-chat-stream'
 
@@ -63,7 +64,6 @@ function isScrollNavigationKey(event: KeyboardEvent) {
 }
 
 export default function InstantMindPage() {
-    const [input, setInput] = useState('')
     const [skillMode, setSkillMode] = useState<ChatSkillMode>('auto')
     const [model, setModel] = useState<ChatModel>(defaultChatModel)
     const [enableReasoning, setEnableReasoning] = useState(true)
@@ -239,25 +239,26 @@ export default function InstantMindPage() {
         scheduleScrollSync(isStreamingOutput)
     }, [bottomSpacing, isStreamingOutput, messages, scheduleScrollSync])
 
-    async function handleSubmit() {
-        const nextInput = input.trim()
-
-        if (!nextInput) {
-            return
-        }
-
+    async function handleSubmit(value: string, composer?: ChatComposerPayload, displaySegments?: ChatComposerDisplaySegment[]) {
         autoScrollLockedForCurrentTurnRef.current = false
         userScrollIntentRef.current = false
         if (userScrollIntentTimeoutRef.current !== null) {
             window.clearTimeout(userScrollIntentTimeoutRef.current)
             userScrollIntentTimeoutRef.current = null
         }
-        setInput('')
-        const accepted = await sendMessage(nextInput)
 
-        if (!accepted) {
-            setInput(nextInput)
+        // sendMessage 内部会立即写入用户消息并切到 submitted；这里返回 true 代表 Composer 可以立刻清空草稿，
+        // 不需要等完整流式回答结束后才清空输入框。
+        void sendMessage(value, composer, displaySegments)
+        return true
+    }
+
+    function handleSelectSuggestion(suggestion: EmptyStateSuggestion) {
+        if (status === 'submitted' || status === 'streaming') {
+            return
         }
+
+        void handleSubmit(suggestion.text, suggestion.composer, suggestion.displaySegments)
     }
 
     async function handleRegenerateLastTurn() {
@@ -309,8 +310,10 @@ export default function InstantMindPage() {
                 <ChatMessageList
                     messages={messages}
                     status={status}
+                    enableReasoning={enableReasoning}
                     onDeleteUserTurn={deleteUserTurn}
                     onRegenerateLastTurn={handleRegenerateLastTurn}
+                    onSelectSuggestion={handleSelectSuggestion}
                 />
             </div>
 
@@ -337,13 +340,11 @@ export default function InstantMindPage() {
                     </div>
 
                     <div ref={inputContainerRef}>
-                        <ChatInputForm
-                            input={input}
+                        <ChatComposer
                             status={status}
                             skillMode={skillMode}
                             model={model}
                             enableReasoning={enableReasoning}
-                            onInputChange={setInput}
                             onSkillModeChange={setSkillMode}
                             onModelChange={setModel}
                             onEnableReasoningChange={setEnableReasoning}

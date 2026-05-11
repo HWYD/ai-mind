@@ -51,10 +51,11 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - session 和 prompt 构建。
 - planning、fallback、tool execution、final answer 阶段编排。
 - assistant 输出流消费。
-- Tool 和 Resource 执行映射。
+- Tool、Resource、Prompt 执行映射。
 - authoritative answer 策略。
 - runtime 错误收口。
-- 固定 Skill 场景下的 capability context 消费。
+- 固定 Skill 场景下的 Resource / Prompt context 消费。
+- Composer payload hint 消费。
 
 代表性模块：
 
@@ -63,7 +64,8 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - `assistant-stream`：消费模型输出并写出 text 或 reasoning chunk。
 - `tool-runtime`：校验并执行 Tool / Resource 调用，映射展示字段。
 - `authoritative-answer`：判断确定性工具结果是否可以绕过模型改写。
-- `capability-context`：为 `reader-skill` 消费固定 remote MCP capability。
+- `capability-context`：为 `reader-skill` 消费固定 Resource / Prompt context。
+- `composer-context`：消费 Composer command 与 resource reference，生成本轮受控上下文。
 
 ## Skills
 
@@ -73,13 +75,14 @@ Skills 描述任务表面。
 
 - 声明任务模式。
 - 提供 system prompt 和 output policy。
-- 限定 allowed tools。
 - 声明 capability selector 边界。
 - 声明 fallback policy。
 
 它们不直接执行工具、不管理 MCP client，也不编排多阶段 runtime。
 
 Skill 是能力组织层，不应该偷偷长成 Agent。
+
+`v0.0.12` 之后，Skill 不再通过 `allowedTools` 直接控制模型可用工具。本轮 Tool 绑定由 `capabilitySelectors -> capability catalog -> Tool Runtime` 解析。
 
 ## Tools
 

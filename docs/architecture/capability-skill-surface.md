@@ -44,7 +44,7 @@ Capability Surface 不意味着所有能力都以同一种方式执行。Tool、
 
 ## Tool Capability
 
-Tool capability 表示可执行动作。
+Tool capability 表示可执行动作。`v0.0.12` 之后，Skill 不再通过 `allowedTools` 直接声明可用工具，而是通过 `capabilitySelectors` 解析本轮 active tools。
 
 示例：
 
@@ -52,7 +52,7 @@ Tool capability 表示可执行动作。
 - local MCP tool：`city-weather`。
 - remote MCP tool：`check_doc_consistency`。
 
-Tool 执行仍然走 Tool Runtime 路径。Capability model 只负责描述它。
+Tool 执行仍然走 Tool Runtime 路径。Capability model 负责描述和选择边界，Tool Runtime 负责绑定、校验和执行。
 
 ## Resource Capability
 
@@ -60,10 +60,10 @@ Resource capability 表示可读取上下文。
 
 示例：
 
-- 通过 `local-text-read` 读取本地项目文件。
+- 通过 `docs://...` 读取受控 docs 文档。
 - remote mock context：`project://latest-context`。
 
-Resource 执行是读取操作。它的结果可以显示为 Resource part，也可以注入最终回答上下文。
+Resource 执行是读取操作。它的结果可以显示为 Resource part，也可以注入最终回答上下文。Resource 不进入模型 tool binding。
 
 ## Prompt Capability
 
@@ -74,7 +74,7 @@ Prompt capability 表示可复用的 prompt message 或 prompt template。
 - local prompt：`local-file-summary`。
 - remote prompt：`tasklist-draft`。
 
-Prompt 执行不是 Tool call。Runtime 获取 prompt messages，注入允许参数，再把这些 messages 作为后续模型上下文。
+Prompt 执行不是 Tool call。Runtime 获取 prompt messages，注入允许参数，再把这些 messages 作为后续模型上下文。Prompt 不进入模型 tool binding。
 
 ## Skill Metadata
 
@@ -101,7 +101,7 @@ Skill metadata 描述一个 Skill 是什么，以及它可以消费哪些能力�
 它覆盖：
 
 - 通过 local MCP Tool 查询天气。
-- 通过 local MCP Resource 读取本地项目文件。
+- 通过 local MCP Resource 读取 `docs/**/*.md` 文档。
 - 通过 local MCP Prompt 总结本地文件。
 - 通过 remote MCP Resource 获取项目上下文。
 - 通过 remote MCP Prompt 生成 tasklist 草稿。
@@ -122,14 +122,30 @@ Skill metadata 描述一个 Skill 是什么，以及它可以消费哪些能力�
 
 当前设计中，它刻意不进入 MCP 迁移路径。
 
+## Tool Binding Boundary
+
+`v0.0.12` 之后，Tool 绑定遵循下面的链路：
+
+```text
+skill.capabilitySelectors
+  -> capability catalog
+  -> active tool definitions
+  -> model.bindTools(activeTools)
+  -> tool call validation / execution
+```
+
+模型绑定、tool call 校验和执行共用同一份 active tool map。这样可以避免 selector 命中了一个 capability，但执行时又按短名取到另一个来源的同名工具。
+
+Resource / Prompt 不会被放进 `bindTools()`。如果需要消费 Resource / Prompt，由 runtime 按它们自己的语义读取或注入上下文。
+
 ## Local MCP Boundary
 
 Local MCP 当前提供受控的本地能力：
 
 - 来自 `weather-server` 的天气 Tool。
-- 来自 `project-files-server` 的项目文件 Resource 和 local Prompt。
+- 来自 `project-docs-server` 的 docs Resource 和 local Prompt。
 
-本地文件访问仍然受严格边界保护。MCP 不意味着可以任意访问文件系统。
+本地文件访问仍然受严格边界保护。当前只允许 `docs://...` 读取 `docs/**/*.md`，MCP 不意味着可以任意访问文件系统。
 
 ## Remote MCP Boundary
 
@@ -141,9 +157,9 @@ Remote MCP 当前只通过 `project-assistant-service` 验证一个最小 remote
 
 Capability metadata 不能只用于 UI 展示，也需要能被 runtime 消费。
 
-当前 runtime 可以解析固定的 `reader-skill` capability 场景，执行这些 capability，写出流式执行事实，并将结果注入最终回答上下文。
+当前 runtime 可以解析固定的 `reader-skill` Resource / Prompt 场景，写出流式执行事实，并将结果注入最终回答上下文。
 
-这是一条很窄的桥，不是通用 planner。
+Tool 场景回到标准 Tool Runtime，由模型真实产出 tool call 后再执行。这是一条很窄的桥，不是通用 planner。
 
 ## Design Principle
 

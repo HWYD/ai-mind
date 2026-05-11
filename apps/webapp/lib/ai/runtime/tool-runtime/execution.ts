@@ -3,7 +3,6 @@ import { type ToolCall, ToolMessage } from '@langchain/core/messages'
 
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
-import { chatToolRegistry } from '@/lib/ai/tools'
 
 import { throwIfAborted, writeStreamErrorChunk } from '../stream-errors'
 import type { ChatExecutionContext, ExecutedToolResult, ToolValidationError, WriteChunk } from '../types'
@@ -14,11 +13,13 @@ import {
     getResourceResultFields,
     getToolDisplayFields,
     type ResourceDisplayFields,
+    type ToolDefinitionMap,
     type ToolDisplayFields,
 } from './display'
 
 interface ExecuteToolCallOptions {
     errorStage?: StreamErrorStage
+    toolDefinitionMap: ToolDefinitionMap
 }
 
 interface ToolExecutionErrorOptions {
@@ -141,16 +142,17 @@ export async function executeToolCall(
     toolCall: ToolCall,
     context: ChatExecutionContext,
     writeChunk: WriteChunk,
-    options: ExecuteToolCallOptions = {}
+    options: ExecuteToolCallOptions
 ): Promise<ExecutedToolResult> {
     // 执行前先做取消检查，避免已取消请求继续调用外部能力。
     throwIfAborted(context.signal)
 
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
+    const toolDefinition = options.toolDefinitionMap.get(toolCall.name)
     const partId = createId()
-    const input = formatToolInput(toolCall)
-    const displayFields = getToolDisplayFields(toolCall)
-    const resourceDisplayFields = displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall) : undefined
+    const input = formatToolInput(toolCall, options.toolDefinitionMap)
+    const displayFields = getToolDisplayFields(toolCall, options.toolDefinitionMap)
+    const resourceDisplayFields =
+        displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, options.toolDefinitionMap) : undefined
     const resourceServerId = displayFields.serverId ?? 'mcp-resource'
 
     if (displayFields.outputPartType === 'resource' && resourceDisplayFields) {
@@ -234,7 +236,7 @@ export async function executeToolCall(
               })
 
         if (displayFields.outputPartType === 'resource') {
-            const resourceResultFields = getResourceResultFields(toolCall, result, output)
+            const resourceResultFields = getResourceResultFields(toolCall, result, output, options.toolDefinitionMap)
 
             writeChunk({
                 type: 'resource-end',

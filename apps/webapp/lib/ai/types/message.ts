@@ -1,3 +1,5 @@
+import type { ChatComposerDisplaySegment, ChatComposerPayload } from './chat'
+
 export type MindRole = 'system' | 'user' | 'assistant'
 export type CapabilitySource = 'internal' | 'mcp'
 export type CapabilityLocation = 'local' | 'remote'
@@ -11,6 +13,7 @@ export interface TextPart extends BasePart {
     type: 'text'
     text: string
     format: 'markdown'
+    displaySegments?: ChatComposerDisplaySegment[]
 }
 
 export interface ReasoningPart extends BasePart {
@@ -74,4 +77,5 @@ export interface MindMessage {
     role: MindRole
     parts: MindMessagePart[]
     createdAt: string
+    composer?: ChatComposerPayload
 }

@@ -14,22 +14,24 @@ import { throwIfAborted, writeStreamErrorChunk } from './stream-errors'
 import type { ChatExecutionContext, WriteChunk } from './types'
 
 /**
- * v0.0.11 最小 capability runtime 消费层。
- * 这层只负责 reader-skill 下的固定 remote MCP 能力闭环，不承担通用 planner、workflow 或 Agent 编排职责。
+ * v0.0.11/0.0.12 的最小 capability context 注入层。
+ * 这里只负责 reader-skill 下的 remote resource/prompt 上下文注入；remote tool 已统一收敛进标准 Tool Runtime。
  */
 const PROJECT_ASSISTANT_SERVER_ID = 'project-assistant-service'
 const LATEST_CONTEXT_RESOURCE_NAME = 'latest-context'
 const LATEST_CONTEXT_RESOURCE_URI = 'project://latest-context'
 const TASKLIST_DRAFT_PROMPT_NAME = 'tasklist-draft'
-const DOC_CONSISTENCY_TOOL_NAME = 'check_doc_consistency'
 const REMOTE_CONTEXT_PREVIEW_CHARS = 3000
 
 const PROJECT_CONTEXT_PATTERNS = [/latest-context/i, /当前项目上下文/, /项目上下文/, /项目状态/, /项目.*最近在做什么/]
 const TASKLIST_DRAFT_PATTERNS = [/tasklist/i, /任务清单/, /执行清单/]
 const DOC_CONSISTENCY_PATTERNS = [/check_doc_consistency/i, /文档一致性/, /检查.*文档.*一致/, /文档.*不一致/]
 
+type RemoteContextCapabilityType = Extract<CapabilityType, 'prompt' | 'resource'>
+type RemoteCapabilityName = typeof LATEST_CONTEXT_RESOURCE_NAME | typeof TASKLIST_DRAFT_PROMPT_NAME
+
 interface RemoteCapabilityInvocation {
-    capabilityType: CapabilityType
+    capabilityType: RemoteContextCapabilityType
     execute: (options: ExecuteRemoteCapabilityOptions) => Promise<BaseMessage[]>
     input: string
     location: Extract<CapabilityLocation, 'remote'>
@@ -42,8 +44,6 @@ interface ExecuteRemoteCapabilityOptions {
     context: ChatExecutionContext
     writeChunk: WriteChunk
 }
-
-type RemoteCapabilityName = typeof DOC_CONSISTENCY_TOOL_NAME | typeof LATEST_CONTEXT_RESOURCE_NAME | typeof TASKLIST_DRAFT_PROMPT_NAME
 
 /**
  * 读取本轮最后一条用户消息，作为 capability 命中和最小参数注入的唯一输入。
@@ -67,8 +67,8 @@ function getLastUserMessageText(request: ChatRequest) {
 }
 
 /**
- * 对一组固定高置信规则做命中判断。
- * v0.0.11 只做最小规则路由，不引入模型分类器或可配置 DSL。
+ * 对固定高置信规则做命中判断。
+ * v0.0.12 只保留 resource/prompt 的最小上下文注入规则，不在这里执行 remote tool。
  */
 function matchesAny(text: string, patterns: RegExp[]) {
     return patterns.some(pattern => pattern.test(text))
@@ -78,7 +78,7 @@ function matchesAny(text: string, patterns: RegExp[]) {
  * 构造 remote MCP capability 的标准 identity。
  * 后续是否允许执行会基于这个 identity 和 skill.capabilitySelectors 做匹配。
  */
-function createRemoteCapabilityIdentity(name: RemoteCapabilityName, capabilityType: CapabilityType): CapabilityIdentity {
+function createRemoteCapabilityIdentity(name: RemoteCapabilityName, capabilityType: RemoteContextCapabilityType): CapabilityIdentity {
     return {
         capabilityType,
         location: 'remote',
@@ -90,7 +90,7 @@ function createRemoteCapabilityIdentity(name: RemoteCapabilityName, capabilityTy
 
 /**
  * 判断当前 Skill 是否声明承接该 capability。
- * 这里把 capabilitySelectors 当作“能力边界”，确保 runtime 不会越过 skill 声明去调用远端能力。
+ * 这里把 capabilitySelectors 当作能力边界，确保 runtime 不会越过 skill 声明去调用远端能力。
  */
 function isRemoteCapabilityAllowed(skillDefinition: SkillDefinition, identity: CapabilityIdentity) {
     const capabilityId = buildCapabilityId(identity)
@@ -126,11 +126,11 @@ function isRemoteCapabilityAllowed(skillDefinition: SkillDefinition, identity: C
 
 /**
  * 创建一次可执行的 remote capability invocation。
- * invocation 自带 execute 方法，让 orchestrator 只消费统一对象，不需要知道具体 resource/prompt/tool 名称。
+ * invocation 自带 execute 方法，让 orchestrator 只消费统一对象，不需要知道具体 resource/prompt 名称。
  */
 function createRemoteCapabilityInvocation(
     name: RemoteCapabilityName,
-    capabilityType: CapabilityType,
+    capabilityType: RemoteContextCapabilityType,
     userGoal: string
 ): RemoteCapabilityInvocation {
     const invocation: RemoteCapabilityInvocation = {
@@ -140,11 +140,7 @@ function createRemoteCapabilityInvocation(
                 return executeRemoteResourceInvocation(invocation, options)
             }
 
-            if (capabilityType === 'prompt') {
-                return executeRemotePromptInvocation(invocation, options)
-            }
-
-            return executeRemoteToolInvocation(invocation, options)
+            return executeRemotePromptInvocation(invocation, options)
         },
         input: capabilityType === 'resource' ? LATEST_CONTEXT_RESOURCE_URI : `goal=${userGoal}`,
         location: 'remote',
@@ -233,7 +229,7 @@ function toPromptContextMessages(messages: Awaited<ReturnType<typeof mcpClientMa
 }
 
 /**
- * 构造 capability 失败时仍可进入最终回答的上下文。
+ * 构造 capability 失败时仍可进入最终回答的上下文消息。
  * 这样单个 remote 能力不可用时，整轮对话不会中断，模型也会被约束不要编造结果。
  */
 function createFailureContextMessage(invocation: RemoteCapabilityInvocation, error: unknown) {
@@ -251,7 +247,7 @@ function createFailureContextMessage(invocation: RemoteCapabilityInvocation, err
 
 /**
  * 写出统一错误 chunk。
- * 注意：调用方必须已经先写出对应 start chunk，并复用同一个 partId，前端才能把失败态落到正确卡片上。
+ * 调用方必须已经先写出对应 start chunk，并复用同一个 partId，前端才能把失败态落到正确卡片上。
  */
 function writeRemoteCapabilityError(writeChunk: WriteChunk, invocation: RemoteCapabilityInvocation, partId: string, error: unknown) {
     const basePayload = {
@@ -275,20 +271,10 @@ function writeRemoteCapabilityError(writeChunk: WriteChunk, invocation: RemoteCa
         return
     }
 
-    if (invocation.capabilityType === 'prompt') {
-        writeStreamErrorChunk(writeChunk, {
-            ...basePayload,
-            promptName: invocation.name,
-            scope: 'prompt',
-        })
-        return
-    }
-
     writeStreamErrorChunk(writeChunk, {
         ...basePayload,
-        input: invocation.input,
-        scope: 'tool',
-        toolName: invocation.name,
+        promptName: invocation.name,
+        scope: 'prompt',
     })
 }
 
@@ -414,66 +400,8 @@ async function executeRemotePromptInvocation(invocation: RemoteCapabilityInvocat
 }
 
 /**
- * 执行 remote tool：check_doc_consistency。
- * 它不走模型 tool_call，而是由 runtime 在高置信 reader 场景下主动调用，用于验证 capability 最小闭环。
- */
-async function executeRemoteToolInvocation(invocation: RemoteCapabilityInvocation, options: ExecuteRemoteCapabilityOptions) {
-    const partId = createId()
-
-    options.writeChunk({
-        type: 'tool-start',
-        partId,
-        toolName: invocation.name,
-        title: '文档一致性检查',
-        action: 'check',
-        source: invocation.source,
-        location: invocation.location,
-        serverId: invocation.serverId,
-        input: invocation.input,
-    })
-
-    try {
-        throwIfAborted(options.context.signal)
-        const response = await mcpClientManager.callTool(invocation.serverId, {
-            name: DOC_CONSISTENCY_TOOL_NAME,
-            arguments: {
-                focus: invocation.input.replace(/^goal=/, ''),
-            },
-        })
-        const output = extractTextFromContentParts(response.result.content)
-
-        if (!output) {
-            throw new MCPHostError('REQUEST_FAILED', 'check_doc_consistency 没有返回可用文本结果。')
-        }
-
-        options.writeChunk({
-            type: 'tool-end',
-            partId,
-            toolName: invocation.name,
-            title: '文档一致性检查',
-            action: 'check',
-            source: invocation.source,
-            location: invocation.location,
-            serverId: invocation.serverId,
-            input: invocation.input,
-            output,
-        })
-
-        return [new HumanMessage(['以下是 remote MCP tool `check_doc_consistency` 的检查结果，请优先基于它回答。', output].join('\n\n'))]
-    } catch (error) {
-        if (options.context.signal?.aborted) {
-            throw error
-        }
-
-        writeRemoteCapabilityError(options.writeChunk, invocation, partId, error)
-
-        return [createFailureContextMessage(invocation, error)]
-    }
-}
-
-/**
- * 将当前用户问题解析成 v0.0.11 固定的 remote capability 调用列表。
- * 这里不是通用 planner，只处理 reader-skill 下的最小闭环验证场景。
+ * 将当前用户问题解析成固定的 remote resource/prompt 调用列表。
+ * 这里不是通用 planner，只处理 reader-skill 下的最小 capability context 注入场景。
  */
 export function resolveCapabilityContextInvocations(request: ChatRequest, skillDefinition?: SkillDefinition): RemoteCapabilityInvocation[] {
     if (skillDefinition?.skillId !== 'reader-skill') {
@@ -481,11 +409,11 @@ export function resolveCapabilityContextInvocations(request: ChatRequest, skillD
     }
 
     const userGoal = getLastUserMessageText(request)
+    const isDocConsistencyIntent = matchesAny(userGoal, DOC_CONSISTENCY_PATTERNS)
     const invocations: RemoteCapabilityInvocation[] = []
-    const candidates: Array<[RemoteCapabilityName, CapabilityType, boolean]> = [
+    const candidates: Array<[RemoteCapabilityName, RemoteContextCapabilityType, boolean]> = [
         [LATEST_CONTEXT_RESOURCE_NAME, 'resource', matchesAny(userGoal, PROJECT_CONTEXT_PATTERNS)],
-        [TASKLIST_DRAFT_PROMPT_NAME, 'prompt', matchesAny(userGoal, TASKLIST_DRAFT_PATTERNS)],
-        [DOC_CONSISTENCY_TOOL_NAME, 'tool', matchesAny(userGoal, DOC_CONSISTENCY_PATTERNS)],
+        [TASKLIST_DRAFT_PROMPT_NAME, 'prompt', !isDocConsistencyIntent && matchesAny(userGoal, TASKLIST_DRAFT_PATTERNS)],
     ]
 
     for (const [name, capabilityType, matched] of candidates) {

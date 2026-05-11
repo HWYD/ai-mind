@@ -25,15 +25,28 @@ function createStaticCapabilityDefinition(
 const staticCapabilityDefinitions: CapabilityDefinition[] = [
     createStaticCapabilityDefinition(
         {
+            capabilityType: 'resource',
+            location: 'local',
+            name: 'project-docs',
+            providerKind: 'mcp',
+            serverId: 'project-docs-server',
+        },
+        {
+            title: 'project-docs',
+            description: '读取 docs/ 项目知识区内允许的 Markdown 文档 Resource。',
+        }
+    ),
+    createStaticCapabilityDefinition(
+        {
             capabilityType: 'prompt',
             location: 'local',
             name: 'local-file-summary',
             providerKind: 'mcp',
-            serverId: 'project-files-server',
+            serverId: 'project-docs-server',
         },
         {
             title: 'local-file-summary',
-            description: '对已读取的单个本地项目文件生成结构化摘要 Prompt。',
+            description: '对已读取的单个 docs 文档生成结构化摘要 Prompt。',
         }
     ),
     createStaticCapabilityDefinition(
@@ -82,7 +95,7 @@ const staticCapabilityDefinitions: CapabilityDefinition[] = [
  */
 export function toCapabilityDefinition(toolDefinition: ChatToolDefinition): CapabilityDefinition {
     const providerKind = toolDefinition.source ?? 'internal'
-    const capabilityType = toolDefinition.outputPartType ?? 'tool'
+    const capabilityType = 'tool'
     const location =
         providerKind === 'mcp' && toolDefinition.serverId
             ? (mcpServerRegistry.get(toolDefinition.serverId as MCPServerId)?.location ?? 'local')

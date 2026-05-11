@@ -1,7 +1,6 @@
 import { calculatorToolDefinition } from './calculator-tool'
 import { cityWeatherToolDefinition } from './city-weather-tool'
 import { datetimeToolDefinition } from './datetime-tool'
-import { localTextReadToolDefinition } from './local-text-read-tool'
 import { type ChatToolDefinition, createChatToolRegistry } from './registry'
 import { textTransformToolDefinition } from './text-transform-tool'
 import { unitConvertToolDefinition } from './unit-convert-tool'
@@ -10,7 +9,6 @@ const chatToolDefinitions: ChatToolDefinition[] = [
     calculatorToolDefinition,
     cityWeatherToolDefinition,
     datetimeToolDefinition,
-    localTextReadToolDefinition,
     textTransformToolDefinition,
     unitConvertToolDefinition,
 ]
@@ -34,7 +32,6 @@ export {
     calculatorToolDefinition,
     cityWeatherToolDefinition,
     datetimeToolDefinition,
-    localTextReadToolDefinition,
     textTransformToolDefinition,
     unitConvertToolDefinition,
 }

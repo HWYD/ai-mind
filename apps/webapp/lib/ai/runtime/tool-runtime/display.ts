@@ -9,6 +9,8 @@ import { getMessageContentText } from '../message-content'
 const DEFAULT_RESOURCE_PREVIEW_CHARS = 3000
 const DEFAULT_RESOURCE_URI = 'resource://unknown'
 
+export type ToolDefinitionMap = ReadonlyMap<string, ChatToolDefinition>
+
 export interface ToolDisplayFields {
     title?: string
     action?: string
@@ -43,11 +45,15 @@ function resolveToolLocation(source: 'internal' | 'mcp', serverId?: string): 'lo
     return mcpServerRegistry.get(serverId as MCPServerId)?.location ?? 'local'
 }
 
+function getToolDefinition(toolName: string, toolDefinitionMap?: ToolDefinitionMap) {
+    return toolDefinitionMap ? toolDefinitionMap.get(toolName) : chatToolRegistry.get(toolName)
+}
+
 /**
  * 统一格式化模型传回参数，优先走工具自身声明的 formatInput。
  */
-export function formatToolInput(toolCall: ToolCall) {
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
+export function formatToolInput(toolCall: ToolCall, toolDefinitionMap?: ToolDefinitionMap) {
+    const toolDefinition = getToolDefinition(toolCall.name, toolDefinitionMap)
 
     try {
         return toolDefinition?.formatInput ? toolDefinition.formatInput(toolCall.args) : JSON.stringify(toolCall.args)
@@ -59,8 +65,8 @@ export function formatToolInput(toolCall: ToolCall) {
 /**
  * 从工具定义读取展示字段，任何展示配置异常都兜底，避免影响主链执行。
  */
-export function getToolDisplayFields(toolCall: ToolCall): ToolDisplayFields {
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
+export function getToolDisplayFields(toolCall: ToolCall, toolDefinitionMap?: ToolDefinitionMap): ToolDisplayFields {
+    const toolDefinition = getToolDefinition(toolCall.name, toolDefinitionMap)
 
     try {
         const displayConfig = toolDefinition?.getDisplayConfig?.(toolCall.args)
@@ -94,8 +100,8 @@ export function getToolDisplayFields(toolCall: ToolCall): ToolDisplayFields {
 /**
  * 生成资源类型输出的基础展示字段，未配置时使用安全兜底值。
  */
-export function getResourceDisplayFields(toolCall: ToolCall): ResourceDisplayFields {
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
+export function getResourceDisplayFields(toolCall: ToolCall, toolDefinitionMap?: ToolDefinitionMap): ResourceDisplayFields {
+    const toolDefinition = getToolDefinition(toolCall.name, toolDefinitionMap)
 
     try {
         const resourceDisplayConfig = toolDefinition?.getResourceDisplayConfig?.(toolCall.args)
@@ -116,8 +122,8 @@ export function getResourceDisplayFields(toolCall: ToolCall): ResourceDisplayFie
 /**
  * 把工具结果转换成 Resource 卡片字段；若工具未提供结构化结果则退化为文本预览。
  */
-export function getResourceResultFields(toolCall: ToolCall, result: unknown, output: string) {
-    const toolDefinition = chatToolRegistry.get(toolCall.name)
+export function getResourceResultFields(toolCall: ToolCall, result: unknown, output: string, toolDefinitionMap?: ToolDefinitionMap) {
+    const toolDefinition = getToolDefinition(toolCall.name, toolDefinitionMap)
 
     if (toolDefinition?.getResourceResult) {
         const resourceResult = toolDefinition.getResourceResult(toolCall.args, result)
@@ -127,7 +133,7 @@ export function getResourceResultFields(toolCall: ToolCall, result: unknown, out
         }
     }
 
-    const displayFields = getResourceDisplayFields(toolCall)
+    const displayFields = getResourceDisplayFields(toolCall, toolDefinitionMap)
     const previewChars = normalizePreviewChars(toolDefinition?.resourcePreviewChars)
 
     return {

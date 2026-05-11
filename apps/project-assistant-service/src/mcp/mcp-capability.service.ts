@@ -9,7 +9,7 @@ interface DocConsistencyInput {
 }
 
 /**
- * 统一注册 `project-assistant-service` 在 v0.0.11 暴露的 MCP 能力面。
+ * 统一注册 `project-assistant-service` 在 v0.0.12 使用的 MCP mock 能力面。
  * 当前严格保持“每类 capability 一个最小 mock”：
  * - resource: `project://latest-context`
  * - prompt: `tasklist-draft`
@@ -51,9 +51,15 @@ export class McpCapabilityService {
                         text: JSON.stringify(
                             {
                                 project: 'AI Mind',
-                                version: 'v0.0.11',
-                                summary: '当前版本聚焦 capability model、skill metadata 与 remote MCP 单服务闭环。',
-                                documents: ['README.md', 'private-folder/plans/', 'private-folder/tasklists/'],
+                                version: 'v0.0.12',
+                                summary: '当前版本聚焦 docs resource 边界、Composer V1 与 capability-driven tool runtime。',
+                                documents: [
+                                    'README.md',
+                                    'docs/README.md',
+                                    'docs/architecture/capability-skill-surface.md',
+                                    'docs/versions/v0.0.12-docs-resource-composer-capability-tool-runtime.md',
+                                    'docs/tasklists/v0.0.12-tasklist.md',
+                                ],
                                 updatedAt: new Date().toISOString(),
                             },
                             null,

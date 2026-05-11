@@ -2,9 +2,9 @@ import { mcpClientManager } from '@/lib/ai/mcp/client/mcp-client-manager'
 import { MCPHostError } from '@/lib/ai/mcp/protocol/errors'
 import type { MCPPromptAdapterResult } from '@/lib/ai/mcp/protocol/types'
 
+import { PROJECT_DOCS_SERVER_ID } from './docs-resource-shared'
 import type { MCPPromptAdapter } from './types'
 
-const PROJECT_FILES_SERVER_ID = 'project-files-server'
 const LOCAL_FILE_SUMMARY_PROMPT_NAME = 'local-file-summary'
 
 export interface LocalFileSummaryPromptAdapterInput {
@@ -40,7 +40,7 @@ function normalizePromptArgs(input: LocalFileSummaryPromptAdapterInput) {
 export const localFileSummaryPromptAdapter: MCPPromptAdapter<LocalFileSummaryPromptAdapterInput> = {
     async get(input): Promise<MCPPromptAdapterResult> {
         const normalizedInput = normalizePromptArgs(input)
-        const response = await mcpClientManager.getPrompt(PROJECT_FILES_SERVER_ID, {
+        const response = await mcpClientManager.getPrompt(PROJECT_DOCS_SERVER_ID, {
             name: LOCAL_FILE_SUMMARY_PROMPT_NAME,
             arguments: {
                 filename: normalizedInput.filename,
@@ -57,7 +57,7 @@ export const localFileSummaryPromptAdapter: MCPPromptAdapter<LocalFileSummaryPro
             description: response.result.description,
             messages: response.result.messages,
             promptName: LOCAL_FILE_SUMMARY_PROMPT_NAME,
-            serverId: PROJECT_FILES_SERVER_ID,
+            serverId: PROJECT_DOCS_SERVER_ID,
         }
     },
 }

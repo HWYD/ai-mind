@@ -2,6 +2,12 @@ import { type ToolCall, ToolMessage } from '@langchain/core/messages'
 import { describe, expect, it } from 'vitest'
 
 import { createAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from '@/lib/ai/runtime/authoritative-answer'
+import { calculatorToolDefinition, type ChatToolDefinition, unitConvertToolDefinition } from '@/lib/ai/tools'
+
+const toolDefinitionMap = new Map<string, ChatToolDefinition>([
+    [calculatorToolDefinition.name, calculatorToolDefinition],
+    [unitConvertToolDefinition.name, unitConvertToolDefinition],
+])
 
 function createRequest(text: string) {
     return {
@@ -45,6 +51,7 @@ describe('runtime/authoritative-answer', () => {
         expect(
             shouldBypassAuthoritativeAnswer({
                 request: createRequest('1+1=?'),
+                toolDefinitionMap,
                 executedToolResults: [createExecutedToolResult('calculator')],
             })
         ).toBe(true)
@@ -54,6 +61,7 @@ describe('runtime/authoritative-answer', () => {
         expect(
             shouldBypassAuthoritativeAnswer({
                 request: createRequest('\u0031+\u0032+\u0033=\uff1f \u5982\u4f55\u5b66\u4e60\u6570\u5b66\uff1f'),
+                toolDefinitionMap,
                 executedToolResults: [createExecutedToolResult('calculator', '6')],
             })
         ).toBe(false)
@@ -63,13 +71,14 @@ describe('runtime/authoritative-answer', () => {
         expect(
             shouldBypassAuthoritativeAnswer({
                 request: createRequest('\u5982\u4f55\u5b66\u4e60\u6570\u5b66\uff1f'),
+                toolDefinitionMap,
                 executedToolResults: [createExecutedToolResult('calculator')],
             })
         ).toBe(false)
     })
 
     it('single authoritative tool result returns direct answer', () => {
-        const answer = createAuthoritativeToolAnswer([createExecutedToolResult('calculator')], () => '1+1')
+        const answer = createAuthoritativeToolAnswer([createExecutedToolResult('calculator')], toolDefinitionMap, () => '1+1')
 
         expect(answer).toBe('`1+1` \u7684\u7ed3\u679c\u662f **2**\u3002')
     })
@@ -77,6 +86,7 @@ describe('runtime/authoritative-answer', () => {
     it('multiple tool results do not return direct answer', () => {
         const answer = createAuthoritativeToolAnswer(
             [createExecutedToolResult('calculator'), createExecutedToolResult('unit-convert', '1 m = 100 cm')],
+            toolDefinitionMap,
             () => 'input'
         )
 
@@ -86,6 +96,7 @@ describe('runtime/authoritative-answer', () => {
     it('failed tool result does not return direct answer', () => {
         const answer = createAuthoritativeToolAnswer(
             [createExecutedToolResult('calculator', '\u8ba1\u7b97\u5931\u8d25', false)],
+            toolDefinitionMap,
             () => '1+1'
         )
 

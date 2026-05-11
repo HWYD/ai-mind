@@ -28,8 +28,6 @@ export interface SkillDefinition {
     description: string
     // Skill 专属的系统提示词，用于约束模型的任务风格。
     systemPrompt: string
-    // 当前 Skill 允许使用的 Tool 名称列表。
-    allowedTools: string[]
     // 输出风格策略：当前已由 Runtime 消费，会补充额外的 system prompt 约束。
     outputPolicy?: SkillOutputPolicy
     // 结果优先策略：当前仅保留字段定义，尚未在 Runtime 中独立消费。

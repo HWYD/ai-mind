@@ -18,11 +18,11 @@ function createProjectAssistantServiceMcpToken() {
 }
 
 /**
- * `project-files-server` 当前暴露本地项目文件相关的 Resource 与 Prompt 能力。
+ * `project-docs-server` 只暴露 docs/ 项目知识区相关的 Resource 与 Prompt 能力。
  */
-const projectFilesServerDefinition: MCPServerDefinition = {
+const projectDocsServerDefinition: MCPServerDefinition = {
     transport: 'stdio',
-    args: [createServerScriptPath('project-files-server.mjs')],
+    args: [createServerScriptPath('project-docs-server.mjs')],
     capabilities: {
         prompts: true,
         resources: true,
@@ -30,10 +30,10 @@ const projectFilesServerDefinition: MCPServerDefinition = {
     },
     command: process.execPath,
     cwd: process.cwd(),
-    displayName: '项目文件 MCP Server',
+    displayName: '项目文档 MCP Server',
     providerKind: 'mcp',
     location: 'local',
-    serverId: 'project-files-server',
+    serverId: 'project-docs-server',
     stderr: 'pipe',
     auth: {
         type: 'none',
@@ -93,7 +93,7 @@ const projectAssistantServiceDefinition: MCPServerDefinition = {
  */
 export const MCP_SERVER_DEFINITIONS: MCPServerDefinition[] = [
     weatherServerDefinition,
-    projectFilesServerDefinition,
+    projectDocsServerDefinition,
     projectAssistantServiceDefinition,
 ]
 

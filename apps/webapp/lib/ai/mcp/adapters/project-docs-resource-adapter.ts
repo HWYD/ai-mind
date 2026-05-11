@@ -1,20 +1,22 @@
-﻿import { mcpClientManager } from '@/lib/ai/mcp/client/mcp-client-manager'
+import { mcpClientManager } from '@/lib/ai/mcp/client/mcp-client-manager'
 import { MCPHostError } from '@/lib/ai/mcp/protocol/errors'
 import type { MCPResourceAdapterResult } from '@/lib/ai/mcp/protocol/types'
-import {
-    assertSafeRootFilename,
-    createProjectResourcePreview,
-    createProjectResourceUri,
-    MAX_PROJECT_RESOURCE_PREVIEW_CHARS,
-} from '@/lib/ai/tools/local-text-read-shared'
 
+import {
+    assertSafeDocsResourcePath,
+    createDocsResourcePreview,
+    createDocsResourceUri,
+    MAX_PROJECT_DOCS_RESOURCE_PREVIEW_CHARS,
+    PROJECT_DOCS_SERVER_ID,
+} from './docs-resource-shared'
 import type { MCPResourceAdapter } from './types'
 
-export interface ProjectFileResourceAdapterInput {
-    filename: string
+export interface ProjectDocsResourceAdapterInput {
+    resourcePath?: string
+    uri?: string
 }
 
-const PROJECT_FILES_SERVER_ID = 'project-files-server'
+const PROJECT_DOCS_RESOURCE_FALLBACK_NAME = 'docs-resource'
 type ReadResourceContent = Awaited<ReturnType<typeof mcpClientManager.readResource>>['result']['contents'][number]
 type TextResourceContent = ReadResourceContent & {
     _meta?: unknown
@@ -48,28 +50,38 @@ function toMetadataRecord(value: unknown) {
     return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
 }
 
-export const projectFileResourceAdapter: MCPResourceAdapter<ProjectFileResourceAdapterInput> = {
+function resolveResourcePath(input: ProjectDocsResourceAdapterInput) {
+    const rawPath = input.resourcePath ?? input.uri
+
+    if (!rawPath) {
+        throw new MCPHostError('REQUEST_FAILED', 'docs resource 缺少 resourcePath 或 uri 参数。')
+    }
+
+    return assertSafeDocsResourcePath(rawPath)
+}
+
+export const projectDocsResourceAdapter: MCPResourceAdapter<ProjectDocsResourceAdapterInput> = {
     async read(input): Promise<MCPResourceAdapterResult> {
-        const safeFilename = assertSafeRootFilename(input.filename)
-        const uri = createProjectResourceUri(safeFilename)
-        const response = await mcpClientManager.readResource(PROJECT_FILES_SERVER_ID, {
+        const resourcePath = resolveResourcePath(input)
+        const uri = createDocsResourceUri(resourcePath)
+        const response = await mcpClientManager.readResource(PROJECT_DOCS_SERVER_ID, {
             uri,
         })
         const textContent = extractTextContent(response.result)
 
         if (!textContent) {
-            throw new MCPHostError('REQUEST_FAILED', '项目文件 MCP Resource 没有返回可用文本内容。')
+            throw new MCPHostError('REQUEST_FAILED', 'docs MCP Resource 没有返回可用文本内容。')
         }
 
         const metadata = toMetadataRecord(textContent._meta)
 
         return {
             content: textContent.text,
-            contentPreview: createProjectResourcePreview(textContent.text),
-            previewChars: MAX_PROJECT_RESOURCE_PREVIEW_CHARS,
+            contentPreview: createDocsResourcePreview(textContent.text),
+            previewChars: MAX_PROJECT_DOCS_RESOURCE_PREVIEW_CHARS,
             mimeType: textContent.mimeType,
-            resourceName: typeof metadata.filename === 'string' ? metadata.filename : safeFilename,
-            serverId: PROJECT_FILES_SERVER_ID,
+            resourceName: typeof metadata.resourcePath === 'string' ? metadata.resourcePath : PROJECT_DOCS_RESOURCE_FALLBACK_NAME,
+            serverId: PROJECT_DOCS_SERVER_ID,
             sizeBytes: toNumberMetaValue(metadata.sizeBytes),
             status: 'completed',
             truncated: toBooleanMetaValue(metadata.truncated),

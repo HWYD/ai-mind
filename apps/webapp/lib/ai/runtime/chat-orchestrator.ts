@@ -9,10 +9,18 @@ import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, 
 import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from './authoritative-answer'
 import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
 import { buildSystemMessages, createChatSession } from './chat-session'
+import { executeComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
 import { PromptRuntimeError, resolvePromptContextInvocation } from './prompt-context'
 import { logSkillRuntime, throwIfAborted, writeStreamErrorChunk } from './stream-errors'
 import { executeToolCall, formatToolInput, normalizeAndValidateToolCalls, writeToolValidationErrors } from './tool-runtime'
-import type { ChatExecutionContext, ChatServiceDependencies, ExecutedToolResult, ToolValidationResult, WriteChunk } from './types'
+import type {
+    ChatExecutionContext,
+    ChatServiceDependencies,
+    ChatSession,
+    ExecutedToolResult,
+    ToolValidationResult,
+    WriteChunk,
+} from './types'
 
 interface ChatOrchestratorOptions {
     context: ChatExecutionContext
@@ -51,7 +59,7 @@ interface ToolExecutionStageResult {
 }
 
 async function streamDirectAnswer(
-    model: ReturnType<typeof createChatSession>['baseModel'],
+    model: ChatSession['baseModel'],
     langChainMessages: BaseMessage[],
     context: ChatExecutionContext,
     writeChunk: WriteChunk,
@@ -79,7 +87,7 @@ export class ChatOrchestrator {
         this.writeChunk = options.writeChunk
     }
 
-    private buildPlanningMessages(session: ReturnType<typeof createChatSession>, withRetryPrompt: boolean) {
+    private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
         return [
             ...buildSystemMessages(
                 session.skillSystemPrompt,
@@ -91,10 +99,7 @@ export class ChatOrchestrator {
         ]
     }
 
-    private async runPlanningAttempt(
-        session: ReturnType<typeof createChatSession>,
-        withRetryPrompt: boolean
-    ): Promise<PlanningAttemptResult> {
+    private async runPlanningAttempt(session: ChatSession, withRetryPrompt: boolean): Promise<PlanningAttemptResult> {
         if (!session.toolBoundModel) {
             throw new Error('toolBoundModel is required for planning stage')
         }
@@ -107,7 +112,7 @@ export class ChatOrchestrator {
             signal: this.context.signal,
         })
         const response = await streamPlanningResponse(planningStream, this.context, this.writeChunk, this.isClosed)
-        const validationResult = normalizeAndValidateToolCalls(response)
+        const validationResult = normalizeAndValidateToolCalls(response, session.activeToolDefinitionMap)
         const hasVisibleText = hasVisibleAssistantText(response)
 
         logSkillRuntime(withRetryPrompt ? 'retry-finished' : 'planning-finished', {
@@ -139,7 +144,7 @@ export class ChatOrchestrator {
         }
     }
 
-    private async runPlanningStage(session: ReturnType<typeof createChatSession>): Promise<PlanningStageResult> {
+    private async runPlanningStage(session: ChatSession): Promise<PlanningStageResult> {
         const firstAttempt = await this.runPlanningAttempt(session, false)
 
         if (firstAttempt.validationResult.toolCalls.length === 0 && !firstAttempt.hasVisibleText) {
@@ -158,6 +163,7 @@ export class ChatOrchestrator {
     }
 
     private async runToolExecutionStage(
+        session: ChatSession,
         toolCalls: ToolCall[],
         toolErrors: ToolValidationResult['toolErrors']
     ): Promise<ToolExecutionStageResult> {
@@ -167,6 +173,7 @@ export class ChatOrchestrator {
         for (const toolCall of toolCalls) {
             const executedToolResult = await executeToolCall(toolCall, this.context, this.writeChunk, {
                 errorStage: 'tool-execution',
+                toolDefinitionMap: session.activeToolDefinitionMap,
             })
             executedToolResults.push(executedToolResult)
             toolMessages.push(executedToolResult.toolMessage)
@@ -179,7 +186,7 @@ export class ChatOrchestrator {
     }
 
     private async runFinalAnswerStage(
-        session: ReturnType<typeof createChatSession>,
+        session: ChatSession,
         planningMessage: AIMessage,
         executedToolResults: ExecutedToolResult[],
         toolMessages: ToolMessage[]
@@ -272,7 +279,7 @@ export class ChatOrchestrator {
         await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
     }
 
-    private async runCapabilityContextAnswerStage(session: ReturnType<typeof createChatSession>) {
+    private async runCapabilityContextAnswerStage(session: ChatSession) {
         // Step 3.5 的能力消费入口：先判断本轮是否命中固定 remote capability 场景。
         // 命中后由 runtime 主动获取上下文，再进入最终回答阶段；未命中则继续原有 tool/direct-answer 链路。
         const capabilityInvocations = resolveCapabilityContextInvocations(this.request, session.skillDefinition)
@@ -304,6 +311,35 @@ export class ChatOrchestrator {
         return true
     }
 
+    private async runComposerContextAnswerStage(session: ChatSession) {
+        const composerInvocation = resolveComposerContextInvocation(this.request)
+
+        if (!composerInvocation) {
+            return false
+        }
+
+        const composerContextMessages = await executeComposerContextInvocation(composerInvocation, {
+            context: this.context,
+            writeChunk: this.writeChunk,
+        })
+        const finalMessages: BaseMessage[] = [
+            ...buildSystemMessages(
+                session.skillSystemPrompt,
+                session.skillOutputPolicyPrompt,
+                '请优先基于本轮 Composer 引用读取到的上下文或 Prompt 指令回答；不要向用户暴露“已注入上下文”等内部执行状态。如果资源或 Prompt 获取失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
+            ),
+            ...session.langChainMessages,
+            ...composerContextMessages,
+        ]
+        const finalStream = await session.baseModel.stream(finalMessages, {
+            signal: this.context.signal,
+        })
+
+        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
+
+        return true
+    }
+
     async run() {
         const lifecycle = new StreamLifecycle({
             context: this.context,
@@ -312,7 +348,7 @@ export class ChatOrchestrator {
         })
 
         try {
-            const session = createChatSession(this.request, this.deps)
+            const session = await createChatSession(this.request, this.deps)
 
             throwIfAborted(this.context.signal)
 
@@ -331,6 +367,11 @@ export class ChatOrchestrator {
                     name: session.skillDefinition.name,
                     description: session.skillDefinition.description,
                 })
+            }
+
+            if (await this.runComposerContextAnswerStage(session)) {
+                lifecycle.emitFinishIfOpen()
+                return
             }
 
             if (await this.runCapabilityContextAnswerStage(session)) {
@@ -358,13 +399,16 @@ export class ChatOrchestrator {
                 return
             }
 
-            const toolExecutionResult = await this.runToolExecutionStage(planningStage.toolCalls, planningStage.toolErrors)
+            const toolExecutionResult = await this.runToolExecutionStage(session, planningStage.toolCalls, planningStage.toolErrors)
             const canBypassModel = shouldBypassAuthoritativeAnswer({
                 request: this.request,
+                toolDefinitionMap: session.activeToolDefinitionMap,
                 executedToolResults: toolExecutionResult.executedToolResults,
             })
             const authoritativeDecision = canBypassModel
-                ? decideAuthoritativeToolAnswer(toolExecutionResult.executedToolResults, formatToolInput)
+                ? decideAuthoritativeToolAnswer(toolExecutionResult.executedToolResults, session.activeToolDefinitionMap, toolCall =>
+                      formatToolInput(toolCall, session.activeToolDefinitionMap)
+                  )
                 : {
                       shouldBypassModel: false,
                       toolNames: toolExecutionResult.executedToolResults.map(result => result.toolCall.name),

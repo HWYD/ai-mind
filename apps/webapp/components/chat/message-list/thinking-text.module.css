@@ -1,0 +1,46 @@
+.thinkingText {
+    --thinking-text-base: color-mix(in oklch, var(--muted-foreground) 88%, var(--foreground) 12%);
+    --thinking-text-sheen: color-mix(in oklch, var(--muted-foreground) 62%, var(--background) 38%);
+
+    display: inline-block;
+    color: var(--thinking-text-base);
+    background-image: linear-gradient(
+        100deg,
+        var(--thinking-text-base) 0%,
+        var(--thinking-text-base) 42%,
+        var(--thinking-text-sheen) 50%,
+        var(--thinking-text-base) 58%,
+        var(--thinking-text-base) 100%
+    );
+    background-repeat: no-repeat;
+    background-position: 100% 0;
+    background-size: 260% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    animation: thinking-text-shimmer 1.8s ease-in-out infinite;
+}
+
+:global(.dark) .thinkingText {
+    --thinking-text-base: color-mix(in oklch, var(--muted-foreground) 82%, var(--background) 18%);
+    --thinking-text-sheen: color-mix(in oklch, var(--muted-foreground) 84%, var(--foreground) 16%);
+}
+
+@keyframes thinking-text-shimmer {
+    from {
+        background-position: 100% 0;
+    }
+
+    to {
+        background-position: 0 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thinkingText {
+        color: var(--muted-foreground);
+        background-image: none;
+        animation: none;
+        -webkit-text-fill-color: currentColor;
+    }
+}

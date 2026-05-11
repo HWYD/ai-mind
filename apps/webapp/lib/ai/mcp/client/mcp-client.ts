@@ -51,6 +51,16 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: s
 }
 
 /**
+ * Streamable HTTP 的 session 可能因为 remote 服务重启而失效。
+ * 这类错误适合重建连接后重试一次；其他业务错误不能自动吞掉。
+ */
+function isRecoverableSessionError(error: unknown) {
+    const message = toErrorMessage(error).toLowerCase()
+
+    return message.includes('session not found') || message.includes('no valid session id')
+}
+
+/**
  * 把底层 SDK / 传输层异常统一翻译成 MCP Host 层错误码。
  * 这里的目标是沉淀稳定语义，避免上层依赖错误文案字符串。
  */
@@ -89,7 +99,7 @@ function resolveHostErrorCode(error: unknown, fallback: MCPHostErrorCode): MCPHo
         return 'UNAUTHORIZED'
     }
 
-    if (message.includes('forbidden') || message.includes('禁止访问')) {
+    if (message.includes('forbidden') || message.includes('禁止访问') || message.includes('不允许') || message.includes('只允许')) {
         return 'FORBIDDEN'
     }
 
@@ -113,9 +123,7 @@ function resolveHostErrorCode(error: unknown, fallback: MCPHostErrorCode): MCPHo
  * 4. 输出统一的 Host 层结构
  */
 export class MCPClient {
-    private client = new Client(MCP_CLIENT_INFO, {
-        capabilities: MCP_CLIENT_CAPABILITIES,
-    })
+    private client: Client
 
     /**
      * 复用同一轮初始化 Promise，避免并发请求时把同一个 MCP Server 重复拉起。
@@ -135,24 +143,51 @@ export class MCPClient {
     private transport: MCPClientTransport
 
     constructor(private readonly serverDefinition: MCPServerDefinition) {
-        if (isMCPStdioServerDefinition(serverDefinition)) {
-            this.transport = createStdioClientTransport(serverDefinition)
-        } else if (isMCPStreamableHttpServerDefinition(serverDefinition)) {
-            this.transport = createStreamableHttpClientTransport(serverDefinition)
+        this.client = this.createClient()
+        this.transport = this.createTransport()
+        this.bindTransportHandlers()
+    }
+
+    /**
+     * 创建官方 SDK Client，并把底层错误同步到 Host 层状态。
+     * session 失效重连时需要重新创建 Client，避免旧 session 状态残留。
+     */
+    private createClient() {
+        const client = new Client(MCP_CLIENT_INFO, {
+            capabilities: MCP_CLIENT_CAPABILITIES,
+        })
+
+        client.onerror = error => {
+            this.lastError = error
+            this.state = 'error'
+        }
+
+        return client
+    }
+
+    /**
+     * 根据 server definition 创建对应 transport。
+     * transport 保存 session / 进程连接等底层状态，因此重连时必须重新创建。
+     */
+    private createTransport(): MCPClientTransport {
+        if (isMCPStdioServerDefinition(this.serverDefinition)) {
+            return createStdioClientTransport(this.serverDefinition)
+        } else if (isMCPStreamableHttpServerDefinition(this.serverDefinition)) {
+            return createStreamableHttpClientTransport(this.serverDefinition)
         } else {
-            const unsupportedServerDefinition = serverDefinition as { displayName: string; transport: string }
+            const unsupportedServerDefinition = this.serverDefinition as { displayName: string; transport: string }
 
             throw new MCPHostError(
                 'UNSUPPORTED_TRANSPORT',
                 `${unsupportedServerDefinition.displayName} 使用了当前版本尚未接入的 transport：${unsupportedServerDefinition.transport}`
             )
         }
+    }
 
-        this.client.onerror = error => {
-            this.lastError = error
-            this.state = 'error'
-        }
-
+    /**
+     * transport 关闭后清空连接 Promise，下一次请求可以重新 initialize。
+     */
+    private bindTransportHandlers() {
         this.transport.onerror = error => {
             this.lastError = error
             this.state = 'error'
@@ -161,6 +196,41 @@ export class MCPClient {
         this.transport.onclose = () => {
             this.connectPromise = null
             this.state = 'closed'
+        }
+    }
+
+    /**
+     * 丢弃当前底层连接并创建全新的 SDK Client / transport。
+     * 主要用于 remote MCP 服务重启后，旧 mcp-session-id 已经不存在的场景。
+     */
+    private async resetConnection() {
+        try {
+            await withTimeout(this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} reset`)
+        } catch {
+            // 旧 session 已失效时 close 也可能失败；这里继续重建，保证下一次请求能重新 initialize。
+        }
+
+        this.connectPromise = null
+        this.state = 'idle'
+        this.client = this.createClient()
+        this.transport = this.createTransport()
+        this.bindTransportHandlers()
+    }
+
+    /**
+     * 执行一次 MCP 请求；如果遇到可恢复的 session 失效错误，则重建连接后只重试一次。
+     */
+    private async runWithSessionRecovery<T>(operation: () => Promise<T>) {
+        try {
+            return await operation()
+        } catch (error) {
+            if (!isMCPStreamableHttpServerDefinition(this.serverDefinition) || !isRecoverableSessionError(error)) {
+                throw error
+            }
+
+            await this.resetConnection()
+            await this.connect()
+            return operation()
         }
     }
 
@@ -190,10 +260,12 @@ export class MCPClient {
         await this.connect()
 
         try {
-            const result = await withTimeout(
-                this.client.callTool(params, undefined, options),
-                this.getTimeoutMs('request'),
-                `${this.serverDefinition.serverId} tools/call`
+            const result = await this.runWithSessionRecovery(() =>
+                withTimeout(
+                    this.client.callTool(params, undefined, options),
+                    this.getTimeoutMs('request'),
+                    `${this.serverDefinition.serverId} tools/call`
+                )
             )
 
             return {
@@ -218,10 +290,8 @@ export class MCPClient {
         await this.connect()
 
         try {
-            const result = await withTimeout(
-                this.client.listPrompts(),
-                this.getTimeoutMs('list'),
-                `${this.serverDefinition.serverId} prompts/list`
+            const result = await this.runWithSessionRecovery(() =>
+                withTimeout(this.client.listPrompts(), this.getTimeoutMs('list'), `${this.serverDefinition.serverId} prompts/list`)
             )
 
             return {
@@ -330,10 +400,8 @@ export class MCPClient {
         await this.connect()
 
         try {
-            const result = await withTimeout(
-                this.client.listResources(),
-                this.getTimeoutMs('list'),
-                `${this.serverDefinition.serverId} resources/list`
+            const result = await this.runWithSessionRecovery(() =>
+                withTimeout(this.client.listResources(), this.getTimeoutMs('list'), `${this.serverDefinition.serverId} resources/list`)
             )
 
             return {
@@ -358,10 +426,8 @@ export class MCPClient {
         await this.connect()
 
         try {
-            const result = await withTimeout(
-                this.client.listTools(),
-                this.getTimeoutMs('list'),
-                `${this.serverDefinition.serverId} tools/list`
+            const result = await this.runWithSessionRecovery(() =>
+                withTimeout(this.client.listTools(), this.getTimeoutMs('list'), `${this.serverDefinition.serverId} tools/list`)
             )
 
             return {
@@ -386,10 +452,12 @@ export class MCPClient {
         await this.connect()
 
         try {
-            const result = await withTimeout(
-                this.client.getPrompt(params, options),
-                this.getTimeoutMs('request'),
-                `${this.serverDefinition.serverId} prompts/get`
+            const result = await this.runWithSessionRecovery(() =>
+                withTimeout(
+                    this.client.getPrompt(params, options),
+                    this.getTimeoutMs('request'),
+                    `${this.serverDefinition.serverId} prompts/get`
+                )
             )
 
             return {
@@ -415,10 +483,12 @@ export class MCPClient {
         await this.connect()
 
         try {
-            const result = await withTimeout(
-                this.client.readResource(params, options),
-                this.getTimeoutMs('request'),
-                `${this.serverDefinition.serverId} resources/read`
+            const result = await this.runWithSessionRecovery(() =>
+                withTimeout(
+                    this.client.readResource(params, options),
+                    this.getTimeoutMs('request'),
+                    `${this.serverDefinition.serverId} resources/read`
+                )
             )
 
             return {

@@ -1,6 +1,6 @@
 import type { ToolCall } from '@langchain/core/messages'
 
-import { getChatToolDefinition } from '@/lib/ai/tools'
+import type { ChatToolDefinition } from '@/lib/ai/tools'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 import type { ExecutedToolResult } from './types'
@@ -97,6 +97,7 @@ function createMultiToolNonBypassDecision(executedToolResults: ExecutedToolResul
 
 export interface AuthoritativeBypassContext {
     request: ChatRequest
+    toolDefinitionMap: ReadonlyMap<string, ChatToolDefinition>
     executedToolResults: ExecutedToolResult[]
 }
 
@@ -107,13 +108,13 @@ export interface AuthoritativeAnswerDecision {
     toolNames: string[]
 }
 
-export function shouldBypassAuthoritativeAnswer({ request, executedToolResults }: AuthoritativeBypassContext) {
+export function shouldBypassAuthoritativeAnswer({ request, toolDefinitionMap, executedToolResults }: AuthoritativeBypassContext) {
     if (executedToolResults.length !== 1) {
         return false
     }
 
     const [executedToolResult] = executedToolResults
-    const toolDefinition = getChatToolDefinition(executedToolResult.toolCall.name)
+    const toolDefinition = toolDefinitionMap.get(executedToolResult.toolCall.name)
 
     if (!toolDefinition?.resultIsAuthoritative || !executedToolResult.success || !executedToolResult.output) {
         return false
@@ -138,6 +139,7 @@ export function shouldBypassAuthoritativeAnswer({ request, executedToolResults }
 
 export function decideAuthoritativeToolAnswer(
     executedToolResults: ExecutedToolResult[],
+    toolDefinitionMap: ReadonlyMap<string, ChatToolDefinition>,
     formatToolInput: (toolCall: ToolCall) => string
 ): AuthoritativeAnswerDecision {
     if (executedToolResults.length !== 1) {
@@ -145,7 +147,7 @@ export function decideAuthoritativeToolAnswer(
     }
 
     const [executedToolResult] = executedToolResults
-    const toolDefinition = getChatToolDefinition(executedToolResult.toolCall.name)
+    const toolDefinition = toolDefinitionMap.get(executedToolResult.toolCall.name)
 
     if (!toolDefinition?.resultIsAuthoritative || !executedToolResult.success || !executedToolResult.output) {
         return createSingleToolNonBypassDecision(executedToolResult.toolCall.name)
@@ -161,9 +163,10 @@ export function decideAuthoritativeToolAnswer(
 
 export function createAuthoritativeToolAnswer(
     executedToolResults: ExecutedToolResult[],
+    toolDefinitionMap: ReadonlyMap<string, ChatToolDefinition>,
     formatToolInput: (toolCall: ToolCall) => string
 ): string | null {
-    const decision = decideAuthoritativeToolAnswer(executedToolResults, formatToolInput)
+    const decision = decideAuthoritativeToolAnswer(executedToolResults, toolDefinitionMap, formatToolInput)
 
     return decision.shouldBypassModel ? (decision.answerText ?? null) : null
 }

@@ -40,6 +40,16 @@
     --sidebar-ring: oklch(0.708 0 0);
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
+    --composer-focus: oklch(0.62 0.16 255);
+    --composer-focus-border: oklch(0.82 0.055 255);
+    --composer-focus-soft: oklch(0.972 0.022 255);
+    --composer-mode-bg: oklch(0.955 0.012 245);
+    --composer-chip-bg: oklch(0.97 0.025 255);
+    --composer-chip-border: oklch(0.86 0.08 255);
+    --composer-chip-foreground: oklch(0.38 0.13 255);
+    --composer-resource-bg: oklch(0.975 0.016 185);
+    --composer-resource-border: oklch(0.875 0.045 185);
+    --composer-resource-foreground: oklch(0.36 0.07 185);
 }
 
 html {
@@ -96,6 +106,33 @@ html {
     border-left: 3px solid color-mix(in oklch, var(--border) 88%, white 12%);
     padding-left: 1rem;
     color: color-mix(in oklch, var(--muted-foreground) 92%, black 4%);
+}
+
+.ai-composer-editor .ProseMirror {
+    min-height: 48px;
+    max-height: 180px;
+    overflow-y: auto;
+    outline: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.ai-composer-editor .ProseMirror p {
+    margin: 0;
+}
+
+.ai-composer-editor .ProseMirror-selectednode[data-composer-command-chip],
+.ai-composer-editor .ProseMirror-selectednode[data-composer-resource-chip] {
+    outline: 2px solid var(--composer-focus);
+    outline-offset: 2px;
+}
+
+.ai-composer-editor .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    color: var(--muted-foreground);
+    pointer-events: none;
 }
 
 @theme inline {
@@ -173,6 +210,16 @@ html {
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --composer-focus: oklch(0.72 0.14 255);
+    --composer-focus-border: oklch(0.55 0.055 255);
+    --composer-focus-soft: oklch(0.28 0.035 255);
+    --composer-mode-bg: oklch(0.27 0.026 245);
+    --composer-chip-bg: oklch(0.27 0.05 255);
+    --composer-chip-border: oklch(0.45 0.1 255);
+    --composer-chip-foreground: oklch(0.82 0.08 255);
+    --composer-resource-bg: oklch(0.25 0.032 185);
+    --composer-resource-border: oklch(0.42 0.055 185);
+    --composer-resource-foreground: oklch(0.82 0.05 185);
 }
 
 @layer base {

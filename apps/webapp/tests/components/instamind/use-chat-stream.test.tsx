@@ -55,7 +55,7 @@ describe('useChatStream', () => {
                     const finishTimer = window.setTimeout(() => {
                         controller.enqueue(encoder.encode(`${JSON.stringify(finishChunk)}\n`))
                         controller.close()
-                    }, 100)
+                    }, 1000)
 
                     signal?.addEventListener(
                         'abort',
@@ -166,8 +166,8 @@ describe('useChatStream', () => {
                 type: 'resource-start',
                 partId: 'resource-1',
                 resourceName: 'NOT_EXIST.md',
-                uri: 'project://NOT_EXIST.md',
-                serverId: 'project-files-server',
+                uri: 'docs://NOT_EXIST.md',
+                serverId: 'project-docs-server',
             },
             {
                 type: 'error',
@@ -177,8 +177,8 @@ describe('useChatStream', () => {
                 message: '未找到文件',
                 partId: 'resource-1',
                 resourceName: 'NOT_EXIST.md',
-                uri: 'project://NOT_EXIST.md',
-                serverId: 'project-files-server',
+                uri: 'docs://NOT_EXIST.md',
+                serverId: 'project-docs-server',
             },
             { type: 'finish' },
         ]
