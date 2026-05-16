@@ -4,9 +4,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { MindMessage, ReasoningPart } from '@/lib/ai/types/message'
 
-import { AssistantMessage } from './assistant-message'
-import type { EmptyStateSuggestion } from './empty-state-suggestion-options'
-import { EmptyStateSuggestions } from './empty-state-suggestions'
+import { AssistantMessage } from './messages/assistant-message'
+import { UserMessage } from './messages/user-message'
 import {
     type AssistantFeedback,
     buildCombinedReasoning,
@@ -15,34 +14,41 @@ import {
     getMessageCopyText,
     getMessageTextContent,
     hasVisibleContent,
-} from './message-list-utils'
-import { ThinkingText } from './thinking-text'
-import { UserMessage } from './user-message'
+} from './shared/message-list-utils'
+import { ThinkingText } from './shared/thinking-text'
+import type { EmptyStateSuggestion } from './suggestions/empty-state-suggestion-options'
+import { EmptyStateSuggestions } from './suggestions/empty-state-suggestions'
 
 const ChatMessageItem = memo(function ChatMessageItem({
+    enableReasoning,
     feedbackState,
+    isAssistantReplyCompleted,
     isCopied,
+    isDeleteDisabled,
+    isLatestAssistantMessage,
+    isThinking,
     message,
-    messageIndex,
     onCopy,
     onDeleteUserTurn,
     onFeedbackChange,
     onRegenerateLastTurn,
-    status,
-    totalMessages,
-    enableReasoning,
+    onSelectFollowUpQuestion,
+    showFollowUpSuggestions,
 }: {
     enableReasoning: boolean
     feedbackState: AssistantFeedback
+    isAssistantReplyCompleted: boolean
     isCopied: boolean
+    isDeleteDisabled: boolean
+    isLatestAssistantMessage: boolean
+    isThinking: boolean
     message: MindMessage
-    messageIndex: number
     onCopy: (message: MindMessage) => void
     onDeleteUserTurn: (userMessageId: string) => boolean
     onFeedbackChange: (messageId: string, feedback: 'up' | 'down') => void
     onRegenerateLastTurn: () => Promise<boolean> | boolean
-    status: ChatListStatus
-    totalMessages: number
+    onSelectFollowUpQuestion: (question: string) => void
+    showFollowUpSuggestions: boolean
 }) {
     const visibleParts = useMemo(() => message.parts.filter(hasVisibleContent), [message.parts])
     const reasoningParts = useMemo(() => visibleParts.filter((part): part is ReasoningPart => part.type === 'reasoning'), [visibleParts])
@@ -50,9 +56,6 @@ const ChatMessageItem = memo(function ChatMessageItem({
     const combinedReasoning = useMemo(() => buildCombinedReasoning(reasoningParts), [reasoningParts])
     const messageTextContent = useMemo(() => getMessageTextContent(message), [message])
     const hasTextContent = messageTextContent.trim().length > 0
-    const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === totalMessages - 1
-    const isAssistantReplyCompleted = !isLatestAssistantMessage || (status !== 'submitted' && status !== 'streaming')
-    const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted
     // 深度思考的 chunk 可能晚于 Skill/Resource 卡片到达，先预留顶部位置，避免后续插入时把内容整体顶下去。
     const reserveReasoningSpace = enableReasoning && isThinking && combinedReasoning.length === 0
 
@@ -61,7 +64,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             <UserMessage
                 message={message}
                 isCopied={isCopied}
-                isDeleteDisabled={status === 'submitted' || status === 'streaming'}
+                isDeleteDisabled={isDeleteDisabled}
                 onCopy={onCopy}
                 onDelete={onDeleteUserTurn}
             />
@@ -69,7 +72,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     }
 
     if (visibleParts.length === 0) {
-        if (message.role === 'assistant' && (status === 'submitted' || status === 'streaming')) {
+        if (message.role === 'assistant' && isThinking) {
             return (
                 <article className="flex justify-start">
                     <div className="inline-flex items-center py-2 text-sm font-medium text-muted-foreground">
@@ -96,7 +99,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
             onCopy={onCopy}
             onFeedbackChange={onFeedbackChange}
             onRegenerateLastTurn={onRegenerateLastTurn}
+            onSelectFollowUpQuestion={onSelectFollowUpQuestion}
             reserveReasoningSpace={reserveReasoningSpace}
+            showFollowUpSuggestions={showFollowUpSuggestions}
         />
     )
 })
@@ -107,6 +112,7 @@ export function ChatMessageList({
     enableReasoning,
     onDeleteUserTurn,
     onRegenerateLastTurn,
+    onSelectFollowUpQuestion,
     onSelectSuggestion,
 }: {
     enableReasoning: boolean
@@ -114,18 +120,21 @@ export function ChatMessageList({
     status: ChatListStatus
     onDeleteUserTurn: (userMessageId: string) => boolean
     onRegenerateLastTurn: () => Promise<boolean> | boolean
+    onSelectFollowUpQuestion: (question: string) => void
     onSelectSuggestion: (suggestion: EmptyStateSuggestion) => void
 }) {
     const copyResetTimeoutRef = useRef<number | null>(null)
     const onDeleteUserTurnRef = useRef(onDeleteUserTurn)
     const onRegenerateLastTurnRef = useRef(onRegenerateLastTurn)
+    const onSelectFollowUpQuestionRef = useRef(onSelectFollowUpQuestion)
     const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
     const [assistantFeedback, setAssistantFeedback] = useState<Record<string, AssistantFeedback>>({})
 
     useEffect(() => {
         onDeleteUserTurnRef.current = onDeleteUserTurn
         onRegenerateLastTurnRef.current = onRegenerateLastTurn
-    }, [onDeleteUserTurn, onRegenerateLastTurn])
+        onSelectFollowUpQuestionRef.current = onSelectFollowUpQuestion
+    }, [onDeleteUserTurn, onRegenerateLastTurn, onSelectFollowUpQuestion])
 
     useEffect(() => {
         return () => {
@@ -171,33 +180,45 @@ export function ChatMessageList({
 
     const handleRegenerateLastTurn = useCallback(() => onRegenerateLastTurnRef.current(), [])
 
+    const handleSelectFollowUpQuestion = useCallback((question: string) => {
+        onSelectFollowUpQuestionRef.current(question)
+    }, [])
+
+    const isBusy = status === 'submitted' || status === 'streaming'
+
     return (
         <div className="flex min-h-0 flex-col gap-5 px-1 py-2">
-            {messages.length === 0 ? (
-                <EmptyStateSuggestions
-                    disabled={status === 'submitted' || status === 'streaming'}
-                    onSelectSuggestion={onSelectSuggestion}
-                />
-            ) : null}
+            {messages.length === 0 ? <EmptyStateSuggestions disabled={isBusy} onSelectSuggestion={onSelectSuggestion} /> : null}
 
             {messages.map((message, messageIndex) => {
                 const isCopied = copiedMessageId === message.id
                 const feedbackState = assistantFeedback[message.id] ?? null
+                const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messages.length - 1
+                const isAssistantReplyCompleted = !isLatestAssistantMessage || !isBusy
+                const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted
+                const showFollowUpSuggestions =
+                    isLatestAssistantMessage &&
+                    isAssistantReplyCompleted &&
+                    status === 'ready' &&
+                    getMessageTextContent(message).trim().length > 0
 
                 return (
                     <ChatMessageItem
                         key={message.id}
                         enableReasoning={enableReasoning}
                         message={message}
-                        messageIndex={messageIndex}
-                        totalMessages={messages.length}
-                        status={status}
                         isCopied={isCopied}
+                        isDeleteDisabled={message.role === 'user' && isBusy}
+                        isLatestAssistantMessage={isLatestAssistantMessage}
+                        isAssistantReplyCompleted={isAssistantReplyCompleted}
+                        isThinking={isThinking}
                         feedbackState={feedbackState}
                         onCopy={handleCopyMessage}
                         onDeleteUserTurn={handleDeleteUserTurn}
                         onFeedbackChange={toggleAssistantFeedback}
                         onRegenerateLastTurn={handleRegenerateLastTurn}
+                        onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
+                        showFollowUpSuggestions={showFollowUpSuggestions}
                     />
                 )
             })}

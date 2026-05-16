@@ -18,7 +18,7 @@ import {
     getToolTitle,
     parsePromptInputRows,
     renderStatusIcon,
-} from './message-list-utils'
+} from '../shared/message-list-utils'
 
 function ToolIcon({ toolName }: { toolName: string }) {
     switch (toolName) {

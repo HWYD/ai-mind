@@ -1,0 +1,232 @@
+import type { MindMessage, MindMessagePart, PromptPart, ResourcePart, TextPart, ToolPart } from '@/lib/ai/types/message'
+
+import { createReasoningPart, createTextPart } from './message-factory'
+
+export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
+    return messages.filter(message => {
+        if (message.parts.length === 0) {
+            return false
+        }
+
+        return message.parts.some(part => {
+            if (part.type === 'tool' || part.type === 'resource' || part.type === 'skill' || part.type === 'prompt') {
+                return true
+            }
+
+            return part.text.trim().length > 0
+        })
+    })
+}
+
+export function getMessageTextContent(message: MindMessage): string {
+    return message.parts
+        .filter((part): part is TextPart => part.type === 'text' && part.text.trim().length > 0)
+        .map(part => part.text)
+        .join('\n\n')
+}
+
+export function appendPart(messages: MindMessage[], messageId: string, part: MindMessagePart): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: [...message.parts, part],
+        }
+    })
+}
+
+function appendTextualDeltaToMessage(message: MindMessage, partId: string, partType: 'text' | 'reasoning', delta: string): MindMessage {
+    const parts = [...message.parts]
+    const targetIndex = parts.findIndex(part => part.id === partId && part.type === partType)
+
+    if (targetIndex === -1) {
+        const nextPart = partType === 'reasoning' ? createReasoningPart(delta, partId) : createTextPart(delta, partId)
+
+        return {
+            ...message,
+            parts: [...message.parts, nextPart],
+        }
+    }
+
+    const targetPart = parts[targetIndex]
+
+    if (targetPart.type !== partType) {
+        return message
+    }
+
+    parts[targetIndex] = {
+        ...targetPart,
+        text: targetPart.text + delta,
+    }
+
+    return {
+        ...message,
+        parts,
+    }
+}
+
+// 通过 partId 精确追加文本增量，避免并发流式更新时把内容拼到错误的 part 中。
+export function appendTextualPartDelta(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    partType: 'text' | 'reasoning',
+    delta: string
+): MindMessage[] {
+    const lastMessageIndex = messages.length - 1
+    const lastMessage = messages[lastMessageIndex]
+
+    // 流式文本通常追加到最后一条 assistant 消息，先走快路径，避免每个 delta 都遍历整个消息列表。
+    if (lastMessage?.id === messageId) {
+        const nextMessage = appendTextualDeltaToMessage(lastMessage, partId, partType, delta)
+
+        return [...messages.slice(0, lastMessageIndex), nextMessage]
+    }
+
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return appendTextualDeltaToMessage(message, partId, partType, delta)
+    })
+}
+
+export function updateToolPart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    updater: (part: ToolPart) => ToolPart
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'tool' || part.id !== partId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
+        }
+    })
+}
+
+export function updateResourcePart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    updater: (part: ResourcePart) => ResourcePart
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'resource' || part.id !== partId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
+        }
+    })
+}
+
+export function updatePromptPart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    updater: (part: PromptPart) => PromptPart
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'prompt' || part.id !== partId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
+        }
+    })
+}
+
+export function removeMessage(messages: MindMessage[], messageId: string | null): MindMessage[] {
+    if (!messageId) {
+        return messages
+    }
+
+    return messages.filter(message => message.id !== messageId)
+}
+
+export function removeUserTurnPair(messages: MindMessage[], userMessageId: string): MindMessage[] {
+    const userMessageIndex = messages.findIndex(message => message.id === userMessageId && message.role === 'user')
+
+    if (userMessageIndex === -1) {
+        return messages
+    }
+
+    const messageIdsToRemove = new Set<string>([userMessageId])
+
+    for (let index = userMessageIndex + 1; index < messages.length; index += 1) {
+        const message = messages[index]
+
+        if (message.role === 'user') {
+            break
+        }
+
+        if (message.role === 'assistant') {
+            messageIdsToRemove.add(message.id)
+            break
+        }
+    }
+
+    return messages.filter(message => !messageIdsToRemove.has(message.id))
+}
+
+export function getLastUserTurnForRegeneration(messages: MindMessage[]) {
+    const stableMessages = pruneTransientMessages(messages)
+    let lastUserIndex = -1
+
+    for (let index = stableMessages.length - 1; index >= 0; index -= 1) {
+        if (stableMessages[index].role === 'user') {
+            lastUserIndex = index
+            break
+        }
+    }
+
+    if (lastUserIndex === -1) {
+        return null
+    }
+
+    const lastUserMessage = stableMessages[lastUserIndex]
+    const userText = getMessageTextContent(lastUserMessage).trim()
+    const hasAssistantAfterUser = stableMessages.slice(lastUserIndex + 1).some(message => message.role === 'assistant')
+
+    if (!userText || !hasAssistantAfterUser) {
+        return null
+    }
+
+    return {
+        baseMessages: stableMessages.slice(0, lastUserIndex),
+        composer: lastUserMessage.composer,
+        displaySegments: lastUserMessage.parts.find((part): part is TextPart => part.type === 'text')?.displaySegments,
+        userText,
+    }
+}

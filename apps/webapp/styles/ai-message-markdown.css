@@ -1,0 +1,90 @@
+.ai-message-markdown {
+    font-size: 0.9375rem;
+    line-height: 1.75rem;
+}
+
+/* .ai-message-markdown,
+.ai-message-markdown * {
+    transition-property: none !important;
+} */
+
+.ai-message-markdown p {
+    margin: 0;
+}
+
+.ai-message-markdown h1,
+.ai-message-markdown h2,
+.ai-message-markdown h3,
+.ai-message-markdown h4,
+.ai-message-markdown h5,
+.ai-message-markdown h6 {
+    line-height: 1.55;
+    color: oklch(from var(--foreground) l c h);
+}
+
+.ai-message-markdown h1,
+.ai-message-markdown h2,
+.ai-message-markdown h3 {
+    font-weight: 650;
+}
+
+.ai-message-markdown h4,
+.ai-message-markdown h5,
+.ai-message-markdown h6 {
+    font-weight: 600;
+}
+
+.ai-message-markdown h1 {
+    margin-top: 1.75rem;
+    font-size: 1.5rem;
+}
+
+.ai-message-markdown h2 {
+    margin-top: 1.5rem;
+    font-size: 1.25rem;
+}
+
+.ai-message-markdown h3 {
+    margin-top: 1.25rem;
+    font-size: 1.125rem;
+}
+
+.ai-message-markdown h4 {
+    margin-top: 1rem;
+    font-size: 1rem;
+}
+
+.ai-message-markdown h5 {
+    margin-top: 0.875rem;
+    font-size: 0.9375rem;
+}
+
+.ai-message-markdown h6 {
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+}
+
+.ai-message-markdown strong {
+    font-weight: 600;
+}
+
+.ai-message-markdown ul,
+.ai-message-markdown ol {
+    padding-left: 1.5rem;
+}
+
+.ai-message-markdown li + li {
+    margin-top: 0.35rem;
+}
+
+.ai-message-markdown a {
+    color: color-mix(in oklch, var(--primary) 78%, black 8%);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.ai-message-markdown blockquote {
+    border-left: 3px solid color-mix(in oklch, var(--border) 88%, white 12%);
+    padding-left: 1rem;
+    color: color-mix(in oklch, var(--muted-foreground) 92%, black 4%);
+}

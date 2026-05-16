@@ -7,409 +7,36 @@ import { resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
-import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
-import type {
-    ChatComposerDisplaySegment,
-    ChatComposerPayload,
-    ChatRequest,
-    ChatSkillMode,
-    ChatStatus,
-    MindMessageInput,
-} from '@/lib/ai/types/chat'
-import type {
-    MindMessage,
-    MindMessagePart,
-    MindRole,
-    PromptPart,
-    ReasoningPart,
-    ResourcePart,
-    SkillPart,
-    TextPart,
-    ToolPart,
-} from '@/lib/ai/types/message'
+import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequest, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import type { MindMessage } from '@/lib/ai/types/message'
 
-const MAX_CONTEXT_TURNS = 8
+import {
+    createAssistantPlaceholder,
+    createMessage,
+    createPromptPart,
+    createReasoningPart,
+    createResourcePart,
+    createSkillPart,
+    createTextPart,
+    createToolPart,
+} from './chat-stream/message-factory'
+import {
+    appendPart,
+    getLastUserTurnForRegeneration,
+    pruneTransientMessages,
+    removeMessage,
+    removeUserTurnPair,
+    updatePromptPart,
+    updateResourcePart,
+    updateToolPart,
+} from './chat-stream/message-operations'
+import { buildRequestMessages, toRequestSkill } from './chat-stream/request-message-builder'
+import { consumeNdjsonStream } from './chat-stream/stream-reader'
+import { useStreamTextBuffer } from './chat-stream/use-stream-text-buffer'
+
+// 文本/推理 delta 的批量刷新窗口。流式 token 先进入 buffer，再按约 40ms + rAF 合并写入 React state。
+// 调大：Markdown 解析和 DOM 更新更少但打字感更钝；调小：更实时但更容易触发渲染/滚动抖动。
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
-
-function createTextPart(text: string, id?: string, displaySegments?: ChatComposerDisplaySegment[]): TextPart {
-    return {
-        id,
-        type: 'text',
-        text,
-        format: 'markdown',
-        ...(displaySegments?.length ? { displaySegments } : {}),
-    }
-}
-
-function createReasoningPart(text: string, id?: string): ReasoningPart {
-    return {
-        id,
-        type: 'reasoning',
-        text,
-        format: 'markdown',
-        visibility: 'collapsed',
-    }
-}
-
-function createToolPart(
-    partId: string,
-    toolName: string,
-    input: string,
-    title?: string,
-    action?: string,
-    source?: ToolPart['source'],
-    location?: ToolPart['location'],
-    serverId?: string
-): ToolPart {
-    return {
-        id: partId,
-        type: 'tool',
-        toolName,
-        title,
-        action,
-        source,
-        location,
-        serverId,
-        status: 'called',
-        input,
-    }
-}
-
-function createResourcePart(
-    partId: string,
-    resourceName: string,
-    uri: string,
-    serverId: string,
-    source?: ResourcePart['source'],
-    location?: ResourcePart['location']
-): ResourcePart {
-    return {
-        id: partId,
-        type: 'resource',
-        resourceName,
-        uri,
-        source,
-        location,
-        serverId,
-        status: 'loading',
-    }
-}
-
-function createSkillPart(skillId: string, name: string, description?: string): SkillPart {
-    return {
-        id: `skill:${skillId}`,
-        type: 'skill',
-        skillId,
-        name,
-        description,
-    }
-}
-
-function createPromptPart(
-    partId: string,
-    promptName: string,
-    status: PromptPart['status'],
-    source?: PromptPart['source'],
-    location?: PromptPart['location'],
-    serverId?: string,
-    input?: string
-): PromptPart {
-    return {
-        id: partId,
-        type: 'prompt',
-        promptName,
-        source,
-        location,
-        serverId,
-        status,
-        input,
-    }
-}
-
-function createMessage(role: MindRole, parts: MindMessagePart[], composer?: ChatComposerPayload): MindMessage {
-    return {
-        id: createId(),
-        role,
-        parts,
-        createdAt: new Date().toISOString(),
-        // composer 只表达本轮结构化输入语义；用户气泡的 chip 位置由 text part displaySegments 承接。
-        ...(composer ? { composer } : {}),
-    }
-}
-
-function createAssistantPlaceholder(messageId: string): MindMessage {
-    return {
-        id: messageId,
-        role: 'assistant',
-        parts: [],
-        createdAt: new Date().toISOString(),
-    }
-}
-
-function toMessageInput(message: MindMessage): MindMessageInput | null {
-    const parts = message.parts.filter(
-        (part): part is MindMessageInput['parts'][number] => part.type === 'text' && part.text.trim().length > 0
-    )
-
-    if (parts.length === 0) {
-        return null
-    }
-
-    return {
-        role: message.role,
-        parts: parts.map(part => ({
-            type: part.type,
-            text: part.text,
-            format: part.format,
-            ...(part.type === 'reasoning' && part.visibility ? { visibility: part.visibility } : {}),
-        })),
-    }
-}
-
-function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
-    return messages.filter(message => {
-        if (message.parts.length === 0) {
-            return false
-        }
-
-        return message.parts.some(part => {
-            if (part.type === 'tool' || part.type === 'resource' || part.type === 'skill' || part.type === 'prompt') {
-                return true
-            }
-
-            return part.text.trim().length > 0
-        })
-    })
-}
-
-function toRequestMessages(messages: MindMessage[]): MindMessageInput[] {
-    return messages.map(toMessageInput).filter((message): message is MindMessageInput => message !== null)
-}
-
-function getMessageTextContent(message: MindMessage): string {
-    return message.parts
-        .filter((part): part is TextPart => part.type === 'text' && part.text.trim().length > 0)
-        .map(part => part.text)
-        .join('\n\n')
-}
-
-function getRecentContextWindow(messages: MindMessage[]): MindMessage[] {
-    const systemMessages = messages.filter(message => message.role === 'system')
-    const conversationalMessages = messages.filter(message => message.role !== 'system')
-
-    if (conversationalMessages.length === 0) {
-        return systemMessages
-    }
-
-    const recentMessages: MindMessage[] = []
-    let userTurnCount = 0
-
-    for (let index = conversationalMessages.length - 1; index >= 0; index -= 1) {
-        const message = conversationalMessages[index]
-        recentMessages.unshift(message)
-
-        if (message.role === 'user') {
-            userTurnCount += 1
-
-            if (userTurnCount >= MAX_CONTEXT_TURNS) {
-                break
-            }
-        }
-    }
-
-    return [...systemMessages, ...recentMessages]
-}
-
-function buildRequestMessages(messages: MindMessage[]): MindMessageInput[] {
-    return toRequestMessages(getRecentContextWindow(messages))
-}
-
-function appendPart(messages: MindMessage[], messageId: string, part: MindMessagePart): MindMessage[] {
-    return messages.map(message => {
-        if (message.id !== messageId) {
-            return message
-        }
-
-        return {
-            ...message,
-            parts: [...message.parts, part],
-        }
-    })
-}
-
-// 通过 partId 精确追加文本增量，避免并发流式更新时把内容拼到错误的 part 中。
-function appendTextualPartDelta(
-    messages: MindMessage[],
-    messageId: string,
-    partId: string,
-    partType: 'text' | 'reasoning',
-    delta: string
-): MindMessage[] {
-    return messages.map(message => {
-        if (message.id !== messageId) {
-            return message
-        }
-
-        const parts = [...message.parts]
-        const targetIndex = parts.findIndex(part => part.id === partId && part.type === partType)
-
-        if (targetIndex === -1) {
-            const nextPart = partType === 'reasoning' ? createReasoningPart(delta, partId) : createTextPart(delta, partId)
-
-            return {
-                ...message,
-                parts: [...message.parts, nextPart],
-            }
-        }
-
-        const targetPart = parts[targetIndex]
-
-        if (targetPart.type !== partType) {
-            return message
-        }
-
-        parts[targetIndex] = {
-            ...targetPart,
-            text: targetPart.text + delta,
-        }
-
-        return {
-            ...message,
-            parts,
-        }
-    })
-}
-
-function updateToolPart(messages: MindMessage[], messageId: string, partId: string, updater: (part: ToolPart) => ToolPart): MindMessage[] {
-    return messages.map(message => {
-        if (message.id !== messageId) {
-            return message
-        }
-
-        return {
-            ...message,
-            parts: message.parts.map(part => {
-                if (part.type !== 'tool' || part.id !== partId) {
-                    return part
-                }
-
-                return updater(part)
-            }),
-        }
-    })
-}
-
-function updateResourcePart(
-    messages: MindMessage[],
-    messageId: string,
-    partId: string,
-    updater: (part: ResourcePart) => ResourcePart
-): MindMessage[] {
-    return messages.map(message => {
-        if (message.id !== messageId) {
-            return message
-        }
-
-        return {
-            ...message,
-            parts: message.parts.map(part => {
-                if (part.type !== 'resource' || part.id !== partId) {
-                    return part
-                }
-
-                return updater(part)
-            }),
-        }
-    })
-}
-
-function updatePromptPart(
-    messages: MindMessage[],
-    messageId: string,
-    partId: string,
-    updater: (part: PromptPart) => PromptPart
-): MindMessage[] {
-    return messages.map(message => {
-        if (message.id !== messageId) {
-            return message
-        }
-
-        return {
-            ...message,
-            parts: message.parts.map(part => {
-                if (part.type !== 'prompt' || part.id !== partId) {
-                    return part
-                }
-
-                return updater(part)
-            }),
-        }
-    })
-}
-
-function removeMessage(messages: MindMessage[], messageId: string | null): MindMessage[] {
-    if (!messageId) {
-        return messages
-    }
-
-    return messages.filter(message => message.id !== messageId)
-}
-
-function removeUserTurnPair(messages: MindMessage[], userMessageId: string): MindMessage[] {
-    const userMessageIndex = messages.findIndex(message => message.id === userMessageId && message.role === 'user')
-
-    if (userMessageIndex === -1) {
-        return messages
-    }
-
-    const messageIdsToRemove = new Set<string>([userMessageId])
-
-    for (let index = userMessageIndex + 1; index < messages.length; index += 1) {
-        const message = messages[index]
-
-        if (message.role === 'user') {
-            break
-        }
-
-        if (message.role === 'assistant') {
-            messageIdsToRemove.add(message.id)
-            break
-        }
-    }
-
-    return messages.filter(message => !messageIdsToRemove.has(message.id))
-}
-
-function getLastUserTurnForRegeneration(messages: MindMessage[]) {
-    const stableMessages = pruneTransientMessages(messages)
-    let lastUserIndex = -1
-
-    for (let index = stableMessages.length - 1; index >= 0; index -= 1) {
-        if (stableMessages[index].role === 'user') {
-            lastUserIndex = index
-            break
-        }
-    }
-
-    if (lastUserIndex === -1) {
-        return null
-    }
-
-    const lastUserMessage = stableMessages[lastUserIndex]
-    const userText = getMessageTextContent(lastUserMessage).trim()
-    const hasAssistantAfterUser = stableMessages.slice(lastUserIndex + 1).some(message => message.role === 'assistant')
-
-    if (!userText || !hasAssistantAfterUser) {
-        return null
-    }
-
-    return {
-        baseMessages: stableMessages.slice(0, lastUserIndex),
-        composer: lastUserMessage.composer,
-        displaySegments: lastUserMessage.parts.find((part): part is TextPart => part.type === 'text')?.displaySegments,
-        userText,
-    }
-}
 
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error && error.message) {
@@ -419,77 +46,10 @@ function getErrorMessage(error: unknown): string {
     return '请求失败，请稍后重试。'
 }
 
-async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: (chunk: ChatStreamChunk) => void) {
-    const reader = stream.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    // 按 NDJSON 协议逐行消费流，避免把半截 JSON 提前交给解析层。
-    while (true) {
-        const { done, value } = await reader.read()
-
-        if (done) {
-            break
-        }
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-            const trimmedLine = line.trim()
-
-            if (!trimmedLine) {
-                continue
-            }
-
-            const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(trimmedLine))
-
-            if (!parsedChunk.success) {
-                throw new Error('服务端返回了无法解析的流式数据。')
-            }
-
-            onChunk(parsedChunk.data)
-        }
-    }
-
-    const finalLine = buffer.trim()
-
-    if (!finalLine) {
-        return
-    }
-
-    const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(finalLine))
-
-    if (!parsedChunk.success) {
-        throw new Error('服务端返回了无法解析的流式数据。')
-    }
-
-    onChunk(parsedChunk.data)
-}
-
-function toRequestSkill(skillMode: ChatSkillMode) {
-    switch (skillMode) {
-        case 'utility':
-            return 'utility-skill'
-        case 'reader':
-            return 'reader-skill'
-        default:
-            return undefined
-    }
-}
-
 interface UseChatStreamOptions {
     skillMode?: ChatSkillMode
     model?: ChatModel
     enableReasoning?: boolean
-}
-
-interface PendingTextDelta {
-    messageId: string
-    partId: string
-    partType: 'text' | 'reasoning'
-    delta: string
 }
 
 export function useChatStream(options: UseChatStreamOptions = {}) {
@@ -504,6 +64,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const messagesRef = useRef(messages)
     const conversationIdRef = useRef(createId())
     const abortControllerRef = useRef<AbortController | null>(null)
+    // 当前正在写入的 assistant message/part 由服务端 stream chunk 驱动，后续 delta 必须精确落到对应 part。
     const activeStreamRef = useRef<{
         messageId: string | null
         textPartId: string | null
@@ -513,117 +74,23 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         textPartId: null,
         reasoningPartId: null,
     })
-    const pendingTextDeltasRef = useRef<Map<string, PendingTextDelta>>(new Map())
-    const flushTimerRef = useRef<number | null>(null)
-    const flushRafRef = useRef<number | null>(null)
-
-    useEffect(() => {
-        messagesRef.current = messages
-    }, [messages])
-
-    useEffect(() => {
-        return () => {
-            if (flushTimerRef.current !== null) {
-                window.clearTimeout(flushTimerRef.current)
-            }
-
-            if (flushRafRef.current !== null) {
-                window.cancelAnimationFrame(flushRafRef.current)
-            }
-        }
-    }, [])
-
     function updateMessages(updater: (current: MindMessage[]) => MindMessage[]) {
         setMessages(current => {
             const next = updater(current)
+            // 异步提交、取消和重新生成都依赖最新消息快照，ref 与 state 必须同步推进。
             messagesRef.current = next
             return next
         })
     }
 
-    function clearScheduledTextFlushes() {
-        if (flushTimerRef.current !== null) {
-            window.clearTimeout(flushTimerRef.current)
-            flushTimerRef.current = null
-        }
+    const textBuffer = useStreamTextBuffer({
+        flushIntervalMs: STREAM_TEXT_FLUSH_INTERVAL_MS,
+        updateMessages,
+    })
 
-        if (flushRafRef.current !== null) {
-            window.cancelAnimationFrame(flushRafRef.current)
-            flushRafRef.current = null
-        }
-    }
-
-    function clearPendingTextDeltas() {
-        pendingTextDeltasRef.current.clear()
-        clearScheduledTextFlushes()
-    }
-
-    function flushPendingTextDeltas() {
-        clearScheduledTextFlushes()
-
-        if (pendingTextDeltasRef.current.size === 0) {
-            return
-        }
-
-        const pending = Array.from(pendingTextDeltasRef.current.values())
-        pendingTextDeltasRef.current.clear()
-
-        updateMessages(current =>
-            pending.reduce(
-                (nextMessages, deltaItem) =>
-                    appendTextualPartDelta(nextMessages, deltaItem.messageId, deltaItem.partId, deltaItem.partType, deltaItem.delta),
-                current
-            )
-        )
-    }
-
-    function scheduleTextFlushByTimer() {
-        if (flushTimerRef.current !== null) {
-            return
-        }
-
-        flushTimerRef.current = window.setTimeout(() => {
-            flushTimerRef.current = null
-            flushPendingTextDeltas()
-        }, STREAM_TEXT_FLUSH_INTERVAL_MS)
-    }
-
-    function scheduleTextFlushByAnimationFrame() {
-        if (flushRafRef.current !== null) {
-            return
-        }
-
-        flushRafRef.current = window.requestAnimationFrame(() => {
-            flushRafRef.current = null
-            flushPendingTextDeltas()
-        })
-    }
-
-    function enqueueTextDelta(messageId: string, partId: string, partType: 'text' | 'reasoning', delta: string) {
-        if (!delta) {
-            return
-        }
-
-        const pendingKey = `${messageId}:${partType}:${partId}`
-        const existing = pendingTextDeltasRef.current.get(pendingKey)
-
-        if (existing) {
-            existing.delta += delta
-        } else {
-            pendingTextDeltasRef.current.set(pendingKey, {
-                messageId,
-                partId,
-                partType,
-                delta,
-            })
-        }
-
-        scheduleTextFlushByTimer()
-
-        if (delta.includes('\n') || delta.includes('```')) {
-            scheduleTextFlushByAnimationFrame()
-        }
-    }
+    useEffect(() => {
+        messagesRef.current = messages
+    }, [messages])
 
     function resetActiveStream() {
         activeStreamRef.current = {
@@ -640,7 +107,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return
         }
 
-        clearPendingTextDeltas()
+        textBuffer.clear()
         updateMessages(current => removeMessage(current, messageId))
         resetActiveStream()
     }
@@ -648,279 +115,316 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     function finalizeAbortedAssistantMessage() {
         // 用户主动中止时，保留已经收到的正文 / 推理 / 工具卡片，只清掉空占位消息，
         // 避免前端把“已看到的半截回答”整条删除。
-        clearPendingTextDeltas()
+        textBuffer.clear()
         updateMessages(current => pruneTransientMessages(current))
         resetActiveStream()
     }
 
+    function beginAssistantMessage(chunk: Extract<ChatStreamChunk, { type: 'start' }>) {
+        activeStreamRef.current.messageId = chunk.messageId
+        activeStreamRef.current.textPartId = null
+        activeStreamRef.current.reasoningPartId = null
+        updateMessages(current => [...current, createAssistantPlaceholder(chunk.messageId)])
+    }
+
+    function appendSelectedSkill(chunk: Extract<ChatStreamChunk, { type: 'skill-selected' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current => appendPart(current, messageId, createSkillPart(chunk.skillId, chunk.name, chunk.description)))
+    }
+
+    function beginTextPart(chunk: Extract<ChatStreamChunk, { type: 'text-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        activeStreamRef.current.textPartId = chunk.partId
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current => appendPart(current, messageId, createTextPart('', chunk.partId)))
+    }
+
+    function appendTextDeltaBuffered(chunk: Extract<ChatStreamChunk, { type: 'text-delta' }>) {
+        const messageId = activeStreamRef.current.messageId
+        const textPartId = activeStreamRef.current.textPartId
+
+        if (!messageId || textPartId !== chunk.partId) {
+            return
+        }
+
+        textBuffer.enqueue(messageId, chunk.partId, 'text', chunk.delta)
+    }
+
+    function beginReasoningPart(chunk: Extract<ChatStreamChunk, { type: 'reasoning-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        activeStreamRef.current.reasoningPartId = chunk.partId
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current => appendPart(current, messageId, createReasoningPart('', chunk.partId)))
+    }
+
+    function appendReasoningDeltaBuffered(chunk: Extract<ChatStreamChunk, { type: 'reasoning-delta' }>) {
+        const messageId = activeStreamRef.current.messageId
+        const reasoningPartId = activeStreamRef.current.reasoningPartId
+
+        if (!messageId || reasoningPartId !== chunk.partId) {
+            return
+        }
+
+        textBuffer.enqueue(messageId, chunk.partId, 'reasoning', chunk.delta)
+    }
+
+    function appendToolCall(chunk: Extract<ChatStreamChunk, { type: 'tool-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            appendPart(
+                current,
+                messageId,
+                createToolPart(
+                    chunk.partId,
+                    chunk.toolName,
+                    chunk.input,
+                    chunk.title,
+                    chunk.action,
+                    chunk.source,
+                    chunk.location,
+                    chunk.serverId
+                )
+            )
+        )
+    }
+
+    function completeToolCall(chunk: Extract<ChatStreamChunk, { type: 'tool-end' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            updateToolPart(current, messageId, chunk.partId, part => ({
+                ...part,
+                title: chunk.title ?? part.title,
+                action: chunk.action ?? part.action,
+                source: chunk.source ?? part.source,
+                location: chunk.location ?? part.location,
+                serverId: chunk.serverId ?? part.serverId,
+                status: 'completed',
+                output: chunk.output,
+            }))
+        )
+    }
+
+    function appendPromptInjection(chunk: Extract<ChatStreamChunk, { type: 'prompt-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            appendPart(
+                current,
+                messageId,
+                createPromptPart(chunk.partId, chunk.promptName, 'called', chunk.source, chunk.location, chunk.serverId, chunk.input)
+            )
+        )
+    }
+
+    function completePromptInjection(chunk: Extract<ChatStreamChunk, { type: 'prompt-end' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            updatePromptPart(current, messageId, chunk.partId, part => ({
+                ...part,
+                promptName: chunk.promptName,
+                source: chunk.source ?? part.source,
+                location: chunk.location ?? part.location,
+                serverId: chunk.serverId ?? part.serverId,
+                status: chunk.status,
+                messageCount: chunk.messageCount,
+            }))
+        )
+    }
+
+    function appendResourceRead(chunk: Extract<ChatStreamChunk, { type: 'resource-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            appendPart(
+                current,
+                messageId,
+                createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId, chunk.source, chunk.location)
+            )
+        )
+    }
+
+    function completeResourceRead(chunk: Extract<ChatStreamChunk, { type: 'resource-end' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            updateResourcePart(current, messageId, chunk.partId, part => ({
+                ...part,
+                resourceName: chunk.resourceName,
+                uri: chunk.uri,
+                source: chunk.source ?? part.source,
+                location: chunk.location ?? part.location,
+                serverId: chunk.serverId,
+                status: 'completed',
+                contentPreview: chunk.contentPreview,
+                isTruncated: chunk.isTruncated,
+                previewChars: chunk.previewChars,
+            }))
+        )
+    }
+
+    function finishAssistantMessage() {
+        updateMessages(current => pruneTransientMessages(current))
+        resetActiveStream()
+    }
+
+    function handleStreamPartError(chunk: Extract<ChatStreamChunk, { type: 'error' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        // 统一错误协议下，tool/resource 错误走部件更新，runtime/request 错误走全局失败。
+        if (chunk.scope === 'tool') {
+            if (!messageId || !chunk.partId) {
+                return
+            }
+
+            updateMessages(current =>
+                updateToolPart(current, messageId, chunk.partId, part => ({
+                    ...part,
+                    toolName: chunk.toolName ?? part.toolName,
+                    source: chunk.source ?? part.source,
+                    location: chunk.location ?? part.location,
+                    serverId: chunk.serverId ?? part.serverId,
+                    input: chunk.input ?? part.input,
+                    status: 'failed',
+                    error: chunk.message,
+                }))
+            )
+            return
+        }
+
+        if (chunk.scope === 'resource') {
+            if (!messageId || !chunk.partId) {
+                return
+            }
+
+            updateMessages(current =>
+                updateResourcePart(current, messageId, chunk.partId, part => ({
+                    ...part,
+                    resourceName: chunk.resourceName ?? part.resourceName,
+                    uri: chunk.uri ?? part.uri,
+                    source: chunk.source ?? part.source,
+                    location: chunk.location ?? part.location,
+                    serverId: chunk.serverId ?? part.serverId,
+                    status: 'failed',
+                    error: chunk.message,
+                }))
+            )
+            return
+        }
+
+        if (chunk.scope === 'prompt') {
+            if (!messageId || !chunk.partId) {
+                return
+            }
+
+            updateMessages(current =>
+                updatePromptPart(current, messageId, chunk.partId, part => ({
+                    ...part,
+                    source: chunk.source ?? part.source,
+                    location: chunk.location ?? part.location,
+                    serverId: chunk.serverId ?? part.serverId,
+                    promptName: chunk.promptName ?? part.promptName,
+                    status: 'failed',
+                    error: chunk.message,
+                }))
+            )
+            return
+        }
+
+        throw new Error(chunk.message)
+    }
+
     function handleChunk(chunk: ChatStreamChunk) {
         if (chunk.type !== 'text-delta' && chunk.type !== 'reasoning-delta') {
-            flushPendingTextDeltas()
+            // 结构性 chunk 到来前先落地文本，避免卡片/结束事件插到尚未 flush 的正文前面。
+            textBuffer.flush()
         }
 
         switch (chunk.type) {
-            case 'start': {
-                activeStreamRef.current.messageId = chunk.messageId
-                activeStreamRef.current.textPartId = null
-                activeStreamRef.current.reasoningPartId = null
-                updateMessages(current => [...current, createAssistantPlaceholder(chunk.messageId)])
+            case 'start':
+                beginAssistantMessage(chunk)
                 return
-            }
-            case 'skill-selected': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current => appendPart(current, messageId, createSkillPart(chunk.skillId, chunk.name, chunk.description)))
+            case 'skill-selected':
+                appendSelectedSkill(chunk)
                 return
-            }
-            case 'text-start': {
-                const messageId = activeStreamRef.current.messageId
-
-                activeStreamRef.current.textPartId = chunk.partId
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current => appendPart(current, messageId, createTextPart('', chunk.partId)))
+            case 'text-start':
+                beginTextPart(chunk)
                 return
-            }
-            case 'text-delta': {
-                const messageId = activeStreamRef.current.messageId
-                const textPartId = activeStreamRef.current.textPartId
-
-                if (!messageId || textPartId !== chunk.partId) {
-                    return
-                }
-
-                enqueueTextDelta(messageId, chunk.partId, 'text', chunk.delta)
+            case 'text-delta':
+                appendTextDeltaBuffered(chunk)
                 return
-            }
-            case 'reasoning-start': {
-                const messageId = activeStreamRef.current.messageId
-
-                activeStreamRef.current.reasoningPartId = chunk.partId
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current => appendPart(current, messageId, createReasoningPart('', chunk.partId)))
+            case 'reasoning-start':
+                beginReasoningPart(chunk)
                 return
-            }
-            case 'reasoning-delta': {
-                const messageId = activeStreamRef.current.messageId
-                const reasoningPartId = activeStreamRef.current.reasoningPartId
-
-                if (!messageId || reasoningPartId !== chunk.partId) {
-                    return
-                }
-
-                enqueueTextDelta(messageId, chunk.partId, 'reasoning', chunk.delta)
+            case 'reasoning-delta':
+                appendReasoningDeltaBuffered(chunk)
                 return
-            }
-            case 'tool-start': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    appendPart(
-                        current,
-                        messageId,
-                        createToolPart(
-                            chunk.partId,
-                            chunk.toolName,
-                            chunk.input,
-                            chunk.title,
-                            chunk.action,
-                            chunk.source,
-                            chunk.location,
-                            chunk.serverId
-                        )
-                    )
-                )
+            case 'tool-start':
+                appendToolCall(chunk)
                 return
-            }
-            case 'tool-end': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    updateToolPart(current, messageId, chunk.partId, part => ({
-                        ...part,
-                        title: chunk.title ?? part.title,
-                        action: chunk.action ?? part.action,
-                        source: chunk.source ?? part.source,
-                        location: chunk.location ?? part.location,
-                        serverId: chunk.serverId ?? part.serverId,
-                        status: 'completed',
-                        output: chunk.output,
-                    }))
-                )
+            case 'tool-end':
+                completeToolCall(chunk)
                 return
-            }
-            case 'prompt-start': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    appendPart(
-                        current,
-                        messageId,
-                        createPromptPart(
-                            chunk.partId,
-                            chunk.promptName,
-                            'called',
-                            chunk.source,
-                            chunk.location,
-                            chunk.serverId,
-                            chunk.input
-                        )
-                    )
-                )
+            case 'prompt-start':
+                appendPromptInjection(chunk)
                 return
-            }
-            case 'prompt-end': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    updatePromptPart(current, messageId, chunk.partId, part => ({
-                        ...part,
-                        promptName: chunk.promptName,
-                        source: chunk.source ?? part.source,
-                        location: chunk.location ?? part.location,
-                        serverId: chunk.serverId ?? part.serverId,
-                        status: chunk.status,
-                        messageCount: chunk.messageCount,
-                    }))
-                )
+            case 'prompt-end':
+                completePromptInjection(chunk)
                 return
-            }
-            case 'resource-start': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    appendPart(
-                        current,
-                        messageId,
-                        createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId, chunk.source, chunk.location)
-                    )
-                )
+            case 'resource-start':
+                appendResourceRead(chunk)
                 return
-            }
-            case 'resource-end': {
-                const messageId = activeStreamRef.current.messageId
-
-                if (!messageId) {
-                    return
-                }
-
-                updateMessages(current =>
-                    updateResourcePart(current, messageId, chunk.partId, part => ({
-                        ...part,
-                        resourceName: chunk.resourceName,
-                        uri: chunk.uri,
-                        source: chunk.source ?? part.source,
-                        location: chunk.location ?? part.location,
-                        serverId: chunk.serverId,
-                        status: 'completed',
-                        contentPreview: chunk.contentPreview,
-                        isTruncated: chunk.isTruncated,
-                        previewChars: chunk.previewChars,
-                    }))
-                )
+            case 'resource-end':
+                completeResourceRead(chunk)
                 return
-            }
             case 'text-end':
             case 'reasoning-end':
                 return
             case 'finish':
-                updateMessages(current => pruneTransientMessages(current))
-                resetActiveStream()
+                finishAssistantMessage()
                 return
-            case 'error': {
-                const messageId = activeStreamRef.current.messageId
-
-                // 统一错误协议下，tool/resource 错误走部件更新，runtime/request 错误走全局失败。
-                if (chunk.scope === 'tool') {
-                    if (!messageId || !chunk.partId) {
-                        return
-                    }
-
-                    updateMessages(current =>
-                        updateToolPart(current, messageId, chunk.partId, part => ({
-                            ...part,
-                            toolName: chunk.toolName ?? part.toolName,
-                            source: chunk.source ?? part.source,
-                            location: chunk.location ?? part.location,
-                            serverId: chunk.serverId ?? part.serverId,
-                            input: chunk.input ?? part.input,
-                            status: 'failed',
-                            error: chunk.message,
-                        }))
-                    )
-                    return
-                }
-
-                if (chunk.scope === 'resource') {
-                    if (!messageId || !chunk.partId) {
-                        return
-                    }
-
-                    updateMessages(current =>
-                        updateResourcePart(current, messageId, chunk.partId, part => ({
-                            ...part,
-                            resourceName: chunk.resourceName ?? part.resourceName,
-                            uri: chunk.uri ?? part.uri,
-                            source: chunk.source ?? part.source,
-                            location: chunk.location ?? part.location,
-                            serverId: chunk.serverId ?? part.serverId,
-                            status: 'failed',
-                            error: chunk.message,
-                        }))
-                    )
-                    return
-                }
-
-                if (chunk.scope === 'prompt') {
-                    if (!messageId || !chunk.partId) {
-                        return
-                    }
-
-                    updateMessages(current =>
-                        updatePromptPart(current, messageId, chunk.partId, part => ({
-                            ...part,
-                            source: chunk.source ?? part.source,
-                            location: chunk.location ?? part.location,
-                            serverId: chunk.serverId ?? part.serverId,
-                            promptName: chunk.promptName ?? part.promptName,
-                            status: 'failed',
-                            error: chunk.message,
-                        }))
-                    )
-                    return
-                }
-
-                throw new Error(chunk.message)
-            }
+            case 'error':
+                handleStreamPartError(chunk)
+                return
         }
     }
 
@@ -936,7 +440,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return false
         }
 
-        clearPendingTextDeltas()
+        textBuffer.clear()
+        // 发送前清理上一轮的空占位或临时消息，保证请求上下文只包含稳定内容。
         const stableBaseMessages = pruneTransientMessages(baseMessages)
         const userMessage = createMessage('user', [createTextPart(text, undefined, displaySegments)], composer)
         const nextMessages = [...stableBaseMessages, userMessage]
@@ -982,13 +487,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             }
 
             setStatus('streaming')
+            // consumeNdjsonStream 会持续回调 handleChunk，把协议事件增量转换成前端消息部件。
             await consumeNdjsonStream(response.body, handleChunk)
 
             if (!controller.signal.aborted) {
                 setStatus('ready')
             }
         } catch (requestError) {
-            flushPendingTextDeltas()
+            // 异常前先 flush，避免最后一批已经收到的文本还停留在 buffer 中。
+            textBuffer.flush()
 
             if (isAbortError(requestError)) {
                 finalizeAbortedAssistantMessage()
@@ -1001,7 +508,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             setError(getErrorMessage(requestError))
             setStatus('error')
         } finally {
-            flushPendingTextDeltas()
+            // finish、error、abort 都会走 finally，再兜底 flush 一次，保证不会丢尾字符。
+            textBuffer.flush()
 
             if (abortControllerRef.current === controller) {
                 abortControllerRef.current = null
@@ -1028,6 +536,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return false
         }
 
+        // 删除一轮用户消息时，同时删除它后面对应的 assistant 回答，保持回合结构完整。
         updateMessages(current => removeUserTurnPair(pruneTransientMessages(current), userMessageId))
         return true
     }
@@ -1043,6 +552,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return false
         }
 
+        // 重新生成复用上一条用户输入和结构化 composer 信息，但丢弃原 assistant 回答。
         return submitTurn(lastTurn.baseMessages, lastTurn.userText, lastTurn.composer, lastTurn.displaySegments)
     }
 

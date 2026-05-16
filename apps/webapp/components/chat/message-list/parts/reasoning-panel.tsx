@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
-import { ThinkingText } from './thinking-text'
+import { ThinkingText } from '../shared/thinking-text'
 
 function getReasoningPreview(text: string) {
     return text.replace(/\s+/g, ' ').trim().slice(0, 140)

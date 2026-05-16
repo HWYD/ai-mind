@@ -2,6 +2,7 @@
 @import 'streamdown/styles.css';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+@import '../styles/ai-message-markdown.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -54,58 +55,7 @@
 
 html {
     color-scheme: light;
-}
-
-.markdown-body > * + * {
-    margin-top: 1rem;
-}
-
-.markdown-body p {
-    margin: 0;
-}
-
-.markdown-body h1,
-.markdown-body h2,
-.markdown-body h3 {
-    font-weight: 700;
-    line-height: 1.4;
-    color: oklch(from var(--foreground) l c h);
-}
-
-.markdown-body h1 {
-    margin-top: 2rem;
-    font-size: 1.875rem;
-}
-
-.markdown-body h2 {
-    margin-top: 1.75rem;
-    font-size: 1.5rem;
-}
-
-.markdown-body h3 {
-    margin-top: 1.5rem;
-    font-size: 1.25rem;
-}
-
-.markdown-body ul,
-.markdown-body ol {
-    padding-left: 1.5rem;
-}
-
-.markdown-body li + li {
-    margin-top: 0.35rem;
-}
-
-.markdown-body a {
-    color: color-mix(in oklch, var(--primary) 78%, black 8%);
-    text-decoration: underline;
-    text-underline-offset: 3px;
-}
-
-.markdown-body blockquote {
-    border-left: 3px solid color-mix(in oklch, var(--border) 88%, white 12%);
-    padding-left: 1rem;
-    color: color-mix(in oklch, var(--muted-foreground) 92%, black 4%);
+    scrollbar-gutter: stable;
 }
 
 .ai-composer-editor .ProseMirror {

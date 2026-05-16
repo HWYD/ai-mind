@@ -3,10 +3,11 @@ import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
-import { type AssistantFeedback, getCopiedButtonClassName, getFeedbackButtonClassName } from './message-list-utils'
-import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from './part-panels'
-import { ReasoningPanel } from './reasoning-panel'
-import { TextPartView } from './text-part'
+import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
+import { ReasoningPanel } from '../parts/reasoning-panel'
+import { TextPartView } from '../parts/text-part'
+import { type AssistantFeedback, getCopiedButtonClassName, getFeedbackButtonClassName } from '../shared/message-list-utils'
+import { FollowUpSuggestions } from '../suggestions/follow-up-suggestions'
 
 export function AssistantMessage({
     combinedReasoning,
@@ -21,7 +22,9 @@ export function AssistantMessage({
     onCopy,
     onFeedbackChange,
     onRegenerateLastTurn,
+    onSelectFollowUpQuestion,
     reserveReasoningSpace,
+    showFollowUpSuggestions,
 }: {
     combinedReasoning: string
     contentParts: MindMessagePart[]
@@ -35,7 +38,9 @@ export function AssistantMessage({
     onCopy: (message: MindMessage) => void
     onFeedbackChange: (messageId: string, feedback: 'up' | 'down') => void
     onRegenerateLastTurn: () => Promise<boolean> | boolean
+    onSelectFollowUpQuestion: (question: string) => void
     reserveReasoningSpace?: boolean
+    showFollowUpSuggestions: boolean
 }) {
     return (
         <article className="flex justify-start">
@@ -114,6 +119,10 @@ export function AssistantMessage({
                             </Button>
                         ) : null}
                     </div>
+                ) : null}
+
+                {showFollowUpSuggestions ? (
+                    <FollowUpSuggestions seed={`${message.id}:${message.createdAt}`} onSelectQuestion={onSelectFollowUpQuestion} />
                 ) : null}
             </div>
         </article>
