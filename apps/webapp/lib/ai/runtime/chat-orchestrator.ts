@@ -21,6 +21,12 @@ import type {
     ToolValidationResult,
     WriteChunk,
 } from './types'
+import {
+    createVersionPlanTasklistAgentSkeleton,
+    readVersionPlanForTasklistAgent,
+    resolveVersionPlanTasklistAgentInvocation,
+    runVersionPlanTasklistAgent,
+} from './version-plan-tasklist-agent'
 
 interface ChatOrchestratorOptions {
     context: ChatExecutionContext
@@ -58,6 +64,10 @@ interface ToolExecutionStageResult {
     toolMessages: ToolMessage[]
 }
 
+// ChatOrchestrator 是单轮聊天请求的总调度器：
+// - 更具体的结构化能力先尝试接管，例如 v0.1.0 的受控单 Agent。
+// - 未命中结构化能力时，再依次回落到 Composer Context、Capability Context、Tool Calling 或普通直答。
+// 这里不直接实现具体 Agent / Tool / Resource 细节，只负责确定本轮应该走哪条主链路。
 async function streamDirectAnswer(
     model: ChatSession['baseModel'],
     langChainMessages: BaseMessage[],
@@ -70,6 +80,23 @@ async function streamDirectAnswer(
     })
 
     await streamAssistantParts(stream, context, writeChunk, isClosed)
+}
+
+function getLastUserMessageText(request: ChatRequest) {
+    for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+        const message = request.messages[index]
+
+        if (message.role !== 'user') {
+            continue
+        }
+
+        return message.parts
+            .map(part => ('text' in part ? part.text : ''))
+            .join('\n')
+            .trim()
+    }
+
+    return ''
 }
 
 export class ChatOrchestrator {
@@ -88,6 +115,8 @@ export class ChatOrchestrator {
     }
 
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
+        // 普通 Tool Calling 的 planning 阶段仍沿用 Skill + Tool prompt 组合。
+        // v0.1.0 Agent 不走这里，它由 runVersionPlanTasklistAgentEntryStage 提前接管。
         return [
             ...buildSystemMessages(
                 session.skillSystemPrompt,
@@ -105,9 +134,9 @@ export class ChatOrchestrator {
         }
 
         // Planning stage consumes one bound-model stream and folds it into:
-        // 1. executable tool calls
-        // 2. normalized validation errors
-        // 3. visibility status for assistant text content
+        // - executable tool calls
+        // - normalized validation errors
+        // - visibility status for assistant text content
         const planningStream = await session.toolBoundModel.stream(this.buildPlanningMessages(session, withRetryPrompt), {
             signal: this.context.signal,
         })
@@ -259,7 +288,8 @@ export class ChatOrchestrator {
             }
         }
 
-        // Final-answer stage turns planning + tool outputs into natural-language closure.
+        // 普通 Tool Calling 的最终回答阶段：把 planning 消息、ToolMessage 和可选 Prompt 上下文合并，
+        // 再交给基础模型生成自然语言收束。Agent 的最终回答由 Agent runner 自己生成，不复用这里。
         const finalMessages: BaseMessage[] = [
             ...buildSystemMessages(
                 session.skillSystemPrompt,
@@ -280,7 +310,8 @@ export class ChatOrchestrator {
     }
 
     private async runCapabilityContextAnswerStage(session: ChatSession) {
-        // Step 3.5 的能力消费入口：先判断本轮是否命中固定 remote capability 场景。
+        // Capability Context 是比普通 Tool Calling 更早的“上下文注入”分支。
+        // 它只处理固定 capability 场景，例如 remote resource / prompt 已被 runtime 主动解析出的情况。
         // 命中后由 runtime 主动获取上下文，再进入最终回答阶段；未命中则继续原有 tool/direct-answer 链路。
         const capabilityInvocations = resolveCapabilityContextInvocations(this.request, session.skillDefinition)
 
@@ -296,7 +327,7 @@ export class ChatOrchestrator {
             ...buildSystemMessages(
                 session.skillSystemPrompt,
                 session.skillOutputPolicyPrompt,
-                // 这条 prompt 只约束 Step 3.5 的最终回答阶段，避免模型把内部注入状态暴露给用户。
+                // 这条 prompt 只约束 capability context 的最终回答，避免模型把内部注入状态暴露给用户。
                 '请优先基于本轮 runtime 已获取的 capability 结果或 Prompt 指令回答；不要向用户暴露“已注入/未注入上下文”等内部执行状态。如果某个 capability 调用失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
             ),
             ...session.langChainMessages,
@@ -312,6 +343,8 @@ export class ChatOrchestrator {
     }
 
     private async runComposerContextAnswerStage(session: ChatSession) {
+        // Composer Context 处理用户在输入框里显式选择的 command / reference。
+        // 注意：/tasklist + docs://versions/*.md 会先被 Agent 分支接管，不会落到这里变成普通 docs summary。
         const composerInvocation = resolveComposerContextInvocation(this.request)
 
         if (!composerInvocation) {
@@ -340,6 +373,71 @@ export class ChatOrchestrator {
         return true
     }
 
+    private async runVersionPlanTasklistAgentEntryStage(session: ChatSession) {
+        // v0.1.0 的受控单 Agent 当前仍挂在 runtime 下：
+        // 它不是通用 Agent 平台，而是一条明确的 Runtime-controlled 主路径。
+        //
+        // 入口必须同时满足：
+        // - Composer command 是 /tasklist。
+        // - 用户显式引用 docs://versions/*.md。
+        //
+        // 命中后会读取 version plan、生成 planExtract，并继续执行 draft -> validate -> maybe revise -> final。
+        // 整条 Agent 链路完成后会短路普通 Composer Context、Capability Context 和 Tool Calling。
+        const agentInvocation = resolveVersionPlanTasklistAgentInvocation(this.request)
+
+        if (!agentInvocation) {
+            return false
+        }
+
+        if (agentInvocation.kind === 'missing-version-plan') {
+            // /tasklist 没有显式版本方案时 fail closed，不让模型根据裸目标自由生成 tasklist。
+            writeStaticTextPart(
+                this.writeChunk,
+                '请先通过 @ 引用一个 `docs://versions/*.md` 版本方案，再生成 tasklist 草稿。本版不支持只根据目标直接生成 tasklist。'
+            )
+            return true
+        }
+
+        const skeletonResult = createVersionPlanTasklistAgentSkeleton(agentInvocation)
+
+        logSkillRuntime('version-plan-tasklist-agent-skeleton', {
+            agent: skeletonResult.state.agentName,
+            status: skeletonResult.state.status,
+            versionPlanUri: skeletonResult.state.versionPlanReference.uri,
+        })
+
+        const readResult = await readVersionPlanForTasklistAgent(skeletonResult.state, {
+            context: this.context,
+            stepIndex: 1,
+            userGoal: getLastUserMessageText(this.request),
+            writeChunk: this.writeChunk,
+        })
+
+        if (readResult.success === false) {
+            writeStaticTextPart(
+                this.writeChunk,
+                [
+                    '版本方案读取失败，暂时无法继续生成 tasklist 草稿。',
+                    '',
+                    `错误信息：${readResult.errorMessage}`,
+                    '',
+                    '请确认引用的是可读取的 docs://versions/*.md 文件。v0.1.0 不会自动扫描 versions 目录，也不会读取 docs/tasklists/*。',
+                ].join('\n')
+            )
+            return true
+        }
+
+        await runVersionPlanTasklistAgent({
+            context: this.context,
+            initialState: readResult.state,
+            model: session.baseModel,
+            userGoal: getLastUserMessageText(this.request),
+            writeChunk: this.writeChunk,
+        })
+
+        return true
+    }
+
     async run() {
         const lifecycle = new StreamLifecycle({
             context: this.context,
@@ -348,6 +446,11 @@ export class ChatOrchestrator {
         })
 
         try {
+            // 先发 start，让前端立即创建 assistant 占位。
+            // createChatSession 会解析 Skill / Tool Binding，Agent 场景还可能命中远端 capability 可用性判断；
+            // 如果等这些前置准备完成再发首包，用户会看到“按钮已禁用但消息区空白”的假死状态。
+            lifecycle.emitStartOnce()
+
             const session = await createChatSession(this.request, this.deps)
 
             throwIfAborted(this.context.signal)
@@ -358,8 +461,6 @@ export class ChatOrchestrator {
                 activeTools: session.activeToolNames,
             })
 
-            lifecycle.emitStartOnce()
-
             if (session.skillDefinition) {
                 this.writeChunk({
                     type: 'skill-selected',
@@ -367,6 +468,17 @@ export class ChatOrchestrator {
                     name: session.skillDefinition.name,
                     description: session.skillDefinition.description,
                 })
+            }
+
+            // 主链路优先级从“最具体”到“最通用”：
+            // - 受控 Agent：/tasklist + version plan，完整接管本轮。
+            // - Composer Context：/summary、@resource 等普通结构化输入。
+            // - Capability Context：runtime 主动消费的固定 capability 场景。
+            // - Tool Calling：模型自行决定是否调用已绑定工具。
+            // - Direct Answer：没有工具或无需工具时直接回答。
+            if (await this.runVersionPlanTasklistAgentEntryStage(session)) {
+                lifecycle.emitFinishIfOpen()
+                return
             }
 
             if (await this.runComposerContextAnswerStage(session)) {

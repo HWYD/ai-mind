@@ -1,42 +1,6 @@
-import type { ComposerReference } from '../composer-types'
+import type { ComposerResourceOption, DocsResourceCatalogItem, DocsResourceCatalogResponse } from '../composer-types'
 
-export interface ComposerResourceOption extends ComposerReference {
-    description: string
-}
-
-export const composerResourceOptions: ComposerResourceOption[] = [
-    {
-        id: 'docs:README.md',
-        type: 'resource',
-        label: 'docs/README.md',
-        uri: 'docs://README.md',
-        source: 'local',
-        description: '项目公开文档入口与能力概览',
-    },
-    {
-        id: 'docs:architecture/runtime-boundary.md',
-        type: 'resource',
-        label: 'docs/architecture/runtime-boundary.md',
-        uri: 'docs://architecture/runtime-boundary.md',
-        source: 'local',
-        description: 'Runtime 主链路与分层边界说明',
-    },
-    {
-        id: 'docs:architecture/stream-core.md',
-        type: 'resource',
-        label: 'docs/architecture/stream-core.md',
-        uri: 'docs://architecture/stream-core.md',
-        source: 'local',
-        description: '结构化流式协议与 typed parts 说明',
-    },
-    {
-        id: 'docs:architecture/capability-skill-surface.md',
-        type: 'resource',
-        label: 'docs/architecture/capability-skill-surface.md',
-        uri: 'docs://architecture/capability-skill-surface.md',
-        source: 'local',
-        description: 'Capability、Skill 与 Composer 表面的关系',
-    },
+const remoteResourceOptions: ComposerResourceOption[] = [
     {
         id: 'remote:project-assistant-service:latest-context',
         type: 'resource',
@@ -48,7 +12,69 @@ export const composerResourceOptions: ComposerResourceOption[] = [
     },
 ]
 
-export function getFilteredComposerResources(query: string) {
+const API_SUCCESS_CODE = 0
+
+let cachedDocsResourceOptions: ComposerResourceOption[] | null = null
+let docsResourceOptionsRequest: Promise<ComposerResourceOption[]> | null = null
+
+function isDocsResourceCatalogItem(value: unknown): value is DocsResourceCatalogItem {
+    if (!value || typeof value !== 'object') {
+        return false
+    }
+
+    const record = value as Record<string, unknown>
+
+    return (
+        typeof record.description === 'string' &&
+        typeof record.fileName === 'string' &&
+        (record.group === 'architecture' || record.group === 'readme' || record.group === 'version-plan') &&
+        typeof record.label === 'string' &&
+        typeof record.uri === 'string'
+    )
+}
+
+async function getDocsResourceOptions() {
+    if (cachedDocsResourceOptions) {
+        return cachedDocsResourceOptions
+    }
+
+    docsResourceOptionsRequest ??= fetch('/api/ai/resources/docs-catalog')
+        .then(async response => {
+            if (!response.ok) {
+                throw new Error('Docs resource catalog request failed.')
+            }
+
+            const payload = (await response.json()) as DocsResourceCatalogResponse
+            if (payload.code !== API_SUCCESS_CODE) {
+                throw new Error(payload.message || 'Docs resource catalog request failed.')
+            }
+
+            const options = payload.data.resources.filter(isDocsResourceCatalogItem).map<ComposerResourceOption>(resource => ({
+                id: `docs:${resource.group}:${resource.fileName}`,
+                type: 'resource',
+                label: resource.label,
+                uri: resource.uri,
+                source: 'local',
+                description: resource.description,
+            }))
+
+            cachedDocsResourceOptions = options
+
+            return options
+        })
+        .catch(() => {
+            return []
+        })
+        .finally(() => {
+            docsResourceOptionsRequest = null
+        })
+
+    return docsResourceOptionsRequest
+}
+
+export async function getFilteredComposerResources(query: string) {
+    const docsResourceOptions = await getDocsResourceOptions()
+    const composerResourceOptions = [...docsResourceOptions, ...remoteResourceOptions]
     const normalizedQuery = query.trim().toLowerCase()
 
     if (!normalizedQuery) {

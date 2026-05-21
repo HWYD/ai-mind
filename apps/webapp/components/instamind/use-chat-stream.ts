@@ -29,6 +29,7 @@ import {
     updatePromptPart,
     updateResourcePart,
     updateToolPart,
+    upsertAgentStepPart,
 } from './chat-stream/message-operations'
 import { buildRequestMessages, toRequestSkill } from './chat-stream/request-message-builder'
 import { consumeNdjsonStream } from './chat-stream/stream-reader'
@@ -135,6 +136,59 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         updateMessages(current => appendPart(current, messageId, createSkillPart(chunk.skillId, chunk.name, chunk.description)))
+    }
+
+    function startAgentStep(chunk: Extract<ChatStreamChunk, { type: 'agent-step-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            upsertAgentStepPart(
+                current,
+                messageId,
+                {
+                    partId: chunk.partId,
+                    stepIndex: chunk.stepIndex,
+                    actionType: chunk.actionType,
+                    title: chunk.title,
+                    status: 'running',
+                },
+                chunk.runId,
+                chunk.agentName
+            )
+        )
+    }
+
+    function endAgentStep(chunk: Extract<ChatStreamChunk, { type: 'agent-step-end' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            upsertAgentStepPart(
+                current,
+                messageId,
+                {
+                    partId: chunk.partId,
+                    stepIndex: chunk.stepIndex,
+                    actionType: chunk.actionType,
+                    title: chunk.title ?? chunk.actionType,
+                    status: chunk.status,
+                    summary: chunk.summary,
+                    durationMs: chunk.durationMs,
+                    severity: chunk.severity,
+                    tags: chunk.tags,
+                    error: chunk.error,
+                },
+                chunk.runId,
+                chunk.agentName
+            )
+        )
     }
 
     function beginTextPart(chunk: Extract<ChatStreamChunk, { type: 'text-start' }>) {
@@ -385,6 +439,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 return
             case 'skill-selected':
                 appendSelectedSkill(chunk)
+                return
+            case 'agent-step-start':
+                startAgentStep(chunk)
+                return
+            case 'agent-step-end':
+                endAgentStep(chunk)
                 return
             case 'text-start':
                 beginTextPart(chunk)

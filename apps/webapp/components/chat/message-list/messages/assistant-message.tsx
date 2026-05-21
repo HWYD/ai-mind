@@ -1,13 +1,20 @@
 import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
+import type { MindMessage, MindMessagePart, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
 
+import { AgentTracePanel } from '../parts/agent-trace-panel'
 import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
 import { ReasoningPanel } from '../parts/reasoning-panel'
 import { TextPartView } from '../parts/text-part'
 import { type AssistantFeedback, getCopiedButtonClassName, getFeedbackButtonClassName } from '../shared/message-list-utils'
 import { FollowUpSuggestions } from '../suggestions/follow-up-suggestions'
+
+type AgentDetailPart = PromptPart | ResourcePart | SkillPart | ToolPart
+
+function isAgentDetailPart(part: MindMessagePart): part is AgentDetailPart {
+    return part.type === 'prompt' || part.type === 'resource' || part.type === 'skill' || part.type === 'tool'
+}
 
 export function AssistantMessage({
     combinedReasoning,
@@ -42,12 +49,19 @@ export function AssistantMessage({
     reserveReasoningSpace?: boolean
     showFollowUpSuggestions: boolean
 }) {
+    const agentMessage = contentParts.some(part => part.type === 'agent-step')
+    const agentDetailParts = agentMessage ? contentParts.filter(isAgentDetailPart) : []
+
     return (
         <article className="flex justify-start">
             <div className="w-full max-w-[51rem] text-foreground">
                 <ReasoningPanel combinedReasoning={combinedReasoning} isThinking={isThinking} reserveSpace={reserveReasoningSpace} />
 
                 {contentParts.map((part, index) => {
+                    if (agentMessage && isAgentDetailPart(part)) {
+                        return null
+                    }
+
                     if (part.type === 'text') {
                         return <TextPartView key={`${message.id}:text:${part.id ?? index}`} part={part} />
                     }
@@ -62,6 +76,10 @@ export function AssistantMessage({
 
                     if (part.type === 'skill') {
                         return <SkillPanel key={`${message.id}:skill:${part.id ?? index}`} part={part} />
+                    }
+
+                    if (part.type === 'agent-step') {
+                        return <AgentTracePanel key={`${message.id}:agent-step:${part.runId}`} part={part} detailParts={agentDetailParts} />
                     }
 
                     if (part.type === 'prompt') {

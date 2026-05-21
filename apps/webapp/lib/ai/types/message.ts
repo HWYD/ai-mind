@@ -70,7 +70,31 @@ export interface PromptPart extends BasePart {
     error?: string
 }
 
-export type MindMessagePart = TextPart | ReasoningPart | ToolPart | ResourcePart | SkillPart | PromptPart
+export type AgentStepStatus = 'completed' | 'failed' | 'running' | 'skipped'
+export type AgentStepSeverity = 'error' | 'info' | 'warning'
+
+export interface AgentStepEntry {
+    actionType: string
+    durationMs?: number
+    error?: string
+    partId: string
+    severity?: AgentStepSeverity
+    status: AgentStepStatus
+    stepIndex: number
+    summary?: string
+    tags?: string[]
+    title: string
+}
+
+export interface AgentStepPart extends BasePart {
+    type: 'agent-step'
+    agentName: string
+    runId: string
+    status: AgentStepStatus
+    steps: AgentStepEntry[]
+}
+
+export type MindMessagePart = TextPart | ReasoningPart | ToolPart | ResourcePart | SkillPart | PromptPart | AgentStepPart
 
 export interface MindMessage {
     id: string

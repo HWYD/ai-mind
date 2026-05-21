@@ -35,6 +35,8 @@ const skillModeDescriptions: Record<ChatSkillMode, string> = {
 const composerControlButtonClass =
     'inline-flex size-10 items-center justify-center rounded-xl border border-border/80 bg-background text-base shadow-xs'
 
+let composerHydrated = false
+
 function SlashTriggerIcon() {
     return (
         <span aria-hidden="true" className="text-[0.9rem] font-bold leading-none text-foreground">
@@ -43,14 +45,19 @@ function SlashTriggerIcon() {
     )
 }
 
-function subscribeToHydrationStore() {
-    return () => {}
+function subscribeToHydrationStore(onStoreChange: () => void) {
+    const timeoutId = window.setTimeout(() => {
+        composerHydrated = true
+        onStoreChange()
+    }, 0)
+
+    return () => window.clearTimeout(timeoutId)
 }
 
 function useIsHydrated() {
     return useSyncExternalStore(
         subscribeToHydrationStore,
-        () => true,
+        () => composerHydrated,
         () => false
     )
 }

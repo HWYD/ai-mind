@@ -31,9 +31,8 @@ export interface PromptContextInvocation {
 
 /**
  * 判断本轮是否需要注入本地 Prompt 上下文。
- * v0.0.12 Step 1 已移除模型可见的本地文件读取工具，所以旧的
- * “工具结果 -> local-file-summary Prompt”桥接链路会在这里明确关闭。
- * Step 4D 会通过显式 `docs://...` Resource 引用重新接入 `local-file-summary`。
+ * 模型可见的本地文件读取工具已经下线，所以旧的“工具结果 -> local-file-summary Prompt”
+ * 桥接链路会在这里明确关闭；本地摘要能力改由显式 `docs://...` Resource 引用触发。
  */
 export function resolvePromptContextInvocation(
     _request: ChatRequest,

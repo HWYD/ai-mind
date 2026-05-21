@@ -4,6 +4,7 @@ import { datetimeToolDefinition } from './datetime-tool'
 import { type ChatToolDefinition, createChatToolRegistry } from './registry'
 import { textTransformToolDefinition } from './text-transform-tool'
 import { unitConvertToolDefinition } from './unit-convert-tool'
+import { validateTasklistStructureToolDefinition } from './validate-tasklist-structure-tool'
 
 const chatToolDefinitions: ChatToolDefinition[] = [
     calculatorToolDefinition,
@@ -11,6 +12,7 @@ const chatToolDefinitions: ChatToolDefinition[] = [
     datetimeToolDefinition,
     textTransformToolDefinition,
     unitConvertToolDefinition,
+    validateTasklistStructureToolDefinition,
 ]
 
 export const chatToolRegistry = createChatToolRegistry(chatToolDefinitions)
@@ -34,5 +36,6 @@ export {
     datetimeToolDefinition,
     textTransformToolDefinition,
     unitConvertToolDefinition,
+    validateTasklistStructureToolDefinition,
 }
 export type { ChatToolDefinition, ChatToolRegistry, ToolDisplayConfig, ToolExecutionResult } from './registry'

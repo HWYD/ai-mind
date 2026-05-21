@@ -38,6 +38,24 @@ interface ToolValidationErrorWriteOptions {
     writeChunk: WriteChunk
 }
 
+/**
+ * LangChain 在 tool_call 形式 invoke 时会把工具返回值包成 ToolMessage。
+ * Runtime 内部仍需要拿到原始业务 payload，供 formatOutput、rawResult 和 Agent 质量门复用。
+ */
+function extractToolResultPayload(result: unknown) {
+    if (!ToolMessage.isInstance(result)) {
+        return result
+    }
+
+    const content = typeof result.content === 'string' ? result.content : JSON.stringify(result.content)
+
+    try {
+        return JSON.parse(content) as unknown
+    } catch {
+        return content
+    }
+}
+
 function writeToolExecutionError(options: ToolExecutionErrorOptions) {
     const resourceServerId = options.displayFields.serverId ?? 'mcp-resource'
 
@@ -223,20 +241,19 @@ export async function executeToolCall(
             }
         )
 
-        const output = formatToolExecutionOutput(toolDefinition, result)
-        const toolMessage = ToolMessage.isInstance(result)
-            ? result
-            : new ToolMessage({
-                  content: output,
-                  tool_call_id: toolCall.id ?? createId(),
-                  status: 'success',
-                  metadata: {
-                      toolName: toolCall.name,
-                  },
-              })
+        const resultPayload = extractToolResultPayload(result)
+        const output = formatToolExecutionOutput(toolDefinition, resultPayload)
+        const toolMessage = new ToolMessage({
+            content: output,
+            tool_call_id: toolCall.id ?? createId(),
+            status: 'success',
+            metadata: {
+                toolName: toolCall.name,
+            },
+        })
 
         if (displayFields.outputPartType === 'resource') {
-            const resourceResultFields = getResourceResultFields(toolCall, result, output, options.toolDefinitionMap)
+            const resourceResultFields = getResourceResultFields(toolCall, resultPayload, output, options.toolDefinitionMap)
 
             writeChunk({
                 type: 'resource-end',
@@ -269,6 +286,7 @@ export async function executeToolCall(
             toolCall,
             toolMessage,
             output,
+            rawResult: resultPayload,
             success: true,
         }
     } catch (error) {

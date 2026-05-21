@@ -51,6 +51,7 @@ Tool capability 表示可执行动作。`v0.0.12` 之后，Skill 不再通过 `a
 - internal tools，例如 calculator、datetime、text transform、unit conversion。
 - local MCP tool：`city-weather`。
 - remote MCP tool：`check_doc_consistency`。
+- Agent scope tool：`validate_tasklist_structure`。
 
 Tool 执行仍然走 Tool Runtime 路径。Capability model 负责描述和选择边界，Tool Runtime 负责绑定、校验和执行。
 
@@ -160,6 +161,23 @@ Capability metadata 不能只用于 UI 展示，也需要能被 runtime 消费�
 当前 runtime 可以解析固定的 `reader-skill` Resource / Prompt 场景，写出流式执行事实，并将结果注入最终回答上下文。
 
 Tool 场景回到标准 Tool Runtime，由模型真实产出 tool call 后再执行。这是一条很窄的桥，不是通用 planner。
+
+## Agent Boundary
+
+`v0.1.0` 后，AI Mind 开始引入受控单 Agent。
+
+Agent 可以消费 Resource、Tool 和 Runtime 中的中间状态，但它不等于 Skill，也不等于 Capability Model 本身。
+
+当前原则：
+
+- Skill 描述稳定任务表面。
+- Capability Model 描述可用能力。
+- Tool Runtime 执行具体工具。
+- Agent Runtime 编排一个受控多步任务。
+
+`Version Plan to Tasklist Agent` 只在 `/tasklist + @docs://versions/*.md` 下启动。它会读取用户显式引用的版本方案，生成 tasklist 草稿，调用 `validate_tasklist_structure` 做结构校验，并在必要时最多修正一次。
+
+这个 Agent 不会自动扫描资源、不会写入文件，也不会把所有 capability 暴露给模型自由选择。
 
 ## Design Principle
 

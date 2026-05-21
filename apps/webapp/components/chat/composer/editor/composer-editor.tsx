@@ -13,7 +13,7 @@ import tippy, { type Instance as TippyInstance } from 'tippy.js'
 import type { ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
 
-import type { ComposerPayload } from '../composer-types'
+import type { ComposerPayload, ComposerResourceOption } from '../composer-types'
 import { ComposerCommandMenu, type ComposerCommandMenuRef } from '../menu/composer-command-menu'
 import { getFilteredComposerCommands } from '../menu/composer-command-options'
 import { ComposerResourceMenu, type ComposerResourceMenuRef } from '../menu/composer-resource-menu'
@@ -31,7 +31,7 @@ import { getEditorPlainText, getPlainTextFromContent, serializeComposerPayload, 
 const COMPOSER_PLACEHOLDER = '输入你的问题，或使用 / 命令，@ 引用资源...'
 
 type CommandSuggestionItem = ReturnType<typeof getFilteredComposerCommands>[number]
-type ResourceSuggestionItem = ReturnType<typeof getFilteredComposerResources>[number]
+type ResourceSuggestionItem = ComposerResourceOption
 
 const slashCommandPluginKey = new PluginKey('aiComposerSlashCommand')
 const resourceReferencePluginKey = new PluginKey('aiComposerResourceReference')

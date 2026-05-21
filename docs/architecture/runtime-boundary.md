@@ -56,6 +56,7 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - runtime 错误收口。
 - 固定 Skill 场景下的 Resource / Prompt context 消费。
 - Composer payload hint 消费。
+- 受控 Agent path 的入口识别、状态推进和失败收束。
 
 代表性模块：
 
@@ -66,6 +67,26 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - `authoritative-answer`：判断确定性工具结果是否可以绕过模型改写。
 - `capability-context`：为 `reader-skill` 消费固定 Resource / Prompt context。
 - `composer-context`：消费 Composer command 与 resource reference，生成本轮受控上下文。
+- `version-plan-tasklist-agent`：承接 `/tasklist + @docs://versions/*.md` 的受控单 Agent 路径。
+
+## Controlled Agent Runtime
+
+`v0.1.0` 后，Runtime 可以承接受控单 Agent。
+
+当前 Agent 不是自由 Planner，也不是完整多 Agent 系统。它只在明确入口下启动，并由 Runtime 固定执行顺序、状态转移、资源边界、工具作用域和停止条件。
+
+当前代表路径：
+
+```text
+/tasklist + @docs://versions/*.md
+  -> read version plan
+  -> draft tasklist
+  -> validate structure
+  -> optional revise once
+  -> final answer
+```
+
+Agent 不应该绕过 runtime 直接读取资源、自由绑定工具或写入项目文件。它可以复用 Tool Runtime、Resource adapter 和 stream-core，但必须由 Runtime 控制边界。
 
 ## Skills
 

@@ -1,6 +1,8 @@
 import { createId } from '@/lib/ai/create-id'
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
+    AgentStepEntry,
+    AgentStepPart,
     MindMessage,
     MindMessagePart,
     MindRole,
@@ -104,6 +106,17 @@ export function createPromptPart(
         serverId,
         status,
         input,
+    }
+}
+
+export function createAgentStepPart(entry: AgentStepEntry, runId: string, agentName: string): AgentStepPart {
+    return {
+        id: `agent-step:${runId}`,
+        type: 'agent-step',
+        runId,
+        agentName,
+        status: entry.status,
+        steps: [entry],
     }
 }
 

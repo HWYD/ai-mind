@@ -60,6 +60,7 @@ export interface ExecutedToolResult {
     toolCall: ToolCall
     toolMessage: ToolMessage
     output: string
+    rawResult?: unknown
     success: boolean
 }
 

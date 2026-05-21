@@ -10,6 +10,35 @@ export interface SkillSelectedChunk {
     description?: string
 }
 
+export type AgentStepStatus = 'completed' | 'failed' | 'running' | 'skipped'
+export type AgentStepSeverity = 'error' | 'info' | 'warning'
+
+export interface AgentStepStartChunk {
+    type: 'agent-step-start'
+    partId: string
+    runId: string
+    agentName: string
+    stepIndex: number
+    actionType: string
+    title: string
+}
+
+export interface AgentStepEndChunk {
+    type: 'agent-step-end'
+    partId: string
+    runId: string
+    agentName: string
+    stepIndex: number
+    actionType: string
+    status: Exclude<AgentStepStatus, 'running'>
+    title?: string
+    summary?: string
+    durationMs?: number
+    severity?: AgentStepSeverity
+    tags?: string[]
+    error?: string
+}
+
 export interface TextStartChunk {
     type: 'text-start'
     partId: string
@@ -159,6 +188,8 @@ export interface ErrorChunk {
 export type ChatStreamChunk =
     | StartChunk
     | SkillSelectedChunk
+    | AgentStepStartChunk
+    | AgentStepEndChunk
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk

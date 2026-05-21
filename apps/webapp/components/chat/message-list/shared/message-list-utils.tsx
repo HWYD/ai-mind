@@ -22,6 +22,7 @@ export function hasVisibleContent(part: MindMessagePart) {
         case 'resource':
         case 'skill':
         case 'prompt':
+        case 'agent-step':
             return true
         default:
             return false

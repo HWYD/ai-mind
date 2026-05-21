@@ -1,12 +1,12 @@
 'use client'
 
 import { FileText, Server } from 'lucide-react'
-import { forwardRef, useCallback, useImperativeHandle, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
-import type { ComposerResourceOption } from './composer-resource-options'
+import type { ComposerResourceOption } from '../composer-types'
 
 export interface ComposerResourceMenuRef {
     onKeyDown: (props: { event: KeyboardEvent }) => boolean
@@ -20,7 +20,14 @@ export const ComposerResourceMenu = forwardRef<
     }
 >(({ command, items }, ref) => {
     const [selectedIndex, setSelectedIndex] = useState(0)
+    const selectedItemRef = useRef<HTMLButtonElement | null>(null)
     const boundedSelectedIndex = Math.min(selectedIndex, Math.max(items.length - 1, 0))
+
+    useEffect(() => {
+        selectedItemRef.current?.scrollIntoView({
+            block: 'nearest',
+        })
+    }, [boundedSelectedIndex])
 
     const selectItem = useCallback(
         (index: number) => {
@@ -72,7 +79,7 @@ export const ComposerResourceMenu = forwardRef<
 
     return (
         <div className="relative w-[420px] rounded-2xl border border-border/80 bg-popover p-2 shadow-xl shadow-black/10">
-            <div className="space-y-1">
+            <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
                 {items.map((item, index) => {
                     const isSelected = index === boundedSelectedIndex
                     const Icon = item.source === 'remote' ? Server : FileText
@@ -80,6 +87,7 @@ export const ComposerResourceMenu = forwardRef<
                     return (
                         <button
                             key={item.id}
+                            ref={isSelected ? selectedItemRef : null}
                             type="button"
                             onMouseDown={event => event.preventDefault()}
                             onClick={() => selectItem(index)}

@@ -1,22 +1,25 @@
 # AI Mind
 
-AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 AI 应用从“单轮聊天”走向“能力接入、流式协议、Skill Runtime、MCP 集成与执行过程可视化”的运行时架构。
+AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 AI 应用从“单轮聊天”走向“能力接入、流式协议、Skill Runtime、MCP 集成、受控 Agent 与执行过程可视化”的运行时架构。
 
-它不是普通 AI Chat Demo，也不是完整商业化 Agent 平台。它更像一个围绕 **AI Runtime / Capability / Stream / Skill / MCP** 的开源技术探索项目，重点关注 AI 应用在工程层面如何组织输入、能力、执行过程和流式输出。
+它不是普通 AI Chat Demo，也不是完整商业化 Agent 平台。它更像一个围绕 **AI Runtime / Capability / Stream / Skill / MCP / Agent** 的开源技术探索项目，重点关注 AI 应用在工程层面如何组织输入、能力、执行过程和流式输出。
 
 当前项目处于 **Runtime Skeleton / MVP** 阶段，适合作为 AI 应用前端、AI Runtime、MCP 接入、结构化流式协议和执行过程可视化的技术探索样例。
 
-![AI Mind main UI](./assets/screenshots/ai-mind-v0.0.12-main-ui.gif)
+![AI Mind controlled tasklist agent demo](./assets/screenshots/ai-mind-v0.1.0-tasklist-agent.gif)
+
+> v0.1.0：通过 `/tasklist + @docs://versions/*.md` 触发受控 Tasklist Agent，展示读取版本方案、生成草稿、结构校验、自动修正和最终输出过程。
 
 ## 项目解决的问题
 
 AI Mind 关注的不是“再做一个聊天框”，而是聊天框背后的运行时问题：
 
-- AI 应用从简单聊天扩展到 Tool、Resource、Prompt 后，运行时边界如何拆分。
+- AI 应用从简单聊天扩展到 Tool、Resource、Prompt 和 Agent 后，运行时边界如何拆分。
 - Tool / Resource / Prompt 等能力如何统一建模，并保持各自执行语义。
 - 流式输出中的 `reasoning / tool / resource / prompt / text / error` 等 chunk 如何统一协议。
 - Skill Runtime 如何承接不同类型任务，而不是让主链路持续变胖。
 - MCP Server 如何接入本地和远程能力。
+- 第一个 Agent 如何先做成受控单 Agent，而不是一上来进入开放式规划系统。
 - 前端如何展示 Skill 命中、capability 类型、local / remote 来源、serverId 和执行状态。
 - 如何让 AI 应用从“黑盒回答”变成“可观察、可解释、可调试”的执行过程。
 
@@ -25,7 +28,7 @@ AI Mind 关注的不是“再做一个聊天框”，而是聊天框背后的运
 AI Mind 的价值不在于做一个完整 AI 产品，而在于验证 AI 应用从“聊天界面”走向“能力接入、运行时编排、流式协议和可解释执行”的工程结构。
 
 - 它是一个 AI Native Runtime Skeleton，用于验证 AI 应用运行时架构。
-- 它关注流式输出、Tool / Resource / Prompt 能力建模、Skill Runtime、MCP 接入和执行过程可视化。
+- 它关注流式输出、Tool / Resource / Prompt 能力建模、Skill Runtime、MCP 接入、受控 Agent 和执行过程可视化。
 - 它适合作为 AI 应用前端、AI Runtime、MCP 接入和流式协议的技术探索项目。
 - 它不是普通 AI Chat Demo。
 - 它不是完整商业化 Agent 平台。
@@ -73,18 +76,26 @@ flowchart TD
         NS --> UI["UI Events"]
     end
 
+    subgraph Agent["Agent Side"]
+        AG["Controlled Agent<br/>Version Plan to Tasklist"] --> AS["Agent State Machine"]
+        AS --> QG["validate_tasklist_structure"]
+        AS --> AT["AgentTracePanel"]
+    end
+
     D --> S
     D --> SC
+    D --> AG
 ```
 
 - `API Route` 是 HTTP 边界，负责请求入口、响应包装和错误映射。
 - `chat-service facade` 是薄 facade，负责创建内部流、组装运行时依赖，并返回 `Response`。
-- `Runtime` 是聊天主链路编排层，负责 session、planning、tool execution、final answer、context 注入和错误收口。
+- `Runtime` 是聊天主链路编排层，负责 session、planning、tool execution、controlled agent path、final answer、context 注入和错误收口。
 - `@ai-mind/stream-core` 承接稳定流式内核，负责 NDJSON chunk、生命周期、错误事件和 writer。
 - `Skills` 用于承接稳定任务模式，例如 `utility-skill` 和 `reader-skill`。
 - `Capability Model` 统一描述 Tool / Resource / Prompt 的能力表面、来源和选择边界。
 - MCP Host 同时接入本地 `stdio` server 和 remote `Streamable HTTP` server；当前包含 `weather-server`、`project-docs-server` 和 `project-assistant-service`。
-- 前端通过流式 part 展示文本、工具、资源、Prompt、Skill 命中和执行状态。
+- `Controlled Agent` 当前用于 `/tasklist + @docs://versions/*.md`，生成 tasklist 草稿并通过结构质量门校验。
+- 前端通过流式 part 展示文本、工具、资源、Prompt、Skill 命中、Agent step 和执行状态。
 
 ## 核心设计
 
@@ -130,6 +141,14 @@ Capability Model 用来统一描述 Tool / Resource / Prompt：
 
 `v0.0.12` 后，Skill 不再直接写死 `allowedTools`，而是通过 `capabilitySelectors -> capability catalog -> active tools` 解析本轮可绑定工具。这样可以避免 Skill 维护一套工具名列表，而 Tool Runtime 又维护另一套执行来源。
 
+### Controlled Agent Runtime
+
+`v0.1.0` 后，项目新增第一个受控单 Agent：`Version Plan to Tasklist Agent`。
+
+它只在 `/tasklist + @docs://versions/*.md` 下启动，负责读取用户显式引用的版本方案、生成 tasklist 草稿、调用 `validate_tasklist_structure` 做结构校验，并在必要时最多自动修正一次。
+
+这个 Agent 不是通用 Agent，也不自动扫描 docs 或写入文件。它的入口、步骤、工具和停止条件都由 Runtime 控制。
+
 ### MCP Integration
 
 MCP 在项目里用于验证“能力来源可以来自外部 server”：
@@ -143,7 +162,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.0.12`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.1.0`。
 
 已经验证：
 
@@ -156,13 +175,15 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Capability Model。
 - Composer V1。
 - Capability-driven Tool Runtime。
+- 受控单 Agent。
+- Agent Step 流式协议与执行过程可视化。
 
 当前非目标：
 
 - 不是完整商业化 Agent 平台。
 - 不是 Dify / LangGraph 替代品。
 - 不是完整多 Agent 生产系统。
-- 当前重点是验证运行时分层、能力接入、流式协议和执行过程可视化。
+- 当前重点是验证运行时分层、能力接入、流式协议、受控 Agent 和执行过程可视化。
 
 ## 系列博客
 
@@ -175,22 +196,27 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 1. [README](./README.md)：快速理解项目定位、核心设计和当前状态。
 2. [Docs Overview](./docs)：完整文档入口与推荐阅读顺序。
-3. [Architecture](./docs/architecture)：长期架构说明，包括 runtime boundary、stream-core、capability / skill surface。
+3. [Architecture](./docs/architecture)：长期架构说明，包括 runtime boundary、stream-core、capability / skill surface、controlled agent runtime。
 4. [Versions](./docs/versions)：各版本设计方案。
 5. [Releases](./docs/releases)：版本发布说明。
 6. [Tasklists](./docs/tasklists)：公开任务清单。
 
-## 当前版本：v0.0.12
+## 当前版本：v0.1.0
 
-这版的主线不是继续扩展 Agent 或 workflow，而是在 `v0.0.11` 已建立的 Capability Surface 上收紧本地文档边界、升级输入层，并把 Tool 绑定收口到 capability-driven runtime：
+这版的主线是引入第一个受控单 Agent：`Version Plan to Tasklist Agent`。
 
-- 本地 Resource 边界收敛到 `docs/**/*.md`，统一使用 `docs://...`。
-- 本地 MCP server 从 `project-files-server` 改为 `project-docs-server`。
-- 下线模型可见的 `local-text-read` Tool，保留受控 docs Resource 读取能力。
-- 新增 Tiptap Composer V1，支持 `/` command 与 `@` resource inline chip。
-- 后端兼容旧 `plainText`，新增 `composer` 作为结构化输入 hint。
-- 删除 `SkillDefinition.allowedTools`，通过 `capabilitySelectors -> capability catalog -> Tool Runtime` 解析本轮 active tools。
-- remote MCP Tool 进入标准 Tool Runtime，不再由 capability-context 写死执行。
+它不是通用 Agent，也不是让模型自由规划再执行的开放式 Agent，而是只承接一条明确路径：
+
+- 用户通过 Composer 选择 `/tasklist`。
+- 用户显式引用 `docs://versions/*.md` 版本方案。
+- Runtime 读取版本方案并生成 tasklist 草稿。
+- `validate_tasklist_structure` 执行确定性结构校验。
+- 如存在可自动修正的结构问题，最多自动修正一次。
+- final answer 输出 tasklist 草稿、结构校验结论和人工确认点。
+
+本版不写入 `docs/tasklists/*`，不读取历史 tasklist，不自动扫描 `docs/versions/*`，也不持久化 AgentState。
+
+更多 UI 演示可查看 [assets/screenshots](./assets/screenshots)。
 
 ## 当前能力
 
@@ -198,13 +224,14 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 - `LangChain.js + Ollama`
 - NDJSON 流式协议。
-- `reasoning / tool / resource / prompt / text / error` 多段式消息流。
+- `reasoning / tool / resource / prompt / agent-step / text / error` 多段式消息流。
 - Skill 命中与 Prompt 执行事实展示。
 - 统一 `error` chunk 语义。
 - `authoritative answer`：在单工具确定性结果场景下支持工具结果直出，减少模型二次改写带来的偏差。
 - 最近 `N=8` 轮上下文。
 - Capability-driven Tool Runtime。
 - Composer payload hint 消费。
+- Runtime-controlled Agent path。
 
 ### Skills
 
@@ -218,6 +245,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - `text-transform`
 - `unit-convert`
 - `city-weather`
+- `validate_tasklist_structure`
 - remote MCP `check_doc_consistency`
 
 ### MCP Host MVP
@@ -239,10 +267,21 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Enter 发送、Shift + Enter 换行、中文 IME 防误发。
 - `plainText + composer.command + composer.references` 兼容提交。
 
+### Agent Runtime
+
+- `Version Plan to Tasklist Agent`
+- 入口：`/tasklist + @docs://versions/*.md`
+- `AgentState` 只保存本轮草稿、校验结果和修正次数。
+- `tasklistDraft v1 -> v2` 最多自动修正一次。
+- `validate_tasklist_structure` 作为结构质量门。
+- `AgentTracePanel` 展示读方案、生成草稿、结构校验、自动修正和最终输出。
+- 不自动扫描 docs，不写入 tasklist 文件。
+
 ### 工程化边界
 
 - `route -> chat-service facade -> runtime -> skills / tools / mcp`
 - `@ai-mind/stream-core` / `packages/stream-core` 负责稳定流式内核。
+- `version-plan-tasklist-agent` 负责受控 tasklist Agent 主路径。
 - `apps/webapp/tests/**` 为唯一 webapp 自动化测试目录。
 - `packages/stream-core/tests/**` 为 package 测试目录。
 
@@ -256,6 +295,10 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
     - 薄 facade，负责创建内部流、构造中间 `StreamResult` 并包装 `Response`。
 - `apps/webapp/lib/ai/runtime/`
     - 正式聊天运行时编排层。
+- `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/`
+    - 受控单 Agent，负责从版本方案生成 tasklist 草稿。
+- `apps/webapp/components/chat/message-list/parts/agent-trace-panel.tsx`
+    - Agent 执行过程展示面板。
 - `apps/project-assistant-service/`
     - NestJS remote MCP 服务，当前用于验证单 server 最小闭环。
 - `apps/webapp/tests/`
@@ -276,28 +319,29 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 如果想从代码层面理解项目，可以优先看下面几个入口：
 
-| Area             | Path                                                                           | What to Look For                                                                  |
-| ---------------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Runtime 主编排   | [apps/webapp/lib/ai/runtime](./apps/webapp/lib/ai/runtime)                     | 聊天 session、planning、tool execution、final answer、Composer context 和错误收口 |
-| Stream Core      | [packages/stream-core/src](./packages/stream-core/src)                         | NDJSON chunk 协议、stream lifecycle、error chunk 和 web writer                    |
-| Capability Model | [apps/webapp/lib/ai/capabilities](./apps/webapp/lib/ai/capabilities)           | capability catalog、selector 解析和 active tool binding                           |
-| Composer V1      | [apps/webapp/components/chat/composer](./apps/webapp/components/chat/composer) | Tiptap 输入层、command chip、resource chip、菜单和序列化                          |
-| MCP Integration  | [apps/webapp/lib/ai/mcp](./apps/webapp/lib/ai/mcp)                             | MCP client、server registry、transport、Tool / Resource / Prompt adapter          |
+| Area             | Path                                                                                                               | What to Look For                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Runtime 主编排   | [apps/webapp/lib/ai/runtime](./apps/webapp/lib/ai/runtime)                                                         | 聊天 session、planning、tool execution、Agent stage、final answer 和错误收口 |
+| Agent Runtime    | [apps/webapp/lib/ai/runtime/version-plan-tasklist-agent](./apps/webapp/lib/ai/runtime/version-plan-tasklist-agent) | 受控单 Agent、状态机、runner、plan extract 和 final answer                   |
+| Stream Core      | [packages/stream-core/src](./packages/stream-core/src)                                                             | NDJSON chunk 协议、stream lifecycle、error chunk、agent-step 和 web writer   |
+| Capability Model | [apps/webapp/lib/ai/capabilities](./apps/webapp/lib/ai/capabilities)                                               | capability catalog、selector 解析和 active tool binding                      |
+| Composer V1      | [apps/webapp/components/chat/composer](./apps/webapp/components/chat/composer)                                     | Tiptap 输入层、command chip、resource chip、菜单和序列化                     |
+| MCP Integration  | [apps/webapp/lib/ai/mcp](./apps/webapp/lib/ai/mcp)                                                                 | MCP client、server registry、transport、Tool / Resource / Prompt adapter     |
 
-## v0.0.12 的关键判断
+## v0.1.0 的关键判断
 
 这版有三个重要原则：
 
-1. docs Resource 是受控本地知识边界，不是任意文件读取入口。
-2. Composer 是增强输入框，不是 Markdown 富文本编辑器。
-3. Tool 绑定应该由 capability selector 决定，而不是由 Skill 里的 `allowedTools` 字段直接控制。
+1. 第一个 Agent 先做受控单 Agent，不做通用 Agent。
+2. Agent 必须基于用户显式引用的 `docs://versions/*.md`，不自动扫描 docs。
+3. Agent 输出 tasklist 草稿和校验结论，但不自动写入文件。
 
 因此：
 
-- `docs://...` 只允许读取 `docs/**/*.md`。
-- `/` 和 `@` 只表达本轮意图与引用，不直接执行 workflow。
-- `plainText` 仍是主输入，`composer` 是结构化 hint。
-- Remote Tool 仍走标准 tool call 链，不提前进入 Agent 编排。
+- `/tasklist` 只有配合 `@docs://versions/*.md` 才进入 Agent。
+- `validate_tasklist_structure` 只做结构校验，不判断内容质量是否完美。
+- `tasklistDraft` 只存在本轮 `AgentState` 内存中。
+- Agent Step 通过流式协议展示，但不变成完整调试台。
 
 ## 快速开始前置条件
 
@@ -358,9 +402,10 @@ pnpm build:watch
 
 - `现在广州天气怎么样？`
 - 选择 `/summary`，引用 `@docs://README.md`，输入：`帮我总结这份项目文档`
+- 选择 `/tasklist`，引用 `@docs://versions/v0.1.0-controlled-tasklist-agent.md`，输入：`基于这个版本方案生成 tasklist 草稿`
 - 选择 `@project://latest-context`，输入：`帮我概括当前项目上下文`
 
-其中 `/tasklist` 和 `/check` 当前主要作为任务意图 hint，不等同于立即执行 remote Prompt 或 remote Tool。
+其中 `/tasklist` 只有配合 `@docs://versions/*.md` 才进入受控 Agent；`/check` 当前主要作为任务意图 hint，不等同于立即执行 remote Tool。
 
 ## 常用验证
 
@@ -411,6 +456,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                           |
 | v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                            |
 | v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime |
+| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                      |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -428,7 +474,9 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Local / Remote MCP Resource / Prompt / Tool 最小闭环
 - [x] Composer V1（Tiptap 输入层 + `/` command + `@` resource）
 - [x] Capability-driven Tool Runtime 收口
-- [ ] 受控单 Agent Preview
+- [x] 受控单 Agent Preview
+- [ ] Agent Trace 持久化
+- [ ] tasklist 草稿保存与人工确认流
 - [ ] 持久化与数据层
 
 ## Design Notes / 设计说明
@@ -451,11 +499,21 @@ MCP 用来验证外部能力来源如何进入 AI Runtime。项目同时保留�
 
 ### 为什么要展示执行过程？
 
-AI 应用如果只展示最终答案，运行时行为会很黑盒。当前前端会展示 Skill 命中、capability 类型、local / remote 来源、serverId、执行状态和错误信息，让调试、回归和能力验证更清楚。
+AI 应用如果只展示最终答案，运行时行为会很黑盒。当前前端会展示 Skill 命中、capability 类型、local / remote 来源、serverId、执行状态、Agent step 和错误信息，让调试、回归和能力验证更清楚。
+
+### 为什么第一个 Agent 做成受控 Tasklist Agent？
+
+第一个 Agent 如果直接做通用规划，很容易把资源读取、工具权限、停止条件和前端展示都变成黑盒。`v0.1.0` 选择从 `Version Plan to Tasklist Agent` 开始，是因为它输入明确、输出明确、可以通过结构质量门校验，并且不会自动写文件。
 
 ### 当前为什么不直接做完整 Agent / Workflow？
 
-在 Tool、Resource、Prompt、Skill、MCP、流式协议和输入层边界还没有稳定前，过早进入完整 Agent / Workflow 容易把问题放大。当前项目优先把 Runtime Skeleton 做清楚，再逐步推进受控单 Agent Preview。
+当前已经完成受控单 Agent Preview，但它仍然不是完整 Agent / Workflow 平台。项目会继续先把 Runtime 边界、Agent Trace、工具作用域和人工确认流做稳，再评估更开放的规划执行、多 Agent 或持久化能力。
+
+## Star
+
+如果你也在学习 AI 应用前端、Tool Calling、MCP、Skill Runtime 或 Agent Runtime，可以点个 Star 关注这个项目。
+
+AI Mind 会继续按版本迭代，每一版都会尽量配套源码、设计文档、tasklist、release 和复盘文章，方便持续跟进运行时架构如何一步步长出来。
 
 ## License
 

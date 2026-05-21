@@ -20,7 +20,7 @@
 
 [Architecture](./architecture) 存放跨版本长期成立的架构说明。
 
-这里关注的是稳定边界，例如 runtime boundary、stream-core、capability / skill surface 等内容。
+这里关注的是稳定边界，例如 runtime boundary、stream-core、capability / skill surface、controlled agent runtime 等内容。
 
 ### Versions
 

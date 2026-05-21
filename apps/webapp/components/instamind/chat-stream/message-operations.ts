@@ -1,6 +1,15 @@
-import type { MindMessage, MindMessagePart, PromptPart, ResourcePart, TextPart, ToolPart } from '@/lib/ai/types/message'
+import type {
+    AgentStepEntry,
+    AgentStepPart,
+    MindMessage,
+    MindMessagePart,
+    PromptPart,
+    ResourcePart,
+    TextPart,
+    ToolPart,
+} from '@/lib/ai/types/message'
 
-import { createReasoningPart, createTextPart } from './message-factory'
+import { createAgentStepPart, createReasoningPart, createTextPart } from './message-factory'
 
 export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
     return messages.filter(message => {
@@ -9,7 +18,13 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
         }
 
         return message.parts.some(part => {
-            if (part.type === 'tool' || part.type === 'resource' || part.type === 'skill' || part.type === 'prompt') {
+            if (
+                part.type === 'agent-step' ||
+                part.type === 'tool' ||
+                part.type === 'resource' ||
+                part.type === 'skill' ||
+                part.type === 'prompt'
+            ) {
                 return true
             }
 
@@ -162,6 +177,73 @@ export function updatePromptPart(
                 }
 
                 return updater(part)
+            }),
+        }
+    })
+}
+
+function getAgentStepPartStatus(steps: AgentStepEntry[]): AgentStepPart['status'] {
+    if (steps.some(step => step.status === 'running')) {
+        return 'running'
+    }
+
+    if (steps.some(step => step.status === 'failed')) {
+        return 'failed'
+    }
+
+    if (steps.length > 0 && steps.every(step => step.status === 'skipped')) {
+        return 'skipped'
+    }
+
+    return 'completed'
+}
+
+function upsertAgentStep(steps: AgentStepEntry[], entry: AgentStepEntry) {
+    const existingIndex = steps.findIndex(step => step.partId === entry.partId)
+
+    if (existingIndex === -1) {
+        return [...steps, entry].sort((left, right) => left.stepIndex - right.stepIndex)
+    }
+
+    return steps.map(step => (step.partId === entry.partId ? { ...step, ...entry } : step))
+}
+
+export function upsertAgentStepPart(
+    messages: MindMessage[],
+    messageId: string,
+    entry: AgentStepEntry,
+    runId: string,
+    agentName: string
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+
+        if (!existingPart) {
+            return {
+                ...message,
+                parts: [...message.parts, createAgentStepPart(entry, runId, agentName)],
+            }
+        }
+
+        const nextSteps = upsertAgentStep(existingPart.steps, entry)
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'agent-step' || part.runId !== runId) {
+                    return part
+                }
+
+                return {
+                    ...part,
+                    agentName,
+                    status: getAgentStepPartStatus(nextSteps),
+                    steps: nextSteps,
+                }
             }),
         }
     })
