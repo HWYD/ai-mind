@@ -11,6 +11,7 @@ import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequest, Chat
 import type { MindMessage } from '@/lib/ai/types/message'
 
 import {
+    createAgentTextArtifact,
     createAssistantPlaceholder,
     createMessage,
     createPromptPart,
@@ -21,11 +22,14 @@ import {
     createToolPart,
 } from './chat-stream/message-factory'
 import {
+    appendAgentTextArtifact,
+    appendAgentTextArtifactDelta,
     appendPart,
     getLastUserTurnForRegeneration,
     pruneTransientMessages,
     removeMessage,
     removeUserTurnPair,
+    updateAgentTextArtifact,
     updatePromptPart,
     updateResourcePart,
     updateToolPart,
@@ -211,6 +215,46 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         textBuffer.enqueue(messageId, chunk.partId, 'text', chunk.delta)
+    }
+
+    function beginArtifact(chunk: Extract<ChatStreamChunk, { type: 'artifact-start' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current => appendAgentTextArtifact(current, messageId, createAgentTextArtifact(chunk)))
+    }
+
+    function appendArtifactDelta(chunk: Extract<ChatStreamChunk, { type: 'artifact-delta' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current => appendAgentTextArtifactDelta(current, messageId, chunk.artifactId, chunk.delta))
+    }
+
+    function endArtifact(chunk: Extract<ChatStreamChunk, { type: 'artifact-end' }>) {
+        const messageId = activeStreamRef.current.messageId
+
+        if (!messageId) {
+            return
+        }
+
+        updateMessages(current =>
+            updateAgentTextArtifact(current, messageId, chunk.artifactId, artifact => ({
+                ...artifact,
+                error: chunk.error,
+                metadata: {
+                    ...artifact.metadata,
+                    ...chunk.metadata,
+                },
+                status: chunk.status,
+            }))
+        )
     }
 
     function beginReasoningPart(chunk: Extract<ChatStreamChunk, { type: 'reasoning-start' }>) {
@@ -451,6 +495,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 return
             case 'text-delta':
                 appendTextDeltaBuffered(chunk)
+                return
+            case 'artifact-start':
+                beginArtifact(chunk)
+                return
+            case 'artifact-delta':
+                appendArtifactDelta(chunk)
+                return
+            case 'artifact-end':
+                endArtifact(chunk)
                 return
             case 'reasoning-start':
                 beginReasoningPart(chunk)

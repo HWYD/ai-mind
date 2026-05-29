@@ -1,8 +1,8 @@
 import type { ChatComposerReference, ChatRequest } from '@/lib/ai/types/chat'
 
 import { createId } from '../../create-id'
-import { createInitialVersionPlanTasklistAgentState } from './state-machine'
-import type { VersionPlanTasklistAgentState } from './types'
+import type { VersionPlanTasklistAgentState } from './contract/types'
+import { createInitialVersionPlanTasklistAgentState } from './state/state-machine'
 
 const VERSION_PLAN_RESOURCE_URI_PATTERN = /^docs:\/\/versions\/[^/\\]+\.md$/i
 
@@ -70,24 +70,6 @@ export function createVersionPlanTasklistAgentSkeleton(
     }
 }
 
-export {
-    parseVersionPlanTasklistAgentAction,
-    parseVersionPlanTasklistPlannerActionText,
-    versionPlanTasklistAgentActionSchema,
-} from './action-schema'
-export { getVersionPlanTasklistAgentToolDefinitionMap, isVersionPlanTasklistAgentToolAllowed } from './agent-tools'
-export { extractVersionPlan } from './plan-extract'
 export { runVersionPlanTasklistAgent } from './tasklist-agent-runner'
-export {
-    applyVersionPlanTasklistAgentAction,
-    createInitialVersionPlanTasklistAgentState,
-    validateVersionPlanTasklistAgentAction,
-} from './state-machine'
-export { readVersionPlanForTasklistAgent } from './version-plan-reader'
-export type {
-    VersionPlanExtract,
-    VersionPlanTasklistAgentAction,
-    VersionPlanTasklistAgentState,
-    VersionPlanTasklistAgentStatus,
-    VersionPlanTasklistToolName,
-} from './types'
+export { readVersionPlanForTasklistAgent } from './resources/version-plan-reader'
+export type { VersionPlanTasklistAgentState } from './contract/types'

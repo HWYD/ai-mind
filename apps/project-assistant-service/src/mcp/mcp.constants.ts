@@ -4,7 +4,7 @@
  */
 export const PROJECT_ASSISTANT_MCP_INFO = {
     name: 'project-assistant-service',
-    version: '0.0.11',
+    version: '0.1.1',
 }
 
 /**

@@ -73,17 +73,24 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 
 `v0.1.0` 后，Runtime 可以承接受控单 Agent。
 
-当前 Agent 不是自由 Planner，也不是完整多 Agent 系统。它只在明确入口下启动，并由 Runtime 固定执行顺序、状态转移、资源边界、工具作用域和停止条件。
+当前 Agent 不是自由 Planner，也不是完整多 Agent 系统。它只在明确入口下启动，并由 Runtime 控制执行顺序、状态转移、资源边界、工具作用域和停止条件。
+
+`v0.1.1` 后，受控 Agent 可以做一次白名单 Planning Decision，但这仍然属于 Runtime-controlled path，不等于开放式 Planner。
 
 当前代表路径：
 
 ```text
 /tasklist + @docs://versions/*.md
   -> read version plan
+  -> evaluate readiness
+  -> planning decision
+  -> decide tasklist strategy
   -> draft tasklist
   -> validate structure
   -> optional revise once
+  -> evaluate revision effect
   -> final answer
+  -> text artifact delivery
 ```
 
 Agent 不应该绕过 runtime 直接读取资源、自由绑定工具或写入项目文件。它可以复用 Tool Runtime、Resource adapter 和 stream-core，但必须由 Runtime 控制边界。

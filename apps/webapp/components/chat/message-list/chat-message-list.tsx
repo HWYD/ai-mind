@@ -51,6 +51,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     showFollowUpSuggestions: boolean
 }) {
     const visibleParts = useMemo(() => message.parts.filter(hasVisibleContent), [message.parts])
+    const hasArtifacts = (message.artifacts?.length ?? 0) > 0
     const reasoningParts = useMemo(() => visibleParts.filter((part): part is ReasoningPart => part.type === 'reasoning'), [visibleParts])
     const contentParts = useMemo(() => visibleParts.filter(part => part.type !== 'reasoning'), [visibleParts])
     const combinedReasoning = useMemo(() => buildCombinedReasoning(reasoningParts), [reasoningParts])
@@ -71,7 +72,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
         )
     }
 
-    if (visibleParts.length === 0) {
+    if (visibleParts.length === 0 && !hasArtifacts) {
         if (message.role === 'assistant' && isThinking) {
             return (
                 <article className="flex justify-start">

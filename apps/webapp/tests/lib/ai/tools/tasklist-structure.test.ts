@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 
 import { resolveToolBindingForSkill } from '@/lib/ai/capabilities/tool-binding'
 import {
     getVersionPlanTasklistAgentToolDefinitionMap,
     isVersionPlanTasklistAgentToolAllowed,
-} from '@/lib/ai/runtime/version-plan-tasklist-agent'
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import { utilitySkillDefinition } from '@/lib/ai/skills/utility-skill'
 import { validateTasklistStructure, validateTasklistStructureWithDetail } from '@/lib/ai/tools/tasklist-structure'
 
@@ -116,7 +116,8 @@ describe('tasklist-structure', () => {
         })
 
         expect(result.status).toBe('warning')
-        expect(result.weakSections.some(section => section.section.includes('Test Plan'))).toBe(true)
+        expect(result.weakSections.some(section => section.code === 'missing_test_plan')).toBe(true)
+        expect(result.weakSections.every(section => typeof section.code === 'string' && section.code.length > 0)).toBe(true)
     })
 
     it('does not treat checklist text inside code blocks as real checklist items', () => {

@@ -214,7 +214,7 @@ const projectRoot = resolveProjectRoot()
 const docsRoot = path.join(projectRoot, 'docs')
 const server = new McpServer({
     name: SERVER_ID,
-    version: '0.0.12',
+    version: '0.1.1',
 })
 const docsResourceTemplate = new ResourceTemplate('docs://{+resourcePath}', {
     list: async () => ({

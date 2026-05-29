@@ -3,6 +3,7 @@ import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { MindMessage, MindMessagePart, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
 
+import { AgentTextArtifactPanel } from '../parts/agent-text-artifact-panel'
 import { AgentTracePanel } from '../parts/agent-trace-panel'
 import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
 import { ReasoningPanel } from '../parts/reasoning-panel'
@@ -51,6 +52,7 @@ export function AssistantMessage({
 }) {
     const agentMessage = contentParts.some(part => part.type === 'agent-step')
     const agentDetailParts = agentMessage ? contentParts.filter(isAgentDetailPart) : []
+    const artifacts = message.artifacts ?? []
 
     return (
         <article className="flex justify-start">
@@ -79,7 +81,14 @@ export function AssistantMessage({
                     }
 
                     if (part.type === 'agent-step') {
-                        return <AgentTracePanel key={`${message.id}:agent-step:${part.runId}`} part={part} detailParts={agentDetailParts} />
+                        return (
+                            <div key={`${message.id}:agent-step:${part.runId}`}>
+                                <AgentTracePanel part={part} detailParts={agentDetailParts} />
+                                {artifacts.map(artifact => (
+                                    <AgentTextArtifactPanel key={`${message.id}:artifact:${artifact.artifactId}`} artifact={artifact} />
+                                ))}
+                            </div>
+                        )
                     }
 
                     if (part.type === 'prompt') {
@@ -88,6 +97,12 @@ export function AssistantMessage({
 
                     return null
                 })}
+
+                {!agentMessage
+                    ? artifacts.map(artifact => (
+                          <AgentTextArtifactPanel key={`${message.id}:artifact:${artifact.artifactId}`} artifact={artifact} />
+                      ))
+                    : null}
 
                 {hasTextContent && isAssistantReplyCompleted ? (
                     <div className="mt-2 flex items-center gap-1 text-muted-foreground">

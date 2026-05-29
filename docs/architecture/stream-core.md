@@ -30,9 +30,11 @@ Package 名称：
 
 - `ChatStreamChunk` 协议类型。
 - stream error 协议类型。
+- text artifact 协议类型。
 - `StreamLifecycle`。
 - stream error chunk helpers。
 - static text part writer。
+- text artifact writer。
 - static reasoning part writer。
 - NDJSON web chunk writer。
 
@@ -51,10 +53,25 @@ Package 名称：
 - Tool 执行。
 - Resource 读取。
 - Prompt 消费。
+- Agent 文本产物。
 - 统一错误。
 - finish 事件。
 
 这让前端可以增量、结构化地消费模型输出与运行时执行事实。
+
+## Text Artifact Chunks
+
+`v0.1.1` 后，stream-core 增加通用文本产物协议：
+
+- `artifact-start`
+- `artifact-delta`
+- `artifact-end`
+
+第一版只支持 `artifactType: 'text'`，并用 `artifactKind` 区分 `tasklist`、`generic_markdown` 等文本产物。
+
+这类 chunk 不替代普通 `text-start / text-delta / text-end`。普通 text 继续用于 assistant 回复摘要；artifact 用于承载 Agent 最终交付的 Markdown 或 plain text 产物。
+
+当前第一个落地场景是 `Version Plan to Tasklist Agent` 的最终 tasklist：Runtime 完成结构校验和必要修正后，再通过 text artifact 分段输出最终 Markdown。
 
 ## Error Chunk
 
@@ -94,6 +111,7 @@ Package 名称：
 - MCP client 或 server 逻辑。
 - authoritative answer 策略。
 - 业务 fallback policy。
+- artifact 持久化、编辑器、下载或 diff。
 
 这些职责仍然留在 app runtime，因为它们仍强依赖 AI Mind 当前聊天语义。
 

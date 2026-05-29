@@ -178,7 +178,7 @@ export function isMCPStreamableHttpServerDefinition(
  */
 export const MCP_CLIENT_INFO: Implementation = {
     name: 'ai-mind-mcp-host',
-    version: '0.0.12',
+    version: '0.1.1',
 }
 
 export const MCP_CLIENT_CAPABILITIES: ClientCapabilities = {}

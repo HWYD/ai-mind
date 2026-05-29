@@ -6,7 +6,7 @@ import { AppModule } from './app.module.js'
 
 /**
  * 启动 `project-assistant-service`。
- * v0.0.11 只承载 MCP 最小闭环，同时保留普通 HTTP API 扩展位（例如 `/health`）。
+ * 当前只承载 MCP 最小闭环，同时保留普通 HTTP API 扩展位（例如 `/health`）。
  */
 async function bootstrap() {
     const app = await NestFactory.create(AppModule)

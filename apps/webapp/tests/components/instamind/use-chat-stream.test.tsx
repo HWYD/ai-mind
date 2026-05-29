@@ -228,4 +228,113 @@ describe('useChatStream', () => {
 
         expect(result.current.error).toContain('Model streaming failed.')
     })
+
+    it('artifact chunks 会聚合到 message.artifacts 且不混入普通 text part', async () => {
+        const streamChunks: ChatStreamChunk[] = [
+            { type: 'start', messageId: 'assistant-artifact' },
+            {
+                type: 'artifact-start',
+                artifactId: 'artifact-tasklist',
+                artifactKind: 'tasklist',
+                artifactType: 'text',
+                format: 'markdown',
+                title: 'v0.1.1 Tasklist 草稿',
+            },
+            {
+                type: 'artifact-delta',
+                artifactId: 'artifact-tasklist',
+                delta: '# v0.1.1 Tasklist\n\n',
+            },
+            {
+                type: 'artifact-delta',
+                artifactId: 'artifact-tasklist',
+                delta: '## Step 1\n- [ ] 实现 artifact',
+            },
+            {
+                type: 'artifact-end',
+                artifactId: 'artifact-tasklist',
+                metadata: {
+                    charCount: 42,
+                    sectionCount: 2,
+                    validated: true,
+                },
+                status: 'completed',
+            },
+            { type: 'text-start', partId: 'text-summary' },
+            {
+                type: 'text-delta',
+                partId: 'text-summary',
+                delta: '结构校验结论：pass',
+            },
+            { type: 'text-end', partId: 'text-summary' },
+            { type: 'finish' },
+        ]
+
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(assistantMessage?.artifacts).toHaveLength(1)
+        expect(assistantMessage?.artifacts?.[0]).toMatchObject({
+            artifactId: 'artifact-tasklist',
+            artifactKind: 'tasklist',
+            content: '# v0.1.1 Tasklist\n\n## Step 1\n- [ ] 实现 artifact',
+            status: 'completed',
+            title: 'v0.1.1 Tasklist 草稿',
+        })
+        expect(textPart?.type).toBe('text')
+        expect(textPart?.text).toBe('结构校验结论：pass')
+        expect(textPart?.text).not.toContain('## Step 1')
+    })
+
+    it('failed artifact 会保留在消息中且不导致页面状态失败', async () => {
+        const streamChunks: ChatStreamChunk[] = [
+            { type: 'start', messageId: 'assistant-artifact-failed' },
+            {
+                type: 'artifact-start',
+                artifactId: 'artifact-failed',
+                artifactKind: 'generic_markdown',
+                artifactType: 'text',
+                format: 'markdown',
+                title: 'Markdown 产物',
+            },
+            {
+                type: 'artifact-end',
+                artifactId: 'artifact-failed',
+                error: 'artifact writer failed',
+                status: 'failed',
+            },
+            { type: 'finish' },
+        ]
+
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成报告')
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+
+        expect(assistantMessage?.parts).toHaveLength(0)
+        expect(assistantMessage?.artifacts?.[0]).toMatchObject({
+            artifactId: 'artifact-failed',
+            error: 'artifact writer failed',
+            status: 'failed',
+        })
+    })
 })

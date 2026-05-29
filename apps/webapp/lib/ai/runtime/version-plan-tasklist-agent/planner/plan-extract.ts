@@ -1,4 +1,4 @@
-import type { VersionPlanExtract } from './types'
+import type { VersionPlanExtract } from '../contract/types'
 
 const TARGET_VERSION_PATTERN = /\bv\d+\.\d+\.\d+\b/i
 

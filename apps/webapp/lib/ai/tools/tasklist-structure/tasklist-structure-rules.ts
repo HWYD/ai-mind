@@ -1,4 +1,10 @@
-import type { TasklistBlockingIssue, TasklistStructure, TasklistValidationResult, TasklistWeakSection } from './tasklist-structure-types'
+import type {
+    TasklistBlockingIssue,
+    TasklistStructure,
+    TasklistValidationResult,
+    TasklistWeakSection,
+    TasklistWeakSectionCode,
+} from './tasklist-structure-types'
 
 const MIN_STEP_TASKS = 2
 const MAX_STEP_TASKS = 12
@@ -15,11 +21,18 @@ function createBlockingIssue(code: string, message: string, suggestion: string):
 }
 
 /**
- * 创建弱项问题；弱项默认可自动修正，通常用于触发 v1 -> v2 的结构补全。
+ * 创建弱项问题；code 是后续 warning 分流和 v1/v2 修正效果比较的稳定身份。
  */
-function createWeakSection(section: string, issue: string, suggestion: string, autoFixable = true): TasklistWeakSection {
+function createWeakSection(
+    code: TasklistWeakSectionCode,
+    section: string,
+    issue: string,
+    suggestion: string,
+    autoFixable = true
+): TasklistWeakSection {
     return {
         autoFixable,
+        code,
         issue,
         section,
         suggestion,
@@ -94,45 +107,89 @@ function getWeakSections(structure: TasklistStructure) {
 
     if (!structure.hasTestPlanSection) {
         weakSections.push(
-            createWeakSection('Test Plan / 验证计划', '缺少独立验证计划。', '补充 Test Plan；如果每个 Step 已有验证，该项保持 warning。')
+            createWeakSection(
+                'missing_test_plan',
+                'Test Plan / 验证计划',
+                '缺少独立验证计划。',
+                '补充 Test Plan；如果每个 Step 已有验证，该项保持 warning。',
+                false
+            )
         )
     }
 
     if (!structure.hasExecutionDisciplineSection) {
-        weakSections.push(createWeakSection('执行纪律', '缺少执行纪律。', '补充每个 Step 完成后暂停、review、手动验证再继续的约束。'))
+        weakSections.push(
+            createWeakSection(
+                'missing_execution_discipline',
+                '执行纪律',
+                '缺少执行纪律。',
+                '补充每个 Step 完成后暂停、review、手动验证再继续的约束。'
+            )
+        )
     }
 
     if (!structure.hasPausePoint) {
-        weakSections.push(createWeakSection('暂停点', '缺少暂停点。', '补充 Step 完成后的暂停确认点。'))
+        weakSections.push(createWeakSection('missing_pause_point', '暂停点', '缺少暂停点。', '补充 Step 完成后的暂停确认点。', false))
     }
 
     if (!structure.hasEngineeringVerification) {
-        weakSections.push(createWeakSection('工程验证', '缺少工程验证。', '补充 lint、typecheck、build 或相关最小测试。'))
+        weakSections.push(
+            createWeakSection(
+                'missing_engineering_verification',
+                '工程验证',
+                '缺少工程验证。',
+                '补充 lint、typecheck、build 或相关最小测试。'
+            )
+        )
     }
 
     if (!structure.hasNonGoalsSection) {
-        weakSections.push(createWeakSection('Non-goals / 非目标', '缺少非目标说明。', '补充本版明确不做的范围，避免任务发散。'))
+        weakSections.push(
+            createWeakSection('missing_non_goals', 'Non-goals / 非目标', '缺少非目标说明。', '补充本版明确不做的范围，避免任务发散。')
+        )
     }
 
     if (!structure.hasRisksSection) {
-        weakSections.push(createWeakSection('Risks / 风险或人工确认点', '缺少风险或人工确认点。', '补充需要人工拍板或容易偏离边界的风险。'))
+        weakSections.push(
+            createWeakSection(
+                'weak_risks',
+                'Risks / 风险或人工确认点',
+                '缺少风险或人工确认点。',
+                '补充需要人工拍板或容易偏离边界的风险。',
+                false
+            )
+        )
     }
 
     for (const step of structure.steps) {
         if (step.taskCount < MIN_STEP_TASKS) {
             weakSections.push(
-                createWeakSection(step.title, 'Step 任务过少。', `每个 Step 建议至少包含 ${MIN_STEP_TASKS} 个 checklist item。`)
+                createWeakSection(
+                    'step_too_few_tasks',
+                    step.title,
+                    'Step 任务过少。',
+                    `每个 Step 建议至少包含 ${MIN_STEP_TASKS} 个 checklist item。`,
+                    false
+                )
             )
         }
 
         if (step.taskCount > MAX_STEP_TASKS) {
             weakSections.push(
-                createWeakSection(step.title, 'Step 任务过多。', `每个 Step 建议不超过 ${MAX_STEP_TASKS} 个 checklist item。`)
+                createWeakSection(
+                    'step_too_many_tasks',
+                    step.title,
+                    'Step 任务过多。',
+                    `每个 Step 建议不超过 ${MAX_STEP_TASKS} 个 checklist item。`,
+                    false
+                )
             )
         }
 
         if (!step.hasVerification) {
-            weakSections.push(createWeakSection(step.title, 'Step 缺少最小验证。', '为该 Step 补充最小验证方式或验收标准。'))
+            weakSections.push(
+                createWeakSection('step_missing_verification', step.title, 'Step 缺少最小验证。', '为该 Step 补充最小验证方式或验收标准。')
+            )
         }
     }
 

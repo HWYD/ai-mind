@@ -6,7 +6,7 @@ export type McpAuthResult = 'forbidden' | 'ok' | 'unauthorized'
 
 /**
  * MCP 端点的最小 mock 鉴权服务。
- * v0.0.11 只验证 Bearer Token，不引入用户态登录透传与复杂权限模型。
+ * 当前只验证 Bearer Token，不引入用户态登录透传与复杂权限模型。
  */
 @Injectable()
 export class McpAuthService {

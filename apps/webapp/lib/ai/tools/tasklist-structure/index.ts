@@ -5,6 +5,7 @@ export {
     tasklistBlockingIssueSchema,
     tasklistValidationResultSchema,
     tasklistValidationStatusSchema,
+    tasklistWeakSectionCodeSchema,
     tasklistWeakSectionSchema,
     validateTasklistStructureInputSchema,
     type TasklistBlockingIssue,
@@ -14,6 +15,7 @@ export {
     type TasklistStructure,
     type TasklistValidationResult,
     type TasklistWeakSection,
+    type TasklistWeakSectionCode,
     type ValidateTasklistStructureInput,
 } from './tasklist-structure-types'
 export {

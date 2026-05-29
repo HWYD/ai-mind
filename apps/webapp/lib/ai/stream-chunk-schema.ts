@@ -1,5 +1,20 @@
-import { streamErrorCodes, streamErrorScopes, streamErrorStages } from '@ai-mind/stream-core/protocol'
+import {
+    agentArtifactFormats,
+    agentArtifactKinds,
+    streamErrorCodes,
+    streamErrorScopes,
+    streamErrorStages,
+} from '@ai-mind/stream-core/protocol'
 import { z } from 'zod'
+
+const agentTextArtifactMetadataSchema = z.object({
+    charCount: z.number().int().nonnegative().optional(),
+    generatedFrom: z.string().min(1).optional(),
+    revision: z.number().int().positive().optional(),
+    sectionCount: z.number().int().nonnegative().optional(),
+    targetVersion: z.string().min(1).optional(),
+    validated: z.boolean().optional(),
+})
 
 export const chatStreamChunkSchema = z.discriminatedUnion('type', [
     z.object({
@@ -48,6 +63,28 @@ export const chatStreamChunkSchema = z.discriminatedUnion('type', [
     z.object({
         type: z.literal('text-end'),
         partId: z.string().min(1),
+    }),
+    z.object({
+        type: z.literal('artifact-start'),
+        artifactId: z.string().min(1),
+        artifactType: z.literal('text'),
+        artifactKind: z.enum(agentArtifactKinds),
+        title: z.string().min(1),
+        format: z.enum(agentArtifactFormats),
+        sourceStepId: z.string().min(1).optional(),
+        metadata: agentTextArtifactMetadataSchema.optional(),
+    }),
+    z.object({
+        type: z.literal('artifact-delta'),
+        artifactId: z.string().min(1),
+        delta: z.string(),
+    }),
+    z.object({
+        type: z.literal('artifact-end'),
+        artifactId: z.string().min(1),
+        status: z.enum(['completed', 'failed']),
+        metadata: agentTextArtifactMetadataSchema.optional(),
+        error: z.string().optional(),
     }),
     z.object({
         type: z.literal('reasoning-start'),

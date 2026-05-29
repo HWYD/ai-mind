@@ -1,8 +1,11 @@
+import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
+
 import { createId } from '@/lib/ai/create-id'
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
     AgentStepEntry,
     AgentStepPart,
+    AgentTextArtifactViewModel,
     MindMessage,
     MindMessagePart,
     MindRole,
@@ -117,6 +120,19 @@ export function createAgentStepPart(entry: AgentStepEntry, runId: string, agentN
         agentName,
         status: entry.status,
         steps: [entry],
+    }
+}
+
+export function createAgentTextArtifact(chunk: Extract<ChatStreamChunk, { type: 'artifact-start' }>): AgentTextArtifactViewModel {
+    return {
+        artifactId: chunk.artifactId,
+        artifactKind: chunk.artifactKind,
+        artifactType: chunk.artifactType,
+        content: '',
+        format: chunk.format,
+        metadata: chunk.metadata,
+        status: 'streaming',
+        title: chunk.title,
     }
 }
 

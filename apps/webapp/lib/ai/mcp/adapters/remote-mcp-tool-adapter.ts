@@ -19,7 +19,7 @@ interface JsonSchemaLike {
 
 /**
  * 从 MCP tool 调用结果中提取可交给现有 Tool Runtime 展示和回填的文本。
- * v0.0.12 先只消费 text/structuredContent，避免 remote tool adapter 过早承担复杂内容协议。
+ * 当前先只消费 text/structuredContent，避免 remote tool adapter 过早承担复杂内容协议。
  */
 function extractToolText(result: Awaited<ReturnType<typeof mcpClientManager.callTool>>['result']) {
     const textParts: string[] = []

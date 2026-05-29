@@ -76,3 +76,5 @@ private-folder/*
 .trae/*
 
 AGENTS.md
+
+.agents/*

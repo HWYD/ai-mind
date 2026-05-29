@@ -64,7 +64,7 @@ const weatherServerDefinition: MCPServerDefinition = {
 }
 
 /**
- * `project-assistant-service` 代表 v0.0.11 的 remote MCP 能力来源。
+ * `project-assistant-service` 代表当前 remote MCP 能力来源。
  * 当前通过 Streamable HTTP 接入，先验证单 server 的 Resource / Prompt / Tool 最小闭环。
  */
 const projectAssistantServiceDefinition: MCPServerDefinition = {

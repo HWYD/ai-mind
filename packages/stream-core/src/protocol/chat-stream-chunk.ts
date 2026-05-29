@@ -55,6 +55,46 @@ export interface TextEndChunk {
     partId: string
 }
 
+export const agentArtifactKinds = ['tasklist', 'plan', 'copywriting', 'audit_report', 'release_note', 'generic_markdown'] as const
+export type AgentArtifactKind = (typeof agentArtifactKinds)[number]
+
+export const agentArtifactFormats = ['markdown', 'plain_text'] as const
+export type AgentArtifactFormat = (typeof agentArtifactFormats)[number]
+
+export interface AgentTextArtifactMetadata {
+    charCount?: number
+    generatedFrom?: string
+    revision?: number
+    sectionCount?: number
+    targetVersion?: string
+    validated?: boolean
+}
+
+export interface AgentArtifactStartChunk {
+    type: 'artifact-start'
+    artifactId: string
+    artifactKind: AgentArtifactKind
+    artifactType: 'text'
+    format: AgentArtifactFormat
+    metadata?: AgentTextArtifactMetadata
+    sourceStepId?: string
+    title: string
+}
+
+export interface AgentArtifactDeltaChunk {
+    type: 'artifact-delta'
+    artifactId: string
+    delta: string
+}
+
+export interface AgentArtifactEndChunk {
+    type: 'artifact-end'
+    artifactId: string
+    error?: string
+    metadata?: AgentTextArtifactMetadata
+    status: 'completed' | 'failed'
+}
+
 export interface ReasoningStartChunk {
     type: 'reasoning-start'
     partId: string
@@ -193,6 +233,9 @@ export type ChatStreamChunk =
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk
+    | AgentArtifactStartChunk
+    | AgentArtifactDeltaChunk
+    | AgentArtifactEndChunk
     | ReasoningStartChunk
     | ReasoningDeltaChunk
     | ReasoningEndChunk

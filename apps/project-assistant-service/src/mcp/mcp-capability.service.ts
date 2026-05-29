@@ -9,7 +9,7 @@ interface DocConsistencyInput {
 }
 
 /**
- * 统一注册 `project-assistant-service` 在 v0.0.12 使用的 MCP mock 能力面。
+ * 统一注册 `project-assistant-service` 当前提供的 MCP mock 能力面。
  * 当前严格保持“每类 capability 一个最小 mock”：
  * - resource: `project://latest-context`
  * - prompt: `tasklist-draft`
@@ -51,14 +51,18 @@ export class McpCapabilityService {
                         text: JSON.stringify(
                             {
                                 project: 'AI Mind',
-                                version: 'v0.0.12',
-                                summary: '当前版本聚焦 docs resource 边界、Composer V1 与 capability-driven tool runtime。',
+                                version: 'v0.1.1',
+                                summary:
+                                    '当前版本聚焦 Controlled Planner Lite、Agent Text Artifact 最终产物展示，以及受控 Agent 的过程 / 产物分层。',
                                 documents: [
                                     'README.md',
                                     'docs/README.md',
-                                    'docs/architecture/capability-skill-surface.md',
-                                    'docs/versions/v0.0.12-docs-resource-composer-capability-tool-runtime.md',
-                                    'docs/tasklists/v0.0.12-tasklist.md',
+                                    'docs/architecture/agent-runtime.md',
+                                    'docs/architecture/runtime-boundary.md',
+                                    'docs/architecture/stream-core.md',
+                                    'docs/versions/v0.1.1-controlled-planner-lite.md',
+                                    'docs/tasklists/v0.1.1-tasklist.md',
+                                    'docs/releases/v0.1.1.md',
                                 ],
                                 updatedAt: new Date().toISOString(),
                             },
@@ -79,7 +83,7 @@ export class McpCapabilityService {
         server.registerPrompt(
             'tasklist-draft',
             {
-                title: 'Tasklist Draft Prompt',
+                title: '任务清单草稿 Prompt',
                 description: '生成 tasklist 草稿的模板提示（mock）。',
                 argsSchema: {
                     goal: z.string().optional().describe('本次 tasklist 的目标（可选）。'),

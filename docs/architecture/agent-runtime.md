@@ -8,6 +8,8 @@ AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 
 `v0.1.0` 的第一个 Agent 是 `Version Plan to Tasklist Agent`，用于把用户显式引用的版本方案转换成 tasklist 草稿。
 
+`v0.1.1` 在这条路径上加入 `Controlled Planner Lite`：Agent 可以在 Runtime 白名单 action 中做一次有限决策，但仍然不能自由读取资源、自由调用工具、写入文件或循环规划。
+
 ## Agent 的边界
 
 当前 Agent 必须满足明确入口：
@@ -27,19 +29,26 @@ AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 
 ## Runtime-controlled Path
 
-Agent 的主路径由 Runtime 固定：
+Agent 的主路径由 Runtime 控制：
 
 ```text
 read_resource
   -> plan_extract
+  -> evaluate_plan_readiness
+  -> planning_decision
+  -> optional read_optional_context
+  -> decide_tasklist_strategy
   -> draft_tasklist v1
   -> validate_tasklist_structure
+  -> decide_warning_disposition
   -> optional revise_tasklist v2
-  -> validate_tasklist_structure
+  -> optional validate_tasklist_structure
+  -> evaluate_revision_effect
   -> final_answer
+  -> text artifact delivery
 ```
 
-模型只在受控生成节点产出草稿或修正文稿。
+模型只在受控节点产出 action、strategy、草稿或修正文稿。
 
 Runtime 负责：
 
@@ -47,6 +56,8 @@ Runtime 负责：
 - 校验资源边界。
 - 控制状态转移。
 - 限制最大步数和最大修正次数。
+- 限制 Planning Decision 的 action schema。
+- 限制 optional context 白名单和读取次数。
 - 执行结构质量门。
 - 输出最终回答。
 
@@ -58,9 +69,15 @@ Runtime 负责：
 
 - 显式引用的 version plan。
 - `planExtract`。
+- `PlanReadinessResult`。
+- `PlanningDecisionAction`。
+- `TasklistStrategy`。
+- optional context 读取摘要。
 - `tasklistDraft v1`。
 - `tasklistDraft v2`。
 - 结构校验结果。
+- `WarningDisposition`。
+- `RevisionEffectResult`。
 - 自动修正次数。
 
 当前不做：
@@ -86,6 +103,15 @@ Agent 可以使用 Tool，但 Tool 暴露范围必须受控。
 
 可选上下文读取也受限制，不等同于开放文件访问。
 
+`v0.1.1` 只允许在 draft 前最多补读一个白名单资源：
+
+- `docs://README.md`
+- `docs://architecture/runtime-boundary.md`
+- `docs://architecture/stream-core.md`
+- `docs://architecture/capability-skill-surface.md`
+- `docs://architecture/agent-runtime.md`
+- `project://latest-context`
+
 本地 docs resource 仍然遵守 `docs://...` 边界，MCP 或 Agent 都不能绕过这一层去读取任意源码或配置文件。
 
 ## Agent Trace
@@ -102,8 +128,30 @@ Agent 执行过程通过流式 step 事件展示：
 - Agent 做到了哪一步。
 - 哪一步读了资源。
 - 哪一步调用了工具。
+- 做出了什么受控 decision。
+- 使用了什么 tasklist strategy。
 - 是否发生了修正。
+- 修正是否有效。
 - 最终是否输出结果。
+
+面板只展示摘要，不展示完整 action JSON、prompt、AgentState 或 draft diff。
+
+## Agent Text Artifact
+
+`v0.1.1` 后，最终 tasklist 正文不再作为普通 assistant text 的一部分输出。
+
+Runtime 会在 `final_answer` 阶段输出通用 text artifact：
+
+- `artifact-start`
+- `artifact-delta`
+- `artifact-end`
+
+前端用 `AgentTextArtifactPanel` 展示最终 tasklist Markdown 正文，普通 text 只展示结构校验、修正效果和人工复核点摘要。
+
+这个设计保持了两个边界：
+
+- 过程归 `AgentTracePanel`，产物归 `AgentTextArtifactPanel`。
+- Artifact 只是最终交付展示，不提供持久化、编辑、下载或 diff。
 
 ## Design Principle
 

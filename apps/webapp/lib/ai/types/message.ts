@@ -1,3 +1,5 @@
+import type { AgentArtifactFormat, AgentArtifactKind } from '@ai-mind/stream-core/protocol'
+
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from './chat'
 
 export type MindRole = 'system' | 'user' | 'assistant'
@@ -94,12 +96,32 @@ export interface AgentStepPart extends BasePart {
     steps: AgentStepEntry[]
 }
 
+export interface AgentTextArtifactViewModel {
+    artifactId: string
+    artifactKind: AgentArtifactKind
+    artifactType: 'text'
+    content: string
+    error?: string
+    format: AgentArtifactFormat
+    metadata?: {
+        charCount?: number
+        generatedFrom?: string
+        revision?: number
+        sectionCount?: number
+        targetVersion?: string
+        validated?: boolean
+    }
+    status: 'completed' | 'failed' | 'streaming'
+    title: string
+}
+
 export type MindMessagePart = TextPart | ReasoningPart | ToolPart | ResourcePart | SkillPart | PromptPart | AgentStepPart
 
 export interface MindMessage {
     id: string
     role: MindRole
     parts: MindMessagePart[]
+    artifacts?: AgentTextArtifactViewModel[]
     createdAt: string
     composer?: ChatComposerPayload
 }

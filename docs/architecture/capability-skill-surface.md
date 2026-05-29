@@ -177,7 +177,11 @@ Agent 可以消费 Resource、Tool 和 Runtime 中的中间状态，但它不等
 
 `Version Plan to Tasklist Agent` 只在 `/tasklist + @docs://versions/*.md` 下启动。它会读取用户显式引用的版本方案，生成 tasklist 草稿，调用 `validate_tasklist_structure` 做结构校验，并在必要时最多修正一次。
 
+`v0.1.1` 后，这个 Agent 增加一次 `Controlled Planner Lite` 决策。模型可以在 Runtime 白名单 action 中选择下一步，例如继续生成、读取一个白名单 optional context、提出澄清问题或边界停止。
+
 这个 Agent 不会自动扫描资源、不会写入文件，也不会把所有 capability 暴露给模型自由选择。
+
+optional context 也不是开放式 Resource selection。它只能读取固定白名单资源，且最多读取一次。
 
 ## Design Principle
 

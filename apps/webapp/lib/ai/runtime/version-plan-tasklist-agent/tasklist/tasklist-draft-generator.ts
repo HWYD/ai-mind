@@ -2,9 +2,9 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 
 import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure'
 
-import { getMessageContentText } from '../message-content'
-import type { ChatSession } from '../types'
-import type { VersionPlanTasklistAgentState, VersionPlanTasklistDraftArtifact } from './types'
+import { getMessageContentText } from '../../message-content'
+import type { ChatSession } from '../../types'
+import type { VersionPlanTasklistAgentState, VersionPlanTasklistDraftArtifact } from '../contract/types'
 
 const MAX_PLAN_TEXT_CHARS = 30_000
 const DRAFT_SYSTEM_PROMPT = `
@@ -91,6 +91,35 @@ function formatPlanExtractForPrompt(state: VersionPlanTasklistAgentState) {
     ].join('\n\n')
 }
 
+function formatTasklistStrategyForPrompt(state: VersionPlanTasklistAgentState) {
+    const strategy = state.artifacts.planning.strategy
+
+    if (!strategy) {
+        return '未生成 TasklistStrategy。'
+    }
+
+    const granularityInstructions: Record<typeof strategy.granularity, string> = {
+        coarse: '使用粗粒度拆分，Step 数量靠近 expectedStepRange 下限，避免生成过多 Step；每个 Step 只保留关键 checklist。',
+        detailed:
+            '使用细粒度拆分，Step 数量可以靠近 expectedStepRange 上限，checklist 要更具体，但不得新增 version plan 中没有的能力范围。',
+        medium: '使用中等粒度拆分，Step 数量尽量落在 expectedStepRange 中间区间，保持每个 Step 可实现、可验证。',
+    }
+
+    return [
+        `granularity：${strategy.granularity}`,
+        `expectedStepRange：${strategy.expectedStepRange[0]}-${strategy.expectedStepRange[1]}`,
+        formatListForPrompt('grouping（Step 标题和章节优先按这些分组组织）', strategy.grouping),
+        formatListForPrompt('priority（checklist 和执行顺序优先遵循）', strategy.priority),
+        `reason：${strategy.reason}`,
+        '',
+        '生成约束：',
+        `- Step 数量尽量落在 ${strategy.expectedStepRange[0]}-${strategy.expectedStepRange[1]} 个之间；如果 version plan 信息不足，不要为了凑数量编造范围。`,
+        '- Step 标题和顺序优先围绕 grouping 组织。',
+        '- 每个 Step 内 checklist 的先后顺序优先遵循 priority。',
+        `- ${granularityInstructions[strategy.granularity]}`,
+    ].join('\n')
+}
+
 function stripMarkdownFence(text: string) {
     const trimmedText = text.trim()
     const fenceMatch = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/i.exec(trimmedText)
@@ -166,6 +195,9 @@ export function buildDraftTasklistMessages(state: VersionPlanTasklistAgentState,
                 '',
                 'planExtract：',
                 formatPlanExtractForPrompt(state),
+                '',
+                'TasklistStrategy：',
+                formatTasklistStrategyForPrompt(state),
                 '',
                 'version plan 原文：',
                 truncatePlanText(getVersionPlanContent(state)),

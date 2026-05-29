@@ -8,8 +8,21 @@ export const validateTasklistStructureInputSchema = z.object({
 
 export const tasklistValidationStatusSchema = z.enum(['pass', 'warning', 'fail'])
 
+export const tasklistWeakSectionCodeSchema = z.enum([
+    'missing_test_plan',
+    'missing_engineering_verification',
+    'missing_pause_point',
+    'missing_execution_discipline',
+    'missing_non_goals',
+    'weak_risks',
+    'step_too_few_tasks',
+    'step_too_many_tasks',
+    'step_missing_verification',
+])
+
 export const tasklistWeakSectionSchema = z.object({
     autoFixable: z.boolean(),
+    code: tasklistWeakSectionCodeSchema,
     issue: z.string(),
     section: z.string(),
     suggestion: z.string(),
@@ -64,5 +77,6 @@ export interface TasklistStructure {
 
 export type ValidateTasklistStructureInput = z.infer<typeof validateTasklistStructureInputSchema>
 export type TasklistBlockingIssue = z.infer<typeof tasklistBlockingIssueSchema>
+export type TasklistWeakSectionCode = z.infer<typeof tasklistWeakSectionCodeSchema>
 export type TasklistValidationResult = z.infer<typeof tasklistValidationResultSchema>
 export type TasklistWeakSection = z.infer<typeof tasklistWeakSectionSchema>

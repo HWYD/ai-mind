@@ -1,6 +1,7 @@
 import type {
     AgentStepEntry,
     AgentStepPart,
+    AgentTextArtifactViewModel,
     MindMessage,
     MindMessagePart,
     PromptPart,
@@ -13,8 +14,12 @@ import { createAgentStepPart, createReasoningPart, createTextPart } from './mess
 
 export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
     return messages.filter(message => {
-        if (message.parts.length === 0) {
+        if (message.parts.length === 0 && (message.artifacts?.length ?? 0) === 0) {
             return false
+        }
+
+        if ((message.artifacts?.length ?? 0) > 0) {
+            return true
         }
 
         return message.parts.some(part => {
@@ -30,6 +35,73 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
 
             return part.text.trim().length > 0
         })
+    })
+}
+
+export function appendAgentTextArtifact(messages: MindMessage[], messageId: string, artifact: AgentTextArtifactViewModel): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingArtifacts = message.artifacts ?? []
+        const existingIndex = existingArtifacts.findIndex(existingArtifact => existingArtifact.artifactId === artifact.artifactId)
+
+        if (existingIndex === -1) {
+            return {
+                ...message,
+                artifacts: [...existingArtifacts, artifact],
+            }
+        }
+
+        return {
+            ...message,
+            artifacts: existingArtifacts.map(existingArtifact =>
+                existingArtifact.artifactId === artifact.artifactId ? { ...existingArtifact, ...artifact } : existingArtifact
+            ),
+        }
+    })
+}
+
+export function appendAgentTextArtifactDelta(messages: MindMessage[], messageId: string, artifactId: string, delta: string): MindMessage[] {
+    if (!delta) {
+        return messages
+    }
+
+    return messages.map(message => {
+        if (message.id !== messageId || !message.artifacts?.length) {
+            return message
+        }
+
+        return {
+            ...message,
+            artifacts: message.artifacts.map(artifact =>
+                artifact.artifactId === artifactId
+                    ? {
+                          ...artifact,
+                          content: artifact.content + delta,
+                      }
+                    : artifact
+            ),
+        }
+    })
+}
+
+export function updateAgentTextArtifact(
+    messages: MindMessage[],
+    messageId: string,
+    artifactId: string,
+    updater: (artifact: AgentTextArtifactViewModel) => AgentTextArtifactViewModel
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId || !message.artifacts?.length) {
+            return message
+        }
+
+        return {
+            ...message,
+            artifacts: message.artifacts.map(artifact => (artifact.artifactId === artifactId ? updater(artifact) : artifact)),
+        }
     })
 }
 

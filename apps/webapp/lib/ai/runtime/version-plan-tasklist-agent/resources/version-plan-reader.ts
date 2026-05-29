@@ -5,11 +5,12 @@ import { projectDocsResourceAdapter } from '@/lib/ai/mcp/adapters'
 import { PROJECT_DOCS_SERVER_ID } from '@/lib/ai/mcp/adapters/docs-resource-shared'
 import { MCPHostError, toErrorMessage } from '@/lib/ai/mcp/protocol/errors'
 
-import { throwIfAborted, writeStreamErrorChunk } from '../stream-errors'
-import type { ChatExecutionContext, WriteChunk } from '../types'
-import { extractVersionPlan } from './plan-extract'
-import { applyVersionPlanTasklistAgentAction } from './state-machine'
-import type { VersionPlanExtract, VersionPlanTasklistAgentState } from './types'
+import { throwIfAborted, writeStreamErrorChunk } from '../../stream-errors'
+import type { ChatExecutionContext, WriteChunk } from '../../types'
+import type { VersionPlanExtract, VersionPlanTasklistAgentState } from '../contract/types'
+import { extractVersionPlan } from '../planner/plan-extract'
+import { evaluatePlanReadiness } from '../planner/plan-readiness'
+import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
 
 interface ReadVersionPlanOptions {
     context: ChatExecutionContext
@@ -116,6 +117,10 @@ export async function readVersionPlanForTasklistAgent(
             planUri: resource.uri,
             userGoal: options.userGoal,
         })
+        const readiness = evaluatePlanReadiness(extract, {
+            planContent: resource.content,
+            planUri: resource.uri,
+        })
         const advancedState = applyVersionPlanTasklistAgentAction(state, {
             type: 'read_resource',
             resourceUri: resource.uri,
@@ -126,6 +131,10 @@ export async function readVersionPlanForTasklistAgent(
             ...advancedState,
             artifacts: {
                 ...advancedState.artifacts,
+                planning: {
+                    ...advancedState.artifacts.planning,
+                    readiness,
+                },
                 versionPlan: {
                     content: resource.content,
                     extract,
