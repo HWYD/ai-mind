@@ -189,7 +189,13 @@ export function validateVersionPlanTasklistAgentAction(
     }
 }
 
-// apply 会再次调用 guard，避免未来调用方绕过 validate 直接推进非法状态。
+/**
+ * 根据一个受控 Agent action 推进状态机，并返回推进后的最新 state。
+ *
+ * 这里是状态变更的唯一入口：先复用 guard 校验当前状态是否允许执行该 action，
+ * 再统一递增 step 计数、写入对应 artifact，并切换到下一个 Agent status。
+ * 如果 action 不符合当前状态边界，会直接抛错，避免调用方绕过状态机写出非法状态。
+ */
 export function applyVersionPlanTasklistAgentAction(
     state: VersionPlanTasklistAgentState,
     action: VersionPlanTasklistAgentAction

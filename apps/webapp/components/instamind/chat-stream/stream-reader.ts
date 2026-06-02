@@ -2,6 +2,24 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 
 import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
 
+function parseChatStreamLine(line: string): ChatStreamChunk {
+    let parsedJson: unknown
+
+    try {
+        parsedJson = JSON.parse(line)
+    } catch {
+        throw new Error('服务端返回了无法解析的流式数据。')
+    }
+
+    const parsedChunk = chatStreamChunkSchema.safeParse(parsedJson)
+
+    if (!parsedChunk.success) {
+        throw new Error('服务端返回了无法解析的流式数据。')
+    }
+
+    return parsedChunk.data
+}
+
 export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: (chunk: ChatStreamChunk) => void) {
     const reader = stream.getReader()
     const decoder = new TextDecoder()
@@ -26,13 +44,7 @@ export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, on
                 continue
             }
 
-            const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(trimmedLine))
-
-            if (!parsedChunk.success) {
-                throw new Error('服务端返回了无法解析的流式数据。')
-            }
-
-            onChunk(parsedChunk.data)
+            onChunk(parseChatStreamLine(trimmedLine))
         }
     }
 
@@ -42,11 +54,5 @@ export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, on
         return
     }
 
-    const parsedChunk = chatStreamChunkSchema.safeParse(JSON.parse(finalLine))
-
-    if (!parsedChunk.success) {
-        throw new Error('服务端返回了无法解析的流式数据。')
-    }
-
-    onChunk(parsedChunk.data)
+    onChunk(parseChatStreamLine(finalLine))
 }

@@ -88,3 +88,21 @@
     padding-left: 1rem;
     color: color-mix(in oklch, var(--muted-foreground) 92%, black 4%);
 }
+
+.ai-message-markdown table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+.ai-message-markdown th,
+.ai-message-markdown td {
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.ai-message-markdown th code,
+.ai-message-markdown td code {
+    white-space: normal;
+}

@@ -1,22 +1,19 @@
 import { useEffect, useRef } from 'react'
 
-import type { MindMessage } from '@/lib/ai/types/message'
+import type { PendingTextDelta } from './stream-message-reducer'
 
-import { appendTextualPartDelta } from './message-operations'
-
-interface PendingTextDelta {
-    messageId: string
-    partId: string
-    partType: 'text' | 'reasoning'
-    delta: string
-}
-
+/**
+ * 文本增量 buffer 的配置。
+ *
+ * buffer 不直接修改 MindMessage，flush 时只把合并后的 delta 批量交回上层 reducer。
+ * 这样“何时刷新”和“消息树怎么变”分开，避免 token 缓冲逻辑污染 stream chunk 映射规则。
+ */
 interface UseStreamTextBufferOptions {
     flushIntervalMs: number
-    updateMessages: (updater: (current: MindMessage[]) => MindMessage[]) => void
+    flushTextDeltas: (pendingTextDeltas: PendingTextDelta[]) => void
 }
 
-export function useStreamTextBuffer({ flushIntervalMs, updateMessages }: UseStreamTextBufferOptions) {
+export function useStreamTextBuffer({ flushIntervalMs, flushTextDeltas }: UseStreamTextBufferOptions) {
     const pendingTextDeltasRef = useRef<Map<string, PendingTextDelta>>(new Map())
     const flushTimerRef = useRef<number | null>(null)
     const flushRafRef = useRef<number | null>(null)
@@ -45,6 +42,11 @@ export function useStreamTextBuffer({ flushIntervalMs, updateMessages }: UseStre
         }
     }
 
+    /**
+     * 把已合并的 pending delta 一次提交给 reducer。
+     *
+     * pending 已经按 messageId + partType + partId 合并；一次提交只触发一次消息树更新。
+     */
     function flush() {
         clearScheduledFlushes()
 
@@ -55,14 +57,7 @@ export function useStreamTextBuffer({ flushIntervalMs, updateMessages }: UseStre
         const pending = Array.from(pendingTextDeltasRef.current.values())
         pendingTextDeltasRef.current.clear()
 
-        // 一次 flush 只触发一次 setMessages，把多个 part 的文本增量合并进同一棵消息树。
-        updateMessages(current =>
-            pending.reduce(
-                (nextMessages, deltaItem) =>
-                    appendTextualPartDelta(nextMessages, deltaItem.messageId, deltaItem.partId, deltaItem.partType, deltaItem.delta),
-                current
-            )
-        )
+        flushTextDeltas(pending)
     }
 
     function clear() {
@@ -93,6 +88,11 @@ export function useStreamTextBuffer({ flushIntervalMs, updateMessages }: UseStre
         }, flushIntervalMs)
     }
 
+    /**
+     * 入队单个 text/reasoning delta。
+     *
+     * 同一个 message/part/type 的连续 token 会合并成一条 delta，减少 Markdown 解析和 React 渲染压力。
+     */
     function enqueue(messageId: string, partId: string, partType: 'text' | 'reasoning', delta: string) {
         if (!delta) {
             return

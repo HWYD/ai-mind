@@ -10,32 +10,17 @@ import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequest, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
 import type { MindMessage } from '@/lib/ai/types/message'
 
-import {
-    createAgentTextArtifact,
-    createAssistantPlaceholder,
-    createMessage,
-    createPromptPart,
-    createReasoningPart,
-    createResourcePart,
-    createSkillPart,
-    createTextPart,
-    createToolPart,
-} from './chat-stream/message-factory'
-import {
-    appendAgentTextArtifact,
-    appendAgentTextArtifactDelta,
-    appendPart,
-    getLastUserTurnForRegeneration,
-    pruneTransientMessages,
-    removeMessage,
-    removeUserTurnPair,
-    updateAgentTextArtifact,
-    updatePromptPart,
-    updateResourcePart,
-    updateToolPart,
-    upsertAgentStepPart,
-} from './chat-stream/message-operations'
+import { createMessage, createTextPart } from './chat-stream/message-factory'
+import { getLastUserTurnForRegeneration, pruneTransientMessages, removeMessage, removeUserTurnPair } from './chat-stream/message-operations'
 import { buildRequestMessages, toRequestSkill } from './chat-stream/request-message-builder'
+import {
+    createInitialActiveStreamState,
+    createStreamMessageState,
+    reduceStreamChunk,
+    reduceStreamTextDeltas,
+    type StreamMessageReducerResult,
+    type StreamMessageState,
+} from './chat-stream/stream-message-reducer'
 import { consumeNdjsonStream } from './chat-stream/stream-reader'
 import { useStreamTextBuffer } from './chat-stream/use-stream-text-buffer'
 
@@ -69,44 +54,80 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const messagesRef = useRef(messages)
     const conversationIdRef = useRef(createId())
     const abortControllerRef = useRef<AbortController | null>(null)
-    // 当前正在写入的 assistant message/part 由服务端 stream chunk 驱动，后续 delta 必须精确落到对应 part。
-    const activeStreamRef = useRef<{
-        messageId: string | null
-        textPartId: string | null
-        reasoningPartId: string | null
-    }>({
-        messageId: null,
-        textPartId: null,
-        reasoningPartId: null,
-    })
-    function updateMessages(updater: (current: MindMessage[]) => MindMessage[]) {
-        setMessages(current => {
-            const next = updater(current)
+
+    const streamMessageStateRef = useRef(createStreamMessageState(messages)) //给 stream reducer 用的同步快照，里面有 messages + activeStream。
+
+    /**
+     * React state 更新后，把异步代码会读取的两份快照也更新到同一份 messages。
+     *
+     * messagesRef 只保存最新消息列表，给 send/regenerate/delete 这类异步入口读取。
+     * streamMessageStateRef 还额外保存 activeStream 指针，所以这里只替换它的 messages，保留当前正在写入的 part 位置。
+     */
+    function syncMessageSnapshots(nextMessages: MindMessage[]) {
+        messagesRef.current = nextMessages
+        streamMessageStateRef.current = {
+            ...streamMessageStateRef.current,
+            messages: nextMessages,
+        }
+    }
+
+    /**
+     * 执行一次 stream reducer，并把 reducer 算出的新状态提交回 Hook。
+     *
+     * 结构性 chunk 和 buffer flush 都走这里：先用当前 streamMessageStateRef 计算下一份 state，
+     * 再同步更新 streamMessageStateRef、messagesRef 和 React messages。
+     * 如果 reducer 返回 fatalError，说明是整轮请求级错误，直接抛给 submitTurn 的 catch 统一展示。
+     */
+    function commitStreamReduction(applyStreamUpdate: (currentState: StreamMessageState) => StreamMessageReducerResult) {
+        const reduction = applyStreamUpdate(streamMessageStateRef.current)
+
+        streamMessageStateRef.current = reduction.state
+        messagesRef.current = reduction.state.messages
+        setMessages(reduction.state.messages)
+
+        if (reduction.fatalError) {
+            throw new Error(reduction.fatalError)
+        }
+    }
+
+    /**
+     * 提交流式消息树更新，同时同步 React state 和 messagesRef。
+     * applyMessageUpdate 接收当前完整 messages 列表，并且必须返回更新后的完整 messages 列表。
+     */
+    function updateMessages(applyMessageUpdate: (currentMessages: MindMessage[]) => MindMessage[]) {
+        setMessages(currentMessages => {
+            const nextMessages = applyMessageUpdate(currentMessages)
             // 异步提交、取消和重新生成都依赖最新消息快照，ref 与 state 必须同步推进。
-            messagesRef.current = next
-            return next
+            syncMessageSnapshots(nextMessages)
+            return nextMessages
         })
     }
 
     const textBuffer = useStreamTextBuffer({
         flushIntervalMs: STREAM_TEXT_FLUSH_INTERVAL_MS,
-        updateMessages,
+        flushTextDeltas: pendingTextDeltas => {
+            // buffer 只负责合并高频 token；真正改消息树仍交回 reducer，避免文本更新逻辑散在两个文件。
+            commitStreamReduction(current => reduceStreamTextDeltas(current, pendingTextDeltas))
+        },
     })
 
     useEffect(() => {
-        messagesRef.current = messages
+        syncMessageSnapshots(messages)
     }, [messages])
 
+    /**
+     * 重置 active part 指针。
+     * 取消、finish 或错误清理后必须重置，避免下一轮 delta 误落到上一轮消息。
+     */
     function resetActiveStream() {
-        activeStreamRef.current = {
-            messageId: null,
-            textPartId: null,
-            reasoningPartId: null,
+        streamMessageStateRef.current = {
+            ...streamMessageStateRef.current,
+            activeStream: createInitialActiveStreamState(),
         }
     }
 
     function discardActiveAssistantMessage() {
-        const { messageId } = activeStreamRef.current
+        const { messageId } = streamMessageStateRef.current.activeStream
 
         if (!messageId) {
             return
@@ -125,90 +146,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         resetActiveStream()
     }
 
-    function beginAssistantMessage(chunk: Extract<ChatStreamChunk, { type: 'start' }>) {
-        activeStreamRef.current.messageId = chunk.messageId
-        activeStreamRef.current.textPartId = null
-        activeStreamRef.current.reasoningPartId = null
-        updateMessages(current => [...current, createAssistantPlaceholder(chunk.messageId)])
-    }
-
-    function appendSelectedSkill(chunk: Extract<ChatStreamChunk, { type: 'skill-selected' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current => appendPart(current, messageId, createSkillPart(chunk.skillId, chunk.name, chunk.description)))
-    }
-
-    function startAgentStep(chunk: Extract<ChatStreamChunk, { type: 'agent-step-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            upsertAgentStepPart(
-                current,
-                messageId,
-                {
-                    partId: chunk.partId,
-                    stepIndex: chunk.stepIndex,
-                    actionType: chunk.actionType,
-                    title: chunk.title,
-                    status: 'running',
-                },
-                chunk.runId,
-                chunk.agentName
-            )
-        )
-    }
-
-    function endAgentStep(chunk: Extract<ChatStreamChunk, { type: 'agent-step-end' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            upsertAgentStepPart(
-                current,
-                messageId,
-                {
-                    partId: chunk.partId,
-                    stepIndex: chunk.stepIndex,
-                    actionType: chunk.actionType,
-                    title: chunk.title ?? chunk.actionType,
-                    status: chunk.status,
-                    summary: chunk.summary,
-                    durationMs: chunk.durationMs,
-                    severity: chunk.severity,
-                    tags: chunk.tags,
-                    error: chunk.error,
-                },
-                chunk.runId,
-                chunk.agentName
-            )
-        )
-    }
-
-    function beginTextPart(chunk: Extract<ChatStreamChunk, { type: 'text-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        activeStreamRef.current.textPartId = chunk.partId
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current => appendPart(current, messageId, createTextPart('', chunk.partId)))
-    }
-
+    /**
+     * 缓存当前打开 text part 的 delta。
+     * partId 不匹配时丢弃，保护多段输出时不会串写。
+     */
     function appendTextDeltaBuffered(chunk: Extract<ChatStreamChunk, { type: 'text-delta' }>) {
-        const messageId = activeStreamRef.current.messageId
-        const textPartId = activeStreamRef.current.textPartId
+        const { messageId, textPartId } = streamMessageStateRef.current.activeStream
 
         if (!messageId || textPartId !== chunk.partId) {
             return
@@ -217,258 +160,18 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         textBuffer.enqueue(messageId, chunk.partId, 'text', chunk.delta)
     }
 
-    function beginArtifact(chunk: Extract<ChatStreamChunk, { type: 'artifact-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current => appendAgentTextArtifact(current, messageId, createAgentTextArtifact(chunk)))
-    }
-
-    function appendArtifactDelta(chunk: Extract<ChatStreamChunk, { type: 'artifact-delta' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current => appendAgentTextArtifactDelta(current, messageId, chunk.artifactId, chunk.delta))
-    }
-
-    function endArtifact(chunk: Extract<ChatStreamChunk, { type: 'artifact-end' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            updateAgentTextArtifact(current, messageId, chunk.artifactId, artifact => ({
-                ...artifact,
-                error: chunk.error,
-                metadata: {
-                    ...artifact.metadata,
-                    ...chunk.metadata,
-                },
-                status: chunk.status,
-            }))
-        )
-    }
-
-    function beginReasoningPart(chunk: Extract<ChatStreamChunk, { type: 'reasoning-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        activeStreamRef.current.reasoningPartId = chunk.partId
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current => appendPart(current, messageId, createReasoningPart('', chunk.partId)))
-    }
-
+    /**
+     * 缓存当前打开 reasoning part 的 delta。
+     * reasoning 与 text 分开校验 partId，避免推理内容和正文互相拼接。
+     */
     function appendReasoningDeltaBuffered(chunk: Extract<ChatStreamChunk, { type: 'reasoning-delta' }>) {
-        const messageId = activeStreamRef.current.messageId
-        const reasoningPartId = activeStreamRef.current.reasoningPartId
+        const { messageId, reasoningPartId } = streamMessageStateRef.current.activeStream
 
         if (!messageId || reasoningPartId !== chunk.partId) {
             return
         }
 
         textBuffer.enqueue(messageId, chunk.partId, 'reasoning', chunk.delta)
-    }
-
-    function appendToolCall(chunk: Extract<ChatStreamChunk, { type: 'tool-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            appendPart(
-                current,
-                messageId,
-                createToolPart(
-                    chunk.partId,
-                    chunk.toolName,
-                    chunk.input,
-                    chunk.title,
-                    chunk.action,
-                    chunk.source,
-                    chunk.location,
-                    chunk.serverId
-                )
-            )
-        )
-    }
-
-    function completeToolCall(chunk: Extract<ChatStreamChunk, { type: 'tool-end' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            updateToolPart(current, messageId, chunk.partId, part => ({
-                ...part,
-                title: chunk.title ?? part.title,
-                action: chunk.action ?? part.action,
-                source: chunk.source ?? part.source,
-                location: chunk.location ?? part.location,
-                serverId: chunk.serverId ?? part.serverId,
-                status: 'completed',
-                output: chunk.output,
-            }))
-        )
-    }
-
-    function appendPromptInjection(chunk: Extract<ChatStreamChunk, { type: 'prompt-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            appendPart(
-                current,
-                messageId,
-                createPromptPart(chunk.partId, chunk.promptName, 'called', chunk.source, chunk.location, chunk.serverId, chunk.input)
-            )
-        )
-    }
-
-    function completePromptInjection(chunk: Extract<ChatStreamChunk, { type: 'prompt-end' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            updatePromptPart(current, messageId, chunk.partId, part => ({
-                ...part,
-                promptName: chunk.promptName,
-                source: chunk.source ?? part.source,
-                location: chunk.location ?? part.location,
-                serverId: chunk.serverId ?? part.serverId,
-                status: chunk.status,
-                messageCount: chunk.messageCount,
-            }))
-        )
-    }
-
-    function appendResourceRead(chunk: Extract<ChatStreamChunk, { type: 'resource-start' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            appendPart(
-                current,
-                messageId,
-                createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId, chunk.source, chunk.location)
-            )
-        )
-    }
-
-    function completeResourceRead(chunk: Extract<ChatStreamChunk, { type: 'resource-end' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        if (!messageId) {
-            return
-        }
-
-        updateMessages(current =>
-            updateResourcePart(current, messageId, chunk.partId, part => ({
-                ...part,
-                resourceName: chunk.resourceName,
-                uri: chunk.uri,
-                source: chunk.source ?? part.source,
-                location: chunk.location ?? part.location,
-                serverId: chunk.serverId,
-                status: 'completed',
-                contentPreview: chunk.contentPreview,
-                isTruncated: chunk.isTruncated,
-                previewChars: chunk.previewChars,
-            }))
-        )
-    }
-
-    function finishAssistantMessage() {
-        updateMessages(current => pruneTransientMessages(current))
-        resetActiveStream()
-    }
-
-    function handleStreamPartError(chunk: Extract<ChatStreamChunk, { type: 'error' }>) {
-        const messageId = activeStreamRef.current.messageId
-
-        // 统一错误协议下，tool/resource 错误走部件更新，runtime/request 错误走全局失败。
-        if (chunk.scope === 'tool') {
-            if (!messageId || !chunk.partId) {
-                return
-            }
-
-            updateMessages(current =>
-                updateToolPart(current, messageId, chunk.partId, part => ({
-                    ...part,
-                    toolName: chunk.toolName ?? part.toolName,
-                    source: chunk.source ?? part.source,
-                    location: chunk.location ?? part.location,
-                    serverId: chunk.serverId ?? part.serverId,
-                    input: chunk.input ?? part.input,
-                    status: 'failed',
-                    error: chunk.message,
-                }))
-            )
-            return
-        }
-
-        if (chunk.scope === 'resource') {
-            if (!messageId || !chunk.partId) {
-                return
-            }
-
-            updateMessages(current =>
-                updateResourcePart(current, messageId, chunk.partId, part => ({
-                    ...part,
-                    resourceName: chunk.resourceName ?? part.resourceName,
-                    uri: chunk.uri ?? part.uri,
-                    source: chunk.source ?? part.source,
-                    location: chunk.location ?? part.location,
-                    serverId: chunk.serverId ?? part.serverId,
-                    status: 'failed',
-                    error: chunk.message,
-                }))
-            )
-            return
-        }
-
-        if (chunk.scope === 'prompt') {
-            if (!messageId || !chunk.partId) {
-                return
-            }
-
-            updateMessages(current =>
-                updatePromptPart(current, messageId, chunk.partId, part => ({
-                    ...part,
-                    source: chunk.source ?? part.source,
-                    location: chunk.location ?? part.location,
-                    serverId: chunk.serverId ?? part.serverId,
-                    promptName: chunk.promptName ?? part.promptName,
-                    status: 'failed',
-                    error: chunk.message,
-                }))
-            )
-            return
-        }
-
-        throw new Error(chunk.message)
     }
 
     function handleChunk(chunk: ChatStreamChunk) {
@@ -478,65 +181,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         switch (chunk.type) {
-            case 'start':
-                beginAssistantMessage(chunk)
-                return
-            case 'skill-selected':
-                appendSelectedSkill(chunk)
-                return
-            case 'agent-step-start':
-                startAgentStep(chunk)
-                return
-            case 'agent-step-end':
-                endAgentStep(chunk)
-                return
-            case 'text-start':
-                beginTextPart(chunk)
-                return
             case 'text-delta':
                 appendTextDeltaBuffered(chunk)
-                return
-            case 'artifact-start':
-                beginArtifact(chunk)
-                return
-            case 'artifact-delta':
-                appendArtifactDelta(chunk)
-                return
-            case 'artifact-end':
-                endArtifact(chunk)
-                return
-            case 'reasoning-start':
-                beginReasoningPart(chunk)
                 return
             case 'reasoning-delta':
                 appendReasoningDeltaBuffered(chunk)
                 return
-            case 'tool-start':
-                appendToolCall(chunk)
-                return
-            case 'tool-end':
-                completeToolCall(chunk)
-                return
-            case 'prompt-start':
-                appendPromptInjection(chunk)
-                return
-            case 'prompt-end':
-                completePromptInjection(chunk)
-                return
-            case 'resource-start':
-                appendResourceRead(chunk)
-                return
-            case 'resource-end':
-                completeResourceRead(chunk)
-                return
-            case 'text-end':
-            case 'reasoning-end':
-                return
-            case 'finish':
-                finishAssistantMessage()
-                return
-            case 'error':
-                handleStreamPartError(chunk)
+            default:
+                // 结构性 chunk 统一交给 reducer：start/tool/resource/prompt/artifact/error/finish 等消息树变化都在一个入口收口。
+                commitStreamReduction(current => reduceStreamChunk(current, chunk))
                 return
         }
     }
@@ -561,6 +214,9 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         const controller = new AbortController()
 
         messagesRef.current = nextMessages
+        // 每一轮新请求都从“稳定历史消息 + 当前 user 消息”重新初始化 stream reducer 状态；
+        // 否则上一轮 activeStream 的 messageId/partId 可能影响本轮 delta 路由。
+        streamMessageStateRef.current = createStreamMessageState(nextMessages)
         setMessages(nextMessages)
         setError(null)
         setStatus('submitted')
