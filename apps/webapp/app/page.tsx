@@ -1,5 +1,5 @@
-import InstantMindPage from '@/components/instamind/instantmind-page'
+import { LandingPage } from '@/components/landing/landing-page'
 
 export default function Page() {
-    return <InstantMindPage />
+    return <LandingPage />
 }

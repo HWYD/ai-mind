@@ -51,11 +51,45 @@
     --composer-resource-bg: oklch(0.975 0.016 185);
     --composer-resource-border: oklch(0.875 0.045 185);
     --composer-resource-foreground: oklch(0.36 0.07 185);
+    --landing-brand: var(--composer-focus);
+    --landing-brand-soft: var(--composer-focus-soft);
+    --landing-brand-border: var(--composer-focus-border);
+    --landing-resource: var(--composer-resource-foreground);
+    --landing-resource-soft: var(--composer-resource-bg);
+    --landing-resource-border: var(--composer-resource-border);
+    --landing-panel-muted: oklch(0.985 0.006 255);
+    --landing-shadow-lg: 0 24px 80px oklch(0.145 0 0 / 0.1);
 }
 
 html {
     color-scheme: light;
     scrollbar-gutter: stable;
+}
+
+@keyframes hero-preview-float {
+    0% {
+        transform: translate3d(0, 0, 0) rotate(0deg);
+    }
+
+    50% {
+        transform: translate3d(3px, -8px, 0) rotate(0.2deg);
+    }
+
+    100% {
+        transform: translate3d(0, 0, 0) rotate(0deg);
+    }
+}
+
+.hero-preview-float {
+    animation: hero-preview-float 6.8s ease-in-out infinite;
+    will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hero-preview-float {
+        animation: none;
+        will-change: auto;
+    }
 }
 
 .ai-composer-editor .ProseMirror {

@@ -1,6 +1,8 @@
 'use client'
 
 import { ArrowDown, CircleAlert } from 'lucide-react'
+import Image from 'next/image'
+import Link from 'next/link'
 import { useState } from 'react'
 
 import { ChatComposer } from '@/components/chat/composer/chat-composer'
@@ -63,14 +65,19 @@ export default function InstantMindPage() {
 
     return (
         <main className="min-h-screen bg-background text-foreground">
-            <div className="mx-auto flex min-h-screen max-w-5xl flex-col gap-5 px-6 pt-9" style={{ paddingBottom: `${bottomSpacing}px` }}>
-                <header>
-                    <h1 className="m-0 text-4xl font-semibold tracking-tight">AI Mind</h1>
-                    <p className="mt-3 text-base leading-7 text-muted-foreground">
-                        AI Runtime 实验台：支持普通问答、深度思考、Tool 调用与多来源上下文读取。
-                    </p>
-                </header>
+            <header className="border-b bg-background">
+                <div className="mx-auto flex h-16 max-w-7xl items-center px-6 lg:px-12">
+                    <Link href="/" className="flex items-center gap-3" aria-label="AI Mind 官网">
+                        <Image src="/brand/ai-mind-icon.png" alt="AI Mind" width={32} height={32} className="size-8 rounded-lg" priority />
+                        <span className="text-xl font-semibold tracking-tight text-foreground">AI Mind</span>
+                    </Link>
+                </div>
+            </header>
 
+            <div
+                className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl flex-col gap-5 px-6 pt-8"
+                style={{ paddingBottom: `${bottomSpacing}px` }}
+            >
                 {error ? (
                     <Alert variant="destructive">
                         <CircleAlert className="size-4" strokeWidth={2.2} />
