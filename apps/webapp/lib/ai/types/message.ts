@@ -1,4 +1,4 @@
-import type { AgentArtifactFormat, AgentArtifactKind } from '@ai-mind/stream-core/protocol'
+import type { AgentArtifactFormat, AgentArtifactKind, AgentGraphDebugSummary } from '@ai-mind/stream-core/protocol'
 
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from './chat'
 
@@ -88,9 +88,38 @@ export interface AgentStepEntry {
     title: string
 }
 
+export interface AgentGraphNodeEntry {
+    durationMs?: number
+    error?: string
+    nodeId: string
+    partId: string
+    patchSummaries: string[]
+    severity?: AgentStepSeverity
+    status: AgentStepStatus
+    stepIndex: number
+    summary?: string
+    tags?: string[]
+    title: string
+}
+
+export interface AgentGraphRouteEntry {
+    fromNodeId: string
+    reason?: string
+    routeLabel: string
+    toNodeId: string
+}
+
+export interface AgentGraphTrace {
+    debugSummary?: AgentGraphDebugSummary
+    nodes: AgentGraphNodeEntry[]
+    routes: AgentGraphRouteEntry[]
+    runtime: 'LangGraph'
+}
+
 export interface AgentStepPart extends BasePart {
     type: 'agent-step'
     agentName: string
+    graph?: AgentGraphTrace
     runId: string
     status: AgentStepStatus
     steps: AgentStepEntry[]

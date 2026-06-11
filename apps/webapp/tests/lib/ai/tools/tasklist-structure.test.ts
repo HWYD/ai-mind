@@ -19,6 +19,11 @@ const validTasklist = `
 
 基于版本方案生成受控单 Agent 的实施清单。
 
+## Goals
+
+- 建立受控 Agent 入口。
+- 生成可审查 tasklist。
+
 ## Non-goals
 
 - 不写入 docs 文件
@@ -120,12 +125,27 @@ describe('tasklist-structure', () => {
         expect(result.weakSections.every(section => typeof section.code === 'string' && section.code.length > 0)).toBe(true)
     })
 
+    it('returns warning when the Goals section is missing', () => {
+        const result = validateTasklistStructure({
+            draftText: validTasklist.replace(/## Goals[\s\S]*?## Non-goals/, '## Non-goals'),
+            planUri,
+        })
+
+        expect(result.status).toBe('warning')
+        expect(result.missingSections).toContain('Goals / 版本目标')
+        expect(result.weakSections.some(section => section.code === 'missing_goals')).toBe(true)
+    })
+
     it('does not treat checklist text inside code blocks as real checklist items', () => {
         const result = validateTasklistStructure({
             draftText: `
 # v0.1.0 Broken Tasklist
 
 来源方案：${planUri}
+
+## Goals
+
+- 验证代码块边界。
 
 \`\`\`md
 - [ ] 这里只是示例
@@ -148,6 +168,10 @@ describe('tasklist-structure', () => {
 # v0.1.0 Boundary Tasklist
 
 来源方案：${planUri}
+
+## Goals
+
+- 验证 Step 聚合边界。
 
 ## Non-goals
 

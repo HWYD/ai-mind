@@ -9,6 +9,7 @@ export const validateTasklistStructureInputSchema = z.object({
 export const tasklistValidationStatusSchema = z.enum(['pass', 'warning', 'fail'])
 
 export const tasklistWeakSectionCodeSchema = z.enum([
+    'missing_goals',
     'missing_test_plan',
     'missing_engineering_verification',
     'missing_pause_point',
@@ -65,6 +66,7 @@ export interface TasklistStructure {
     hasAnyVerificationContent: boolean
     hasEngineeringVerification: boolean
     hasExecutionDisciplineSection: boolean
+    hasGoalsSection: boolean
     hasNonGoalsSection: boolean
     hasPausePoint: boolean
     hasRisksSection: boolean

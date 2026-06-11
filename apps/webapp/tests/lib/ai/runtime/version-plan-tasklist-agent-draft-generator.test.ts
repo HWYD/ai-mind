@@ -83,17 +83,28 @@ function getDraftPromptText(granularity: 'coarse' | 'detailed' | 'medium' = 'med
     return getMessageContentText(messages[1].content)
 }
 
+function getDraftSystemPromptText() {
+    const messages = buildDraftTasklistMessages(createStateWithStrategy(), '生成 tasklist 草稿')
+
+    return getMessageContentText(messages[0].content)
+}
+
 describe('runtime/version-plan-tasklist-agent draft generator', () => {
     it('把 expectedStepRange、grouping、priority 注入 draft prompt', () => {
         const promptText = getDraftPromptText()
 
         expect(promptText).toContain('TasklistStrategy：')
+        expect(promptText).toContain('Goals\n- 接入 Planning Decision')
         expect(promptText).toContain('expectedStepRange：3-5')
         expect(promptText).toContain('grouping（Step 标题和章节优先按这些分组组织）')
         expect(promptText).toContain('- Runtime')
         expect(promptText).toContain('priority（checklist 和执行顺序优先遵循）')
         expect(promptText).toContain('- 先接 Runtime 边界')
         expect(promptText).toContain('Step 数量尽量落在 3-5 个之间')
+    })
+
+    it('在系统提示词中要求 tasklist 输出 Goals 章节', () => {
+        expect(getDraftSystemPromptText()).toContain('必须包含 Goals、Non-goals')
     })
 
     it('granularity=coarse 时要求靠近下限并避免过多 Step', () => {

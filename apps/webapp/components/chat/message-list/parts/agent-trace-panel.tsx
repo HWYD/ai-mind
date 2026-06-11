@@ -7,6 +7,7 @@ import {
     ChevronUp,
     CircleDashed,
     FileText,
+    GitBranch,
     LoaderCircle,
     TriangleAlert,
     Wrench,
@@ -17,45 +18,360 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { AgentStepEntry, AgentStepPart, SkillPart } from '@/lib/ai/types/message'
+import type {
+    AgentGraphNodeEntry,
+    AgentGraphRouteEntry,
+    AgentGraphTrace,
+    AgentStepEntry,
+    AgentStepPart,
+    SkillPart,
+} from '@/lib/ai/types/message'
 import { cn } from '@/lib/utils'
 
 import {
     formatDuration,
     getAgentStatusLabel,
+    getAgentTraceStatusValueLabel,
     getAgentTraceTagClassName,
     getAgentTraceTagLabel,
     getStepClassName,
     getStepDisplaySummary,
     localizeAgentTraceText,
 } from './agent-trace-formatters'
-import { type AgentDetailPart, buildStepInlineDetails } from './agent-trace-inline-details'
+import {
+    type AgentDetailPart,
+    buildGraphNodeInlineDetails,
+    buildStepInlineDetails,
+    type StepInlineDetail,
+} from './agent-trace-inline-details'
 
 function getStepStatusIcon(step: AgentStepEntry) {
-    if (step.status === 'failed') {
-        return <XCircle className="size-4 text-rose-500" strokeWidth={2.2} />
+    switch (step.status) {
+        case 'failed':
+            return <XCircle className="size-4 text-rose-500" strokeWidth={2.2} />
+        case 'running':
+            return <LoaderCircle className="size-4 animate-spin text-sky-500" strokeWidth={2.2} />
+        case 'skipped':
+            return <CircleDashed className="size-4 text-muted-foreground" strokeWidth={2.2} />
+        case 'completed':
+            return step.severity === 'warning' ? (
+                <TriangleAlert className="size-4 text-amber-500" strokeWidth={2.2} />
+            ) : (
+                <CheckCircle2 className="size-4 text-emerald-500" strokeWidth={2.2} />
+            )
+    }
+}
+
+function getGraphNodeStatusIcon(node: AgentGraphNodeEntry) {
+    switch (node.status) {
+        case 'failed':
+            return <XCircle className="size-4 text-rose-500" strokeWidth={2.2} />
+        case 'running':
+            return <LoaderCircle className="size-4 animate-spin text-sky-500" strokeWidth={2.2} />
+        case 'skipped':
+            return <CircleDashed className="size-4 text-muted-foreground" strokeWidth={2.2} />
+        case 'completed':
+            return node.severity === 'warning' ? (
+                <TriangleAlert className="size-4 text-amber-500" strokeWidth={2.2} />
+            ) : (
+                <CheckCircle2 className="size-4 text-emerald-500" strokeWidth={2.2} />
+            )
+    }
+}
+
+function getGraphNodeClassName(node: AgentGraphNodeEntry) {
+    switch (node.status) {
+        case 'failed':
+            return 'border-rose-200 bg-rose-50/70'
+        case 'completed':
+        case 'running':
+        case 'skipped':
+            switch (node.severity) {
+                case 'error':
+                    return 'border-rose-200 bg-rose-50/70'
+                case 'warning':
+                    return 'border-amber-200/70 bg-amber-50/20'
+                case 'info':
+                case undefined:
+                    return 'border-transparent bg-transparent'
+            }
+    }
+}
+
+const graphRouteLabels: Record<string, string> = {
+    ask_clarification: '需要澄清',
+    controlled_output_failed: '受控输出失败',
+    fix_now: '进入自动修正',
+    no_auto_revision: '无需自动修正',
+    proceed_to_tasklist_strategy: '继续拆分策略',
+    proceed_with_manual_review_items: '带人工复核继续',
+    read_failed: '读取失败',
+    read_optional_context: '读取补充上下文',
+    read_succeeded: '读取成功',
+    strategy_failed: '策略失败',
+    strategy_ready: '策略就绪',
+    stop_with_boundary_message: '边界停止',
+}
+
+function getGraphRouteLabel(routeLabel: string) {
+    return graphRouteLabels[routeLabel] ?? routeLabel
+}
+
+function getGraphNodeRoutes(graph: AgentGraphTrace, nodeId: string) {
+    return graph.routes.filter(route => route.fromNodeId === nodeId)
+}
+
+function getGraphRevisionCount(graph?: AgentGraphTrace) {
+    return graph?.nodes.filter(node => node.nodeId === 'reviseTasklistV2').length ?? 0
+}
+
+function getGraphRouteKey(route: AgentGraphRouteEntry) {
+    return `${route.fromNodeId}:${route.routeLabel}:${route.toNodeId}:${route.reason ?? ''}`
+}
+
+function isLegacyStepForGraphNode(node: AgentGraphNodeEntry, step: AgentStepEntry) {
+    switch (node.nodeId) {
+        case 'readVersionPlan':
+            return step.actionType === 'read_resource' && step.title.includes('版本方案')
+        case 'evaluatePlanReadiness':
+            return step.actionType === 'check_plan_readiness'
+        case 'planningDecision':
+            return step.actionType === 'planning_decision'
+        case 'readOptionalContext':
+            return step.actionType === 'read_resource' && step.title.includes('补充上下文')
+        case 'decideTasklistStrategy':
+            return step.actionType === 'decide_tasklist_strategy'
+        case 'draftTasklistV1':
+            return step.actionType === 'draft_tasklist'
+        case 'validateTasklistV1':
+            return step.actionType === 'call_tool' && step.title.includes('v1')
+        case 'decideWarningDisposition':
+            return step.actionType === 'decide_warning_disposition'
+        case 'reviseTasklistV2':
+            return step.actionType === 'revise_tasklist'
+        case 'validateTasklistV2':
+            return step.actionType === 'call_tool' && step.title.includes('v2')
+        case 'evaluateRevisionEffect':
+            return step.actionType === 'evaluate_revision_effect'
+        case 'emitFinalArtifact':
+            return step.actionType === 'final_answer'
+        case 'askClarification':
+        case 'stopWithBoundaryMessage':
+            return step.actionType === 'planning_decision'
+        default:
+            return false
+    }
+}
+
+function buildGraphNodeLegacySteps(nodes: AgentGraphNodeEntry[], steps: AgentStepEntry[]) {
+    const usedStepIds = new Set<string>()
+    const legacyStepsByNodeId = new Map<string, AgentStepEntry>()
+
+    for (const node of nodes) {
+        const legacyStep = steps.find(step => !usedStepIds.has(step.partId) && isLegacyStepForGraphNode(node, step))
+
+        if (legacyStep) {
+            usedStepIds.add(legacyStep.partId)
+            legacyStepsByNodeId.set(node.nodeId, legacyStep)
+        }
     }
 
-    if (step.status === 'running') {
-        return <LoaderCircle className="size-4 animate-spin text-sky-500" strokeWidth={2.2} />
+    return legacyStepsByNodeId
+}
+
+function getGraphNodeDisplaySeverity(node: AgentGraphNodeEntry, legacyStep?: AgentStepEntry) {
+    if (node.severity === 'error' || node.severity === 'warning') {
+        return node.severity
     }
 
-    if (step.status === 'skipped') {
-        return <CircleDashed className="size-4 text-muted-foreground" strokeWidth={2.2} />
+    return legacyStep?.severity ?? node.severity
+}
+
+function getGraphNodeDisplayTags(node: AgentGraphNodeEntry, legacyStep?: AgentStepEntry) {
+    return node.tags?.length ? node.tags : legacyStep?.tags
+}
+
+function getVisibleGraphPatchSummaries(node: AgentGraphNodeEntry, displaySummary?: string) {
+    const visibleSummaries = new Set<string>()
+
+    return node.patchSummaries
+        .map(summary => localizeAgentTraceText(summary) ?? summary)
+        .filter(summary => {
+            const normalizedSummary = summary.trim()
+
+            if (!normalizedSummary || normalizedSummary === displaySummary?.trim() || visibleSummaries.has(normalizedSummary)) {
+                return false
+            }
+
+            visibleSummaries.add(normalizedSummary)
+
+            return true
+        })
+}
+
+function renderInlineDetails(anchorId: string, inlineDetails: StepInlineDetail[]) {
+    if (inlineDetails.length === 0) {
+        return null
     }
 
-    if (step.severity === 'warning') {
-        return <TriangleAlert className="size-4 text-amber-500" strokeWidth={2.2} />
+    return (
+        <div className="mt-2 space-y-1.5 rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-xs leading-5">
+            {inlineDetails.map(detail => {
+                const DetailIcon = detail.icon === 'resource' ? FileText : Wrench
+
+                return (
+                    <div key={`${anchorId}:${detail.label}`} className="flex min-w-0 items-start gap-2">
+                        <DetailIcon className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" strokeWidth={2.1} />
+                        <div className="min-w-0">
+                            <span className="font-medium text-muted-foreground">{detail.label}：</span>
+                            <span className="break-words text-foreground">{detail.value}</span>
+                        </div>
+                    </div>
+                )
+            })}
+        </div>
+    )
+}
+
+type GraphDebugSummary = NonNullable<AgentGraphTrace['debugSummary']>
+
+interface GraphDebugSummaryField {
+    label: string
+    value: string
+}
+
+interface GraphDebugSummaryGroup {
+    fields: GraphDebugSummaryField[]
+    title: string
+}
+
+function formatDebugValue(value?: number | string) {
+    if (value === undefined || value === '') {
+        return '未记录'
     }
 
-    return <CheckCircle2 className="size-4 text-emerald-500" strokeWidth={2.2} />
+    return typeof value === 'number' ? String(value) : (localizeAgentTraceText(value) ?? value)
+}
+
+function formatDebugStatus(value?: string) {
+    return value ? getAgentTraceStatusValueLabel(value) : '未记录'
+}
+
+function formatDebugRoute(route?: GraphDebugSummary['lastRoute']) {
+    if (!route) {
+        return '未记录'
+    }
+
+    return `${route.fromNodeId} → ${getGraphRouteLabel(route.label)} → ${route.toNodeId}`
+}
+
+function formatDebugRange(range?: [number, number]) {
+    return range ? `${range[0]}-${range[1]}` : '未记录'
+}
+
+function formatDebugVisitedNodes(nodes: string[]) {
+    return nodes.length > 0 ? nodes.join(' → ') : '未记录'
+}
+
+function buildGraphDebugSummaryGroups(summary: GraphDebugSummary): GraphDebugSummaryGroup[] {
+    return [
+        {
+            title: 'Run',
+            fields: [
+                { label: 'runId', value: summary.runId },
+                { label: 'threadId', value: summary.threadId },
+                { label: 'runtimeMode', value: summary.runtimeMode },
+            ],
+        },
+        {
+            title: 'Route',
+            fields: [
+                { label: 'currentNode', value: formatDebugValue(summary.currentNode) },
+                { label: 'visitedNodes', value: formatDebugVisitedNodes(summary.visitedNodes) },
+                { label: 'lastRoute', value: formatDebugRoute(summary.lastRoute) },
+            ],
+        },
+        {
+            title: 'Planning',
+            fields: [
+                { label: 'readiness.status', value: formatDebugStatus(summary.readiness?.status) },
+                { label: 'decision.type', value: formatDebugValue(summary.decision?.type) },
+                { label: 'strategy.granularity', value: formatDebugValue(summary.strategy?.granularity) },
+                { label: 'strategy.expectedStepRange', value: formatDebugRange(summary.strategy?.expectedStepRange) },
+                { label: 'optionalContext.status', value: formatDebugStatus(summary.optionalContext?.status) },
+                { label: 'manualReviewItems.length', value: String(summary.manualReviewItemCount) },
+            ],
+        },
+        {
+            title: 'Validation',
+            fields: [
+                { label: 'validationV1.status', value: formatDebugStatus(summary.validationV1?.status) },
+                { label: 'validationV1.score', value: formatDebugValue(summary.validationV1?.score) },
+                { label: 'warningDisposition.fixNow.length', value: formatDebugValue(summary.warningDisposition?.fixNowCount) },
+                {
+                    label: 'warningDisposition.manualReviewItems.length',
+                    value: formatDebugValue(summary.warningDisposition?.manualReviewItemCount),
+                },
+                { label: 'validationV2.status', value: formatDebugStatus(summary.validationV2?.status) },
+                { label: 'validationV2.score', value: formatDebugValue(summary.validationV2?.score) },
+                { label: 'revisionEffect.finalDecision', value: formatDebugValue(summary.revisionEffect?.finalDecision) },
+            ],
+        },
+        {
+            title: 'Limits',
+            fields: [
+                { label: 'stepCount / maxSteps', value: `${summary.stepCount} / ${summary.maxSteps}` },
+                {
+                    label: 'optionalContextReads / maxOptionalContextReads',
+                    value: `${summary.optionalContextReads} / ${summary.maxOptionalContextReads}`,
+                },
+                { label: 'draftRevisions / maxDraftRevisions', value: `${summary.draftRevisions} / ${summary.maxDraftRevisions}` },
+            ],
+        },
+        {
+            title: 'Checkpoint',
+            fields: [{ label: 'checkpointMode', value: summary.checkpointMode }],
+        },
+    ]
+}
+
+function renderGraphDebugSummary(summary: GraphDebugSummary) {
+    return (
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {buildGraphDebugSummaryGroups(summary).map(group => (
+                <section key={group.title} className="min-w-0 rounded-lg bg-muted/30 px-3 py-2.5">
+                    <h4 className="text-xs font-semibold uppercase tracking-normal text-muted-foreground">{group.title}</h4>
+                    <dl className="mt-2 space-y-1.5 text-xs leading-5">
+                        {group.fields.map(field => (
+                            <div key={`${group.title}:${field.label}`} className="grid grid-cols-[minmax(7.5rem,0.48fr)_1fr] gap-2">
+                                <dt className="min-w-0 break-words font-medium text-muted-foreground">{field.label}</dt>
+                                <dd className="min-w-0 break-words text-foreground">{field.value}</dd>
+                            </div>
+                        ))}
+                    </dl>
+                </section>
+            ))}
+        </div>
+    )
 }
 
 export function AgentTracePanel({ detailParts = [], part }: { detailParts?: AgentDetailPart[]; part: AgentStepPart }) {
     const [isExpanded, setIsExpanded] = useState(true)
-    const revisionCount = part.steps.filter(step => step.actionType === 'revise_tasklist').length
+    const [isDebugExpanded, setIsDebugExpanded] = useState(false)
+    const graphDebugSummary = part.graph?.debugSummary
+    const hasGraphTimeline = Boolean(part.graph && (part.graph.nodes.length > 0 || part.graph.routes.length > 0))
+    const hasGraph = Boolean(part.graph && (hasGraphTimeline || graphDebugSummary))
+    const showLegacyStepTimeline = !hasGraphTimeline && part.steps.length > 0
+    const revisionCount = Math.max(
+        part.steps.filter(step => step.actionType === 'revise_tasklist').length,
+        getGraphRevisionCount(part.graph)
+    )
     const skillBadge = detailParts.find((detailPart): detailPart is SkillPart => detailPart.type === 'skill')?.skillId
     const stepInlineDetails = buildStepInlineDetails(part.steps, detailParts)
+    const graphNodeInlineDetails = part.graph
+        ? buildGraphNodeInlineDetails(part.graph.nodes, detailParts)
+        : new Map<string, StepInlineDetail[]>()
+    const graphNodeLegacySteps = part.graph ? buildGraphNodeLegacySteps(part.graph.nodes, part.steps) : new Map<string, AgentStepEntry>()
 
     return (
         <Card size="sm" className="mb-3 overflow-hidden border-border/60 shadow-sm">
@@ -66,9 +382,17 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
                             <Bot className="size-[18px]" strokeWidth={2.2} />
                         </span>
                         <div className="min-w-0">
-                            <CardTitle className="text-base">Agent 执行过程</CardTitle>
+                            <CardTitle className="text-base">{hasGraph ? 'Agent Graph 执行过程' : 'Agent 执行过程'}</CardTitle>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                 <span>版本方案转任务清单</span>
+                                {hasGraph ? (
+                                    <>
+                                        <span>·</span>
+                                        <Badge variant="outline" className="h-5 rounded-full bg-sky-50 px-2 text-[0.68rem] text-sky-700">
+                                            LangGraph
+                                        </Badge>
+                                    </>
+                                ) : null}
                                 {skillBadge ? (
                                     <>
                                         <span>·</span>
@@ -80,7 +404,7 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
                                 <span>·</span>
                                 <span>{getAgentStatusLabel(part.status)}</span>
                                 <span>·</span>
-                                <span>{part.steps.length} 步</span>
+                                <span>{hasGraphTimeline ? `${part.graph?.nodes.length ?? 0} 个节点` : `${part.steps.length} 步`}</span>
                                 <span>·</span>
                                 <span>修正 {revisionCount} 次</span>
                             </div>
@@ -102,82 +426,210 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
 
             {isExpanded ? (
                 <CardContent className="pt-4">
-                    <div className="relative space-y-1.5 before:absolute before:top-4 before:bottom-4 before:left-4 before:w-px before:bg-border">
-                        {part.steps.map(step => {
-                            const duration = formatDuration(step.durationMs)
-                            const displayError = localizeAgentTraceText(step.error)
-                            const displaySummary = getStepDisplaySummary(step)
-                            const displayTitle = localizeAgentTraceText(step.title) ?? step.title
-                            const visibleTags = step.tags?.slice(0, 3) ?? []
-                            const inlineDetails = stepInlineDetails.get(step.stepIndex) ?? []
+                    {hasGraphTimeline && part.graph ? (
+                        <div className="space-y-3">
+                            <div className="relative space-y-1.5 before:absolute before:top-4 before:bottom-4 before:left-4 before:w-px before:bg-border">
+                                {part.graph.nodes.map(node => {
+                                    const legacyStep = graphNodeLegacySteps.get(node.nodeId)
+                                    const displayNode = {
+                                        ...node,
+                                        severity: getGraphNodeDisplaySeverity(node, legacyStep),
+                                        tags: getGraphNodeDisplayTags(node, legacyStep),
+                                    }
+                                    const duration = formatDuration(node.durationMs)
+                                    const displayError = localizeAgentTraceText(node.error)
+                                    const displaySummary = localizeAgentTraceText(node.summary)
+                                    const visibleTags = displayNode.tags?.slice(0, 3) ?? []
+                                    const visiblePatchSummaries = getVisibleGraphPatchSummaries(node, displaySummary)
+                                    const inlineDetails = graphNodeInlineDetails.get(node.nodeId) ?? []
+                                    const nodeRoutes = getGraphNodeRoutes(part.graph, node.nodeId)
 
-                            return (
-                                <div
-                                    key={step.partId}
-                                    className={cn('relative grid grid-cols-[2rem_1fr] gap-3 rounded-xl border p-3', getStepClassName(step))}
-                                >
-                                    <div className="relative z-10 mt-0.5 grid size-8 place-items-center rounded-full bg-background shadow-xs ring-1 ring-border">
-                                        {getStepStatusIcon(step)}
-                                    </div>
-
-                                    <div className="min-w-0">
-                                        <div className="flex flex-wrap items-start justify-between gap-2">
-                                            <div className="flex min-w-0 items-center gap-2">
-                                                <Badge variant="secondary" className="size-6 rounded-full px-0 text-xs">
-                                                    {step.stepIndex}
-                                                </Badge>
-                                                <h4 className="truncate text-sm font-semibold text-foreground">{displayTitle}</h4>
+                                    return (
+                                        <div
+                                            key={node.nodeId}
+                                            className={cn(
+                                                'relative grid grid-cols-[2rem_1fr] gap-3 rounded-xl border p-3',
+                                                getGraphNodeClassName(displayNode)
+                                            )}
+                                        >
+                                            <div className="relative z-10 mt-0.5 grid size-8 place-items-center rounded-full bg-background shadow-xs ring-1 ring-border">
+                                                {getGraphNodeStatusIcon(displayNode)}
                                             </div>
-                                            {duration ? <span className="text-xs text-muted-foreground">{duration}</span> : null}
+
+                                            <div className="min-w-0">
+                                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                        <Badge variant="secondary" className="size-6 rounded-full px-0 text-xs">
+                                                            {node.stepIndex}
+                                                        </Badge>
+                                                        <h4 className="min-w-0 truncate text-sm font-semibold text-foreground">
+                                                            {localizeAgentTraceText(node.title)}
+                                                        </h4>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="h-5 rounded-full bg-background/70 px-2 text-[0.68rem]"
+                                                        >
+                                                            {node.nodeId}
+                                                        </Badge>
+                                                    </div>
+                                                    {duration ? <span className="text-xs text-muted-foreground">{duration}</span> : null}
+                                                </div>
+
+                                                {displaySummary ? (
+                                                    <p className="mt-1 text-sm leading-6 text-muted-foreground">{displaySummary}</p>
+                                                ) : null}
+                                                {displayError ? (
+                                                    <p className="mt-1 text-sm leading-6 text-rose-600">{displayError}</p>
+                                                ) : null}
+
+                                                {nodeRoutes.length > 0 ? (
+                                                    <div className="mt-2 space-y-1.5">
+                                                        {nodeRoutes.map(route => (
+                                                            <div
+                                                                key={getGraphRouteKey(route)}
+                                                                className="flex min-w-0 items-start gap-2 text-xs"
+                                                            >
+                                                                <GitBranch
+                                                                    className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+                                                                    strokeWidth={2.1}
+                                                                />
+                                                                <div className="min-w-0 leading-5">
+                                                                    <span className="font-medium text-muted-foreground">路由：</span>
+                                                                    <span className="text-foreground">
+                                                                        {getGraphRouteLabel(route.routeLabel)}
+                                                                    </span>
+                                                                    <span className="text-muted-foreground"> → </span>
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className="h-5 rounded-full bg-background/70 px-2 text-[0.68rem]"
+                                                                    >
+                                                                        {route.toNodeId}
+                                                                    </Badge>
+                                                                    {route.reason ? (
+                                                                        <span className="break-words text-muted-foreground">
+                                                                            {' '}
+                                                                            {localizeAgentTraceText(route.reason)}
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+
+                                                {visibleTags.length > 0 ? (
+                                                    <div className="mt-2 flex flex-wrap gap-2">
+                                                        {visibleTags.map(tag => (
+                                                            <Badge
+                                                                key={`${node.nodeId}:${tag}`}
+                                                                variant="outline"
+                                                                className={getAgentTraceTagClassName(tag)}
+                                                            >
+                                                                {getAgentTraceTagLabel(tag)}
+                                                            </Badge>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+
+                                                {renderInlineDetails(node.nodeId, inlineDetails)}
+
+                                                {visiblePatchSummaries.length > 0 ? (
+                                                    <div className="mt-2 space-y-1 rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-xs leading-5">
+                                                        {visiblePatchSummaries.map(summary => (
+                                                            <p
+                                                                key={`${node.nodeId}:${summary}`}
+                                                                className="break-words text-muted-foreground"
+                                                            >
+                                                                {summary}
+                                                            </p>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    ) : null}
+
+                    {showLegacyStepTimeline ? (
+                        <div className="relative space-y-1.5 before:absolute before:top-4 before:bottom-4 before:left-4 before:w-px before:bg-border">
+                            {part.steps.map(step => {
+                                const duration = formatDuration(step.durationMs)
+                                const displayError = localizeAgentTraceText(step.error)
+                                const displaySummary = getStepDisplaySummary(step)
+                                const displayTitle = localizeAgentTraceText(step.title) ?? step.title
+                                const visibleTags = step.tags?.slice(0, 3) ?? []
+                                const inlineDetails = stepInlineDetails.get(step.stepIndex) ?? []
+
+                                return (
+                                    <div
+                                        key={step.partId}
+                                        className={cn(
+                                            'relative grid grid-cols-[2rem_1fr] gap-3 rounded-xl border p-3',
+                                            getStepClassName(step)
+                                        )}
+                                    >
+                                        <div className="relative z-10 mt-0.5 grid size-8 place-items-center rounded-full bg-background shadow-xs ring-1 ring-border">
+                                            {getStepStatusIcon(step)}
                                         </div>
 
-                                        {displaySummary ? (
-                                            <p className="mt-1 text-sm leading-6 text-muted-foreground">{displaySummary}</p>
-                                        ) : null}
-                                        {displayError ? <p className="mt-1 text-sm leading-6 text-rose-600">{displayError}</p> : null}
-
-                                        {visibleTags.length > 0 ? (
-                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                {visibleTags.map(tag => (
-                                                    <Badge
-                                                        key={`${step.partId}:${tag}`}
-                                                        variant="outline"
-                                                        className={getAgentTraceTagClassName(tag)}
-                                                    >
-                                                        {getAgentTraceTagLabel(tag)}
+                                        <div className="min-w-0">
+                                            <div className="flex flex-wrap items-start justify-between gap-2">
+                                                <div className="flex min-w-0 items-center gap-2">
+                                                    <Badge variant="secondary" className="size-6 rounded-full px-0 text-xs">
+                                                        {step.stepIndex}
                                                     </Badge>
-                                                ))}
+                                                    <h4 className="truncate text-sm font-semibold text-foreground">{displayTitle}</h4>
+                                                </div>
+                                                {duration ? <span className="text-xs text-muted-foreground">{duration}</span> : null}
                                             </div>
-                                        ) : null}
 
-                                        {inlineDetails.length > 0 ? (
-                                            <div className="mt-2 space-y-1.5 rounded-lg border border-border/60 bg-background/70 px-3 py-2 text-xs leading-5">
-                                                {inlineDetails.map(detail => {
-                                                    const DetailIcon = detail.icon === 'resource' ? FileText : Wrench
+                                            {displaySummary ? (
+                                                <p className="mt-1 text-sm leading-6 text-muted-foreground">{displaySummary}</p>
+                                            ) : null}
+                                            {displayError ? <p className="mt-1 text-sm leading-6 text-rose-600">{displayError}</p> : null}
 
-                                                    return (
-                                                        <div
-                                                            key={`${step.partId}:${detail.label}`}
-                                                            className="flex min-w-0 items-start gap-2"
+                                            {visibleTags.length > 0 ? (
+                                                <div className="mt-2 flex flex-wrap gap-2">
+                                                    {visibleTags.map(tag => (
+                                                        <Badge
+                                                            key={`${step.partId}:${tag}`}
+                                                            variant="outline"
+                                                            className={getAgentTraceTagClassName(tag)}
                                                         >
-                                                            <DetailIcon
-                                                                className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
-                                                                strokeWidth={2.1}
-                                                            />
-                                                            <div className="min-w-0">
-                                                                <span className="font-medium text-muted-foreground">{detail.label}：</span>
-                                                                <span className="break-words text-foreground">{detail.value}</span>
-                                                            </div>
-                                                        </div>
-                                                    )
-                                                })}
-                                            </div>
-                                        ) : null}
+                                                            {getAgentTraceTagLabel(tag)}
+                                                        </Badge>
+                                                    ))}
+                                                </div>
+                                            ) : null}
+
+                                            {renderInlineDetails(step.partId, inlineDetails)}
+                                        </div>
                                     </div>
-                                </div>
-                            )
-                        })}
-                    </div>
+                                )
+                            })}
+                        </div>
+                    ) : null}
+
+                    {graphDebugSummary ? (
+                        <div className="mt-4 border-t border-border/60 pt-3">
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 gap-1.5 px-2 text-xs text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                                aria-expanded={isDebugExpanded}
+                                onClick={() => setIsDebugExpanded(current => !current)}
+                            >
+                                <span>Debug</span>
+                                {isDebugExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                            </Button>
+
+                            {isDebugExpanded ? renderGraphDebugSummary(graphDebugSummary) : null}
+                        </div>
+                    ) : null}
                 </CardContent>
             ) : null}
         </Card>

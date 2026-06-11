@@ -1,4 +1,9 @@
+import type { AgentGraphDebugSummary } from '@ai-mind/stream-core/protocol'
+
 import type {
+    AgentGraphNodeEntry,
+    AgentGraphRouteEntry,
+    AgentGraphTrace,
     AgentStepEntry,
     AgentStepPart,
     AgentTextArtifactViewModel,
@@ -10,7 +15,7 @@ import type {
     ToolPart,
 } from '@/lib/ai/types/message'
 
-import { createAgentStepPart, createReasoningPart, createTextPart } from './message-factory'
+import { createAgentGraphStepPart, createAgentStepPart, createReasoningPart, createTextPart } from './message-factory'
 
 export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
     return messages.filter(message => {
@@ -254,16 +259,24 @@ export function updatePromptPart(
     })
 }
 
-function getAgentStepPartStatus(steps: AgentStepEntry[]): AgentStepPart['status'] {
-    if (steps.some(step => step.status === 'running')) {
+type AgentGraphNodeUpdate = Partial<Omit<AgentGraphNodeEntry, 'nodeId'>> & Pick<AgentGraphNodeEntry, 'nodeId'>
+
+function getAgentStepPartStatus(steps: AgentStepEntry[], graph?: AgentGraphTrace): AgentStepPart['status'] {
+    const graphNodes = graph?.nodes ?? []
+
+    if (steps.some(step => step.status === 'running') || graphNodes.some(node => node.status === 'running')) {
         return 'running'
     }
 
-    if (steps.some(step => step.status === 'failed')) {
+    if (steps.some(step => step.status === 'failed') || graphNodes.some(node => node.status === 'failed')) {
         return 'failed'
     }
 
     if (steps.length > 0 && steps.every(step => step.status === 'skipped')) {
+        return 'skipped'
+    }
+
+    if (steps.length === 0 && graphNodes.length > 0 && graphNodes.every(node => node.status === 'skipped')) {
         return 'skipped'
     }
 
@@ -278,6 +291,62 @@ function upsertAgentStep(steps: AgentStepEntry[], entry: AgentStepEntry) {
     }
 
     return steps.map(step => (step.partId === entry.partId ? { ...step, ...entry } : step))
+}
+
+function createGraphNodeFromUpdate(update: AgentGraphNodeUpdate, fallbackStepIndex: number): AgentGraphNodeEntry {
+    return {
+        nodeId: update.nodeId,
+        partId: update.partId ?? `agent-graph-node:${update.nodeId}`,
+        patchSummaries: update.patchSummaries ?? [],
+        status: update.status ?? 'running',
+        stepIndex: update.stepIndex ?? fallbackStepIndex,
+        title: update.title ?? update.nodeId,
+        ...(update.durationMs !== undefined ? { durationMs: update.durationMs } : {}),
+        ...(update.error !== undefined ? { error: update.error } : {}),
+        ...(update.severity !== undefined ? { severity: update.severity } : {}),
+        ...(update.summary !== undefined ? { summary: update.summary } : {}),
+        ...(update.tags !== undefined ? { tags: update.tags } : {}),
+    }
+}
+
+function upsertAgentGraphNode(nodes: AgentGraphNodeEntry[], update: AgentGraphNodeUpdate) {
+    const existingIndex = nodes.findIndex(node => node.nodeId === update.nodeId)
+
+    if (existingIndex === -1) {
+        return [...nodes, createGraphNodeFromUpdate(update, nodes.length + 1)].sort((left, right) => left.stepIndex - right.stepIndex)
+    }
+
+    return nodes.map(node => {
+        if (node.nodeId !== update.nodeId) {
+            return node
+        }
+
+        return {
+            ...node,
+            ...update,
+            patchSummaries: [...node.patchSummaries, ...(update.patchSummaries ?? [])],
+            partId: update.partId ?? node.partId,
+            status: update.status ?? node.status,
+            stepIndex: update.stepIndex ?? node.stepIndex,
+            title: update.title ?? node.title,
+        }
+    })
+}
+
+function getAgentGraphTrace(part: AgentStepPart | undefined): AgentGraphTrace {
+    return part?.graph ?? { nodes: [], routes: [], runtime: 'LangGraph' }
+}
+
+function appendAgentGraphRoute(routes: AgentGraphRouteEntry[], route: AgentGraphRouteEntry) {
+    const routeExists = routes.some(
+        existingRoute =>
+            existingRoute.fromNodeId === route.fromNodeId &&
+            existingRoute.toNodeId === route.toNodeId &&
+            existingRoute.routeLabel === route.routeLabel &&
+            existingRoute.reason === route.reason
+    )
+
+    return routeExists ? routes : [...routes, route]
 }
 
 export function upsertAgentStepPart(
@@ -313,8 +382,174 @@ export function upsertAgentStepPart(
                 return {
                     ...part,
                     agentName,
-                    status: getAgentStepPartStatus(nextSteps),
+                    status: getAgentStepPartStatus(nextSteps, part.graph),
                     steps: nextSteps,
+                }
+            }),
+        }
+    })
+}
+
+export function upsertAgentGraphNodePart(
+    messages: MindMessage[],
+    messageId: string,
+    node: AgentGraphNodeUpdate,
+    runId: string,
+    agentName: string
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+
+        if (!existingPart) {
+            return {
+                ...message,
+                parts: [...message.parts, createAgentGraphStepPart(createGraphNodeFromUpdate(node, 1), runId, agentName)],
+            }
+        }
+
+        const graph = getAgentGraphTrace(existingPart)
+        const nextGraph = {
+            ...graph,
+            nodes: upsertAgentGraphNode(graph.nodes, node),
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'agent-step' || part.runId !== runId) {
+                    return part
+                }
+
+                return {
+                    ...part,
+                    agentName,
+                    graph: nextGraph,
+                    status: getAgentStepPartStatus(part.steps, nextGraph),
+                }
+            }),
+        }
+    })
+}
+
+export function appendAgentGraphRoutePart(
+    messages: MindMessage[],
+    messageId: string,
+    route: AgentGraphRouteEntry,
+    runId: string,
+    agentName: string
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+
+        if (!existingPart) {
+            return {
+                ...message,
+                parts: [
+                    ...message.parts,
+                    {
+                        id: `agent-step:${runId}`,
+                        type: 'agent-step',
+                        runId,
+                        agentName,
+                        graph: {
+                            nodes: [],
+                            routes: [route],
+                            runtime: 'LangGraph',
+                        },
+                        status: 'completed',
+                        steps: [],
+                    },
+                ],
+            }
+        }
+
+        const graph = getAgentGraphTrace(existingPart)
+        const nextGraph = {
+            ...graph,
+            routes: appendAgentGraphRoute(graph.routes, route),
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'agent-step' || part.runId !== runId) {
+                    return part
+                }
+
+                return {
+                    ...part,
+                    agentName,
+                    graph: nextGraph,
+                    status: getAgentStepPartStatus(part.steps, nextGraph),
+                }
+            }),
+        }
+    })
+}
+
+export function upsertAgentGraphDebugSummaryPart(
+    messages: MindMessage[],
+    messageId: string,
+    summary: AgentGraphDebugSummary,
+    runId: string,
+    agentName: string
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+
+        if (!existingPart) {
+            return {
+                ...message,
+                parts: [
+                    ...message.parts,
+                    {
+                        id: `agent-step:${runId}`,
+                        type: 'agent-step',
+                        runId,
+                        agentName,
+                        graph: {
+                            debugSummary: summary,
+                            nodes: [],
+                            routes: [],
+                            runtime: 'LangGraph',
+                        },
+                        status: 'completed',
+                        steps: [],
+                    },
+                ],
+            }
+        }
+
+        const graph = getAgentGraphTrace(existingPart)
+        const nextGraph = {
+            ...graph,
+            debugSummary: summary,
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'agent-step' || part.runId !== runId) {
+                    return part
+                }
+
+                return {
+                    ...part,
+                    agentName,
+                    graph: nextGraph,
+                    status: getAgentStepPartStatus(part.steps, nextGraph),
                 }
             }),
         }

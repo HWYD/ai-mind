@@ -23,9 +23,10 @@ import type {
 } from './types'
 import {
     createVersionPlanTasklistAgentSkeleton,
-    readVersionPlanForTasklistAgent,
     resolveVersionPlanTasklistAgentInvocation,
-    runVersionPlanTasklistAgent,
+    runLegacyVersionPlanTasklistAgentRuntime,
+    runVersionPlanTasklistGraph,
+    selectTasklistAgentRuntime,
 } from './version-plan-tasklist-agent'
 
 interface ChatOrchestratorOptions {
@@ -406,32 +407,35 @@ export class ChatOrchestrator {
             versionPlanUri: skeletonResult.state.versionPlanReference.uri,
         })
 
-        const readResult = await readVersionPlanForTasklistAgent(skeletonResult.state, {
-            context: this.context,
-            stepIndex: 1,
-            userGoal: getLastUserMessageText(this.request),
-            writeChunk: this.writeChunk,
+        const runtimeSelection = selectTasklistAgentRuntime(agentInvocation)
+        const userGoal = getLastUserMessageText(this.request)
+
+        logSkillRuntime('version-plan-tasklist-agent-runtime-selected', {
+            graphCheckpointMode: runtimeSelection?.config.graphCheckpointMode ?? 'off',
+            graphDebugViewEnabled: runtimeSelection?.config.graphDebugViewEnabled ?? false,
+            graphEventsEnabled: runtimeSelection?.config.graphEventsEnabled ?? false,
+            runtimeMode: runtimeSelection?.runtimeMode ?? 'legacy',
         })
 
-        if (readResult.success === false) {
-            writeStaticTextPart(
-                this.writeChunk,
-                [
-                    '版本方案读取失败，暂时无法继续生成 tasklist 草稿。',
-                    '',
-                    `错误信息：${readResult.errorMessage}`,
-                    '',
-                    '请确认引用的是可读取的 docs://versions/*.md 文件。v0.1.0 不会自动扫描 versions 目录，也不会读取 docs/tasklists/*。',
-                ].join('\n')
-            )
+        if (runtimeSelection?.runtimeMode === 'graph') {
+            await runVersionPlanTasklistGraph({
+                context: this.context,
+                conversationId: this.request.conversationId,
+                model: session.baseModel,
+                runtimeConfig: runtimeSelection.config,
+                skeletonState: skeletonResult.state,
+                userGoal,
+                writeChunk: this.writeChunk,
+            })
+
             return true
         }
 
-        await runVersionPlanTasklistAgent({
+        await runLegacyVersionPlanTasklistAgentRuntime({
             context: this.context,
-            initialState: readResult.state,
             model: session.baseModel,
-            userGoal: getLastUserMessageText(this.request),
+            skeletonState: skeletonResult.state,
+            userGoal,
             writeChunk: this.writeChunk,
         })
 

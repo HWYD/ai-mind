@@ -6,14 +6,18 @@ const runtimeMocks = vi.hoisted(() => {
         buildSystemMessages: vi.fn(),
         createChatSession: vi.fn(),
         decideAuthoritativeToolAnswer: vi.fn(),
+        executeComposerContextInvocation: vi.fn(),
         executeToolCall: vi.fn(),
         formatToolInput: vi.fn(),
         hasVisibleAssistantText: vi.fn(),
         normalizeAndValidateToolCalls: vi.fn(),
+        resolveComposerContextInvocation: vi.fn(),
         shouldBypassAuthoritativeAnswer: vi.fn(),
         streamAssistantParts: vi.fn(),
         streamPlanningResponse: vi.fn(),
         stripMessageText: vi.fn(),
+        runLegacyVersionPlanTasklistAgentRuntime: vi.fn(),
+        runVersionPlanTasklistGraph: vi.fn(),
         writeStaticTextPart: vi.fn(),
         writeToolValidationErrors: vi.fn(),
     }
@@ -36,6 +40,11 @@ vi.mock('@/lib/ai/runtime/chat-session', () => ({
     createChatSession: runtimeMocks.createChatSession,
 }))
 
+vi.mock('@/lib/ai/runtime/composer-context', () => ({
+    executeComposerContextInvocation: runtimeMocks.executeComposerContextInvocation,
+    resolveComposerContextInvocation: runtimeMocks.resolveComposerContextInvocation,
+}))
+
 vi.mock('@ai-mind/stream-core', async importOriginal => {
     const actual = await importOriginal<typeof import('@ai-mind/stream-core')>()
 
@@ -50,6 +59,14 @@ vi.mock('@/lib/ai/runtime/tool-runtime', () => ({
     formatToolInput: runtimeMocks.formatToolInput,
     normalizeAndValidateToolCalls: runtimeMocks.normalizeAndValidateToolCalls,
     writeToolValidationErrors: runtimeMocks.writeToolValidationErrors,
+}))
+
+vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent/graph/run-version-plan-tasklist-graph', () => ({
+    runVersionPlanTasklistGraph: runtimeMocks.runVersionPlanTasklistGraph,
+}))
+
+vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent/runtime/legacy-tasklist-agent-runtime', () => ({
+    runLegacyVersionPlanTasklistAgentRuntime: runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime,
 }))
 
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
@@ -70,6 +87,84 @@ function createRequest() {
             },
         ],
         options: {},
+    }
+}
+
+function createTasklistRequest() {
+    return {
+        ...createRequest(),
+        composer: {
+            command: {
+                label: '生成任务清单',
+                name: 'tasklist' as const,
+            },
+            plainText: '',
+            references: [
+                {
+                    id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                    label: 'v0.2.0-controlled-agent-graph.md',
+                    source: 'local' as const,
+                    type: 'resource' as const,
+                    uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                },
+            ],
+        },
+        messages: [
+            {
+                role: 'user' as const,
+                parts: [
+                    {
+                        type: 'text' as const,
+                        format: 'markdown' as const,
+                        text: '基于这个版本方案生成 tasklist 草稿',
+                    },
+                ],
+            },
+        ],
+    }
+}
+
+function createSummaryDocsRequest() {
+    return {
+        ...createRequest(),
+        composer: {
+            command: {
+                label: '总结文档',
+                name: 'summary' as const,
+            },
+            plainText: '',
+            references: [
+                {
+                    id: 'docs://README.md',
+                    label: 'README.md',
+                    source: 'local' as const,
+                    type: 'resource' as const,
+                    uri: 'docs://README.md',
+                },
+            ],
+        },
+    }
+}
+
+function createCheckRequest() {
+    return {
+        ...createRequest(),
+        composer: {
+            command: {
+                label: '检查文档一致性',
+                name: 'check' as const,
+            },
+            plainText: '',
+            references: [
+                {
+                    id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                    label: 'v0.2.0-controlled-agent-graph.md',
+                    source: 'local' as const,
+                    type: 'resource' as const,
+                    uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                },
+            ],
+        },
     }
 }
 
@@ -110,16 +205,27 @@ describe('runtime/chat-orchestrator', () => {
         vi.clearAllMocks()
 
         runtimeMocks.buildSystemMessages.mockReturnValue([])
+        runtimeMocks.resolveComposerContextInvocation.mockReturnValue(null)
+        runtimeMocks.executeComposerContextInvocation.mockResolvedValue([])
         runtimeMocks.hasVisibleAssistantText.mockReturnValue(false)
         runtimeMocks.stripMessageText.mockImplementation((message: AIMessage) => message)
         runtimeMocks.writeToolValidationErrors.mockReturnValue([])
         runtimeMocks.formatToolInput.mockReturnValue('1+1')
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(false)
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(true)
+        runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime.mockResolvedValue({
+            state: {},
+            status: 'completed',
+        })
+        runtimeMocks.runVersionPlanTasklistGraph.mockResolvedValue({
+            graphState: {},
+            state: {},
+        })
         runtimeMocks.decideAuthoritativeToolAnswer.mockReturnValue({
             shouldBypassModel: false,
             toolNames: [],
         })
+        vi.unstubAllEnvs()
     })
 
     it('direct-answer 路径只会收口一次 finish', async () => {
@@ -137,6 +243,87 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
+        expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('graph runtime 配置不影响普通问答主链路', async () => {
+        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: {},
+            deps: { defaultModel: 'qwen3:8b' },
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
+        expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('graph runtime 配置不影响 /summary @docs 普通 Composer Context 链路', async () => {
+        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+
+        const request = createSummaryDocsRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.resolveComposerContextInvocation.mockReturnValue({
+            kind: 'docs-summary',
+        })
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: {},
+            deps: { defaultModel: 'qwen3:8b' },
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
+        expect(runtimeMocks.executeComposerContextInvocation).toHaveBeenCalledTimes(1)
+        expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('graph runtime 配置不让 /check 误入 tasklist Agent', async () => {
+        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+
+        const request = createCheckRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: {},
+            deps: { defaultModel: 'qwen3:8b' },
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
+        expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
@@ -376,6 +563,95 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.writeStaticTextPart).toHaveBeenCalledTimes(1)
         expect(toolBoundModelStream).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('/tasklist 默认使用 legacy runtime 并短路普通链路', async () => {
+        const request = createTasklistRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+        const orchestrator = new ChatOrchestrator({
+            context: {},
+            deps: { defaultModel: 'qwen3:8b' },
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).toHaveBeenCalledWith(
+            expect.objectContaining({
+                context: {},
+                model: session.baseModel,
+                userGoal: '基于这个版本方案生成 tasklist 草稿',
+                writeChunk: expect.any(Function),
+            })
+        )
+        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(session.baseModel.stream).not.toHaveBeenCalled()
+        expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('/tasklist 显式 graph runtime 时进入 graph runner', async () => {
+        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+
+        const request = createTasklistRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+        const orchestrator = new ChatOrchestrator({
+            context: {},
+            deps: { defaultModel: 'qwen3:8b' },
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledWith(
+            expect.objectContaining({
+                context: {},
+                conversationId: request.conversationId,
+                model: session.baseModel,
+                runtimeConfig: expect.objectContaining({
+                    runtimeMode: 'graph',
+                }),
+                userGoal: '基于这个版本方案生成 tasklist 草稿',
+                writeChunk: expect.any(Function),
+            })
+        )
+        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
+        expect(session.baseModel.stream).not.toHaveBeenCalled()
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('graph runtime 失败时不会运行中切回 legacy', async () => {
+        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+        runtimeMocks.runVersionPlanTasklistGraph.mockRejectedValueOnce(new Error('graph failed'))
+
+        const request = createTasklistRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+        const orchestrator = new ChatOrchestrator({
+            context: {},
+            deps: { defaultModel: 'qwen3:8b' },
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
         expectSingleTerminalChunk(writtenChunks)
     })
 

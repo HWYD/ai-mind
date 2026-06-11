@@ -7,6 +7,7 @@ const STEP_HEADING_PATTERN = /(?:^|\b)(?:step\s*\d+|第\s*\d+\s*步|实施步骤
 const VERIFICATION_PATTERN = /验证|测试|校验|检查|回归|smoke|e2e|lint|typecheck|build|test/i
 const ENGINEERING_VERIFICATION_PATTERN = /工程验证|工程校验|lint|typecheck|build|test/i
 const EXECUTION_DISCIPLINE_PATTERN = /执行纪律|实施纪律|执行规则|暂停|等待确认|review/i
+const GOALS_PATTERN = /goals|version goals|版本目标|本版目标|目标/i
 const NON_GOALS_PATTERN = /non-goals|non goals|非目标|本版不做|明确不做/i
 const RISKS_PATTERN = /risks?|风险|人工确认点|确认点/i
 const TEST_PLAN_PATTERN = /test plan|测试计划|验证计划|最小验证/i
@@ -140,6 +141,7 @@ export function extractTasklistStructure(root: MarkdownRootNode, options: { plan
         hasAnyVerificationContent: VERIFICATION_PATTERN.test(documentText),
         hasEngineeringVerification: ENGINEERING_VERIFICATION_PATTERN.test(documentText),
         hasExecutionDisciplineSection: headings.some(heading => EXECUTION_DISCIPLINE_PATTERN.test(heading.text)),
+        hasGoalsSection: headings.some(heading => GOALS_PATTERN.test(heading.text) && !NON_GOALS_PATTERN.test(heading.text)),
         hasNonGoalsSection: headings.some(heading => NON_GOALS_PATTERN.test(heading.text)),
         hasPausePoint: PAUSE_POINT_PATTERN.test(documentText),
         hasRisksSection: headings.some(heading => RISKS_PATTERN.test(heading.text)),

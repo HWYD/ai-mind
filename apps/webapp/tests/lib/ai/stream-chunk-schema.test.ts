@@ -61,3 +61,195 @@ describe('chatStreamChunkSchema artifact chunks', () => {
         ).toBe(false)
     })
 })
+
+describe('chatStreamChunkSchema graph chunks', () => {
+    it('接受合法 graph event chunk', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'readVersionPlan',
+                partId: 'graph-node-start',
+                runId: 'run-1',
+                stepIndex: 1,
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                title: '读取版本方案',
+                type: 'agent-graph-node-start',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                durationMs: 8,
+                nodeId: 'readVersionPlan',
+                partId: 'graph-node-end',
+                runId: 'run-1',
+                severity: 'info',
+                status: 'completed',
+                summary: '已读取 version plan。',
+                tags: ['read_resource'],
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-node-end',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                fromNodeId: 'readVersionPlan',
+                partId: 'graph-route',
+                reason: '读取成功。',
+                routeLabel: 'read_succeeded',
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                toNodeId: 'evaluatePlanReadiness',
+                type: 'agent-graph-route',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'readVersionPlan',
+                partId: 'graph-state-patch',
+                patchSummary: '已读取 version plan。',
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-state-patch',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                partId: 'graph-debug-summary',
+                runId: 'run-1',
+                summary: {
+                    checkpointMode: 'memory',
+                    currentNode: 'emitFinalArtifact',
+                    decision: {
+                        type: 'proceed_to_tasklist_strategy',
+                    },
+                    draftRevisions: 1,
+                    lastRoute: {
+                        fromNodeId: 'decideWarningDisposition',
+                        label: 'no_auto_revision',
+                        toNodeId: 'evaluateRevisionEffect',
+                    },
+                    manualReviewItemCount: 1,
+                    maxDraftRevisions: 1,
+                    maxOptionalContextReads: 1,
+                    maxSteps: 12,
+                    optionalContext: {
+                        status: 'completed',
+                    },
+                    optionalContextReads: 1,
+                    readiness: {
+                        status: 'ready',
+                    },
+                    revisionEffect: {
+                        finalDecision: 'final_with_manual_review_items',
+                    },
+                    runId: 'run-1',
+                    runtimeMode: 'graph',
+                    stepCount: 10,
+                    strategy: {
+                        expectedStepRange: [3, 5],
+                        granularity: 'medium',
+                    },
+                    threadId: 'tasklist-agent:conversation-1:run-1',
+                    validationV1: {
+                        score: 80,
+                        status: 'warning',
+                    },
+                    validationV2: {
+                        score: 96,
+                        status: 'pass',
+                    },
+                    visitedNodes: ['readVersionPlan', 'emitFinalArtifact'],
+                    warningDisposition: {
+                        fixNowCount: 1,
+                        manualReviewItemCount: 2,
+                    },
+                },
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-debug-summary',
+            }).success
+        ).toBe(true)
+    })
+
+    it('拒绝把完整 state patch object 放入 graph state patch chunk', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'readVersionPlan',
+                partId: 'graph-state-patch',
+                patchSummary: {
+                    agentState: {
+                        artifacts: {
+                            tasklistDraft: '# Full draft should not be streamed here',
+                        },
+                    },
+                },
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-state-patch',
+            }).success
+        ).toBe(false)
+    })
+
+    it('拒绝 graph debug summary 携带完整 state 或非白名单字段', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                partId: 'graph-debug-summary',
+                runId: 'run-1',
+                summary: {
+                    agentState: {
+                        artifacts: {
+                            tasklistDraft: '# Full draft should not be streamed here',
+                        },
+                    },
+                    checkpointMode: 'off',
+                    draftRevisions: 0,
+                    manualReviewItemCount: 0,
+                    maxDraftRevisions: 1,
+                    maxOptionalContextReads: 1,
+                    maxSteps: 12,
+                    optionalContextReads: 0,
+                    runId: 'run-1',
+                    runtimeMode: 'graph',
+                    stepCount: 1,
+                    threadId: 'tasklist-agent:conversation-1:run-1',
+                    visitedNodes: ['readVersionPlan'],
+                },
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-debug-summary',
+            }).success
+        ).toBe(false)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                partId: 'graph-debug-summary',
+                runId: 'run-1',
+                summary: {
+                    checkpointMode: 'off',
+                    draftRevisions: 0,
+                    manualReviewItemCount: 0,
+                    maxDraftRevisions: 1,
+                    maxOptionalContextReads: 1,
+                    maxSteps: 12,
+                    optionalContextReads: 0,
+                    readiness: {
+                        reason: '完整 reason 不应进入 debug summary',
+                        status: 'ready',
+                    },
+                    runId: 'run-1',
+                    runtimeMode: 'graph',
+                    stepCount: 1,
+                    threadId: 'tasklist-agent:conversation-1:run-1',
+                    visitedNodes: ['readVersionPlan'],
+                },
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-debug-summary',
+            }).success
+        ).toBe(false)
+    })
+})

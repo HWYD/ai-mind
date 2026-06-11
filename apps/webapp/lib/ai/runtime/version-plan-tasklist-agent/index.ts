@@ -71,5 +71,8 @@ export function createVersionPlanTasklistAgentSkeleton(
 }
 
 export { runVersionPlanTasklistAgent } from './tasklist-agent-runner'
+export { runVersionPlanTasklistGraph } from './graph/run-version-plan-tasklist-graph'
 export { readVersionPlanForTasklistAgent } from './resources/version-plan-reader'
+export { runLegacyVersionPlanTasklistAgentRuntime } from './runtime/legacy-tasklist-agent-runtime'
+export { selectTasklistAgentRuntime } from './runtime/select-tasklist-agent-runtime'
 export type { VersionPlanTasklistAgentState } from './contract/types'

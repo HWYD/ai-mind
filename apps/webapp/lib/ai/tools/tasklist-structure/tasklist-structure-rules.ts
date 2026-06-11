@@ -49,6 +49,10 @@ function getMissingSections(structure: TasklistStructure) {
         missingSections.push('Non-goals / 非目标')
     }
 
+    if (!structure.hasGoalsSection) {
+        missingSections.push('Goals / 版本目标')
+    }
+
     if (!structure.hasTestPlanSection) {
         missingSections.push('Test Plan / 验证计划')
     }
@@ -114,6 +118,12 @@ function getWeakSections(structure: TasklistStructure) {
                 '补充 Test Plan；如果每个 Step 已有验证，该项保持 warning。',
                 false
             )
+        )
+    }
+
+    if (!structure.hasGoalsSection) {
+        weakSections.push(
+            createWeakSection('missing_goals', 'Goals / 版本目标', '缺少版本目标说明。', '补充本版 Goals，承接来源方案中的目标范围。')
         )
     }
 

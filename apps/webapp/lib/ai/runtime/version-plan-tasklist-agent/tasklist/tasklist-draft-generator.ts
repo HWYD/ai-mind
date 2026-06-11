@@ -20,7 +20,7 @@ const DRAFT_SYSTEM_PROMPT = `
    目标版本：v0.x.x
    状态：草稿，待人工确认
 4. 来源方案必须包含完整 planUri，必须保留 docs:// 前缀，不要改写成普通文件路径、相对路径或文件名。
-5. 必须包含 Non-goals、本版执行纪律、Step 拆解、每个 Step 的 checklist item、每个 Step 的最小验证、工程验证、暂停点、风险 / 人工确认点。
+5. 必须包含 Goals、Non-goals、本版执行纪律、Step 拆解、每个 Step 的 checklist item、每个 Step 的最小验证、工程验证、暂停点、风险 / 人工确认点。
 6. 不要声称已经写入文件、数据库或 docs。
 7. 不要读取历史 tasklist，不要扫描 docs/versions，不要引入 RAG、工作流编排或多 Agent。
 `.trim()
@@ -31,6 +31,7 @@ const REVISE_SYSTEM_PROMPT = `
 只允许根据 validation findings 修复结构问题：
 - 补充缺失小节
 - 补充或修复完整来源方案 URI
+- 补充 Goals
 - 补充 checklist 格式
 - 补充最小验证
 - 补充暂停点

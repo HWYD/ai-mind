@@ -10,6 +10,8 @@ AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 
 `v0.1.1` 在这条路径上加入 `Controlled Planner Lite`：Agent 可以在 Runtime 白名单 action 中做一次有限决策，但仍然不能自由读取资源、自由调用工具、写入文件或循环规划。
 
+`v0.2.0` 将这条受控路径的编排层迁移到 LangGraph `StateGraph`。Graph runner 只表达节点、条件边和状态摘要，不扩大 Agent 权限；legacy runner 仍可通过服务端配置回退。
+
 ## Agent 的边界
 
 当前 Agent 必须满足明确入口：
@@ -61,6 +63,13 @@ Runtime 负责：
 - 执行结构质量门。
 - 输出最终回答。
 
+`v0.2.0` 后，Runtime 可以在请求开始前选择：
+
+- `legacy`：使用原受控 runner。
+- `graph`：使用 LangGraph `StateGraph` runner。
+
+这个选择只影响 tasklist Agent，不影响普通问答、docs summary、Tool Calling、Reader Skill 或 Utility Skill。本版不提供前端 runtime switch，也不做运行中 fallback。
+
 ## Agent State
 
 `AgentState` 只保存本轮执行状态。
@@ -86,6 +95,8 @@ Runtime 负责：
 - Agent Trace 数据库。
 - 跨轮记忆。
 - 自动写文件。
+
+GraphState 只包裹 graph runner 需要的运行时信息，例如当前节点、已访问节点、最近 route、threadId、checkpointMode 和脱敏 patch summary。`AgentState` 仍然是业务事实源。
 
 ## Tool Boundary
 
@@ -123,6 +134,13 @@ Agent 执行过程通过流式 step 事件展示：
 
 前端通过 `AgentTracePanel` 聚合展示同一次 Agent run 的多个 step。
 
+`v0.2.0` 后，graph runtime 还可以输出受控 graph events：
+
+- node start / end。
+- route。
+- state patch summary。
+- debug summary。
+
 它的目标不是完整调试台，而是让用户和开发者知道：
 
 - Agent 做到了哪一步。
@@ -134,7 +152,7 @@ Agent 执行过程通过流式 step 事件展示：
 - 修正是否有效。
 - 最终是否输出结果。
 
-面板只展示摘要，不展示完整 action JSON、prompt、AgentState 或 draft diff。
+面板只展示摘要，不展示完整 action JSON、prompt、AgentState、GraphState、resource 原文、tool raw output 或 draft diff。项目不直接透传 LangGraph 原始 debug stream。
 
 ## Agent Text Artifact
 
@@ -152,6 +170,27 @@ Runtime 会在 `final_answer` 阶段输出通用 text artifact：
 
 - 过程归 `AgentTracePanel`，产物归 `AgentTextArtifactPanel`。
 - Artifact 只是最终交付展示，不提供持久化、编辑、下载或 diff。
+
+## Checkpoint 与 Debug
+
+`v0.2.0` 支持 development-only memory checkpoint：
+
+- 只在 graph runtime 下生效。
+- 只在非 production 环境中生效。
+- 默认关闭。
+
+它用于验证 LangGraph checkpointer 接入方式，不是产品级 resume / replay 能力。
+
+Debug Summary 也默认关闭，只在服务端开启后输出白名单字段，例如 runId、threadId、当前节点、最近 route、readiness status、validation status / score 和 step limits。
+
+当前仍然不做：
+
+- production checkpoint。
+- resume。
+- replay。
+- state edit。
+- history list。
+- 完整 GraphState 调试台。
 
 ## Design Principle
 

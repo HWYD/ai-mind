@@ -39,6 +39,114 @@ export interface AgentStepEndChunk {
     error?: string
 }
 
+export interface AgentGraphNodeStartChunk {
+    type: 'agent-graph-node-start'
+    partId: string
+    runId: string
+    threadId: string
+    agentName: string
+    nodeId: string
+    title: string
+    stepIndex: number
+}
+
+export interface AgentGraphNodeEndChunk {
+    type: 'agent-graph-node-end'
+    partId: string
+    runId: string
+    threadId: string
+    agentName: string
+    nodeId: string
+    status: Exclude<AgentStepStatus, 'running'>
+    summary?: string
+    durationMs?: number
+    severity?: AgentStepSeverity
+    tags?: string[]
+    error?: string
+}
+
+export interface AgentGraphRouteChunk {
+    type: 'agent-graph-route'
+    partId: string
+    runId: string
+    threadId: string
+    agentName: string
+    fromNodeId: string
+    toNodeId: string
+    routeLabel: string
+    reason?: string
+}
+
+export interface AgentGraphStatePatchChunk {
+    type: 'agent-graph-state-patch'
+    partId: string
+    runId: string
+    threadId: string
+    agentName: string
+    nodeId: string
+    patchSummary: string
+}
+
+export interface AgentGraphDebugRouteSummary {
+    fromNodeId: string
+    label: string
+    toNodeId: string
+}
+
+export interface AgentGraphDebugSummary {
+    checkpointMode: 'memory' | 'off'
+    currentNode?: string
+    decision?: {
+        type: string
+    }
+    draftRevisions: number
+    lastRoute?: AgentGraphDebugRouteSummary
+    manualReviewItemCount: number
+    maxDraftRevisions: number
+    maxOptionalContextReads: number
+    maxSteps: number
+    optionalContext?: {
+        status: string
+    }
+    optionalContextReads: number
+    readiness?: {
+        status: string
+    }
+    revisionEffect?: {
+        finalDecision: string
+    }
+    runId: string
+    runtimeMode: 'graph'
+    stepCount: number
+    strategy?: {
+        expectedStepRange: [number, number]
+        granularity: string
+    }
+    threadId: string
+    validationV1?: {
+        score: number
+        status: string
+    }
+    validationV2?: {
+        score: number
+        status: string
+    }
+    visitedNodes: string[]
+    warningDisposition?: {
+        fixNowCount: number
+        manualReviewItemCount: number
+    }
+}
+
+export interface AgentGraphDebugSummaryChunk {
+    type: 'agent-graph-debug-summary'
+    partId: string
+    runId: string
+    threadId: string
+    agentName: string
+    summary: AgentGraphDebugSummary
+}
+
 export interface TextStartChunk {
     type: 'text-start'
     partId: string
@@ -230,6 +338,11 @@ export type ChatStreamChunk =
     | SkillSelectedChunk
     | AgentStepStartChunk
     | AgentStepEndChunk
+    | AgentGraphNodeStartChunk
+    | AgentGraphNodeEndChunk
+    | AgentGraphRouteChunk
+    | AgentGraphStatePatchChunk
+    | AgentGraphDebugSummaryChunk
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk

@@ -1,4 +1,4 @@
-import type { AgentStepEntry, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
+import type { AgentGraphNodeEntry, AgentStepEntry, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
 
 import { getAgentTraceStatusValueLabel, getDetailStatusLabel } from './agent-trace-formatters'
 
@@ -87,4 +87,56 @@ export function buildStepInlineDetails(steps: AgentStepEntry[], detailParts: Age
     }
 
     return detailsByStepIndex
+}
+
+export function buildGraphNodeInlineDetails(nodes: AgentGraphNodeEntry[], detailParts: AgentDetailPart[]) {
+    const detailsByNodeId = new Map<string, StepInlineDetail[]>()
+    const resourceDetails = detailParts.filter((detailPart): detailPart is ResourcePart => detailPart.type === 'resource')
+    const validationToolDetails = detailParts.filter(
+        (detailPart): detailPart is ToolPart => detailPart.type === 'tool' && detailPart.toolName === 'validate_tasklist_structure'
+    )
+    let resourceIndex = 0
+    let validationToolIndex = 0
+
+    for (const node of nodes) {
+        const details: StepInlineDetail[] = []
+
+        switch (node.nodeId) {
+            case 'readVersionPlan':
+            case 'readOptionalContext': {
+                const resource = resourceDetails[resourceIndex]
+
+                if (resource) {
+                    resourceIndex += 1
+                    details.push({
+                        icon: 'resource',
+                        label: '资源读取',
+                        value: `${resource.uri}：${getDetailStatusLabel(resource.status)}`,
+                    })
+                }
+
+                break
+            }
+            case 'validateTasklistV1':
+            case 'validateTasklistV2': {
+                const tool = validationToolDetails[validationToolIndex]
+
+                if (tool) {
+                    validationToolIndex += 1
+                    details.push({
+                        icon: 'tool',
+                        ...getValidationToolSummary(tool, validationToolIndex),
+                    })
+                }
+
+                break
+            }
+        }
+
+        if (details.length > 0) {
+            detailsByNodeId.set(node.nodeId, details)
+        }
+    }
+
+    return detailsByNodeId
 }

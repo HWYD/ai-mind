@@ -3,6 +3,7 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { createId } from '@/lib/ai/create-id'
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
+    AgentGraphNodeEntry,
     AgentStepEntry,
     AgentStepPart,
     AgentTextArtifactViewModel,
@@ -120,6 +121,22 @@ export function createAgentStepPart(entry: AgentStepEntry, runId: string, agentN
         agentName,
         status: entry.status,
         steps: [entry],
+    }
+}
+
+export function createAgentGraphStepPart(node: AgentGraphNodeEntry, runId: string, agentName: string): AgentStepPart {
+    return {
+        id: `agent-step:${runId}`,
+        type: 'agent-step',
+        runId,
+        agentName,
+        graph: {
+            nodes: [node],
+            routes: [],
+            runtime: 'LangGraph',
+        },
+        status: node.status,
+        steps: [],
     }
 }
 

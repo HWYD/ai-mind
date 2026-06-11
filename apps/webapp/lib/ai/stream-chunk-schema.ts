@@ -16,6 +16,88 @@ const agentTextArtifactMetadataSchema = z.object({
     validated: z.boolean().optional(),
 })
 
+const agentGraphExpectedStepRangeSchema = z.custom<[number, number]>(
+    value => Array.isArray(value) && value.length === 2 && value.every(item => Number.isInteger(item) && item > 0)
+)
+
+const agentGraphDebugSummarySchema = z
+    .object({
+        checkpointMode: z.enum(['memory', 'off']),
+        currentNode: z.string().min(1).optional(),
+        decision: z
+            .object({
+                type: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        draftRevisions: z.number().int().nonnegative(),
+        lastRoute: z
+            .object({
+                fromNodeId: z.string().min(1),
+                label: z.string().min(1),
+                toNodeId: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        manualReviewItemCount: z.number().int().nonnegative(),
+        maxDraftRevisions: z.number().int().nonnegative(),
+        maxOptionalContextReads: z.number().int().nonnegative(),
+        maxSteps: z.number().int().positive(),
+        optionalContext: z
+            .object({
+                status: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        optionalContextReads: z.number().int().nonnegative(),
+        readiness: z
+            .object({
+                status: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        revisionEffect: z
+            .object({
+                finalDecision: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        runId: z.string().min(1),
+        runtimeMode: z.literal('graph'),
+        stepCount: z.number().int().nonnegative(),
+        strategy: z
+            .object({
+                expectedStepRange: agentGraphExpectedStepRangeSchema,
+                granularity: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        threadId: z.string().min(1),
+        validationV1: z
+            .object({
+                score: z.number().min(0).max(100),
+                status: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        validationV2: z
+            .object({
+                score: z.number().min(0).max(100),
+                status: z.string().min(1),
+            })
+            .strict()
+            .optional(),
+        visitedNodes: z.array(z.string().min(1)),
+        warningDisposition: z
+            .object({
+                fixNowCount: z.number().int().nonnegative(),
+                manualReviewItemCount: z.number().int().nonnegative(),
+            })
+            .strict()
+            .optional(),
+    })
+    .strict()
+
 export const chatStreamChunkSchema = z.discriminatedUnion('type', [
     z.object({
         type: z.literal('start'),
@@ -51,6 +133,60 @@ export const chatStreamChunkSchema = z.discriminatedUnion('type', [
         tags: z.array(z.string().min(1)).optional(),
         error: z.string().optional(),
     }),
+    z.object({
+        type: z.literal('agent-graph-node-start'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        threadId: z.string().min(1),
+        agentName: z.string().min(1),
+        nodeId: z.string().min(1),
+        title: z.string().min(1),
+        stepIndex: z.number().int().positive(),
+    }),
+    z.object({
+        type: z.literal('agent-graph-node-end'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        threadId: z.string().min(1),
+        agentName: z.string().min(1),
+        nodeId: z.string().min(1),
+        status: z.enum(['completed', 'failed', 'skipped']),
+        summary: z.string().optional(),
+        durationMs: z.number().int().nonnegative().optional(),
+        severity: z.enum(['error', 'info', 'warning']).optional(),
+        tags: z.array(z.string().min(1)).optional(),
+        error: z.string().optional(),
+    }),
+    z.object({
+        type: z.literal('agent-graph-route'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        threadId: z.string().min(1),
+        agentName: z.string().min(1),
+        fromNodeId: z.string().min(1),
+        toNodeId: z.string().min(1),
+        routeLabel: z.string().min(1),
+        reason: z.string().optional(),
+    }),
+    z.object({
+        type: z.literal('agent-graph-state-patch'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        threadId: z.string().min(1),
+        agentName: z.string().min(1),
+        nodeId: z.string().min(1),
+        patchSummary: z.string(),
+    }),
+    z
+        .object({
+            type: z.literal('agent-graph-debug-summary'),
+            partId: z.string().min(1),
+            runId: z.string().min(1),
+            threadId: z.string().min(1),
+            agentName: z.string().min(1),
+            summary: agentGraphDebugSummarySchema,
+        })
+        .strict(),
     z.object({
         type: z.literal('text-start'),
         partId: z.string().min(1),

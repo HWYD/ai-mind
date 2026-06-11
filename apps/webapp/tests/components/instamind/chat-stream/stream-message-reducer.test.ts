@@ -145,4 +145,214 @@ describe('stream-message-reducer', () => {
             title: 'Tasklist',
         })
     })
+
+    it('graph node start/end 按 runId 聚合到 agent-step part', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-graph-node' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'readVersionPlan',
+                partId: 'graph-node-read',
+                runId: 'run-graph',
+                stepIndex: 1,
+                threadId: 'tasklist-agent:c1:run-graph',
+                title: '读取版本方案',
+                type: 'agent-graph-node-start',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                durationMs: 12,
+                nodeId: 'readVersionPlan',
+                partId: 'graph-node-read',
+                runId: 'run-graph',
+                severity: 'info',
+                status: 'completed',
+                summary: '已读取 version plan。',
+                threadId: 'tasklist-agent:c1:run-graph',
+                type: 'agent-graph-node-end',
+            },
+        ])
+
+        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-step')
+
+        expect(agentPart).toMatchObject({
+            agentName: 'version-plan-to-tasklist-agent',
+            graph: {
+                nodes: [
+                    {
+                        durationMs: 12,
+                        nodeId: 'readVersionPlan',
+                        patchSummaries: [],
+                        status: 'completed',
+                        summary: '已读取 version plan。',
+                        title: '读取版本方案',
+                    },
+                ],
+                runtime: 'LangGraph',
+            },
+            runId: 'run-graph',
+            status: 'completed',
+            steps: [],
+            type: 'agent-step',
+        })
+    })
+
+    it('graph route 追加到同一次 Agent run', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-graph-route' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'planningDecision',
+                partId: 'graph-node-decision',
+                runId: 'run-graph',
+                stepIndex: 1,
+                threadId: 'tasklist-agent:c1:run-graph',
+                title: '规划决策',
+                type: 'agent-graph-node-start',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                fromNodeId: 'planningDecision',
+                partId: 'graph-route',
+                reason: '输入已满足任务清单生成条件。',
+                routeLabel: 'proceed_to_tasklist_strategy',
+                runId: 'run-graph',
+                threadId: 'tasklist-agent:c1:run-graph',
+                toNodeId: 'decideTasklistStrategy',
+                type: 'agent-graph-route',
+            },
+        ])
+
+        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-step')
+
+        expect(agentPart).toMatchObject({
+            graph: {
+                routes: [
+                    {
+                        fromNodeId: 'planningDecision',
+                        reason: '输入已满足任务清单生成条件。',
+                        routeLabel: 'proceed_to_tasklist_strategy',
+                        toNodeId: 'decideTasklistStrategy',
+                    },
+                ],
+            },
+        })
+    })
+
+    it('graph state patch summary 挂到对应 node，且不会生成普通 text part', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-graph-patch' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'decideWarningDisposition',
+                partId: 'graph-node-warning',
+                runId: 'run-graph',
+                stepIndex: 1,
+                threadId: 'tasklist-agent:c1:run-graph',
+                title: '决定 warning 处理',
+                type: 'agent-graph-node-start',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'decideWarningDisposition',
+                partId: 'graph-patch',
+                patchSummary: 'warning 处理：fixNow 1，manualReview 2。',
+                runId: 'run-graph',
+                threadId: 'tasklist-agent:c1:run-graph',
+                type: 'agent-graph-state-patch',
+            },
+        ])
+
+        const assistantMessage = getAssistantMessage(state)
+        const agentPart = assistantMessage?.parts.find(part => part.type === 'agent-step')
+
+        expect(assistantMessage?.parts.some(part => part.type === 'text')).toBe(false)
+        expect(agentPart).toMatchObject({
+            graph: {
+                nodes: [
+                    {
+                        nodeId: 'decideWarningDisposition',
+                        patchSummaries: ['warning 处理：fixNow 1，manualReview 2。'],
+                    },
+                ],
+            },
+        })
+    })
+
+    it('graph debug summary 合并到同一次 Agent run，且不会生成普通 text part', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-graph-debug' },
+            {
+                actionType: 'planning_decision',
+                agentName: 'version-plan-to-tasklist-agent',
+                partId: 'legacy-decision',
+                runId: 'run-graph',
+                stepIndex: 1,
+                title: '执行 Planning Decision',
+                type: 'agent-step-start',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                partId: 'graph-debug-summary',
+                runId: 'run-graph',
+                summary: {
+                    checkpointMode: 'memory',
+                    currentNode: 'emitFinalArtifact',
+                    decision: {
+                        type: 'proceed_to_tasklist_strategy',
+                    },
+                    draftRevisions: 1,
+                    lastRoute: {
+                        fromNodeId: 'decideWarningDisposition',
+                        label: 'no_auto_revision',
+                        toNodeId: 'evaluateRevisionEffect',
+                    },
+                    manualReviewItemCount: 1,
+                    maxDraftRevisions: 1,
+                    maxOptionalContextReads: 1,
+                    maxSteps: 12,
+                    optionalContextReads: 0,
+                    readiness: {
+                        status: 'ready',
+                    },
+                    runId: 'run-graph',
+                    runtimeMode: 'graph',
+                    stepCount: 8,
+                    threadId: 'tasklist-agent:c1:run-graph',
+                    validationV1: {
+                        score: 96,
+                        status: 'pass',
+                    },
+                    visitedNodes: ['readVersionPlan', 'emitFinalArtifact'],
+                },
+                threadId: 'tasklist-agent:c1:run-graph',
+                type: 'agent-graph-debug-summary',
+            },
+        ])
+
+        const assistantMessage = getAssistantMessage(state)
+        const agentPart = assistantMessage?.parts.find(part => part.type === 'agent-step')
+
+        expect(assistantMessage?.parts.some(part => part.type === 'text')).toBe(false)
+        expect(agentPart).toMatchObject({
+            graph: {
+                debugSummary: {
+                    checkpointMode: 'memory',
+                    currentNode: 'emitFinalArtifact',
+                    runId: 'run-graph',
+                    threadId: 'tasklist-agent:c1:run-graph',
+                    visitedNodes: ['readVersionPlan', 'emitFinalArtifact'],
+                },
+                nodes: [],
+                routes: [],
+                runtime: 'LangGraph',
+            },
+            steps: [
+                {
+                    partId: 'legacy-decision',
+                    status: 'running',
+                },
+            ],
+        })
+    })
 })

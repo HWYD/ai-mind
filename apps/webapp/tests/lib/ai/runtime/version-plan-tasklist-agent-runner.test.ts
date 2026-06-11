@@ -69,6 +69,12 @@ const validTasklist = `
 
 基于版本方案生成受控单 Agent 的实施清单。
 
+## Goals
+
+- 读取 version plan
+- 生成 tasklist 草稿
+- 执行结构校验
+
 ## Non-goals
 
 - 不写入 docs 文件
@@ -326,6 +332,7 @@ describe('runtime/version-plan-tasklist-agent runner', () => {
             type: 'artifact-end',
         })
         expect(artifactContent).toBe(finalState.artifacts.tasklistDraft?.content)
+        expect(writtenChunks.some(chunk => chunk.type.startsWith('agent-graph-'))).toBe(false)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('## Step 1：入口与资源边界'))).toBe(false)
         expect(finalAnswerStartIndex).toBeGreaterThanOrEqual(0)
         expect(artifactStartIndex).toBeGreaterThan(finalAnswerStartIndex)

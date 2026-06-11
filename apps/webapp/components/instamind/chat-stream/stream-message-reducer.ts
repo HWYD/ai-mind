@@ -13,6 +13,7 @@ import {
     createToolPart,
 } from './message-factory'
 import {
+    appendAgentGraphRoutePart,
     appendAgentTextArtifact,
     appendAgentTextArtifactDelta,
     appendPart,
@@ -22,6 +23,8 @@ import {
     updatePromptPart,
     updateResourcePart,
     updateToolPart,
+    upsertAgentGraphDebugSummaryPart,
+    upsertAgentGraphNodePart,
     upsertAgentStepPart,
 } from './message-operations'
 
@@ -248,6 +251,74 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                     chunk.runId,
                     chunk.agentName
                 )
+            )
+        case 'agent-graph-node-start':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertAgentGraphNodePart(
+                    messages,
+                    messageId,
+                    {
+                        nodeId: chunk.nodeId,
+                        partId: chunk.partId,
+                        patchSummaries: [],
+                        status: 'running',
+                        stepIndex: chunk.stepIndex,
+                        title: chunk.title,
+                    },
+                    chunk.runId,
+                    chunk.agentName
+                )
+            )
+        case 'agent-graph-node-end':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertAgentGraphNodePart(
+                    messages,
+                    messageId,
+                    {
+                        durationMs: chunk.durationMs,
+                        error: chunk.error,
+                        nodeId: chunk.nodeId,
+                        partId: chunk.partId,
+                        severity: chunk.severity,
+                        status: chunk.status,
+                        summary: chunk.summary,
+                        tags: chunk.tags,
+                    },
+                    chunk.runId,
+                    chunk.agentName
+                )
+            )
+        case 'agent-graph-route':
+            return updateActiveMessage(state, (messages, messageId) =>
+                appendAgentGraphRoutePart(
+                    messages,
+                    messageId,
+                    {
+                        fromNodeId: chunk.fromNodeId,
+                        reason: chunk.reason,
+                        routeLabel: chunk.routeLabel,
+                        toNodeId: chunk.toNodeId,
+                    },
+                    chunk.runId,
+                    chunk.agentName
+                )
+            )
+        case 'agent-graph-state-patch':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertAgentGraphNodePart(
+                    messages,
+                    messageId,
+                    {
+                        nodeId: chunk.nodeId,
+                        patchSummaries: [chunk.patchSummary],
+                    },
+                    chunk.runId,
+                    chunk.agentName
+                )
+            )
+        case 'agent-graph-debug-summary':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertAgentGraphDebugSummaryPart(messages, messageId, chunk.summary, chunk.runId, chunk.agentName)
             )
         case 'text-start':
             return applyMessagesAndActiveStream(state, appendActivePartMessages(state, createTextPart('', chunk.partId)), {

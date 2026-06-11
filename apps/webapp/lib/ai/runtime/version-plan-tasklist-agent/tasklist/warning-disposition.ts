@@ -3,6 +3,7 @@ import type { TasklistValidationResult, TasklistWeakSectionCode } from '@/lib/ai
 import type { VersionPlanTasklistManualReviewItem, WarningDisposition } from '../contract/types'
 
 const AUTO_FIX_WEAK_SECTION_CODES = new Set<TasklistWeakSectionCode>([
+    'missing_goals',
     'missing_engineering_verification',
     'missing_execution_discipline',
     'missing_non_goals',
