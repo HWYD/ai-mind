@@ -45,10 +45,11 @@ export const chatRequestSchema = z.object({
     options: z
         .object({
             skill: z.string().min(1).optional(),
-            model: z.string().optional(),
+            modelId: z.string().optional(),
             temperature: z.number().optional(),
             maxTokens: z.number().int().positive().optional(),
             enableReasoning: z.boolean().optional(),
         })
+        .strict()
         .optional(),
 })

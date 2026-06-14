@@ -6,14 +6,14 @@ export interface ComposerCommandOption extends ComposerCommand {
 
 export const composerCommandOptions: ComposerCommandOption[] = [
     {
-        name: 'summary',
-        label: '总结文档',
-        description: '基于引用的文档或上下文生成结构化摘要',
-    },
-    {
         name: 'tasklist',
         label: '生成任务清单',
         description: '基于当前目标生成版本 tasklist 草稿',
+    },
+    {
+        name: 'summary',
+        label: '总结文档',
+        description: '基于引用的文档或上下文生成结构化摘要',
     },
     {
         name: 'check',

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Mind Step Audit"
+  short_description: "审计 AI Mind tasklist step 交付质量"
+  default_prompt: "使用 $ai-mind-step-audit 审计当前 AI Mind tasklist step；如果未指定 Step，默认审计最新已完成 Step。"

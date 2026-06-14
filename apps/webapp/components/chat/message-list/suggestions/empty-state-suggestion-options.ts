@@ -42,9 +42,16 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
         icon: Layers3,
         tag: '问答',
         label: '理解 Runtime 分层',
-        description: '解释 AI Mind 当前 Runtime、Skill、MCP 的边界。',
-        text: '解释一下 AI Mind 当前 Runtime 是怎么分层的',
+        description: '解释 AI 应用 Runtime、Skill、MCP、Tool 的边界。',
+        text: '解释一下 AI 应用 Runtime、Skill、MCP、Tool 是怎么分层的',
     },
+    // {
+    //     icon: Layers3,
+    //     tag: '问答',
+    //     label: '理解 Runtime 分层',
+    //     description: '解释 AI Mind 当前 Runtime、Skill、MCP 的边界。',
+    //     text: '解释一下 AI Mind 当前 Runtime 是怎么分层的',
+    // },
     {
         icon: Calculator,
         tag: '工具',

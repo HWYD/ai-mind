@@ -1,8 +1,11 @@
 import { StreamLifecycle, writeStaticTextPart } from '@ai-mind/stream-core'
+import type { StreamErrorCode } from '@ai-mind/stream-core/protocol'
 import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '@langchain/core/messages'
 
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
+import type { AiMindChatModelHandle } from '@/lib/ai/model-provider'
+import { logProviderError, validateInputLength } from '@/lib/ai/model-provider'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, stripMessageText } from './assistant-stream'
@@ -15,9 +18,9 @@ import { logSkillRuntime, throwIfAborted, writeStreamErrorChunk } from './stream
 import { executeToolCall, formatToolInput, normalizeAndValidateToolCalls, writeToolValidationErrors } from './tool-runtime'
 import type {
     ChatExecutionContext,
-    ChatServiceDependencies,
     ChatSession,
     ExecutedToolResult,
+    ResolvedChatExecutionContext,
     ToolValidationResult,
     WriteChunk,
 } from './types'
@@ -30,8 +33,7 @@ import {
 } from './version-plan-tasklist-agent'
 
 interface ChatOrchestratorOptions {
-    context: ChatExecutionContext
-    deps: ChatServiceDependencies
+    context: ResolvedChatExecutionContext
     isClosed: () => boolean
     request: ChatRequest
     writeChunk: WriteChunk
@@ -76,6 +78,7 @@ async function streamDirectAnswer(
     writeChunk: WriteChunk,
     isClosed: () => boolean
 ) {
+    validateInputLength(langChainMessages)
     const stream = await model.stream(langChainMessages, {
         signal: context.signal,
     })
@@ -101,15 +104,14 @@ function getLastUserMessageText(request: ChatRequest) {
 }
 
 export class ChatOrchestrator {
-    private readonly context: ChatExecutionContext
-    private readonly deps: ChatServiceDependencies
+    private readonly context: ResolvedChatExecutionContext
     private readonly isClosed: () => boolean
     private readonly request: ChatRequest
     private readonly writeChunk: WriteChunk
+    private modelHandle: AiMindChatModelHandle | null = null
 
     constructor(options: ChatOrchestratorOptions) {
         this.context = options.context
-        this.deps = options.deps
         this.isClosed = options.isClosed
         this.request = options.request
         this.writeChunk = options.writeChunk
@@ -134,11 +136,14 @@ export class ChatOrchestrator {
             throw new Error('toolBoundModel is required for planning stage')
         }
 
+        const planningMessages = this.buildPlanningMessages(session, withRetryPrompt)
+        validateInputLength(planningMessages)
+
         // Planning stage consumes one bound-model stream and folds it into:
         // - executable tool calls
         // - normalized validation errors
         // - visibility status for assistant text content
-        const planningStream = await session.toolBoundModel.stream(this.buildPlanningMessages(session, withRetryPrompt), {
+        const planningStream = await session.toolBoundModel.stream(planningMessages, {
             signal: this.context.signal,
         })
         const response = await streamPlanningResponse(planningStream, this.context, this.writeChunk, this.isClosed)
@@ -303,6 +308,7 @@ export class ChatOrchestrator {
             ...toolMessages,
             ...promptContextMessages,
         ]
+        validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
@@ -334,6 +340,7 @@ export class ChatOrchestrator {
             ...session.langChainMessages,
             ...capabilityContextMessages,
         ]
+        validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
@@ -365,6 +372,7 @@ export class ChatOrchestrator {
             ...session.langChainMessages,
             ...composerContextMessages,
         ]
+        validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
@@ -455,7 +463,9 @@ export class ChatOrchestrator {
             // 如果等这些前置准备完成再发首包，用户会看到“按钮已禁用但消息区空白”的假死状态。
             lifecycle.emitStartOnce()
 
-            const session = await createChatSession(this.request, this.deps)
+            const session = await createChatSession(this.request, this.context.resolvedModelSelection)
+
+            this.modelHandle = session.modelHandle
 
             throwIfAborted(this.context.signal)
 
@@ -557,10 +567,19 @@ export class ChatOrchestrator {
                 throw error
             }
 
-            lifecycle.emitRuntimeErrorOnce({
-                errorCode: 'MODEL_STREAM_FAILED',
-                retryable: true,
+            // 使用 Provider 层 normalizeError 产出标准化 stream error chunk
+            logProviderError(error)
+            const normalized = this.modelHandle?.normalizeError(error) ?? {
+                code: 'MODEL_STREAM_FAILED',
                 message: 'Model streaming failed.',
+                retryable: true,
+                logMeta: {},
+            }
+
+            lifecycle.emitRuntimeErrorOnce({
+                errorCode: normalized.code as StreamErrorCode,
+                retryable: normalized.retryable,
+                message: normalized.message,
                 stage: 'runtime',
             })
         }

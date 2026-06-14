@@ -10,16 +10,24 @@ import { ChatMessageList } from '@/components/chat/message-list/chat-message-lis
 import type { EmptyStateSuggestion } from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
+import type { ChatModelsInitialState } from '@/lib/ai/models'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatSkillMode } from '@/lib/ai/types/chat'
 
 import { useChatAutoScroll } from './use-chat-auto-scroll'
+import { useChatModels } from './use-chat-models'
 import { useChatStream } from './use-chat-stream'
 
-export default function InstantMindPage() {
+export default function InstantMindPage({ initialChatModelsState }: { initialChatModelsState: ChatModelsInitialState }) {
     const [skillMode, setSkillMode] = useState<ChatSkillMode>('auto')
-    const [model, setModel] = useState<ChatModel>(defaultChatModel)
     const [enableReasoning, setEnableReasoning] = useState(true)
+    const {
+        hasAvailableModels,
+        isLoading: isModelLoading,
+        model,
+        modelError,
+        modelGroups,
+        setModel,
+    } = useChatModels(initialChatModelsState)
     const { messages, status, error, sendMessage, cancel, deleteUserTurn, regenerateLastTurn } = useChatStream({
         skillMode,
         model,
@@ -65,8 +73,8 @@ export default function InstantMindPage() {
 
     return (
         <main className="min-h-screen bg-background text-foreground">
-            <header className="border-b bg-background">
-                <div className="mx-auto flex h-16 max-w-7xl items-center px-6 lg:px-12">
+            <header className="h-16 border-b bg-background">
+                <div className="mx-auto flex h-full max-w-7xl items-center px-6 lg:px-12">
                     <Link href="/" className="flex items-center gap-3" aria-label="AI Mind 官网">
                         <Image src="/brand/ai-mind-icon.png" alt="AI Mind" width={32} height={32} className="size-8 rounded-lg" priority />
                         <span className="text-xl font-semibold tracking-tight text-foreground">AI Mind</span>
@@ -124,6 +132,10 @@ export default function InstantMindPage() {
                             status={status}
                             skillMode={skillMode}
                             model={model}
+                            hasAvailableModels={hasAvailableModels}
+                            isModelLoading={isModelLoading}
+                            modelError={modelError}
+                            modelGroups={modelGroups}
                             enableReasoning={enableReasoning}
                             onSkillModeChange={setSkillMode}
                             onModelChange={setModel}

@@ -28,12 +28,25 @@ import { useStreamTextBuffer } from './chat-stream/use-stream-text-buffer'
 // 调大：Markdown 解析和 DOM 更新更少但打字感更钝；调小：更实时但更容易触发渲染/滚动抖动。
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
 
+type ChatRequestError = Error & {
+    code?: string
+    userMessage?: string
+}
+
 function getErrorMessage(error: unknown): string {
     if (error instanceof Error && error.message) {
         return error.message
     }
 
     return '请求失败，请稍后重试。'
+}
+
+function getErrorCode(error: unknown): string | null {
+    if (!(error instanceof Error) || !('code' in error)) {
+        return null
+    }
+
+    return typeof error.code === 'string' ? error.code : null
 }
 
 interface UseChatStreamOptions {
@@ -230,7 +243,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 ...(composer ? { composer } : {}),
                 messages: buildRequestMessages(nextMessages),
                 options: {
-                    model,
+                    modelId: model,
                     enableReasoning,
                     ...(skill ? { skill } : {}),
                 },
@@ -248,7 +261,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 const responseJson = await response.json().catch(() => null)
                 const errorMessage = responseJson?.error ?? `聊天请求失败，状态码：${response.status}`
                 const errorCode = typeof responseJson?.code === 'string' ? responseJson.code : null
-                throw new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage)
+                const requestError = new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage) as ChatRequestError
+                requestError.code = errorCode ?? undefined
+                requestError.userMessage = errorMessage
+                throw requestError
             }
 
             if (!response.body) {
@@ -273,9 +289,22 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             }
 
             discardActiveAssistantMessage()
-            updateMessages(current => pruneTransientMessages(current))
-            setError(getErrorMessage(requestError))
-            setStatus('error')
+            const requestErrorCode = getErrorCode(requestError)
+
+            if (requestErrorCode === 'MODEL_PROVIDER_RATE_LIMITED') {
+                updateMessages(current => [
+                    ...pruneTransientMessages(current),
+                    createMessage('assistant', [
+                        createTextPart((requestError as ChatRequestError).userMessage ?? getErrorMessage(requestError)),
+                    ]),
+                ])
+                setError(null)
+                setStatus('ready')
+            } else {
+                updateMessages(current => pruneTransientMessages(current))
+                setError(getErrorMessage(requestError))
+                setStatus('error')
+            }
         } finally {
             // finish、error、abort 都会走 finally，再兜底 flush 一次，保证不会丢尾字符。
             textBuffer.flush()

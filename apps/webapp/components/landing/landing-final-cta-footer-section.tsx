@@ -120,7 +120,7 @@ function LandingFooter() {
                         © 2026 AI Mind. Built with Next.js
                     </p>
                     <p data-footer-icp className="mt-3 text-sm leading-6 text-muted-foreground">
-                        备案号：待补充
+                        粤ICP备2025402577号
                     </p>
                 </div>
             </div>

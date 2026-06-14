@@ -1,26 +1,29 @@
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { BaseMessage, ToolCall, ToolMessage } from '@langchain/core/messages'
-import { ChatOllama } from '@langchain/ollama'
+import type { Runnable } from '@langchain/core/runnables'
 
+import type { AiMindChatModelHandle, ResolvedModelSelection } from '@/lib/ai/model-provider'
 import type { SkillDefinition } from '@/lib/ai/skills'
 import type { ChatToolDefinition } from '@/lib/ai/tools'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 export interface ChatExecutionContext {
+    setCookie?: string | null
     signal?: AbortSignal
 }
 
-export interface ChatServiceDependencies {
-    defaultModel: string
-    baseUrl?: string
+export interface ResolvedChatExecutionContext extends ChatExecutionContext {
+    resolvedModelSelection: ResolvedModelSelection
 }
 
 export type WriteChunk = (chunk: ChatStreamChunk) => void
 
 export interface ChatSession {
     request: ChatRequest
-    baseModel: ChatOllama
-    toolBoundModel: ReturnType<ChatOllama['bindTools']> | null
+    baseModel: BaseChatModel
+    modelHandle: AiMindChatModelHandle
+    toolBoundModel: Runnable | null
     skillDefinition?: SkillDefinition
     skillSystemPrompt?: string
     skillOutputPolicyPrompt?: string

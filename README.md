@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.2.0：通过 `/tasklist + @docs://versions/*.md` 触发受控 Tasklist Agent，并可用服务端配置把编排层切换到 LangGraph `StateGraph`。Graph runtime 只替换编排表达，不扩大 Agent 权限；release 默认仍保留 legacy fallback。
+> v0.2.1：新增服务端 Model Provider Runtime 和白名单模型选择。本地可使用 Ollama，配置服务端 Key 后可切换 Qwen / DeepSeek；普通聊天和受控 `/tasklist` Agent 共用模型入口，API Key 不进入前端。
 
 ## 项目解决的问题
 
@@ -57,60 +57,54 @@ AI Mind 的定位仍然更小：它是一个 AI Native Runtime Skeleton，用来
 
 ```mermaid
 flowchart TD
-    A["User Input"] --> B["API Route"]
-    B --> C["chat-service facade"]
-    C --> D["Runtime"]
+    INPUT["用户输入<br/>Composer / 模型选择"] --> API["API 接口层<br/>POST /api/chat"]
+    API --> GUARD["请求边界与治理<br/>Schema / Skill 校验 / 路由识别 / 输入限制 / 限流"]
+    GUARD --> SELECT["模型选择解析<br/>modelId / Model Catalog"]
+    SELECT --> SERVICE["聊天流适配层<br/>chat-service"]
+    SERVICE --> RUNTIME["聊天运行时<br/>ChatOrchestrator / ChatSession"]
 
-    subgraph Capability["Capability Side"]
-        S["Skills"] --> CM["Capability Model"]
-        CM --> CAP["Tools / Resources / Prompts"]
-        CAP --> IT["Internal Tools<br/>calculator / datetime / unit-convert"]
-        CAP --> MCP["MCP Host"]
-        MCP --> LM["Local stdio MCP"]
-        LM --> W["weather-server<br/>Tool"]
-        LM --> PD["project-docs-server<br/>Resource / Prompt"]
-        MCP --> RM["Remote Streamable HTTP MCP"]
-        RM --> PAS["project-assistant-service<br/>Resource / Prompt / Tool"]
-    end
+    RUNTIME --> STREAM["统一流式输出<br/>@ai-mind/stream-core"]
+    STREAM --> NDJSON["NDJSON 响应"]
+    NDJSON --> CONSUMER["前端 Stream Reader / Reducer"]
+    CONSUMER --> VIEW["消息与执行过程展示<br/>文本 / Tool / Agent Trace / Artifact"]
 
-    subgraph Stream["Stream Side"]
-        SC["@ai-mind/stream-core"] --> NS["NDJSON Stream"]
-        NS --> UI["UI Events"]
-    end
+    RUNTIME -. 普通聊天执行 .-> CHAT["普通聊天执行<br/>Planning / Tool Runtime / Final Answer"]
 
-    subgraph Agent["Agent Side"]
-        AG["Controlled Agent<br/>Version Plan to Tasklist"] --> GR["LangGraph StateGraph<br/>可配置 graph runner"]
-        GR --> AS["Agent State Machine<br/>受控业务事实源"]
-        AS --> QG["validate_tasklist_structure"]
-        GR --> AT["AgentTracePanel<br/>Graph timeline / Debug"]
-        AS --> ART["AgentTextArtifactPanel"]
-    end
+    RUNTIME -. 模型创建 .-> MODEL["模型提供方运行时"]
+    MODEL --> REGISTRY["模型提供方注册表<br/>Provider Registry"]
+    REGISTRY --> PROVIDERS["Ollama / Qwen / DeepSeek"]
 
-    D --> S
-    D --> SC
-    D --> AG
+    RUNTIME -. 能力解析与执行 .-> CAPABILITY["能力体系"]
+    CAPABILITY --> DEFINITION["Skill 定义 / Capability Catalog"]
+    DEFINITION --> BINDING["本轮工具绑定与上下文调用<br/>Tool / Resource / Prompt"]
+    BINDING --> SOURCES["内置能力 / 本地 MCP / 远程 MCP"]
+
+    RUNTIME -. 受控 Agent 入口 .-> AGENT["受控任务清单 Agent<br/>/tasklist + versions 文档"]
+    AGENT --> SELECTOR["服务端运行器选择"]
+    SELECTOR --> LEGACY["Legacy Runner"]
+    SELECTOR --> GRAPH["LangGraph Runner"]
+    AGENT --> SHARED["共享业务状态与边界<br/>Steps / Guards / Validation"]
 ```
 
-- `API Route` 是 HTTP 边界，负责请求入口、响应包装和错误映射。
-- `chat-service facade` 是薄 facade，负责创建内部流、组装运行时依赖，并返回 `Response`。
-- `Runtime` 是聊天主链路编排层，负责 session、planning、tool execution、controlled agent path、final answer、context 注入和错误收口。
-- `@ai-mind/stream-core` 承接稳定流式内核，负责 NDJSON chunk、生命周期、错误事件、Agent text artifact 和 writer。
-- `Skills` 用于承接稳定任务模式，例如 `utility-skill` 和 `reader-skill`。
-- `Capability Model` 统一描述 Tool / Resource / Prompt 的能力表面、来源和选择边界。
-- MCP Host 同时接入本地 `stdio` server 和 remote `Streamable HTTP` server；当前包含 `weather-server`、`project-docs-server` 和 `project-assistant-service`。
-- `Controlled Agent` 当前用于 `/tasklist + @docs://versions/*.md`，在受控边界内完成一次 Planning Decision，生成 tasklist 草稿并通过结构质量门校验；`v0.2.0` 可用 LangGraph `StateGraph` 表达这条受控编排路径。
-- 前端通过流式 part 展示文本、工具、资源、Prompt、Skill 命中、Agent step、Graph timeline、Agent text artifact 和执行状态。
+- `API 接口层` 是 HTTP 边界，在进入聊天运行时前完成请求解析、Skill 校验、路由识别、模型白名单选择、输入限制和轻量限流。
+- `chat-service` 是聊天流适配层，负责创建 NDJSON 流、启动 `ChatOrchestrator`、收口流错误并包装 `Response`，不承载业务编排。
+- `ChatOrchestrator / ChatSession` 负责会话构建、执行路径选择、planning、工具执行、上下文注入、受控 Agent 入口和最终回答。
+- `Model Catalog` 在 API 边界把稳定 `modelId` 解析为受控模型选择；运行时再通过 `Provider Registry` 创建 Ollama、Qwen 或 DeepSeek 模型实例。
+- 能力体系通过 Skill 的 `capabilitySelectors`、Capability Catalog 和本轮绑定结果，分别承接 Tool 调用以及 Resource / Prompt 上下文调用；MCP 是外部能力来源，不直接进入主运行时编排。
+- 受控任务清单 Agent 只在 `/tasklist + @docs://versions/*.md` 入口启动。服务端在请求开始前选择 Legacy 或 LangGraph Runner，两者复用同一套业务状态、Steps、Guards 和 Validation 规则。
+- `@ai-mind/stream-core` 统一定义 NDJSON chunk、生命周期、错误和 Artifact 协议；前端消费流并转换为消息、Agent Trace 和 Artifact 展示，后端不直接依赖 React 组件。
+- 图中的实线表示请求与响应主链路，虚线表示聊天运行时调用的受控模块，不表示模块之间按顺序串行执行。
 
 ## 核心设计
 
 ### Runtime Layer
 
-主链路按 `route -> chat-service facade -> runtime -> skills / tools / mcp` 分层：
+主链路按 `API 接口层 -> chat-service -> ChatOrchestrator / ChatSession -> stream-core -> 前端消费` 分层：
 
-- `route` 只处理 HTTP 边界、请求解析和错误响应。
-- `chat-service` 保持薄 facade，不承载复杂业务编排。
-- `runtime` 负责聊天会话构建、阶段编排、工具执行、上下文注入、最终回答和错误收口。
-- `skills / tools / mcp` 作为能力组织和能力来源，不反向污染入口层。
+- `route` 负责 HTTP 边界、请求校验、路由与模型选择、输入限制、轻量限流和错误响应。
+- `chat-service` 保持为聊天流适配层，只创建流、启动主编排并包装 `Response`。
+- `runtime` 负责聊天会话构建、执行路径选择、工具执行、上下文注入、受控 Agent 和最终回答。
+- `skills / capabilities / mcp` 作为能力定义、选择边界和外部能力来源，不反向污染入口层。
 
 ### Stream Core
 
@@ -127,6 +121,18 @@ flowchart TD
 - web NDJSON writer。
 
 这样做的价值是让流式协议更稳定、可测试、可复用，而不是让每个应用入口都重复维护一套 writer 细节。
+
+### Model Provider Runtime
+
+模型链路分为“请求选择”和“运行时创建”两个阶段：
+
+- API 接口层按 `modelId -> Model Catalog` 完成白名单校验，生成受控的模型选择结果。
+- `ChatSession` 按模型选择结果通过 `Provider Registry` 创建对应模型实例。
+- Catalog 统一管理稳定模型 ID、Provider 实际模型名和能力声明。
+- 前端只选择服务端当前可用的白名单模型，不提交 API Key、base URL 或任意模型名。
+- Ollama、Qwen、DeepSeek 的参数和错误差异停留在 Provider 层。
+- 普通聊天、Tool Calling 和 tasklist legacy / graph runner 共用同一模型创建入口。
+- `modelId` 只改变模型来源，不改变 Tool、Skill、MCP 或 Agent 权限。
 
 ### Capability Model
 
@@ -172,7 +178,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.2.0`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.2.1`。
 
 已经验证：
 
@@ -194,6 +200,10 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - AgentTracePanel Graph timeline。
 - development-only memory checkpoint。
 - 脱敏 Debug Summary。
+- Model Catalog 与 Model Provider Runtime。
+- Ollama / Qwen / DeepSeek 白名单模型选择。
+- Provider 错误标准化、输入输出限制和 usage 观测。
+- 默认开启的 IP / session 轻量限流。
 
 当前非目标：
 
@@ -218,40 +228,29 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 5. [Releases](./docs/releases)：版本发布说明。
 6. [Tasklists](./docs/tasklists)：公开任务清单。
 
-## 当前版本：v0.2.0
+## 当前版本：v0.2.1
 
-这版的主线是把 `Version Plan to Tasklist Agent` 的受控编排层迁移到 LangGraph `StateGraph`。
+这版的主线是把 AI Mind 从本地 Ollama 单一路径升级为服务端统一治理的 Model Provider Runtime：
 
-它不是通用 Agent，也不是开放式规划系统，而是把 v0.1.1 已有的固定受控链路表达成更清晰的 graph node、conditional edge 和 state patch summary：
+- Model Catalog 统一管理模型白名单、Provider 实际模型名和能力声明。
+- 请求统一通过 `options.modelId` 选择模型，非法模型 fail closed。
+- 前端模型选择器从服务端事实源初始化，并按“线上模型 / 本地模型”分组。
+- Ollama、Qwen、DeepSeek 通过统一 Provider Registry 接入。
+- 普通聊天、Tool Calling 和 `/tasklist` Agent 共用同一模型创建入口。
+- Provider 原始错误被转换为稳定错误码和中文提示，日志只保留脱敏 metadata。
+- 服务端限制输入长度、chat / tasklist 输出 token 和请求超时。
+- 默认开启按 IP / HttpOnly session 的单实例每日限流。
+- usage / token 只做 best-effort 观测，不作为计费事实源。
 
-- 用户通过 Composer 选择 `/tasklist`。
-- 用户显式引用 `docs://versions/*.md` 版本方案。
-- Runtime 在请求开始前选择 `legacy` 或 `graph` runner。
-- Graph runner 用 `StateGraph` 表达读取方案、readiness、planning decision、optional context、strategy、draft、validation、revision effect 和 final artifact。
-- `PlanningDecisionAction` 和 `WarningDisposition` 映射为 conditional edge。
-- Graph runner 与 legacy runner 共用业务 step operation，不复制两套业务规则。
-- Graph events 通过 AI Mind 自己的 stream chunks 输出 node、route 和脱敏 patch summary。
-- `AgentTracePanel` 可以展示 graph timeline 和折叠 Debug Summary。
-- 最终 tasklist 正文仍通过 Agent Text Artifact 展示；普通 final answer text 只输出结构校验结论、修正效果和人工复核点摘要。
+v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallback、模型市场、成本看板或分布式限流，也不扩大 v0.2.0 Controlled Agent Graph 的权限边界。
 
-release 默认仍保持 `legacy` runtime。需要验证 graph 时，通过服务端 env 显式开启：
-
-```text
-AI_MIND_TASKLIST_AGENT_RUNTIME=graph
-AI_MIND_GRAPH_EVENTS=on
-AI_MIND_GRAPH_CHECKPOINT=memory
-AI_MIND_GRAPH_DEBUG_VIEW=on
-```
-
-本版不写入 docs 文件，不读取历史 tasklist，不自动扫描 `docs/versions/*`，不开放自由 tool calling，不提供前端 runtime switch，也不把 development-only checkpoint 包装成产品能力。
-
-更多 UI 演示可查看 [assets/screenshots](./assets/screenshots)。
+详细设计见 [v0.2.1 版本说明](./docs/versions/v0.2.1-online-demo-and-model-provider-runtime.md)。
 
 ## 当前能力
 
 ### Chat Runtime
 
-- `LangChain.js + Ollama`
+- `LangChain.js + Model Provider Runtime（Ollama / DeepSeek / Qwen）`
 - NDJSON 流式协议。
 - `reasoning / tool / resource / prompt / agent-step / agent-graph-* / artifact / text / error` 多段式消息流。
 - Skill 命中与 Prompt 执行事实展示。
@@ -262,6 +261,16 @@ AI_MIND_GRAPH_DEBUG_VIEW=on
 - Composer payload hint 消费。
 - Runtime-controlled Agent path。
 - Server-configured tasklist Agent legacy / graph runtime selection。
+
+### Model Provider Runtime
+
+- 服务端 Model Catalog 与 `provider/model-key` 稳定模型 ID。
+- Ollama / Qwen / DeepSeek Provider。
+- `GET /api/ai/models` 公开白名单模型列表。
+- 前端“线上模型 / 本地模型”分组选择器。
+- Provider 错误标准化与脱敏日志。
+- 输入字符、输出 token、timeout 和默认限流边界。
+- usage / token best-effort 观测。
 
 ### Skills
 
@@ -342,6 +351,10 @@ AI_MIND_GRAPH_DEBUG_VIEW=on
     - 薄 facade，负责创建内部流、构造中间 `StreamResult` 并包装 `Response`。
 - `apps/webapp/lib/ai/runtime/`
     - 正式聊天运行时编排层。
+- `apps/webapp/lib/ai/model-provider/`
+    - Model Catalog、Provider Registry、模型创建、错误标准化、usage 与输入输出边界。
+- `apps/webapp/lib/ai/rate-limit/`
+    - IP / session 轻量限流配置和单进程 Memory Store。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/`
     - 受控单 Agent，负责从版本方案生成 tasklist 草稿；包含 legacy runner、graph runner、共享 step operation 和 runtime config。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/graph/`
@@ -370,16 +383,17 @@ AI_MIND_GRAPH_DEBUG_VIEW=on
 
 如果想从代码层面理解项目，可以优先看下面几个入口：
 
-| Area             | Path                                                                                                               | What to Look For                                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| Runtime 主编排   | [apps/webapp/lib/ai/runtime](./apps/webapp/lib/ai/runtime)                                                         | 聊天 session、planning、tool execution、Agent stage、final answer 和错误收口                           |
-| Agent Runtime    | [apps/webapp/lib/ai/runtime/version-plan-tasklist-agent](./apps/webapp/lib/ai/runtime/version-plan-tasklist-agent) | 受控单 Agent、legacy / graph runner、StateGraph、状态机、step operation、final answer 和 artifact 输出 |
-| Stream Core      | [packages/stream-core/src](./packages/stream-core/src)                                                             | NDJSON chunk 协议、stream lifecycle、error chunk、agent-step、artifact 和 writer                       |
-| Capability Model | [apps/webapp/lib/ai/capabilities](./apps/webapp/lib/ai/capabilities)                                               | capability catalog、selector 解析和 active tool binding                                                |
-| Composer V1      | [apps/webapp/components/chat/composer](./apps/webapp/components/chat/composer)                                     | Tiptap 输入层、command chip、resource chip、菜单和序列化                                               |
-| MCP Integration  | [apps/webapp/lib/ai/mcp](./apps/webapp/lib/ai/mcp)                                                                 | MCP client、server registry、transport、Tool / Resource / Prompt adapter                               |
+| Area                   | Path                                                                                                               | What to Look For                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Runtime 主编排         | [apps/webapp/lib/ai/runtime](./apps/webapp/lib/ai/runtime)                                                         | 聊天 session、planning、tool execution、Agent stage、final answer 和错误收口                           |
+| Model Provider Runtime | [apps/webapp/lib/ai/model-provider](./apps/webapp/lib/ai/model-provider)                                           | Model Catalog、Provider Registry、模型创建、错误标准化和 usage 观测                                    |
+| Agent Runtime          | [apps/webapp/lib/ai/runtime/version-plan-tasklist-agent](./apps/webapp/lib/ai/runtime/version-plan-tasklist-agent) | 受控单 Agent、legacy / graph runner、StateGraph、状态机、step operation、final answer 和 artifact 输出 |
+| Stream Core            | [packages/stream-core/src](./packages/stream-core/src)                                                             | NDJSON chunk 协议、stream lifecycle、error chunk、agent-step、artifact 和 writer                       |
+| Capability Model       | [apps/webapp/lib/ai/capabilities](./apps/webapp/lib/ai/capabilities)                                               | capability catalog、selector 解析和 active tool binding                                                |
+| Composer V1            | [apps/webapp/components/chat/composer](./apps/webapp/components/chat/composer)                                     | Tiptap 输入层、command chip、resource chip、模型选择器、菜单和序列化                                   |
+| MCP Integration        | [apps/webapp/lib/ai/mcp](./apps/webapp/lib/ai/mcp)                                                                 | MCP client、server registry、transport、Tool / Resource / Prompt adapter                               |
 
-## v0.1.x / v0.2.0 的关键判断
+## v0.1.x / v0.2.x 的关键判断
 
 这组受控 Agent 版本有几个重要原则：
 
@@ -388,6 +402,7 @@ AI_MIND_GRAPH_DEBUG_VIEW=on
 3. Agent 通过 text artifact 展示最终 tasklist 草稿，并用普通 text 输出校验摘要，但不自动写入文件。
 4. `v0.1.1` 只开放一次 action 选择，不开放资源权限、工具权限、写入权限和循环权限。
 5. `v0.2.0` 只把这条受控链路迁移到 LangGraph `StateGraph`，不扩大 Agent 权限。
+6. `v0.2.1` 只改变模型来源和 Provider 治理，不改变 Agent 权限、资源白名单或工具边界。
 
 因此：
 
@@ -402,12 +417,12 @@ AI_MIND_GRAPH_DEBUG_VIEW=on
 
 ## 快速开始前置条件
 
-本项目当前主要在本地运行和验证，启动前建议准备：
+本项目支持本地 Ollama 和服务端配置的 DeepSeek / Qwen，启动前建议准备：
 
 - Node.js：建议 `20+`。
 - pnpm：项目声明为 `pnpm@10.18.3`。
-- Ollama：用于本地模型推理。
-- 推荐模型：默认使用 `qwen3:8b`；如果本机资源有限，可以先拉取并选择 `qwen3:4b`。
+- Ollama：使用本地模型时安装；默认模型为 `qwen3:8b`，本机资源有限时可选择 `qwen3:4b`。
+- DeepSeek / Qwen：使用云模型时，由开发者在对应平台自行创建 API Key，并仅配置在服务端环境中。
 - remote MCP 验证：如果要测试 `project://latest-context` 或 remote Tool，需要同时启动 `project-assistant-service`。
 
 常用模型准备示例：
@@ -452,6 +467,43 @@ pnpm dev:webapp
 ```bash
 pnpm build:watch
 ```
+
+### 模型 Provider 配置
+
+模型选择由服务端 Model Catalog 和环境变量共同决定。前端只提交 `modelId`，不会接收 API Key、base URL、底层模型名或完整 Provider 配置。完整配置模板见 [apps/webapp/.env.example](./apps/webapp/.env.example)。
+
+本地使用 Ollama：
+
+```env
+AI_MIND_DEFAULT_MODEL_ID=ollama/qwen3-8b
+AI_MIND_ALLOWED_PROVIDERS=ollama
+AI_MIND_OLLAMA_BASE_URL=http://127.0.0.1:11434
+```
+
+Ollama 的底层模型名由服务端 Catalog 管理，不提供 `AI_MIND_OLLAMA_MODEL`。首次运行前请先拉取对应模型，例如 `ollama pull qwen3:8b`。
+
+本地开发也可以使用 DeepSeek 或 Qwen。推荐把真实 Key 放在操作系统用户环境变量、部署平台 Secret 或其他工作区外的密钥存储中，修改后重启终端和开发服务：
+
+```env
+AI_MIND_DEFAULT_MODEL_ID=qwen/qwen3.6-flash
+AI_MIND_ALLOWED_PROVIDERS=qwen,deepseek
+AI_MIND_QWEN_API_KEY=xxx
+AI_MIND_DEEPSEEK_API_KEY=xxx
+```
+
+线上部署只启用实际使用的云 Provider，并把默认模型设为同一白名单内的模型。当前 production Catalog 不展示本地 Ollama 模型；DeepSeek / Qwen Key 必须通过部署平台的服务端 Secret 注入。AI Mind 不托管、不创建、不展示第三方平台 API Key，也不会把 Key 放入前端 DTO、stream chunk 或调试信息。
+
+系统默认按 IP 和 session 开启每日限流；本地调试如确有需要，可显式设置 `AI_MIND_RATE_LIMIT_ENABLED=off` 暂时关闭：
+
+```env
+AI_MIND_RATE_LIMIT_ENABLED=on
+AI_MIND_CHAT_DAILY_LIMIT_PER_IP=200
+AI_MIND_CHAT_DAILY_LIMIT_PER_SESSION=100
+AI_MIND_TASKLIST_DAILY_LIMIT_PER_IP=50
+AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
+```
+
+当前限流状态只保存在单个 Node.js 进程内存中，服务重启后会清空，也不能在多实例之间共享。多实例公开访问需要接入 Redis / KV 等集中式存储；这不属于 v0.2.1 的实现范围。
 
 ## 可以试试这些问题
 
@@ -516,6 +568,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                           |
 | v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                      |
 | v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary |
+| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                   |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -539,6 +592,11 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Controlled Agent Graph（LangGraph StateGraph）
 - [x] Graph events / AgentTracePanel timeline
 - [x] Development-only checkpoint / Debug Summary
+- [x] Model Catalog / Multi-Provider Runtime
+- [x] 服务端白名单模型选择器
+- [x] Provider 错误标准化 / 默认轻量限流 / usage 观测
+- [ ] Redis / KV 分布式限流
+- [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化
 - [ ] tasklist 草稿保存与人工确认流
 - [ ] 持久化与数据层

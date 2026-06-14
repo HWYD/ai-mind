@@ -1,15 +1,16 @@
 import type { BaseMessage } from '@langchain/core/messages'
 import { SystemMessage } from '@langchain/core/messages'
-import { ChatOllama } from '@langchain/ollama'
 
 import { resolveToolBindingForSkill } from '@/lib/ai/capabilities'
 import { toLangChainMessages } from '@/lib/ai/langchain-message-adapter'
+import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
+import { createChatModel, getModelProviderConfig } from '@/lib/ai/model-provider'
 import { getToolResultSystemPrompt, getToolRetrySystemPrompt, getToolUseSystemPrompt } from '@/lib/ai/prompts/tool-calling'
 import type { SkillDefinition } from '@/lib/ai/skills'
 import { resolveSkillDefinitionForRequest } from '@/lib/ai/skills/router'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
-import type { ChatServiceDependencies, ChatSession } from './types'
+import type { ChatSession } from './types'
 
 export function buildSystemMessages(...prompts: Array<string | undefined>): BaseMessage[] {
     return prompts
@@ -30,19 +31,17 @@ function getSkillOutputPolicyPrompt(skillDefinition?: SkillDefinition) {
     }
 }
 
-function createBaseModel(request: ChatRequest, deps: ChatServiceDependencies) {
-    return new ChatOllama({
-        model: request.options?.model ?? deps.defaultModel,
-        baseUrl: deps.baseUrl ?? process.env.OLLAMA_BASE_URL ?? 'http://127.0.0.1:11434',
-        temperature: request.options?.temperature ?? 0.3,
-        numPredict: request.options?.maxTokens,
-        think: request.options?.enableReasoning,
-        streaming: true,
+export async function createChatSession(request: ChatRequest, resolvedModelSelection: ResolvedModelSelection): Promise<ChatSession> {
+    const config = getModelProviderConfig()
+    const modelHandle = createChatModel({
+        config,
+        enableReasoning: request.options?.enableReasoning,
+        maxOutputTokens: request.options?.maxTokens,
+        resolvedModelSelection,
+        temperature: request.options?.temperature,
     })
-}
 
-export async function createChatSession(request: ChatRequest, deps: ChatServiceDependencies): Promise<ChatSession> {
-    const baseModel = createBaseModel(request, deps)
+    const { model: baseModel } = modelHandle
     const skillDefinition = resolveSkillDefinitionForRequest(request)
     const skillSystemPrompt = skillDefinition?.systemPrompt
     const skillOutputPolicyPrompt = getSkillOutputPolicyPrompt(skillDefinition)
@@ -51,13 +50,17 @@ export async function createChatSession(request: ChatRequest, deps: ChatServiceD
     const toolUseSystemPrompt = getToolUseSystemPrompt(activeToolNames)
     const toolRetrySystemPrompt = getToolRetrySystemPrompt(activeToolNames)
     const toolResultSystemPrompt = getToolResultSystemPrompt(activeToolNames)
-    const toolBoundModel = activeTools.length > 0 ? baseModel.bindTools(activeTools.map(toolDefinition => toolDefinition.tool)) : null
+    const toolBoundModel =
+        activeTools.length > 0 && modelHandle.bindTools
+            ? modelHandle.bindTools(activeTools.map(toolDefinition => toolDefinition.tool))
+            : null
     const langChainMessages = toLangChainMessages(request.messages)
     const directAnswerMessages: BaseMessage[] = [...buildSystemMessages(skillSystemPrompt, skillOutputPolicyPrompt), ...langChainMessages]
 
     return {
         request,
         baseModel,
+        modelHandle,
         toolBoundModel,
         skillDefinition,
         skillSystemPrompt,

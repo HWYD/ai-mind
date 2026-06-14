@@ -4,21 +4,60 @@ import { ZodError } from 'zod'
 import { chatRequestSchema } from '@/lib/ai/chat-schema'
 import { createChatService } from '@/lib/ai/chat-service'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
+import { ModelSelectionError, resolveModelSelection } from '@/lib/ai/model-provider/catalog/resolve-model-selection'
+import { resolveRouteType } from '@/lib/ai/model-provider/resolve-route-type'
+import { InputLengthExceededError, validateInputLength } from '@/lib/ai/model-provider/validate-input-length'
+import { getRateLimitConfig, MemoryRateLimitStore, resolveClientIp, resolveSessionId } from '@/lib/ai/rate-limit'
 import { validateExplicitSkillForRequest } from '@/lib/ai/skills/router'
 
 export const runtime = 'nodejs'
 
-const chatService = createChatService({
-    defaultModel: 'qwen3:8b',
-})
+const chatService = createChatService()
+
+const rateLimitConfig = getRateLimitConfig()
+const rateLimitStore = new MemoryRateLimitStore(rateLimitConfig)
 
 export async function POST(request: NextRequest) {
     try {
         const json = await request.json()
         const payload = chatRequestSchema.parse(json)
         validateExplicitSkillForRequest(payload)
+
+        const routeType = resolveRouteType(payload)
+        const resolvedModelSelection = resolveModelSelection({
+            modelId: payload.options?.modelId,
+            routeType,
+        })
+
+        validateInputLength(payload.messages)
+
+        const clientIp = resolveClientIp(request)
+        const { sessionId, setCookie } = resolveSessionId(request.cookies)
+
+        const rateLimitResult = rateLimitStore.checkAndIncrement({
+            ip: clientIp,
+            routeType,
+            sessionId,
+        })
+
+        if (!rateLimitResult.allowed) {
+            const routeLabel = routeType === 'tasklist' ? '任务清单' : '聊天'
+            const limitScopeLabel = rateLimitResult.limitKey === 'session' ? '当前会话' : '当前 IP'
+
+            return Response.json(
+                {
+                    error: `${routeLabel}请求已达到${limitScopeLabel}的当日上限（${rateLimitResult.limitValue} 次）。`,
+                    code: 'MODEL_PROVIDER_RATE_LIMITED',
+                    limitKey: rateLimitResult.limitKey,
+                },
+                { status: 429 }
+            )
+        }
+
         return await chatService.streamChat(payload, {
             signal: request.signal,
+            resolvedModelSelection,
+            setCookie,
         })
     } catch (error) {
         if (isAbortError(error)) {
@@ -47,6 +86,29 @@ export async function POST(request: NextRequest) {
                 {
                     error: error.message,
                     code: 'INVALID_SKILL',
+                },
+                { status: 400 }
+            )
+        }
+
+        if (error instanceof ModelSelectionError) {
+            return Response.json(
+                {
+                    error: error.message,
+                    code: error.code,
+                    modelId: error.modelId,
+                },
+                { status: 400 }
+            )
+        }
+
+        if (error instanceof InputLengthExceededError) {
+            return Response.json(
+                {
+                    error: error.message,
+                    code: error.code,
+                    maxChars: error.maxChars,
+                    actualChars: error.actualChars,
                 },
                 { status: 400 }
             )

@@ -4,16 +4,12 @@ import { type ChunkWriter, createNdjsonChunkWriter } from '@ai-mind/stream-core/
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
 import { logChatCancellation } from '@/lib/ai/runtime/stream-errors'
-import type { ChatExecutionContext, ChatServiceDependencies, StreamResult } from '@/lib/ai/runtime/types'
+import type { ResolvedChatExecutionContext, StreamResult } from '@/lib/ai/runtime/types'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
-export type { ChatExecutionContext, ChatServiceDependencies } from '@/lib/ai/runtime/types'
+export type { ChatExecutionContext, ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
 
-async function createChatStreamResult(
-    request: ChatRequest,
-    context: ChatExecutionContext,
-    deps: ChatServiceDependencies
-): Promise<StreamResult> {
+async function createChatStreamResult(request: ChatRequest, context: ResolvedChatExecutionContext): Promise<StreamResult> {
     let closed = false
     let writerRef: ChunkWriter | null = null
 
@@ -37,7 +33,6 @@ async function createChatStreamResult(
                 try {
                     const orchestrator = new ChatOrchestrator({
                         context,
-                        deps,
                         isClosed,
                         request,
                         writeChunk: writer.writeChunk,
@@ -100,19 +95,25 @@ async function createChatStreamResult(
         },
     })
 
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/x-ndjson; charset=utf-8',
+        'Cache-Control': 'no-cache, no-transform',
+    }
+
+    if (context.setCookie) {
+        headers['Set-Cookie'] = context.setCookie
+    }
+
     return {
         body: responseStream,
-        headers: {
-            'Content-Type': 'application/x-ndjson; charset=utf-8',
-            'Cache-Control': 'no-cache, no-transform',
-        },
+        headers,
     }
 }
 
-export function createChatService(deps: ChatServiceDependencies) {
+export function createChatService() {
     return {
-        async streamChat(request: ChatRequest, context: ChatExecutionContext) {
-            const streamResult = await createChatStreamResult(request, context, deps)
+        async streamChat(request: ChatRequest, context: ResolvedChatExecutionContext) {
+            const streamResult = await createChatStreamResult(request, context)
 
             return new Response(streamResult.body, {
                 headers: streamResult.headers,

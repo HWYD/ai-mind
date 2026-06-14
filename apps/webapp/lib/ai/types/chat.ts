@@ -34,7 +34,7 @@ export interface MindMessageInput {
 
 export interface ChatRequestOptions {
     skill?: string
-    model?: string
+    modelId?: string
     temperature?: number
     maxTokens?: number
     enableReasoning?: boolean

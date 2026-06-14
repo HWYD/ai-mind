@@ -6,6 +6,11 @@ export type ChatListStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 export type RuntimePartStatus = 'called' | 'completed' | 'failed' | 'loading'
 export type AssistantFeedback = 'up' | 'down' | null
 
+export interface RateLimitNoticeViewModel {
+    title: string
+    description: string
+}
+
 const promptInputLabelMap: Record<string, string> = {
     filename: '文件名',
     goal: '目标',
@@ -181,6 +186,32 @@ export function getMessageTextContent(message: MindMessage) {
         .filter((part): part is Extract<MindMessagePart, { type: 'text' }> => part.type === 'text' && part.text.trim().length > 0)
         .map(part => part.text)
         .join('\n\n')
+}
+
+export function getRateLimitNoticeViewModel(text: string): RateLimitNoticeViewModel | null {
+    const normalizedText = text.trim()
+
+    if (!/^(聊天|任务清单)请求已达到/.test(normalizedText)) {
+        return null
+    }
+
+    const limitCountMatch = normalizedText.match(/（(\d+)\s*次）/)
+
+    if (!limitCountMatch) {
+        return null
+    }
+
+    const limitCount = limitCountMatch[1]
+    const limitScope = normalizedText.includes('当前会话') ? '当前会话' : '当前 IP'
+
+    return {
+        title: '今日体验次数已用完',
+        description: `${limitScope} 今日最多可体验 ${limitCount} 次，请明天再试。`,
+    }
+}
+
+export function isRateLimitNoticeMessage(message: MindMessage) {
+    return getRateLimitNoticeViewModel(getMessageTextContent(message)) !== null
 }
 
 export function getMessageCopyText(message: MindMessage) {

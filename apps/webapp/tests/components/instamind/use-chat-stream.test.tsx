@@ -32,6 +32,60 @@ afterEach(() => {
 })
 
 describe('useChatStream', () => {
+    it('模型提供方限流时会在当前轮次追加 assistant 错误消息，不进入顶部错误态', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                Response.json(
+                    {
+                        error: '聊天请求已达到当前 IP 的当日上限（2 次）。',
+                        code: 'MODEL_PROVIDER_RATE_LIMITED',
+                        limitKey: 'ip',
+                    },
+                    { status: 429 }
+                )
+            )
+        )
+
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('你好')
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        expect(result.current.error).toBeNull()
+        expect(result.current.messages).toHaveLength(2)
+        expect(result.current.messages[0]?.role).toBe('user')
+        expect(result.current.messages[1]?.role).toBe('assistant')
+
+        const textPart = result.current.messages[1]?.parts.find(part => part.type === 'text')
+
+        expect(textPart?.type).toBe('text')
+        expect(textPart?.text).toBe('聊天请求已达到当前 IP 的当日上限（2 次）。')
+    })
+
+    it('会把当前选中的 modelId 放进聊天请求 options 中', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createNdjsonResponse([{ type: 'start', messageId: 'assistant-model' }, { type: 'finish' }]))
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderHook(() => useChatStream({ model: 'qwen/qwen3.6-plus', enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('你好')
+        })
+
+        const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+        const requestBody = typeof requestInit?.body === 'string' ? JSON.parse(requestInit.body) : null
+
+        expect(requestBody?.options?.modelId).toBe('qwen/qwen3.6-plus')
+    })
+
     it('用户中止流式请求后会保留已收到的 assistant 内容', async () => {
         const encoder = new TextEncoder()
         const fetchMock = vi.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {

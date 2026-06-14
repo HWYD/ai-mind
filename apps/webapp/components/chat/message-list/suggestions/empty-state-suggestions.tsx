@@ -10,7 +10,7 @@ export function EmptyStateSuggestions({
     onSelectSuggestion: (suggestion: EmptyStateSuggestion) => void
 }) {
     return (
-        <section className="mx-auto flex max-w-3xl flex-col items-center text-center">
+        <section className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
             {/* <div>
                 <h1 className="text-3xl font-semibold tracking-tight text-foreground lg:text-4xl">Instant Mind</h1>
                 <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
@@ -18,7 +18,7 @@ export function EmptyStateSuggestions({
                 </p>
             </div> */}
 
-            <div className="mt-8 w-full rounded-3xl bg-muted/20 px-5 py-7">
+            <div className="mt-0 md:mt-8 w-full rounded-3xl bg-muted/20 md:px-5 md:py-7">
                 <p className="text-base font-medium text-foreground">试试这些能力</p>
                 <p className="mt-2 text-sm text-muted-foreground">
                     体验 AI Mind 的运行时能力：从普通问答、Tool 调用到 MCP 资源读取与受控 Agent 执行。

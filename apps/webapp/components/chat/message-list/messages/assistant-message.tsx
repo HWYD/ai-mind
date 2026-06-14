@@ -8,7 +8,12 @@ import { AgentTracePanel } from '../parts/agent-trace-panel'
 import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
 import { ReasoningPanel } from '../parts/reasoning-panel'
 import { TextPartView } from '../parts/text-part'
-import { type AssistantFeedback, getCopiedButtonClassName, getFeedbackButtonClassName } from '../shared/message-list-utils'
+import {
+    type AssistantFeedback,
+    getCopiedButtonClassName,
+    getFeedbackButtonClassName,
+    isRateLimitNoticeMessage,
+} from '../shared/message-list-utils'
 import { FollowUpSuggestions } from '../suggestions/follow-up-suggestions'
 
 type AgentDetailPart = PromptPart | ResourcePart | SkillPart | ToolPart
@@ -53,6 +58,9 @@ export function AssistantMessage({
     const agentMessage = contentParts.some(part => part.type === 'agent-step')
     const agentDetailParts = agentMessage ? contentParts.filter(isAgentDetailPart) : []
     const artifacts = message.artifacts ?? []
+    const isRateLimitNotice = isRateLimitNoticeMessage(message)
+    const showMessageActions = hasTextContent && isAssistantReplyCompleted && !isRateLimitNotice
+    const showBuiltInFollowUpSuggestions = showFollowUpSuggestions && !isRateLimitNotice
 
     return (
         <article className="flex justify-start">
@@ -104,7 +112,7 @@ export function AssistantMessage({
                       ))
                     : null}
 
-                {hasTextContent && isAssistantReplyCompleted ? (
+                {showMessageActions ? (
                     <div className="mt-2 flex items-center gap-1 text-muted-foreground">
                         <Button
                             type="button"
@@ -154,7 +162,7 @@ export function AssistantMessage({
                     </div>
                 ) : null}
 
-                {showFollowUpSuggestions ? (
+                {showBuiltInFollowUpSuggestions ? (
                     <FollowUpSuggestions seed={`${message.id}:${message.createdAt}`} onSelectQuestion={onSelectFollowUpQuestion} />
                 ) : null}
             </div>

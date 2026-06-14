@@ -1,6 +1,8 @@
 import { AIMessage, ToolMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
+
 const runtimeMocks = vi.hoisted(() => {
     return {
         buildSystemMessages: vi.fn(),
@@ -191,6 +193,34 @@ function createSession(overrides: Record<string, unknown> = {}) {
     }
 }
 
+function createExecutionContext(): ResolvedChatExecutionContext {
+    return {
+        resolvedModelSelection: {
+            catalogItem: {
+                availableIn: ['development'],
+                capabilities: {
+                    chat: true,
+                    embedding: false,
+                    jsonOutput: true,
+                    streaming: true,
+                    tasklist: true,
+                    toolCalling: true,
+                },
+                enabled: true,
+                id: 'ollama/qwen3-8b',
+                label: 'qwen3-8b',
+                modelKey: 'qwen3-8b',
+                provider: 'ollama',
+                providerModel: 'qwen3:8b',
+            },
+            modelId: 'ollama/qwen3-8b',
+            provider: 'ollama',
+            providerModel: 'qwen3:8b',
+            routeType: 'chat',
+        },
+    }
+}
+
 function collectChunkTypes(chunks: Array<{ type: string; scope?: string }>) {
     return chunks.map(chunk => (chunk.type === 'error' ? `${chunk.type}:${chunk.scope ?? 'unknown'}` : chunk.type))
 }
@@ -232,10 +262,10 @@ describe('runtime/chat-orchestrator', () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
         const writtenChunks: Array<{ type: string; scope?: string }> = []
+        const context = createExecutionContext()
 
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context,
             isClosed: () => false,
             request: createRequest(),
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -243,8 +273,65 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
+        expect(runtimeMocks.createChatSession).toHaveBeenCalledWith(createRequest(), context.resolvedModelSelection)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it.each([
+        {
+            errorCode: 'MODEL_PROVIDER_AUTH_FAILED',
+            message: 'API Key 无效或已过期，请检查配置后重试。',
+            retryable: false,
+        },
+        {
+            errorCode: 'MODEL_PROVIDER_TIMEOUT',
+            message: '模型响应超时，请稍后重试。',
+            retryable: true,
+        },
+    ])('Provider $errorCode 会下发脱敏的 runtime error chunk', async normalizedError => {
+        const session = createSession({
+            baseModel: {
+                stream: vi.fn().mockRejectedValue(new Error('raw provider error')),
+            },
+            modelHandle: {
+                normalizeError: vi.fn().mockReturnValue({
+                    code: normalizedError.errorCode,
+                    logMeta: {},
+                    message: normalizedError.message,
+                    retryable: normalizedError.retryable,
+                }),
+            },
+        })
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{
+            type: string
+            scope?: string
+            errorCode?: string
+            message?: string
+            retryable?: boolean
+        }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'error',
+                scope: 'runtime',
+                errorCode: normalizedError.errorCode,
+                message: normalizedError.message,
+                retryable: normalizedError.retryable,
+            })
+        )
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
         expectSingleTerminalChunk(writtenChunks)
     })
 
@@ -256,8 +343,7 @@ describe('runtime/chat-orchestrator', () => {
         const writtenChunks: Array<{ type: string; scope?: string }> = []
 
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request: createRequest(),
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -285,8 +371,7 @@ describe('runtime/chat-orchestrator', () => {
         const writtenChunks: Array<{ type: string; scope?: string }> = []
 
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request,
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -312,8 +397,7 @@ describe('runtime/chat-orchestrator', () => {
         const writtenChunks: Array<{ type: string; scope?: string }> = []
 
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request,
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -356,8 +440,7 @@ describe('runtime/chat-orchestrator', () => {
 
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request: createRequest(),
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -408,8 +491,7 @@ describe('runtime/chat-orchestrator', () => {
 
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request: createRequest(),
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -467,8 +549,7 @@ describe('runtime/chat-orchestrator', () => {
 
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request: createRequest(),
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -551,8 +632,7 @@ describe('runtime/chat-orchestrator', () => {
 
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request,
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -572,8 +652,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.createChatSession.mockReturnValue(session)
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request,
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -583,7 +662,7 @@ describe('runtime/chat-orchestrator', () => {
 
         expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).toHaveBeenCalledWith(
             expect.objectContaining({
-                context: {},
+                context: createExecutionContext(),
                 model: session.baseModel,
                 userGoal: '基于这个版本方案生成 tasklist 草稿',
                 writeChunk: expect.any(Function),
@@ -604,8 +683,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.createChatSession.mockReturnValue(session)
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request,
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -615,7 +693,7 @@ describe('runtime/chat-orchestrator', () => {
 
         expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledWith(
             expect.objectContaining({
-                context: {},
+                context: createExecutionContext(),
                 conversationId: request.conversationId,
                 model: session.baseModel,
                 runtimeConfig: expect.objectContaining({
@@ -640,8 +718,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.createChatSession.mockReturnValue(session)
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
-            context: {},
-            deps: { defaultModel: 'qwen3:8b' },
+            context: createExecutionContext(),
             isClosed: () => false,
             request,
             writeChunk: chunk => writtenChunks.push(chunk),
@@ -666,9 +743,9 @@ describe('runtime/chat-orchestrator', () => {
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
             context: {
+                resolvedModelSelection: createExecutionContext().resolvedModelSelection,
                 signal: abortController.signal,
             },
-            deps: { defaultModel: 'qwen3:8b' },
             isClosed: () => false,
             request: createRequest(),
             writeChunk: chunk => writtenChunks.push(chunk),
