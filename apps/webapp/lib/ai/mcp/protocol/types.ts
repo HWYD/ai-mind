@@ -47,6 +47,7 @@ export interface MCPBearerTokenAuthConfig {
     type: 'bearer-token'
     token?: string
     tokenEnv?: string
+    requireExplicitTokenInProduction?: boolean
     headerName?: string
 }
 

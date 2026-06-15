@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common'
 
-import { PROJECT_ASSISTANT_MCP_DEFAULT_TOKEN } from './mcp.constants.js'
+import { resolveProjectAssistantServiceMcpToken } from '../runtime-config.js'
 
 export type McpAuthResult = 'forbidden' | 'ok' | 'unauthorized'
 
@@ -16,7 +16,7 @@ export class McpAuthService {
      * - 兜底固定开发 token（仅本地调试使用）
      */
     private getExpectedToken() {
-        return process.env.PROJECT_ASSISTANT_SERVICE_MCP_TOKEN?.trim() || PROJECT_ASSISTANT_MCP_DEFAULT_TOKEN
+        return resolveProjectAssistantServiceMcpToken()
     }
 
     /**
