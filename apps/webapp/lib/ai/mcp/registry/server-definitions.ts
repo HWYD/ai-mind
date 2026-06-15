@@ -13,10 +13,6 @@ function createProjectAssistantServiceMcpBaseUrl() {
     return process.env.PROJECT_ASSISTANT_SERVICE_MCP_BASE_URL?.trim() || 'http://127.0.0.1:8788/mcp'
 }
 
-function createProjectAssistantServiceMcpToken() {
-    return process.env.PROJECT_ASSISTANT_SERVICE_MCP_TOKEN?.trim() || 'project-assistant-service-dev-token'
-}
-
 /**
  * `project-docs-server` 只暴露 docs/ 项目知识区相关的 Resource 与 Prompt 能力。
  */
@@ -82,7 +78,9 @@ const projectAssistantServiceDefinition: MCPServerDefinition = {
     serverId: 'project-assistant-service',
     auth: {
         type: 'bearer-token',
-        token: createProjectAssistantServiceMcpToken(),
+        token: 'project-assistant-service-dev-token',
+        tokenEnv: 'PROJECT_ASSISTANT_SERVICE_MCP_TOKEN',
+        requireExplicitTokenInProduction: true,
         headerName: 'Authorization',
     },
 }

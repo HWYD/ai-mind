@@ -7,6 +7,7 @@
         "build": "tsc -p tsconfig.json",
         "dev": "tsx watch src/main.ts",
         "start": "node dist/main.js",
+        "test": "node --import tsx --test test/*.test.ts",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {

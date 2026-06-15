@@ -23,7 +23,7 @@ export function assertSafeDocsResourcePath(input: string) {
         throw new Error('docs resource 路径不能为空。')
     }
 
-    if (path.isAbsolute(value) || value.startsWith('/') || value.includes('\\') || value.includes('\0')) {
+    if (path.isAbsolute(value) || value.startsWith('/') || value.includes(':') || value.includes('\\') || value.includes('\0')) {
         throw new Error('docs resource 只允许使用相对 docs/ 的安全路径。')
     }
 

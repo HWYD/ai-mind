@@ -1,0 +1,112 @@
+# AI Mind Release — GHCR 双镜像发布
+# 触发：v*.*.* tag 或 workflow_dispatch（手动触发）
+# 权限：contents: read + packages: write
+# 不：不 SSH 部署、不注入生产 Secret、不发布 latest 标签
+
+name: Release (GHCR)
+
+on:
+  push:
+    tags:
+      - v*.*.*
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号，例如 0.2.2'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    name: Build and push to GHCR
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 拒绝发布含未提交修改的构建（tag 触发时必为干净 checkout；手动触发时做安全检验）
+      - name: Reject uncommitted working tree
+        run: |
+          if ! git diff --exit-code --quiet; then
+            echo "::error::Working tree is not clean. Commit all changes before release."
+            exit 1
+          fi
+
+      # 提取元数据
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          SHA="$(git rev-parse --short HEAD)"
+          echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
+
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VER="${{ github.event.inputs.version }}"
+          elif [ -n "${{ github.ref_name }}" ]; then
+            VER="${GITHUB_REF_NAME#v}"
+          else
+            VER="0.0.0-dev"
+          fi
+          echo "version=${VER}" >> "${GITHUB_OUTPUT}"
+
+          REPO="${GITHUB_REPOSITORY}"
+          echo "repo=${REPO}" >> "${GITHUB_OUTPUT}"
+          echo "repo_url=https://github.com/${REPO}" >> "${GITHUB_OUTPUT}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # webapp 镜像
+      - name: Build and push webapp
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: webapp-runner
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            OCI_CREATED=${{ github.event.repository.updated_at }}
+            OCI_REVISION=${{ github.sha }}
+            OCI_SOURCE=${{ steps.meta.outputs.repo_url }}
+            OCI_VERSION=${{ steps.meta.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-webapp:sha-${{ steps.meta.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-webapp:v${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-webapp:${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=webapp-release
+          cache-to: type=gha,scope=webapp-release,mode=max
+
+      # project-assistant-service 镜像
+      - name: Build and push project-assistant-service
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: project-assistant-service-runner
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            OCI_CREATED=${{ github.event.repository.updated_at }}
+            OCI_REVISION=${{ github.sha }}
+            OCI_SOURCE=${{ steps.meta.outputs.repo_url }}
+            OCI_VERSION=${{ steps.meta.outputs.version }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-project-assistant-service:sha-${{ steps.meta.outputs.sha }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-project-assistant-service:v${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-project-assistant-service:${{ steps.meta.outputs.version }}
+          cache-from: type=gha,scope=pas-release
+          cache-to: type=gha,scope=pas-release,mode=max

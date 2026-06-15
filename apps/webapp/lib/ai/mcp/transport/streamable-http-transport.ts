@@ -4,18 +4,22 @@ import type { MCPBearerTokenAuthConfig, MCPStreamableHttpServerDefinition } from
 
 /**
  * 解析远程 MCP 的 Bearer Token。
- * 优先级：显式 token > tokenEnv 对应的环境变量；两者都没有时返回 undefined，让服务端按未认证处理。
+ * 优先读取 tokenEnv，显式 token 只作为开发态 fallback。
+ * 标记 requireExplicitTokenInProduction 后，生产运行时必须提供非默认值。
  */
-function resolveBearerToken(authConfig: MCPBearerTokenAuthConfig) {
-    if (authConfig.token?.trim()) {
-        return authConfig.token.trim()
+export function resolveBearerToken(authConfig: MCPBearerTokenAuthConfig, env: Record<string, string | undefined> = process.env) {
+    const fallbackToken = authConfig.token?.trim()
+    const explicitToken = authConfig.tokenEnv?.trim() ? env[authConfig.tokenEnv]?.trim() : undefined
+
+    if (
+        authConfig.requireExplicitTokenInProduction &&
+        env.NODE_ENV === 'production' &&
+        (!explicitToken || explicitToken === fallbackToken)
+    ) {
+        throw new Error('Remote MCP bearer token must be configured explicitly in production.')
     }
 
-    if (authConfig.tokenEnv?.trim()) {
-        return process.env[authConfig.tokenEnv]?.trim()
-    }
-
-    return undefined
+    return explicitToken || fallbackToken
 }
 
 /**

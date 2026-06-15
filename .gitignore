@@ -34,6 +34,10 @@ yarn-error.log*
 !.env.development
 !**/.env.example
 !**/.env.development
+deploy/env/*.env
+deploy/env/*.local
+deploy/env/*.production
+!deploy/env/*.env.example
 
 # vercel
 .vercel
@@ -81,4 +85,6 @@ private-folder/*
 
 .codex/tmp/
 
+# test
+# **.test.ts
 

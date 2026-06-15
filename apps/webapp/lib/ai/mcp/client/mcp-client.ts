@@ -200,6 +200,19 @@ export class MCPClient {
     }
 
     /**
+     * 一旦底层 transport 已关闭，或上一轮初始化已经进入错误态，
+     * 下一次 connect 必须使用全新的 SDK Client / transport。
+     * 否则官方 SDK 会把它判定成“同一 Protocol 重复 connect”。
+     */
+    private rebuildConnectionPrimitives() {
+        this.connectPromise = null
+        this.state = 'idle'
+        this.client = this.createClient()
+        this.transport = this.createTransport()
+        this.bindTransportHandlers()
+    }
+
+    /**
      * 丢弃当前底层连接并创建全新的 SDK Client / transport。
      * 主要用于 remote MCP 服务重启后，旧 mcp-session-id 已经不存在的场景。
      */
@@ -210,11 +223,7 @@ export class MCPClient {
             // 旧 session 已失效时 close 也可能失败；这里继续重建，保证下一次请求能重新 initialize。
         }
 
-        this.connectPromise = null
-        this.state = 'idle'
-        this.client = this.createClient()
-        this.transport = this.createTransport()
-        this.bindTransportHandlers()
+        this.rebuildConnectionPrimitives()
     }
 
     /**
@@ -343,6 +352,10 @@ export class MCPClient {
 
         if (this.connectPromise) {
             return this.connectPromise
+        }
+
+        if (this.state === 'closed' || this.state === 'error') {
+            this.rebuildConnectionPrimitives()
         }
 
         this.state = 'connecting'

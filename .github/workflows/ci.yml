@@ -1,0 +1,96 @@
+# AI Mind CI
+# 触发：PR 到 main、push 到 main
+# 权限：最小 contents: read
+# 不：不登录 GHCR、不推送镜像、不 SSH 部署、不注入生产 Secret
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  code:
+    name: Code checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # stream-core
+      - name: stream-core typecheck
+        run: pnpm --filter @ai-mind/stream-core typecheck
+      - name: stream-core test
+        run: pnpm --filter @ai-mind/stream-core test
+      - name: stream-core build
+        run: pnpm --filter @ai-mind/stream-core build
+
+      # webapp
+      - name: webapp lint
+        run: pnpm lint:webapp
+      - name: webapp typecheck
+        run: pnpm typecheck
+      - name: webapp test
+        run: pnpm --dir apps/webapp test
+      - name: webapp production build
+        run: pnpm --dir apps/webapp build
+
+      # project-assistant-service
+      - name: PAS typecheck
+        run: pnpm typecheck:pas
+      - name: PAS test
+        run: pnpm --dir apps/project-assistant-service test
+      - name: PAS build
+        run: pnpm build:pas
+
+  docker:
+    name: Docker build checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build webapp-runner (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: webapp-runner
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=webapp
+          cache-to: type=gha,scope=webapp,mode=max
+
+      - name: Build project-assistant-service-runner (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: project-assistant-service-runner
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=pas
+          cache-to: type=gha,scope=pas,mode=max
