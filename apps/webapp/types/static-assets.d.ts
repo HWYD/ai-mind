@@ -1,11 +1,11 @@
 // 静态资源类型声明，tsc --noEmit 需要这些声明来识别 Next.js 打包层处理的模块导入。
 declare module '*.png' {
-    const value: unknown
+    const value: string
     export default value
 }
 
 declare module '*.jpg' {
-    const value: unknown
+    const value: string
     export default value
 }
 
