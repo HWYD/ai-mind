@@ -20,7 +20,6 @@
 
 # misc
 .DS_Store
-*.pem
 
 # debug
 npm-debug.log*
@@ -28,15 +27,18 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env
+.env
+.env.*
 !.env.example
 !.env.development
 !**/.env.example
 !**/.env.development
+
+# deployment env
 deploy/env/*.env
-deploy/env/*.local
-deploy/env/*.production
+deploy/env/*.production.env
+deploy/env/*.local.env
 !deploy/env/*.env.example
 
 # vercel
@@ -88,3 +90,18 @@ private-folder/*
 # test
 # **.test.ts
 
+# release metadata
+.release.env
+.release.env.previous
+.release.env.backup-*
+deploy/.release*.env
+
+# certs and private keys
+*.key
+*.pem
+*.crt
+*.csr
+deploy/certs/
+deploy/ssl/
+
+deploy/compose.production.local.yml

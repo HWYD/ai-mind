@@ -1,9 +1,8 @@
-# AI Mind Release — GHCR 双镜像发布
-# 触发：v*.*.* tag 或 workflow_dispatch（手动触发）
-# 权限：contents: read + packages: write
-# 不：不 SSH 部署、不注入生产 Secret、不发布 latest 标签
+# AI Mind Release — 腾讯云 TCR 双镜像发布与 SSH 部署
+# 触发：v*.*.* tag 或 workflow_dispatch
+# 不注入模型 API Key、MCP Token、SSL 私钥。
 
-name: Release (GHCR)
+name: Release (TCR)
 
 on:
   push:
@@ -19,21 +18,50 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
-  REGISTRY: ghcr.io
+  REGISTRY: ccr.ccs.tencentyun.com
 
 jobs:
-  release:
-    name: Build and push to GHCR
+  prepare:
+    name: Resolve release metadata
     runs-on: ubuntu-latest
+    outputs:
+      sha_short: ${{ steps.meta.outputs.sha_short }}
+      version: ${{ steps.meta.outputs.version }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      repo_url: ${{ steps.meta.outputs.repo_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          SHA_SHORT="$(git rev-parse --short HEAD)"
+          echo "sha_short=${SHA_SHORT}" >> "${GITHUB_OUTPUT}"
+          echo "image_tag=sha-${SHA_SHORT}" >> "${GITHUB_OUTPUT}"
+
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          elif echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            echo "::error::Release workflow requires a version tag (v*.*.*) or a version input via workflow_dispatch."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "repo_url=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
+
+  release:
+    name: Build and push to TCR
+    runs-on: ubuntu-latest
+    needs: prepare
     timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
 
-      # 拒绝发布含未提交修改的构建（tag 触发时必为干净 checkout；手动触发时做安全检验）
       - name: Reject uncommitted working tree
         run: |
           if ! git diff --exit-code --quiet; then
@@ -41,38 +69,16 @@ jobs:
             exit 1
           fi
 
-      # 提取元数据
-      - name: Resolve release metadata
-        id: meta
-        run: |
-          SHA="$(git rev-parse --short HEAD)"
-          echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
-
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VER="${{ github.event.inputs.version }}"
-          elif echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
-            VER="${GITHUB_REF_NAME#v}"
-          else
-            echo "::error::Release workflow requires a version tag (v*.*.*) or a version input via workflow_dispatch."
-            exit 1
-          fi
-          echo "version=${VER}" >> "${GITHUB_OUTPUT}"
-
-          REPO="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-          echo "repo=${REPO}" >> "${GITHUB_OUTPUT}"
-          echo "repo_url=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
-
-      - name: Log in to GHCR
+      - name: Log in to TCR
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.TCR_USERNAME }}
+          password: ${{ secrets.TCR_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # webapp 镜像
       - name: Build and push webapp
         uses: docker/build-push-action@v6
         with:
@@ -83,16 +89,15 @@ jobs:
           build-args: |
             OCI_CREATED=${{ github.event.repository.updated_at }}
             OCI_REVISION=${{ github.sha }}
-            OCI_SOURCE=${{ steps.meta.outputs.repo_url }}
-            OCI_VERSION=${{ steps.meta.outputs.version }}
+            OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
+            OCI_VERSION=${{ needs.prepare.outputs.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-webapp:sha-${{ steps.meta.outputs.sha }}
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-webapp:v${{ steps.meta.outputs.version }}
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-webapp:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:${{ needs.prepare.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:v${{ needs.prepare.outputs.version }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:${{ needs.prepare.outputs.version }}
           cache-from: type=gha,scope=webapp-release
           cache-to: type=gha,scope=webapp-release,mode=max
 
-      # project-assistant-service 镜像
       - name: Build and push project-assistant-service
         uses: docker/build-push-action@v6
         with:
@@ -103,11 +108,66 @@ jobs:
           build-args: |
             OCI_CREATED=${{ github.event.repository.updated_at }}
             OCI_REVISION=${{ github.sha }}
-            OCI_SOURCE=${{ steps.meta.outputs.repo_url }}
-            OCI_VERSION=${{ steps.meta.outputs.version }}
+            OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
+            OCI_VERSION=${{ needs.prepare.outputs.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-project-assistant-service:sha-${{ steps.meta.outputs.sha }}
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-project-assistant-service:v${{ steps.meta.outputs.version }}
-            ${{ env.REGISTRY }}/${{ steps.meta.outputs.repo }}/ai-mind-project-assistant-service:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:${{ needs.prepare.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:v${{ needs.prepare.outputs.version }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:${{ needs.prepare.outputs.version }}
           cache-from: type=gha,scope=pas-release
           cache-to: type=gha,scope=pas-release,mode=max
+
+  deploy:
+    name: Deploy to production server
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - release
+    timeout-minutes: 30
+    environment: production
+    concurrency: production-deploy
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare SSH
+        env:
+          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$PROD_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+
+      - name: Sync deploy assets
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
+        run: |
+          ssh -p "$PROD_PORT" -i ~/.ssh/id_ed25519 "$PROD_USER@$PROD_HOST" "mkdir -p '$PROD_DEPLOY_PATH'"
+          rsync -az --delete \
+            --exclude '.release.env*' \
+            --exclude '*.production.env' \
+            --exclude '*.local.env' \
+            -e "ssh -p $PROD_PORT -i ~/.ssh/id_ed25519" \
+            deploy/ "$PROD_USER@$PROD_HOST:$PROD_DEPLOY_PATH/"
+
+      - name: Run remote deploy
+        env:
+          PROD_HOST: ${{ secrets.PROD_HOST }}
+          PROD_PORT: ${{ secrets.PROD_PORT }}
+          PROD_USER: ${{ secrets.PROD_USER }}
+          PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
+          TCR_NAMESPACE: ${{ secrets.TCR_NAMESPACE }}
+          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+        run: |
+          ssh -p "$PROD_PORT" -i ~/.ssh/id_ed25519 "$PROD_USER@$PROD_HOST" "\
+            chmod +x '$PROD_DEPLOY_PATH/scripts/'*.sh && \
+            cd '$PROD_DEPLOY_PATH' && \
+            AI_MIND_DEPLOY_ROOT='$PROD_DEPLOY_PATH' \
+            TCR_NAMESPACE='$TCR_NAMESPACE' \
+            AI_MIND_IMAGE_TAG='$IMAGE_TAG' \
+            bash '$PROD_DEPLOY_PATH/scripts/deploy-production.sh'"

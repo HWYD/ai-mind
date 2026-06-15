@@ -1,7 +1,7 @@
 # AI Mind CI
 # 触发：PR 到 main、push 到 main
 # 权限：最小 contents: read
-# 不：不登录 GHCR、不推送镜像、不 SSH 部署、不注入生产 Secret
+# 不：不登录生产镜像仓库、不推送镜像、不 SSH 部署、不注入生产 Secret
 
 name: CI
 
