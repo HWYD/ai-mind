@@ -1,0 +1,59 @@
+# AI Mind 宿主机 Nginx 生产配置模板
+# 证书由宿主机管理，可以使用腾讯云 SSL、Certbot 或其他 CA。
+# 如果服务器访问 Let's Encrypt 不稳定，可使用腾讯云 SSL 证书手动部署。
+# 真实证书和私钥不进入仓库。
+
+upstream ai_mind_webapp {
+    server 127.0.0.1:3000;
+}
+
+server {
+    listen 80;
+    server_name YOUR_DOMAIN;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name YOUR_DOMAIN;
+
+    ssl_certificate /etc/nginx/ssl/YOUR_DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/nginx/ssl/YOUR_DOMAIN/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    location /mcp {
+        return 404;
+    }
+
+    location /api/chat {
+        proxy_pass http://ai_mind_webapp;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        add_header X-Accel-Buffering no;
+
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+    }
+
+    location / {
+        proxy_pass http://ai_mind_webapp;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+    }
+}

@@ -1,0 +1,82 @@
+# AI Mind 生产 Compose
+# 使用 registry SHA 不可变镜像部署；当前生产路线为腾讯云 TCR。
+# 生产 Compose 只运行已构建镜像，不包含 build: 指令。
+# 启动前需要准备好服务器 env 文件和 .release.env。
+
+name: ai-mind-production
+
+services:
+  project-assistant-service:
+    image: ${AI_MIND_PROJECT_ASSISTANT_SERVICE_IMAGE?AI_MIND_PROJECT_ASSISTANT_SERVICE_IMAGE is required}:${AI_MIND_IMAGE_TAG?AI_MIND_IMAGE_TAG is required}
+    env_file:
+      - ./env/project-assistant-service.production.env
+    environment:
+      NODE_ENV: production
+      PROJECT_ASSISTANT_SERVICE_HOST: 0.0.0.0
+      PROJECT_ASSISTANT_SERVICE_PORT: "8788"
+      TZ: Asia/Shanghai
+    expose:
+      - "8788"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8788/health').then((r)=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
+
+  webapp:
+    image: ${AI_MIND_WEBAPP_IMAGE?AI_MIND_WEBAPP_IMAGE is required}:${AI_MIND_IMAGE_TAG?AI_MIND_IMAGE_TAG is required}
+    depends_on:
+      project-assistant-service:
+        condition: service_healthy
+    env_file:
+      - ./env/webapp.production.env
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      PROJECT_ASSISTANT_SERVICE_MCP_BASE_URL: http://project-assistant-service:8788/mcp
+      AI_MIND_SESSION_COOKIE_SECURE: "on"
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    stop_grace_period: 45s
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/health').then((r)=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+        reservations:
+          memory: 256M
