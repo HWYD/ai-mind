@@ -50,16 +50,17 @@ jobs:
 
           if [ -n "${{ github.event.inputs.version }}" ]; then
             VER="${{ github.event.inputs.version }}"
-          elif [ -n "${{ github.ref_name }}" ]; then
+          elif echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+'; then
             VER="${GITHUB_REF_NAME#v}"
           else
-            VER="0.0.0-dev"
+            echo "::error::Release workflow requires a version tag (v*.*.*) or a version input via workflow_dispatch."
+            exit 1
           fi
           echo "version=${VER}" >> "${GITHUB_OUTPUT}"
 
-          REPO="${GITHUB_REPOSITORY}"
+          REPO="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
           echo "repo=${REPO}" >> "${GITHUB_OUTPUT}"
-          echo "repo_url=https://github.com/${REPO}" >> "${GITHUB_OUTPUT}"
+          echo "repo_url=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
