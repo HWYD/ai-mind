@@ -92,9 +92,7 @@ jobs:
             OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
             OCI_VERSION=${{ needs.prepare.outputs.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:${{ needs.prepare.outputs.image_tag }}
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:v${{ needs.prepare.outputs.version }}
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:${{ needs.prepare.outputs.version }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:production
           cache-from: type=gha,scope=webapp-release
           cache-to: type=gha,scope=webapp-release,mode=max
 
@@ -111,63 +109,7 @@ jobs:
             OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
             OCI_VERSION=${{ needs.prepare.outputs.version }}
           tags: |
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:${{ needs.prepare.outputs.image_tag }}
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:v${{ needs.prepare.outputs.version }}
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:${{ needs.prepare.outputs.version }}
+            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:production
           cache-from: type=gha,scope=pas-release
           cache-to: type=gha,scope=pas-release,mode=max
 
-  deploy:
-    name: Deploy to production server
-    runs-on: ubuntu-latest
-    needs:
-      - prepare
-      - release
-    timeout-minutes: 30
-    environment: production
-    concurrency: production-deploy
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Prepare SSH
-        env:
-          PROD_SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          PROD_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
-        run: |
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$PROD_SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          printf '%s\n' "$PROD_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-
-      - name: Sync deploy assets
-        env:
-          PROD_HOST: ${{ secrets.PROD_HOST }}
-          PROD_PORT: ${{ secrets.PROD_PORT }}
-          PROD_USER: ${{ secrets.PROD_USER }}
-          PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
-        run: |
-          ssh -p "$PROD_PORT" -i ~/.ssh/id_ed25519 "$PROD_USER@$PROD_HOST" "mkdir -p '$PROD_DEPLOY_PATH'"
-          rsync -az --delete \
-            --exclude '.release.env*' \
-            --exclude '*.production.env' \
-            --exclude '*.local.env' \
-            -e "ssh -p $PROD_PORT -i ~/.ssh/id_ed25519" \
-            deploy/ "$PROD_USER@$PROD_HOST:$PROD_DEPLOY_PATH/"
-
-      - name: Run remote deploy
-        env:
-          PROD_HOST: ${{ secrets.PROD_HOST }}
-          PROD_PORT: ${{ secrets.PROD_PORT }}
-          PROD_USER: ${{ secrets.PROD_USER }}
-          PROD_DEPLOY_PATH: ${{ secrets.PROD_DEPLOY_PATH }}
-          TCR_NAMESPACE: ${{ secrets.TCR_NAMESPACE }}
-          IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
-        run: |
-          ssh -p "$PROD_PORT" -i ~/.ssh/id_ed25519 "$PROD_USER@$PROD_HOST" "\
-            chmod +x '$PROD_DEPLOY_PATH/scripts/'*.sh && \
-            cd '$PROD_DEPLOY_PATH' && \
-            AI_MIND_DEPLOY_ROOT='$PROD_DEPLOY_PATH' \
-            TCR_NAMESPACE='$TCR_NAMESPACE' \
-            AI_MIND_IMAGE_TAG='$IMAGE_TAG' \
-            bash '$PROD_DEPLOY_PATH/scripts/deploy-production.sh'"
