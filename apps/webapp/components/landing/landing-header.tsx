@@ -43,11 +43,11 @@ export function LandingHeader() {
                         onClick={() => setOpen(false)}
                     >
                         <Image
-                            src="/brand/ai-mind-icon.png"
+                            src="/brand/ai-mind-icon.webp"
                             alt="AI Mind"
-                            width={40}
-                            height={40}
-                            className="size-8 rounded-lg lg:size-10 lg:rounded-xl"
+                            width={32}
+                            height={32}
+                            className="size-5 rounded-lg lg:size-6 lg:rounded-xl"
                             priority
                         />
                         <span className="truncate text-lg font-semibold tracking-tight text-foreground lg:text-xl">AI Mind</span>

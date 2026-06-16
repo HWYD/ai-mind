@@ -76,14 +76,15 @@ async function streamDirectAnswer(
     langChainMessages: BaseMessage[],
     context: ChatExecutionContext,
     writeChunk: WriteChunk,
-    isClosed: () => boolean
+    isClosed: () => boolean,
+    emitReasoning: boolean
 ) {
     validateInputLength(langChainMessages)
     const stream = await model.stream(langChainMessages, {
         signal: context.signal,
     })
 
-    await streamAssistantParts(stream, context, writeChunk, isClosed)
+    await streamAssistantParts(stream, context, writeChunk, isClosed, emitReasoning)
 }
 
 function getLastUserMessageText(request: ChatRequest) {
@@ -117,6 +118,10 @@ export class ChatOrchestrator {
         this.writeChunk = options.writeChunk
     }
 
+    private shouldEmitReasoning() {
+        return this.request.options?.enableReasoning !== false
+    }
+
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
         // 普通 Tool Calling 的 planning 阶段仍沿用 Skill + Tool prompt 组合。
         // v0.1.0 Agent 不走这里，它由 runVersionPlanTasklistAgentEntryStage 提前接管。
@@ -146,7 +151,13 @@ export class ChatOrchestrator {
         const planningStream = await session.toolBoundModel.stream(planningMessages, {
             signal: this.context.signal,
         })
-        const response = await streamPlanningResponse(planningStream, this.context, this.writeChunk, this.isClosed)
+        const response = await streamPlanningResponse(
+            planningStream,
+            this.context,
+            this.writeChunk,
+            this.isClosed,
+            this.shouldEmitReasoning()
+        )
         const validationResult = normalizeAndValidateToolCalls(response, session.activeToolDefinitionMap)
         const hasVisibleText = hasVisibleAssistantText(response)
 
@@ -313,7 +324,7 @@ export class ChatOrchestrator {
             signal: this.context.signal,
         })
 
-        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
+        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
     }
 
     private async runCapabilityContextAnswerStage(session: ChatSession) {
@@ -345,7 +356,7 @@ export class ChatOrchestrator {
             signal: this.context.signal,
         })
 
-        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
+        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
 
         return true
     }
@@ -377,7 +388,7 @@ export class ChatOrchestrator {
             signal: this.context.signal,
         })
 
-        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed)
+        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
 
         return true
     }
@@ -506,7 +517,14 @@ export class ChatOrchestrator {
             }
 
             if (!session.toolBoundModel) {
-                await streamDirectAnswer(session.baseModel, session.directAnswerMessages, this.context, this.writeChunk, this.isClosed)
+                await streamDirectAnswer(
+                    session.baseModel,
+                    session.directAnswerMessages,
+                    this.context,
+                    this.writeChunk,
+                    this.isClosed,
+                    this.shouldEmitReasoning()
+                )
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -514,7 +532,14 @@ export class ChatOrchestrator {
             const planningStage = await this.runPlanningStage(session)
 
             if (planningStage.kind === 'direct-fallback') {
-                await streamDirectAnswer(session.baseModel, session.directAnswerMessages, this.context, this.writeChunk, this.isClosed)
+                await streamDirectAnswer(
+                    session.baseModel,
+                    session.directAnswerMessages,
+                    this.context,
+                    this.writeChunk,
+                    this.isClosed,
+                    this.shouldEmitReasoning()
+                )
                 lifecycle.emitFinishIfOpen()
                 return
             }

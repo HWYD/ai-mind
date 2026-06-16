@@ -102,7 +102,7 @@ function LandingFooter() {
                 <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,auto)] lg:items-center">
                     <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-3">
-                            <Image src="/brand/ai-mind-icon.png" alt="AI Mind" width={32} height={32} className="size-8 rounded-lg" />
+                            <Image src="/brand/ai-mind-icon.webp" alt="AI Mind" width={24} height={24} className="size-6 rounded-lg" />
                             <span className="min-w-0 break-words text-xl font-semibold tracking-tight text-foreground">AI Mind</span>
                         </div>
                         <p className="mt-3 break-words text-sm leading-6 text-muted-foreground">一个持续演进的 AI 应用工程化项目。</p>

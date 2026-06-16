@@ -68,7 +68,7 @@ describe('useChatStream', () => {
         expect(textPart?.text).toBe('聊天请求已达到当前 IP 的当日上限（2 次）。')
     })
 
-    it('会把当前选中的 modelId 放进聊天请求 options 中', async () => {
+    it('会把当前选中的 modelId 和 enableReasoning 放进聊天请求 options 中', async () => {
         const fetchMock = vi
             .fn()
             .mockResolvedValue(createNdjsonResponse([{ type: 'start', messageId: 'assistant-model' }, { type: 'finish' }]))
@@ -84,6 +84,7 @@ describe('useChatStream', () => {
         const requestBody = typeof requestInit?.body === 'string' ? JSON.parse(requestInit.body) : null
 
         expect(requestBody?.options?.modelId).toBe('qwen/qwen3.6-plus')
+        expect(requestBody?.options?.enableReasoning).toBe(false)
     })
 
     it('用户中止流式请求后会保留已收到的 assistant 内容', async () => {

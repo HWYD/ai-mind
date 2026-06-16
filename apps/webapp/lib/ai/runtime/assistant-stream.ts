@@ -24,11 +24,22 @@ function getReasoningText(source: { additional_kwargs?: Record<string, unknown> 
     return ''
 }
 
+function stripReasoningMetadata(additionalKwargs?: Record<string, unknown>) {
+    if (!additionalKwargs || !('reasoning_content' in additionalKwargs)) {
+        return additionalKwargs
+    }
+
+    const { reasoning_content: _ignored, ...rest } = additionalKwargs
+
+    return Object.keys(rest).length > 0 ? rest : undefined
+}
+
 export async function streamAssistantParts(
     modelStream: AsyncIterable<AIMessageChunk>,
     context: ChatExecutionContext,
     writeChunk: WriteChunk,
-    isClosed: () => boolean
+    isClosed: () => boolean,
+    emitReasoning = true
 ) {
     let textStarted = false
     let reasoningStarted = false
@@ -70,7 +81,7 @@ export async function streamAssistantParts(
         const reasoning = getReasoningText(chunk)
         const text = getChunkText(chunk)
 
-        if (reasoning) {
+        if (emitReasoning && reasoning) {
             ensureReasoningPartStarted()
             writeChunk({
                 type: 'reasoning-delta',
@@ -89,7 +100,7 @@ export async function streamAssistantParts(
         }
     }
 
-    if (reasoningStarted) {
+    if (emitReasoning && reasoningStarted) {
         writeChunk({
             type: 'reasoning-end',
             partId: reasoningPartId,
@@ -104,7 +115,7 @@ export async function streamAssistantParts(
     }
 }
 
-function toAIMessage(chunk: AIMessageChunk | null): AIMessage {
+function toAIMessage(chunk: AIMessageChunk | null, includeReasoningMetadata = true): AIMessage {
     if (!chunk) {
         return new AIMessage({
             content: '',
@@ -113,10 +124,12 @@ function toAIMessage(chunk: AIMessageChunk | null): AIMessage {
         })
     }
 
+    const additionalKwargs = includeReasoningMetadata ? chunk.additional_kwargs : stripReasoningMetadata(chunk.additional_kwargs)
+
     return new AIMessage({
         id: chunk.id,
         content: chunk.content,
-        additional_kwargs: chunk.additional_kwargs,
+        ...(additionalKwargs ? { additional_kwargs: additionalKwargs } : {}),
         response_metadata: chunk.response_metadata,
         usage_metadata: chunk.usage_metadata,
         tool_calls: chunk.tool_calls,
@@ -130,7 +143,8 @@ export async function streamPlanningResponse(
     modelStream: AsyncIterable<AIMessageChunk>,
     context: ChatExecutionContext,
     writeChunk: WriteChunk,
-    isClosed: () => boolean
+    isClosed: () => boolean,
+    emitReasoning = true
 ) {
     let combinedChunk: AIMessageChunk | null = null
     let textStarted = false
@@ -168,14 +182,14 @@ export async function streamPlanningResponse(
             if (context.signal?.aborted) {
                 logChatCancellation('request aborted by client')
             }
-            return toAIMessage(combinedChunk)
+            return toAIMessage(combinedChunk, emitReasoning)
         }
 
         combinedChunk = combinedChunk ? combinedChunk.concat(chunk) : chunk
 
         const reasoning = getReasoningText(chunk)
 
-        if (reasoning) {
+        if (emitReasoning && reasoning) {
             ensureReasoningPartStarted()
             writeChunk({
                 type: 'reasoning-delta',
@@ -200,7 +214,7 @@ export async function streamPlanningResponse(
         }
     }
 
-    if (reasoningStarted) {
+    if (emitReasoning && reasoningStarted) {
         writeChunk({
             type: 'reasoning-end',
             partId: reasoningPartId,
@@ -214,7 +228,7 @@ export async function streamPlanningResponse(
         })
     }
 
-    return toAIMessage(combinedChunk)
+    return toAIMessage(combinedChunk, emitReasoning)
 }
 
 export function stripMessageText(message: AIMessage) {

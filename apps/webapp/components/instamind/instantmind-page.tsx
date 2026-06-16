@@ -76,7 +76,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
             <header className="h-16 border-b bg-background">
                 <div className="mx-auto flex h-full max-w-7xl items-center px-6 lg:px-12">
                     <Link href="/" className="flex items-center gap-3" aria-label="AI Mind 官网">
-                        <Image src="/brand/ai-mind-icon.png" alt="AI Mind" width={32} height={32} className="size-8 rounded-lg" priority />
+                        <Image src="/brand/ai-mind-icon.webp" alt="AI Mind" width={24} height={24} className="size-6 rounded-lg" priority />
                         <span className="text-xl font-semibold tracking-tight text-foreground">AI Mind</span>
                     </Link>
                 </div>
