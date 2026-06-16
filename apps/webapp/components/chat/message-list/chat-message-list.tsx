@@ -52,7 +52,10 @@ const ChatMessageItem = memo(function ChatMessageItem({
 }) {
     const visibleParts = useMemo(() => message.parts.filter(hasVisibleContent), [message.parts])
     const hasArtifacts = (message.artifacts?.length ?? 0) > 0
-    const reasoningParts = useMemo(() => visibleParts.filter((part): part is ReasoningPart => part.type === 'reasoning'), [visibleParts])
+    const reasoningParts = useMemo(
+        () => (enableReasoning ? visibleParts.filter((part): part is ReasoningPart => part.type === 'reasoning') : []),
+        [enableReasoning, visibleParts]
+    )
     const contentParts = useMemo(() => visibleParts.filter(part => part.type !== 'reasoning'), [visibleParts])
     const combinedReasoning = useMemo(() => buildCombinedReasoning(reasoningParts), [reasoningParts])
     const messageTextContent = useMemo(() => getMessageTextContent(message), [message])
