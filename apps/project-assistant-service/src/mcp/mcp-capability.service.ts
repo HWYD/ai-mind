@@ -51,18 +51,36 @@ export class McpCapabilityService {
                         text: JSON.stringify(
                             {
                                 project: 'AI Mind',
-                                version: 'v0.1.1',
+                                version: 'v0.2.2',
                                 summary:
-                                    '当前版本聚焦 Controlled Planner Lite、Agent Text Artifact 最终产物展示，以及受控 Agent 的过程 / 产物分层。',
+                                    '当前版本聚焦双应用容器化生产部署收口，已完成宿主机 Nginx + Docker Compose + 内网 PAS 的生产拓扑验证，并跑通 GitHub Actions -> 腾讯云 TCR -> 腾讯云服务器 Docker Compose 的首轮真实发布。',
+                                currentStatus: {
+                                    focus: 'v0.2.2 容器化生产部署与版本资产收口',
+                                    deployment: '生产部署成功，自动发布链路已完成首轮真实验收',
+                                    publicEntry: 'webapp 是唯一公网入口，宿主机 Nginx 仅反代到 127.0.0.1:3000',
+                                    remoteMcp:
+                                        'project-assistant-service 仅在 Docker 内网 expose 8788，webapp 通过 http://project-assistant-service:8788/mcp 访问，公网 /mcp 返回 404',
+                                },
                                 documents: [
                                     'README.md',
                                     'docs/README.md',
                                     'docs/architecture/agent-runtime.md',
                                     'docs/architecture/runtime-boundary.md',
                                     'docs/architecture/stream-core.md',
-                                    'docs/versions/v0.1.1-controlled-planner-lite.md',
-                                    'docs/tasklists/v0.1.1-tasklist.md',
-                                    'docs/releases/v0.1.1.md',
+                                    'docs/versions/v0.2.2-containerized-deployment-and-github-actions-delivery.md',
+                                    'docs/tasklists/v0.2.2-tasklist.md',
+                                    'docs/releases/v0.2.2.md',
+                                ],
+                                deployArtifacts: [
+                                    'deploy/compose.production.yml',
+                                    'deploy/nginx/ai-mind.production.conf.example',
+                                    'deploy/scripts/deploy-production.sh',
+                                    'deploy/scripts/verify-production.sh',
+                                ],
+                                nextSteps: [
+                                    '补齐失败发布回滚演练与恢复证据',
+                                    '补齐更完整的生产 smoke 与资源观测',
+                                    '完善宿主机证书续期与运维文档',
                                 ],
                                 updatedAt: new Date().toISOString(),
                             },
