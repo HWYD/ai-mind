@@ -5,111 +5,136 @@
 name: Release (TCR)
 
 on:
-  push:
-    tags:
-      - v*.*.*
-  workflow_dispatch:
-    inputs:
-      version:
-        description: '版本号，例如 0.2.2'
-        required: false
-        type: string
-        default: ''
+    push:
+        tags:
+            - v*.*.*
+    workflow_dispatch:
+        inputs:
+            version:
+                description: '版本号，例如 0.2.2'
+                required: false
+                type: string
+                default: ''
 
 permissions:
-  contents: read
+    contents: read
 
 env:
-  REGISTRY: ccr.ccs.tencentyun.com
+    REGISTRY: ccr.ccs.tencentyun.com
 
 jobs:
-  prepare:
-    name: Resolve release metadata
-    runs-on: ubuntu-latest
-    outputs:
-      sha_short: ${{ steps.meta.outputs.sha_short }}
-      version: ${{ steps.meta.outputs.version }}
-      image_tag: ${{ steps.meta.outputs.image_tag }}
-      repo_url: ${{ steps.meta.outputs.repo_url }}
-    steps:
-      - uses: actions/checkout@v4
+    prepare:
+        name: Resolve release metadata
+        runs-on: ubuntu-latest
+        outputs:
+            sha_short: ${{ steps.meta.outputs.sha_short }}
+            version: ${{ steps.meta.outputs.version }}
+            image_tag: ${{ steps.meta.outputs.image_tag }}
+            repo_url: ${{ steps.meta.outputs.repo_url }}
+        steps:
+            - uses: actions/checkout@v4
 
-      - name: Resolve release metadata
-        id: meta
-        run: |
-          SHA_SHORT="$(git rev-parse --short HEAD)"
-          echo "sha_short=${SHA_SHORT}" >> "${GITHUB_OUTPUT}"
-          echo "image_tag=sha-${SHA_SHORT}" >> "${GITHUB_OUTPUT}"
+            - name: Resolve release metadata
+              id: meta
+              run: |
+                  SHA_SHORT="$(git rev-parse --short HEAD)"
+                  echo "sha_short=${SHA_SHORT}" >> "${GITHUB_OUTPUT}"
+                  echo "image_tag=sha-${SHA_SHORT}" >> "${GITHUB_OUTPUT}"
 
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.event.inputs.version }}"
-          elif echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            echo "::error::Release workflow requires a version tag (v*.*.*) or a version input via workflow_dispatch."
-            exit 1
-          fi
+                  if [ -n "${{ github.event.inputs.version }}" ]; then
+                    VERSION="${{ github.event.inputs.version }}"
+                  elif echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+                    VERSION="${GITHUB_REF_NAME#v}"
+                  else
+                    echo "::error::Release workflow requires a version tag (v*.*.*) or a version input via workflow_dispatch."
+                    exit 1
+                  fi
 
-          echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "repo_url=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
+                  echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"
+                  echo "repo_url=https://github.com/${GITHUB_REPOSITORY}" >> "${GITHUB_OUTPUT}"
 
-  release:
-    name: Build and push to TCR
-    runs-on: ubuntu-latest
-    needs: prepare
-    timeout-minutes: 45
+    build-webapp:
+        name: Build and push webapp to TCR
+        runs-on: ubuntu-latest
+        needs: prepare
+        timeout-minutes: 60
 
-    steps:
-      - uses: actions/checkout@v4
+        steps:
+            - uses: actions/checkout@v4
 
-      - name: Reject uncommitted working tree
-        run: |
-          if ! git diff --exit-code --quiet; then
-            echo "::error::Working tree is not clean. Commit all changes before release."
-            exit 1
-          fi
+            - name: Reject uncommitted working tree
+              run: |
+                  if ! git diff --exit-code --quiet; then
+                    echo "::error::Working tree is not clean. Commit all changes before release."
+                    exit 1
+                  fi
 
-      - name: Log in to TCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.TCR_USERNAME }}
-          password: ${{ secrets.TCR_PASSWORD }}
+            - name: Log in to TCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ secrets.TCR_USERNAME }}
+                  password: ${{ secrets.TCR_PASSWORD }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
 
-      - name: Build and push webapp
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: webapp-runner
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            OCI_CREATED=${{ github.event.repository.updated_at }}
-            OCI_REVISION=${{ github.sha }}
-            OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
-            OCI_VERSION=${{ needs.prepare.outputs.version }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:production
-          cache-from: type=gha,scope=webapp-release
-          cache-to: type=gha,scope=webapp-release,mode=max
+            - name: Build and push webapp
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  target: webapp-runner
+                  platforms: linux/amd64
+                  push: true
+                  build-args: |
+                      OCI_CREATED=${{ github.event.repository.updated_at }}
+                      OCI_REVISION=${{ github.sha }}
+                      OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
+                      OCI_VERSION=${{ needs.prepare.outputs.version }}
+                  tags: |
+                      ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:production
+                  cache-from: type=gha,scope=webapp-release
+                  cache-to: type=gha,scope=webapp-release,mode=min
 
-      - name: Build and push project-assistant-service
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: project-assistant-service-runner
-          platforms: linux/amd64
-          push: true
-          build-args: |
-            OCI_CREATED=${{ github.event.repository.updated_at }}
-            OCI_REVISION=${{ github.sha }}
-            OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
-            OCI_VERSION=${{ needs.prepare.outputs.version }}
-          tags: |
-            ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:production
-          cache-from: type=gha,scope=pas-release
-          cache-to: type=gha,scope=pas-release,mode=max
+    build-project-assistant-service:
+        name: Build and push project-assistant-service to TCR
+        runs-on: ubuntu-latest
+        needs: prepare
+        timeout-minutes: 60
 
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Reject uncommitted working tree
+              run: |
+                  if ! git diff --exit-code --quiet; then
+                    echo "::error::Working tree is not clean. Commit all changes before release."
+                    exit 1
+                  fi
+
+            - name: Log in to TCR
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ secrets.TCR_USERNAME }}
+                  password: ${{ secrets.TCR_PASSWORD }}
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build and push project-assistant-service
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  target: project-assistant-service-runner
+                  platforms: linux/amd64
+                  push: true
+                  build-args: |
+                      OCI_CREATED=${{ github.event.repository.updated_at }}
+                      OCI_REVISION=${{ github.sha }}
+                      OCI_SOURCE=${{ needs.prepare.outputs.repo_url }}
+                      OCI_VERSION=${{ needs.prepare.outputs.version }}
+                  tags: |
+                      ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:production
+                  cache-from: type=gha,scope=pas-release
+                  cache-to: type=gha,scope=pas-release,mode=min

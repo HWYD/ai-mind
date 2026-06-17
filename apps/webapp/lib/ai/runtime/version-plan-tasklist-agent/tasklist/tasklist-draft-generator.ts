@@ -1,10 +1,24 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 
 import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure'
+import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 import { getMessageContentText } from '../../message-content'
 import type { ChatSession } from '../../types'
-import type { VersionPlanTasklistAgentState, VersionPlanTasklistDraftArtifact } from '../contract/types'
+import type {
+    VersionPlanTasklistDraftArtifact,
+    VersionPlanTasklistIntermediateArtifacts,
+    VersionPlanTasklistPlanningArtifacts,
+} from '../contract/types'
+
+export interface TasklistDraftPromptState {
+    artifacts: {
+        planning: VersionPlanTasklistPlanningArtifacts
+        tasklistDraft?: VersionPlanTasklistDraftArtifact
+        versionPlan?: VersionPlanTasklistIntermediateArtifacts['versionPlan']
+    }
+    versionPlanReference: ChatComposerReference
+}
 
 const MAX_PLAN_TEXT_CHARS = 30_000
 const DRAFT_SYSTEM_PROMPT = `
@@ -73,7 +87,7 @@ function formatListForPrompt(title: string, items: string[]) {
     return [title, ...items.map(item => `- ${item}`)].join('\n')
 }
 
-function formatPlanExtractForPrompt(state: VersionPlanTasklistAgentState) {
+function formatPlanExtractForPrompt(state: TasklistDraftPromptState) {
     const extract = state.artifacts.versionPlan?.extract
 
     if (!extract) {
@@ -92,7 +106,7 @@ function formatPlanExtractForPrompt(state: VersionPlanTasklistAgentState) {
     ].join('\n\n')
 }
 
-function formatTasklistStrategyForPrompt(state: VersionPlanTasklistAgentState) {
+function formatTasklistStrategyForPrompt(state: TasklistDraftPromptState) {
     const strategy = state.artifacts.planning.strategy
 
     if (!strategy) {
@@ -164,7 +178,7 @@ function getModelResponseText(response: unknown) {
     return ''
 }
 
-function getVersionPlanContent(state: VersionPlanTasklistAgentState) {
+function getVersionPlanContent(state: TasklistDraftPromptState) {
     const content = state.artifacts.versionPlan?.content
 
     if (!content) {
@@ -177,7 +191,7 @@ function getVersionPlanContent(state: VersionPlanTasklistAgentState) {
 /**
  * 基于 version plan 原文和 planExtract 构造 v1 草稿生成提示词，保持生成任务受控。
  */
-export function buildDraftTasklistMessages(state: VersionPlanTasklistAgentState, userGoal: string) {
+export function buildDraftTasklistMessages(state: TasklistDraftPromptState, userGoal: string) {
     const versionPlan = state.artifacts.versionPlan
 
     if (!versionPlan?.uri) {
@@ -211,7 +225,7 @@ export function buildDraftTasklistMessages(state: VersionPlanTasklistAgentState,
  * 构造 v2 修正提示词，只允许围绕结构校验 findings 修补草稿。
  */
 export function buildReviseTasklistMessages(
-    state: VersionPlanTasklistAgentState,
+    state: TasklistDraftPromptState,
     draft: VersionPlanTasklistDraftArtifact,
     validationResult: TasklistValidationResult
 ) {
@@ -242,7 +256,7 @@ export function buildReviseTasklistMessages(
  */
 export async function generateTasklistDraft(
     model: ChatSession['baseModel'],
-    state: VersionPlanTasklistAgentState,
+    state: TasklistDraftPromptState,
     userGoal: string,
     signal?: AbortSignal
 ) {
@@ -265,7 +279,7 @@ export async function generateTasklistDraft(
  */
 export async function reviseTasklistDraft(
     model: ChatSession['baseModel'],
-    state: VersionPlanTasklistAgentState,
+    state: TasklistDraftPromptState,
     draft: VersionPlanTasklistDraftArtifact,
     validationResult: TasklistValidationResult,
     signal?: AbortSignal

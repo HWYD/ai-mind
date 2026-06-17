@@ -1,14 +1,17 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import {
+    VERSION_PLAN_TASKLIST_AGENT_LIMITS,
+    VERSION_PLAN_TASKLIST_AGENT_NAME,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/types'
+import {
+    applyVersionPlanTasklistGraphStateUpdate,
     buildVersionPlanTasklistGraphThreadId,
     createInitialVersionPlanTasklistGraphRuntimeState,
     createInitialVersionPlanTasklistGraphState,
     reduceVersionPlanTasklistGraphRuntimeState,
-    toVersionPlanTasklistAgentState,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
-import { createInitialVersionPlanTasklistAgentState } from '@/lib/ai/runtime/version-plan-tasklist-agent/state/state-machine'
 
 const versionPlanReference = {
     id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
@@ -18,9 +21,12 @@ const versionPlanReference = {
     uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
 } as const
 
-function createAgentState() {
-    return createInitialVersionPlanTasklistAgentState({
+function createGraphState() {
+    return createInitialVersionPlanTasklistGraphState({
+        conversationId: 'conversation-1',
         runId: 'run-graph-state-test',
+        runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
+        userGoal: 'Generate v0.2.0 tasklist',
         versionPlanReference,
     })
 }
@@ -45,7 +51,7 @@ function walkJsonObject(value: unknown, visit: (value: unknown) => void) {
 }
 
 describe('runtime/version-plan-tasklist-agent graph state', () => {
-    it('构造 graph 专用 thread id，不改变 conversation model', () => {
+    it('builds a graph-only thread id without changing the conversation model', () => {
         expect(
             buildVersionPlanTasklistGraphThreadId({
                 conversationId: 'conversation-1',
@@ -54,8 +60,7 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
         ).toBe('tasklist-agent:conversation-1:run-1')
     })
 
-    it('初始化 GraphState 时按 Graph-first 分区承载运行态', () => {
-        const agentState = createAgentState()
+    it('creates initial GraphState as the runtime fact source', () => {
         const runtimeConfig = getTasklistAgentRuntimeConfig(
             {
                 AI_MIND_GRAPH_CHECKPOINT: 'memory',
@@ -65,18 +70,23 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
 
         expect(
             createInitialVersionPlanTasklistGraphState({
-                agentState,
                 conversationId: 'conversation-1',
+                runId: 'run-graph-state-test',
                 runtimeConfig,
-                userGoal: '生成 v0.2.0 tasklist',
+                userGoal: 'Generate v0.2.0 tasklist',
+                versionPlanReference,
             })
         ).toEqual({
             execution: {
-                agentName: agentState.agentName,
-                counters: agentState.counters,
-                limits: agentState.limits,
-                runId: agentState.runId,
-                status: agentState.status,
+                agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
+                counters: {
+                    draftRevisions: 0,
+                    optionalContextReads: 0,
+                    steps: 0,
+                },
+                limits: VERSION_PLAN_TASKLIST_AGENT_LIMITS,
+                runId: 'run-graph-state-test',
+                status: 'idle',
             },
             graph: {
                 checkpointMode: 'memory',
@@ -87,39 +97,21 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
             },
             input: {
                 planUri: versionPlanReference.uri,
-                userGoal: '生成 v0.2.0 tasklist',
+                userGoal: 'Generate v0.2.0 tasklist',
             },
-            planning: agentState.artifacts.planning,
+            planning: {
+                manualReviewItems: [],
+            },
             source: {
-                versionPlan: undefined,
                 versionPlanReference,
             },
-            tasklist: {
-                draft: undefined,
-            },
+            tasklist: {},
             threadId: 'tasklist-agent:conversation-1:run-graph-state-test',
         })
     })
 
-    it('GraphState 可临时还原为领域 AgentState 以复用既有状态机规则', () => {
-        const agentState = createAgentState()
-        const graphState = createInitialVersionPlanTasklistGraphState({
-            agentState,
-            conversationId: 'conversation-1',
-            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
-            userGoal: '生成 v0.2.0 tasklist',
-        })
-
-        expect(toVersionPlanTasklistAgentState(graphState)).toEqual(agentState)
-    })
-
-    it('初始 GraphState 可 JSON 序列化，且不混入运行时对象', () => {
-        const graphState = createInitialVersionPlanTasklistGraphState({
-            agentState: createAgentState(),
-            conversationId: 'conversation-1',
-            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
-            userGoal: '生成 v0.2.0 tasklist',
-        })
+    it('keeps initial GraphState JSON-serializable and free of runtime objects', () => {
+        const graphState = createGraphState()
 
         expect(() => JSON.stringify(graphState)).not.toThrow()
         expect(JSON.parse(JSON.stringify(graphState))).toEqual(graphState)
@@ -135,11 +127,11 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
         })
     })
 
-    it('graph runtime reducer 对标量 replace，对轨迹数组 append', () => {
+    it('replaces scalar graph fields and appends graph trace arrays', () => {
         const route = {
             fromNodeId: 'planningDecision',
             label: 'read_optional_context',
-            reason: '需要补充上下文',
+            reason: 'Need optional context.',
             toNodeId: 'readOptionalContext',
         }
         const initial = {
@@ -148,7 +140,7 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
             statePatchSummaries: [
                 {
                     nodeId: 'readVersionPlan',
-                    summary: '已读取 version plan。',
+                    summary: 'Version plan has been read.',
                 },
             ],
             visitedNodes: ['readVersionPlan'],
@@ -163,7 +155,7 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
                 statePatchSummaries: [
                     {
                         nodeId: 'planningDecision',
-                        summary: '已完成规划决策。',
+                        summary: 'Planning decision completed.',
                     },
                 ],
                 visitedNodes: ['planningDecision'],
@@ -177,14 +169,90 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
             statePatchSummaries: [
                 {
                     nodeId: 'readVersionPlan',
-                    summary: '已读取 version plan。',
+                    summary: 'Version plan has been read.',
                 },
                 {
                     nodeId: 'planningDecision',
-                    summary: '已完成规划决策。',
+                    summary: 'Planning decision completed.',
                 },
             ],
             visitedNodes: ['readVersionPlan', 'planningDecision'],
+        })
+    })
+
+    it('merges section patches without dropping sibling fields', () => {
+        const graphState = {
+            ...createGraphState(),
+            output: undefined,
+            planning: {
+                decision: {
+                    reason: '继续。',
+                    type: 'proceed_to_tasklist_strategy' as const,
+                },
+                manualReviewItems: [
+                    {
+                        detail: '测试范围需要确认。',
+                        severity: 'warning' as const,
+                        title: '测试范围',
+                    },
+                ],
+            },
+            tasklist: {
+                draft: {
+                    content: '# Tasklist',
+                    createdAtStep: 5,
+                    planUri: versionPlanReference.uri,
+                    version: 1 as const,
+                },
+            },
+        }
+
+        expect(
+            applyVersionPlanTasklistGraphStateUpdate(graphState, {
+                execution: {
+                    counters: {
+                        steps: 6,
+                    },
+                    status: 'validated_v1',
+                },
+                planning: {
+                    strategy: {
+                        expectedStepRange: [3, 5],
+                        granularity: 'medium',
+                        grouping: ['Runtime'],
+                        priority: ['先收状态'],
+                        reason: '保持中等粒度。',
+                    },
+                },
+                tasklist: {},
+            })
+        ).toMatchObject({
+            execution: {
+                counters: {
+                    draftRevisions: 0,
+                    optionalContextReads: 0,
+                    steps: 6,
+                },
+                status: 'validated_v1',
+            },
+            planning: {
+                decision: {
+                    type: 'proceed_to_tasklist_strategy',
+                },
+                manualReviewItems: [
+                    {
+                        title: '测试范围',
+                    },
+                ],
+                strategy: {
+                    granularity: 'medium',
+                },
+            },
+            tasklist: {
+                draft: {
+                    content: '# Tasklist',
+                },
+            },
         })
     })
 })

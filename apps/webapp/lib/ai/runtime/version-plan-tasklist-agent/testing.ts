@@ -7,7 +7,6 @@ export type {
     TasklistStrategy,
     VersionPlanExtract,
     VersionPlanTasklistAgentAction,
-    VersionPlanTasklistAgentState,
     VersionPlanTasklistAgentStatus,
     WarningDisposition,
 } from './contract/types'
@@ -37,11 +36,7 @@ export {
     generateTasklistStrategy,
 } from './planner/planning-decision'
 export { getVersionPlanTasklistAgentToolDefinitionMap, isVersionPlanTasklistAgentToolAllowed } from './resources/agent-tools'
-export {
-    applyVersionPlanTasklistAgentAction,
-    createInitialVersionPlanTasklistAgentState,
-    validateVersionPlanTasklistAgentAction,
-} from './state/state-machine'
+export { applyVersionPlanTasklistGraphAction, validateVersionPlanTasklistGraphAction } from './state/state-machine'
 export { evaluateRevisionEffect } from './tasklist/revision-effect'
 export { buildDraftTasklistMessages } from './tasklist/tasklist-draft-generator'
 export { decideWarningDisposition } from './tasklist/warning-disposition'

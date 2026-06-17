@@ -196,6 +196,48 @@ describe('stream-message-reducer', () => {
         })
     })
 
+    it('graph node end 保留 warning severity，供 trace 面板渲染警告样式', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-graph-warning' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                nodeId: 'validateTasklistV1',
+                partId: 'graph-node-warning',
+                runId: 'run-graph-warning',
+                stepIndex: 1,
+                threadId: 'tasklist-agent:c1:run-graph-warning',
+                title: '校验 v1 草稿',
+                type: 'agent-graph-node-start',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                durationMs: 18,
+                nodeId: 'validateTasklistV1',
+                partId: 'graph-node-warning',
+                runId: 'run-graph-warning',
+                severity: 'warning',
+                status: 'completed',
+                summary: 'v1 结构校验：warning，评分 90。',
+                threadId: 'tasklist-agent:c1:run-graph-warning',
+                type: 'agent-graph-node-end',
+            },
+        ])
+
+        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-step')
+
+        expect(agentPart).toMatchObject({
+            graph: {
+                nodes: [
+                    {
+                        nodeId: 'validateTasklistV1',
+                        severity: 'warning',
+                        status: 'completed',
+                    },
+                ],
+            },
+        })
+    })
+
     it('graph route 追加到同一次 Agent run', () => {
         const state = reduceChunks([
             { type: 'start', messageId: 'assistant-graph-route' },

@@ -1,9 +1,10 @@
 import { createTextArtifactId, emitTextArtifactEnd, emitTextArtifactFromMarkdown, writeStaticTextPart } from '@ai-mind/stream-core'
 
 import type { WriteChunk } from '../../types'
-import type { PlanningDecisionAction, RevisionEffectResult, VersionPlanTasklistAgentState } from '../contract/types'
+import type { PlanningDecisionAction, RevisionEffectResult } from '../contract/types'
+import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
 import { isControlledPlannerOutputError } from '../planner/planning-decision'
-import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
+import { applyVersionPlanTasklistGraphAction } from '../state/state-machine'
 
 export function getRevisionFinalDecisionLabel(finalDecision: RevisionEffectResult['finalDecision']) {
     const labels: Record<RevisionEffectResult['finalDecision'], string> = {
@@ -47,21 +48,21 @@ export function buildControlledPlannerOutputFailureAnswer(error: unknown) {
     ].join('\n')
 }
 
-function buildFinalAnswerSummary(state: VersionPlanTasklistAgentState) {
-    const draft = state.artifacts.tasklistDraft
+function buildFinalAnswerSummary(state: VersionPlanTasklistGraphStateAnnotationState) {
+    const draft = state.tasklist.draft
     const validationResult = draft?.validationV2 ?? draft?.validationV1
-    const revisionEffect = state.artifacts.planning.revisionEffect
+    const revisionEffect = state.planning.revisionEffect
 
     if (!draft || !validationResult || !revisionEffect) {
-        throw new Error('缺少任务清单草稿、结构校验结果或修正效果评估，无法输出最终回答。')
+        throw new Error('Missing final tasklist output dependencies.')
     }
 
-    const revisionCount = state.counters.draftRevisions
+    const revisionCount = state.execution.counters.draftRevisions
     const fixedIssueLines = revisionEffect.fixedIssues.length > 0 ? revisionEffect.fixedIssues.map(issue => `- ${issue}`) : ['- 无']
     const remainingIssueLines =
         revisionEffect.remainingIssues.length > 0 ? revisionEffect.remainingIssues.map(issue => `- ${issue}`) : ['- 无']
     const manualConfirmationItems = [
-        ...state.artifacts.planning.manualReviewItems.map(item => `- ${item.title}：${item.detail}`),
+        ...state.planning.manualReviewItems.map(item => `- ${item.title}：${item.detail}`),
         draft.targetVersion === 'unknown' ? '- 未能可靠识别目标版本号，请人工确认任务清单标题中的版本号。' : null,
         revisionEffect.remainingIssues.length > 0
             ? `- 结构校验仍存在剩余问题：${revisionEffect.remainingIssues.join('、')}，请人工确认是否接受当前草稿。`
@@ -100,18 +101,21 @@ function buildFinalAnswerSummary(state: VersionPlanTasklistAgentState) {
     ].join('\n')
 }
 
-export function runFinalAnswerStep(options: { state: VersionPlanTasklistAgentState; writeChunk: WriteChunk }) {
-    const draft = options.state.artifacts.tasklistDraft
+export function runFinalAnswerStep(options: {
+    state: VersionPlanTasklistGraphStateAnnotationState
+    writeChunk: WriteChunk
+}): VersionPlanTasklistGraphStatePatch {
+    const draft = options.state.tasklist.draft
     const validationResult = draft?.validationV2 ?? draft?.validationV1
     const answer = buildFinalAnswerSummary(options.state)
-    const finalState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'final_answer',
+    const update = applyVersionPlanTasklistGraphAction(options.state, {
         reason: '输出任务清单草稿、结构校验结论和人工确认点。',
+        type: 'final_answer',
     })
     const artifactId = createTextArtifactId('tasklist')
 
     if (!draft || !validationResult) {
-        throw new Error('缺少任务清单草稿或结构校验结果，无法输出最终产物。')
+        throw new Error('Missing tasklist draft or validation result.')
     }
 
     try {
@@ -139,12 +143,12 @@ export function runFinalAnswerStep(options: { state: VersionPlanTasklistAgentSta
                 },
             })
         } catch {
-            // 如果底层 writer 已经不可写，保持原始错误向上抛出。
+            // 底层 writer 已不可写时保留原始错误。
         }
         throw error
     }
 
     writeStaticTextPart(options.writeChunk, answer)
 
-    return finalState
+    return update
 }

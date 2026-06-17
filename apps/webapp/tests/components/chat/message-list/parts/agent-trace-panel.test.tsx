@@ -69,7 +69,7 @@ describe('AgentTracePanel', () => {
             },
         ]
 
-        render(
+        const { container } = render(
             <AgentTracePanel
                 detailParts={detailParts}
                 part={createGraphAgentStepPart({
@@ -144,10 +144,20 @@ describe('AgentTracePanel', () => {
         expect(screen.getAllByText('已读取 version plan，目标版本 v0.2.0。')).toHaveLength(1)
         expect(screen.getByText('校验提醒处理：自动修正 1，人工复核 2。')).toBeTruthy()
         expect(screen.queryByText('执行规划决策')).toBeNull()
+
+        const warningRow = Array.from(container.querySelectorAll('div')).find(
+            element =>
+                typeof element.className === 'string' &&
+                element.className.includes('border-amber-200/70') &&
+                element.textContent?.includes('校验 v1 草稿')
+        )
+
+        expect(container.querySelector('svg.text-amber-500')).toBeTruthy()
+        expect(warningRow).toBeTruthy()
     })
 
     it('将 graph 校验摘要里的 fail 本地化为失败', () => {
-        render(
+        const { container } = render(
             <AgentTracePanel
                 part={createGraphAgentStepPart({
                     graph: {
@@ -156,6 +166,7 @@ describe('AgentTracePanel', () => {
                                 nodeId: 'validateTasklistV1',
                                 partId: 'graph-validate-v1',
                                 patchSummaries: ['v1 结构校验：fail，评分 45。'],
+                                severity: 'error',
                                 status: 'completed',
                                 stepIndex: 1,
                                 summary: 'v1 结构校验：fail，评分 45。',
@@ -171,6 +182,7 @@ describe('AgentTracePanel', () => {
 
         expect(screen.getByText('v1 结构校验：失败，评分 45。')).toBeTruthy()
         expect(screen.queryByText('v1 结构校验：fail，评分 45。')).toBeNull()
+        expect(container.querySelector('svg.text-rose-500')).toBeTruthy()
     })
 
     it('graph debug summary 存在时展示折叠 Debug 分组', () => {

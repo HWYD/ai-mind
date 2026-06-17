@@ -1,6 +1,7 @@
 import { END } from '@langchain/langgraph'
 import { describe, expect, it } from 'vitest'
 
+import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import type {
     PlanningDecisionAction,
     VersionPlanTasklistPlanningArtifacts,
@@ -24,11 +25,9 @@ import {
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/edges/route-after-warning-disposition'
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-node-ids'
 import {
-    createGraphStateUpdateFromAgentState,
-    createInitialVersionPlanTasklistGraphRuntimeState,
+    createInitialVersionPlanTasklistGraphState,
     type VersionPlanTasklistGraphStateAnnotationState,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
-import { createInitialVersionPlanTasklistAgentState } from '@/lib/ai/runtime/version-plan-tasklist-agent/state/state-machine'
 
 const planUri = 'docs://versions/v0.2.0-controlled-agent-graph.md'
 
@@ -41,27 +40,16 @@ const versionPlanReference = {
 } as const
 
 function createGraphState(planning: VersionPlanTasklistPlanningArtifacts): VersionPlanTasklistGraphStateAnnotationState {
-    const agentState = createInitialVersionPlanTasklistAgentState({
-        runId: 'run-route-test',
-        versionPlanReference,
-    })
-    const statePatch = createGraphStateUpdateFromAgentState({
-        ...agentState,
-        artifacts: {
-            ...agentState.artifacts,
-            planning,
-        },
-    })
-
     return {
-        ...statePatch,
-        graph: createInitialVersionPlanTasklistGraphRuntimeState(),
-        input: {
-            planUri,
+        ...createInitialVersionPlanTasklistGraphState({
+            conversationId: 'conversation-1',
+            runId: 'run-route-test',
+            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
             userGoal: '生成 tasklist',
-        },
+            versionPlanReference,
+        }),
         output: undefined,
-        threadId: 'tasklist-agent:conversation-1:run-route-test',
+        planning,
     }
 }
 
@@ -72,9 +60,12 @@ describe('runtime/version-plan-tasklist-agent graph read version plan route', ()
         })
         const state = {
             ...baseState,
-            execution: {
-                ...baseState.execution,
-                status: 'plan_read' as const,
+            source: {
+                ...baseState.source,
+                versionPlan: {
+                    reference: versionPlanReference,
+                    uri: planUri,
+                },
             },
         }
 
@@ -229,9 +220,15 @@ describe('runtime/version-plan-tasklist-agent graph tasklist strategy routes', (
         })
         const state = {
             ...baseState,
-            execution: {
-                ...baseState.execution,
-                status: 'strategy_decided' as const,
+            planning: {
+                ...baseState.planning,
+                strategy: {
+                    expectedStepRange: [3, 5] as [number, number],
+                    granularity: 'medium' as const,
+                    grouping: ['Runtime', 'Tests'],
+                    priority: ['先做 runtime', '再补测试'],
+                    reason: '版本目标清晰。',
+                },
             },
         }
 

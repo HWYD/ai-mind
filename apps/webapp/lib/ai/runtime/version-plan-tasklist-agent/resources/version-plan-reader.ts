@@ -7,10 +7,11 @@ import { MCPHostError, toErrorMessage } from '@/lib/ai/mcp/protocol/errors'
 
 import { throwIfAborted, writeStreamErrorChunk } from '../../stream-errors'
 import type { ChatExecutionContext, WriteChunk } from '../../types'
-import type { VersionPlanExtract, VersionPlanTasklistAgentState } from '../contract/types'
+import type { VersionPlanExtract } from '../contract/types'
+import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
 import { extractVersionPlan } from '../planner/plan-extract'
 import { evaluatePlanReadiness } from '../planner/plan-readiness'
-import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
+import { applyVersionPlanTasklistGraphAction } from '../state/state-machine'
 
 interface ReadVersionPlanOptions {
     context: ChatExecutionContext
@@ -23,18 +24,14 @@ export type VersionPlanReadResult =
     | {
           extract: VersionPlanExtract
           resourceName: string
-          state: VersionPlanTasklistAgentState
           success: true
+          update: VersionPlanTasklistGraphStatePatch
       }
     | {
           errorMessage: string
-          state: VersionPlanTasklistAgentState
           success: false
       }
 
-/**
- * 将 MCP Host 的错误码映射成前端 stream-core 已知的资源错误类型。
- */
 function toMCPStreamErrorCode(error: unknown): StreamErrorCode {
     if (!(error instanceof MCPHostError)) {
         return 'MCP_EXECUTION_FAILED'
@@ -55,50 +52,47 @@ function toMCPStreamErrorCode(error: unknown): StreamErrorCode {
     }
 }
 
-/**
- * 写入版本方案读取失败的资源级错误，让错误归属到 Resource 卡片而不是最终文本。
- */
-function writeVersionPlanResourceError(writeChunk: WriteChunk, partId: string, error: unknown, state: VersionPlanTasklistAgentState) {
-    // 资源读取失败仍走统一 stream error chunk，让前端可以在 Resource 卡片里归因，而不是只看到最终文本失败。
+function writeVersionPlanResourceError(
+    writeChunk: WriteChunk,
+    partId: string,
+    error: unknown,
+    state: VersionPlanTasklistGraphStateAnnotationState
+) {
     writeStreamErrorChunk(writeChunk, {
-        scope: 'resource',
         errorCode: toMCPStreamErrorCode(error),
-        retryable: true,
-        message: toErrorMessage(error),
-        stage: 'runtime',
-        partId,
-        resourceName: state.versionPlanReference.label,
-        uri: state.versionPlanReference.uri,
-        source: 'mcp',
         location: 'local',
+        message: toErrorMessage(error),
+        partId,
+        resourceName: state.source.versionPlanReference.label,
+        retryable: true,
+        scope: 'resource',
         serverId: PROJECT_DOCS_SERVER_ID,
+        source: 'mcp',
+        stage: 'runtime',
+        uri: state.source.versionPlanReference.uri,
     })
 }
 
-/**
- * 执行 Agent 的 read_resource 步骤：读取用户显式引用的 version plan，并生成本轮内存态的 planExtract。
- */
 export async function readVersionPlanForTasklistAgent(
-    state: VersionPlanTasklistAgentState,
+    state: VersionPlanTasklistGraphStateAnnotationState,
     options: ReadVersionPlanOptions
 ): Promise<VersionPlanReadResult> {
     const resourcePartId = createId()
     options.writeChunk({
-        type: 'resource-start',
-        partId: resourcePartId,
-        resourceName: state.versionPlanReference.label,
-        uri: state.versionPlanReference.uri,
-        source: 'mcp',
         location: 'local',
+        partId: resourcePartId,
+        resourceName: state.source.versionPlanReference.label,
         serverId: PROJECT_DOCS_SERVER_ID,
+        source: 'mcp',
+        type: 'resource-start',
+        uri: state.source.versionPlanReference.uri,
     })
 
     try {
         throwIfAborted(options.context.signal)
 
-        // 真正的 docs:// 边界校验由 projectDocsResourceAdapter 执行，这里只消费用户已显式引用的 URI。
         const resource = await projectDocsResourceAdapter.read({
-            uri: state.versionPlanReference.uri,
+            uri: state.source.versionPlanReference.uri,
         })
         const extract = extractVersionPlan(resource.content, {
             planUri: resource.uri,
@@ -108,24 +102,21 @@ export async function readVersionPlanForTasklistAgent(
             planContent: resource.content,
             planUri: resource.uri,
         })
-        const advancedState = applyVersionPlanTasklistAgentAction(state, {
-            type: 'read_resource',
-            resourceUri: resource.uri,
+        const advancedUpdate = applyVersionPlanTasklistGraphAction(state, {
             reason: '读取用户显式引用的 version plan。',
+            resourceUri: resource.uri,
+            type: 'read_resource',
         })
-        // 状态机只负责合法状态推进；读取到的原文和 planExtract 作为本轮内存 artifact 额外挂回 state。
-        const nextState: VersionPlanTasklistAgentState = {
-            ...advancedState,
-            artifacts: {
-                ...advancedState.artifacts,
-                planning: {
-                    ...advancedState.artifacts.planning,
-                    readiness,
-                },
+        const update: VersionPlanTasklistGraphStatePatch = {
+            ...advancedUpdate,
+            planning: {
+                readiness,
+            },
+            source: {
                 versionPlan: {
                     content: resource.content,
                     extract,
-                    reference: state.versionPlanReference,
+                    reference: state.source.versionPlanReference,
                     resourceName: resource.resourceName,
                     uri: resource.uri,
                 },
@@ -133,36 +124,33 @@ export async function readVersionPlanForTasklistAgent(
         }
 
         options.writeChunk({
-            type: 'resource-end',
-            partId: resourcePartId,
-            resourceName: resource.resourceName,
-            uri: resource.uri,
-            source: 'mcp',
-            location: 'local',
-            serverId: resource.serverId,
             contentPreview: resource.contentPreview,
             isTruncated: resource.truncated,
+            location: 'local',
+            partId: resourcePartId,
             previewChars: resource.previewChars,
+            resourceName: resource.resourceName,
+            serverId: resource.serverId,
+            source: 'mcp',
+            type: 'resource-end',
+            uri: resource.uri,
         })
 
         return {
             extract,
             resourceName: resource.resourceName,
-            state: nextState,
             success: true,
+            update,
         }
     } catch (error) {
         if (options.context.signal?.aborted) {
             throw error
         }
 
-        const errorMessage = toErrorMessage(error)
-
         writeVersionPlanResourceError(options.writeChunk, resourcePartId, error, state)
 
         return {
-            errorMessage,
-            state,
+            errorMessage: toErrorMessage(error),
             success: false,
         }
     }

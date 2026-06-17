@@ -1,10 +1,8 @@
 ﻿import { describe, expect, it } from 'vitest'
 
-import {
-    createInitialVersionPlanTasklistAgentState,
-    evaluatePlanReadiness,
-    extractVersionPlan,
-} from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
+import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
+import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
+import { evaluatePlanReadiness, extractVersionPlan } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const planUri = 'docs://versions/v0.1.1-controlled-planner-lite.md'
@@ -39,7 +37,7 @@ const completePlan = `
 
 ## Interface Changes
 
-- AgentState 增加 planning artifact
+- GraphState 增加 planning artifact
 - AgentTracePanel 展示轻量摘要
 
 ## Test Plan
@@ -50,13 +48,16 @@ const completePlan = `
 
 describe('runtime/version-plan-tasklist-agent readiness', () => {
     it('初始化 state 时创建 planning artifact，并保持人工复核点为空', () => {
-        const state = createInitialVersionPlanTasklistAgentState({
+        const state = createInitialVersionPlanTasklistGraphState({
+            conversationId: 'conversation-readiness',
             runId: 'run-readiness',
+            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
+            userGoal: '基于这个方案生成 tasklist',
             versionPlanReference,
         })
 
-        expect(state.artifacts.planning.manualReviewItems).toEqual([])
-        expect(state.artifacts.planning.readiness).toBeUndefined()
+        expect(state.planning.manualReviewItems).toEqual([])
+        expect(state.planning.readiness).toBeUndefined()
     })
 
     it('完整 version plan 返回 ready', () => {

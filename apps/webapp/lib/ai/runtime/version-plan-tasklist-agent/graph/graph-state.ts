@@ -1,11 +1,14 @@
 import { Annotation } from '@langchain/langgraph'
 
+import type { ChatComposerReference } from '@/lib/ai/types/chat'
+
 import type { TasklistAgentRuntimeConfig } from '../config/agent-runtime-config'
 import type {
-    VersionPlanTasklistAgentState,
+    VersionPlanTasklistAgentStatus,
     VersionPlanTasklistIntermediateArtifacts,
     VersionPlanTasklistPlanningArtifacts,
 } from '../contract/types'
+import { VERSION_PLAN_TASKLIST_AGENT_LIMITS, VERSION_PLAN_TASKLIST_AGENT_NAME } from '../contract/types'
 import type { VersionPlanTasklistGraphNodeId } from './graph-node-ids'
 
 export interface VersionPlanTasklistGraphInput {
@@ -44,7 +47,7 @@ export interface VersionPlanTasklistGraphOutput {
 
 export interface VersionPlanTasklistGraphSourceState {
     versionPlan?: VersionPlanTasklistIntermediateArtifacts['versionPlan']
-    versionPlanReference: VersionPlanTasklistAgentState['versionPlanReference']
+    versionPlanReference: ChatComposerReference
 }
 
 export type VersionPlanTasklistGraphPlanningState = VersionPlanTasklistPlanningArtifacts
@@ -54,11 +57,15 @@ export interface VersionPlanTasklistGraphTasklistState {
 }
 
 export interface VersionPlanTasklistGraphExecutionState {
-    agentName: VersionPlanTasklistAgentState['agentName']
-    counters: VersionPlanTasklistAgentState['counters']
-    limits: VersionPlanTasklistAgentState['limits']
+    agentName: typeof VERSION_PLAN_TASKLIST_AGENT_NAME
+    counters: {
+        draftRevisions: number
+        optionalContextReads: number
+        steps: number
+    }
+    limits: typeof VERSION_PLAN_TASKLIST_AGENT_LIMITS
     runId: string
-    status: VersionPlanTasklistAgentState['status']
+    status: VersionPlanTasklistAgentStatus
 }
 
 export type VersionPlanTasklistGraphRuntimeStateUpdate = Partial<Omit<VersionPlanTasklistGraphRuntimeState, 'runtimeMode'>> & {
@@ -80,6 +87,29 @@ function replaceGraphValue<T>(_left: T, right: T): T {
     return right
 }
 
+function mergeGraphValue<T extends object>(left: T, right: Partial<T>): T {
+    return {
+        ...left,
+        ...right,
+    }
+}
+
+function reduceVersionPlanTasklistGraphExecutionState(
+    left: VersionPlanTasklistGraphExecutionState,
+    right: VersionPlanTasklistGraphExecutionStatePatch
+): VersionPlanTasklistGraphExecutionState {
+    return {
+        ...left,
+        ...right,
+        counters: right.counters
+            ? {
+                  ...left.counters,
+                  ...right.counters,
+              }
+            : left.counters,
+    }
+}
+
 export function buildVersionPlanTasklistGraphThreadId(options: { conversationId: string; runId: string }) {
     return `tasklist-agent:${options.conversationId}:${options.runId}`
 }
@@ -97,66 +127,41 @@ export function createInitialVersionPlanTasklistGraphRuntimeState(
 }
 
 export function createInitialVersionPlanTasklistGraphState(options: {
-    agentState: VersionPlanTasklistAgentState
     conversationId: string
+    runId: string
     runtimeConfig: TasklistAgentRuntimeConfig
     userGoal: string
+    versionPlanReference: ChatComposerReference
 }): VersionPlanTasklistGraphState {
-    const statePatch = createGraphStateUpdateFromAgentState(options.agentState)
-
     // threadId 只服务 graph/checkpoint 调试，不改变既有 conversation 数据模型。
     return {
-        execution: statePatch.execution,
+        execution: {
+            agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
+            counters: {
+                draftRevisions: 0,
+                optionalContextReads: 0,
+                steps: 0,
+            },
+            limits: VERSION_PLAN_TASKLIST_AGENT_LIMITS,
+            runId: options.runId,
+            status: 'idle',
+        },
         graph: createInitialVersionPlanTasklistGraphRuntimeState(options.runtimeConfig.graphCheckpointMode),
         input: {
-            planUri: options.agentState.versionPlanReference.uri,
+            planUri: options.versionPlanReference.uri,
             userGoal: options.userGoal,
         },
-        planning: statePatch.planning,
-        source: statePatch.source,
-        tasklist: statePatch.tasklist,
+        planning: {
+            manualReviewItems: [],
+        },
+        source: {
+            versionPlanReference: options.versionPlanReference,
+        },
+        tasklist: {},
         threadId: buildVersionPlanTasklistGraphThreadId({
             conversationId: options.conversationId,
-            runId: options.agentState.runId,
+            runId: options.runId,
         }),
-    }
-}
-
-export function createGraphStateUpdateFromAgentState(
-    agentState: VersionPlanTasklistAgentState
-): Pick<VersionPlanTasklistGraphState, 'execution' | 'planning' | 'source' | 'tasklist'> {
-    return {
-        execution: {
-            agentName: agentState.agentName,
-            counters: agentState.counters,
-            limits: agentState.limits,
-            runId: agentState.runId,
-            status: agentState.status,
-        },
-        planning: agentState.artifacts.planning,
-        source: {
-            versionPlan: agentState.artifacts.versionPlan,
-            versionPlanReference: agentState.versionPlanReference,
-        },
-        tasklist: {
-            draft: agentState.artifacts.tasklistDraft,
-        },
-    }
-}
-
-export function toVersionPlanTasklistAgentState(state: VersionPlanTasklistGraphState): VersionPlanTasklistAgentState {
-    return {
-        agentName: state.execution.agentName,
-        artifacts: {
-            planning: state.planning,
-            tasklistDraft: state.tasklist.draft,
-            versionPlan: state.source.versionPlan,
-        },
-        counters: state.execution.counters,
-        limits: state.execution.limits,
-        runId: state.execution.runId,
-        status: state.execution.status,
-        versionPlanReference: state.source.versionPlanReference,
     }
 }
 
@@ -199,15 +204,31 @@ export function createGraphRouteRuntimeUpdate(route: VersionPlanTasklistGraphRou
     }
 }
 
+export function applyVersionPlanTasklistGraphStateUpdate(
+    state: VersionPlanTasklistGraphStateAnnotationState,
+    update: VersionPlanTasklistGraphStatePatch
+): VersionPlanTasklistGraphStateAnnotationState {
+    return {
+        execution: update.execution ? reduceVersionPlanTasklistGraphExecutionState(state.execution, update.execution) : state.execution,
+        graph: update.graph ? reduceVersionPlanTasklistGraphRuntimeState(state.graph, update.graph) : state.graph,
+        input: update.input ?? state.input,
+        output: update.output ?? state.output,
+        planning: update.planning ? mergeGraphValue(state.planning, update.planning) : state.planning,
+        source: update.source ? mergeGraphValue(state.source, update.source) : state.source,
+        tasklist: update.tasklist ? mergeGraphValue(state.tasklist, update.tasklist) : state.tasklist,
+        threadId: update.threadId ?? state.threadId,
+    }
+}
+
 // GraphState 只定义 LangGraph 如何合并 node 返回的 partial update。
-// 领域状态机仍通过临时 VersionPlanTasklistAgentState 适配复用，避免 graph 层复制业务规则。
+// 领域状态机直接返回受控 GraphState patch，避免 node 在两套整包状态之间往返转换。
 // graph 只记录编排轨迹和脱敏摘要，reducer 会合并 partial update，并追加 visitedNodes、routes 等轨迹数组。
 // input 是本轮固定输入快照，后续 node 不应改写用户目标或显式引用的 version plan URI。
 // output 只保存 runner 需要的最终状态摘要，不承载完整 tasklist、prompt、资源正文或 tool 原始输出。
 // threadId 只服务 graph/checkpoint 调试链路，不改变 conversation 数据模型，也不作为普通用户概念暴露。
 export const VersionPlanTasklistGraphStateAnnotation = Annotation.Root({
-    execution: Annotation<VersionPlanTasklistGraphExecutionState, VersionPlanTasklistGraphExecutionState>({
-        reducer: replaceGraphValue,
+    execution: Annotation<VersionPlanTasklistGraphExecutionState, VersionPlanTasklistGraphExecutionStatePatch>({
+        reducer: reduceVersionPlanTasklistGraphExecutionState,
     }),
     graph: Annotation<VersionPlanTasklistGraphRuntimeState, VersionPlanTasklistGraphRuntimeStateUpdate>({
         default: createInitialVersionPlanTasklistGraphRuntimeState,
@@ -219,14 +240,14 @@ export const VersionPlanTasklistGraphStateAnnotation = Annotation.Root({
     output: Annotation<VersionPlanTasklistGraphOutput | undefined, VersionPlanTasklistGraphOutput | undefined>({
         reducer: replaceGraphValue,
     }),
-    planning: Annotation<VersionPlanTasklistGraphPlanningState, VersionPlanTasklistGraphPlanningState>({
-        reducer: replaceGraphValue,
+    planning: Annotation<VersionPlanTasklistGraphPlanningState, Partial<VersionPlanTasklistGraphPlanningState>>({
+        reducer: mergeGraphValue,
     }),
-    source: Annotation<VersionPlanTasklistGraphSourceState, VersionPlanTasklistGraphSourceState>({
-        reducer: replaceGraphValue,
+    source: Annotation<VersionPlanTasklistGraphSourceState, Partial<VersionPlanTasklistGraphSourceState>>({
+        reducer: mergeGraphValue,
     }),
-    tasklist: Annotation<VersionPlanTasklistGraphTasklistState, VersionPlanTasklistGraphTasklistState>({
-        reducer: replaceGraphValue,
+    tasklist: Annotation<VersionPlanTasklistGraphTasklistState, Partial<VersionPlanTasklistGraphTasklistState>>({
+        reducer: mergeGraphValue,
     }),
     threadId: Annotation<string, string>({
         reducer: replaceGraphValue,
@@ -235,3 +256,16 @@ export const VersionPlanTasklistGraphStateAnnotation = Annotation.Root({
 
 export type VersionPlanTasklistGraphStateAnnotationState = typeof VersionPlanTasklistGraphStateAnnotation.State
 export type VersionPlanTasklistGraphStateAnnotationUpdate = typeof VersionPlanTasklistGraphStateAnnotation.Update
+export interface VersionPlanTasklistGraphExecutionStatePatch extends Partial<Omit<VersionPlanTasklistGraphExecutionState, 'counters'>> {
+    counters?: Partial<VersionPlanTasklistGraphExecutionState['counters']>
+}
+export interface VersionPlanTasklistGraphStatePatch {
+    execution?: VersionPlanTasklistGraphExecutionStatePatch
+    graph?: VersionPlanTasklistGraphRuntimeStateUpdate
+    input?: VersionPlanTasklistGraphInput
+    output?: VersionPlanTasklistGraphOutput
+    planning?: Partial<VersionPlanTasklistGraphPlanningState>
+    source?: Partial<VersionPlanTasklistGraphSourceState>
+    tasklist?: Partial<VersionPlanTasklistGraphTasklistState>
+    threadId?: string
+}

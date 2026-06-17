@@ -1,9 +1,10 @@
 import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure'
 
 import type { ChatExecutionContext, ChatSession, WriteChunk } from '../../types'
-import type { PlanningDecisionOutput, TasklistStrategy, VersionPlanTasklistAgentState } from '../contract/types'
+import type { PlanningDecisionOutput, TasklistStrategy } from '../contract/types'
+import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
 import { generatePlanningDecisionOutput, generateTasklistStrategy } from '../planner/planning-decision'
-import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
+import { applyVersionPlanTasklistGraphAction } from '../state/state-machine'
 import { getRevisionFinalDecisionLabel } from '../stream/tasklist-agent-output'
 import { evaluateRevisionEffect } from '../tasklist/revision-effect'
 import { createValidationResultForRevision } from '../tasklist/tasklist-agent-validation'
@@ -13,151 +14,178 @@ import { decideWarningDisposition } from '../tasklist/warning-disposition'
 interface TasklistAgentStepOperationOptions {
     context: ChatExecutionContext
     model: ChatSession['baseModel']
-    state: VersionPlanTasklistAgentState
+    state: VersionPlanTasklistGraphStateAnnotationState
     userGoal: string
     writeChunk: WriteChunk
 }
 
-function attachDraftContent(state: VersionPlanTasklistAgentState, content: string): VersionPlanTasklistAgentState {
-    const draft = state.artifacts.tasklistDraft
+function createPromptState(state: VersionPlanTasklistGraphStateAnnotationState) {
+    return {
+        artifacts: {
+            planning: state.planning,
+            tasklistDraft: state.tasklist.draft,
+            versionPlan: state.source.versionPlan,
+        },
+        versionPlanReference: state.source.versionPlanReference,
+    }
+}
+
+export function runPlanReadinessStep(options: {
+    state: VersionPlanTasklistGraphStateAnnotationState
+    writeChunk: WriteChunk
+}): VersionPlanTasklistGraphStatePatch {
+    const readiness = options.state.planning.readiness
+
+    if (!readiness) {
+        throw new Error('Missing PlanReadinessResult.')
+    }
+
+    return applyVersionPlanTasklistGraphAction(options.state, {
+        reason: readiness.reason,
+        type: 'check_plan_readiness',
+    })
+}
+
+export async function runPlanningDecisionStep(options: TasklistAgentStepOperationOptions): Promise<{
+    output: PlanningDecisionOutput
+    update: VersionPlanTasklistGraphStatePatch
+}> {
+    const output = await generatePlanningDecisionOutput(
+        options.model,
+        createPromptState(options.state),
+        options.userGoal,
+        options.context.signal
+    )
+    const update = applyVersionPlanTasklistGraphAction(options.state, {
+        decision: output.decision,
+        reason: output.decision.reason,
+        type: 'planning_decision',
+    })
+
+    return {
+        output,
+        update,
+    }
+}
+
+export async function runTasklistStrategyStep(
+    options: TasklistAgentStepOperationOptions & { strategy?: TasklistStrategy }
+): Promise<VersionPlanTasklistGraphStatePatch> {
+    const strategy =
+        options.strategy ??
+        (await generateTasklistStrategy(options.model, createPromptState(options.state), options.userGoal, options.context.signal))
+
+    return applyVersionPlanTasklistGraphAction(options.state, {
+        reason: strategy.reason,
+        strategy,
+        type: 'decide_tasklist_strategy',
+    })
+}
+
+export async function runDraftTasklistStep(options: TasklistAgentStepOperationOptions): Promise<VersionPlanTasklistGraphStatePatch> {
+    const versionPlan = options.state.source.versionPlan
+    const draftText = await generateTasklistDraft(options.model, createPromptState(options.state), options.userGoal, options.context.signal)
+    const update = applyVersionPlanTasklistGraphAction(options.state, {
+        goal: options.userGoal || '基于版本方案生成任务清单草稿',
+        planUri: versionPlan?.uri ?? options.state.source.versionPlanReference.uri,
+        reason: '基于已读取的 version plan 生成任务清单草稿 v1。',
+        targetVersion: versionPlan?.extract?.targetVersion,
+        type: 'draft_tasklist',
+    })
+    const draft = update.tasklist?.draft
 
     if (!draft) {
-        throw new Error('缺少任务清单草稿 artifact，无法写入草稿内容。')
+        throw new Error('Missing tasklist draft placeholder.')
     }
 
     return {
-        ...state,
-        artifacts: {
-            ...state.artifacts,
-            tasklistDraft: {
+        ...update,
+        tasklist: {
+            draft: {
                 ...draft,
-                content,
+                content: draftText,
             },
         },
     }
 }
 
-export function runPlanReadinessStep(options: { state: VersionPlanTasklistAgentState; writeChunk: WriteChunk }) {
-    const readiness = options.state.artifacts.planning.readiness
-
-    if (!readiness) {
-        throw new Error('缺少 PlanReadinessResult，无法执行规划决策。')
-    }
-
-    const nextState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'check_plan_readiness',
-        reason: readiness.reason,
-    })
-
-    return nextState
-}
-
-export async function runPlanningDecisionStep(
-    options: TasklistAgentStepOperationOptions
-): Promise<{ output: PlanningDecisionOutput; state: VersionPlanTasklistAgentState }> {
-    const output = await generatePlanningDecisionOutput(options.model, options.state, options.userGoal, options.context.signal)
-    const nextState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'planning_decision',
-        decision: output.decision,
-        reason: output.decision.reason,
-    })
-
-    return {
-        output,
-        state: nextState,
-    }
-}
-
-export async function runTasklistStrategyStep(options: TasklistAgentStepOperationOptions & { strategy?: TasklistStrategy }) {
-    const strategy =
-        options.strategy ?? (await generateTasklistStrategy(options.model, options.state, options.userGoal, options.context.signal))
-    const nextState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'decide_tasklist_strategy',
-        reason: strategy.reason,
-        strategy,
-    })
-
-    return nextState
-}
-
-export async function runDraftTasklistStep(options: TasklistAgentStepOperationOptions) {
-    const versionPlan = options.state.artifacts.versionPlan
-    const draftText = await generateTasklistDraft(options.model, options.state, options.userGoal, options.context.signal)
-    const advancedState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'draft_tasklist',
-        goal: options.userGoal || '基于版本方案生成任务清单草稿',
-        planUri: versionPlan?.uri ?? options.state.versionPlanReference.uri,
-        reason: '基于已读取的 version plan 生成任务清单草稿 v1。',
-        targetVersion: versionPlan?.extract?.targetVersion,
-    })
-    const nextState = attachDraftContent(advancedState, draftText)
-
-    return nextState
-}
-
 export function runWarningDispositionStep(options: {
     result: TasklistValidationResult
-    state: VersionPlanTasklistAgentState
+    state: VersionPlanTasklistGraphStateAnnotationState
     writeChunk: WriteChunk
-}) {
+}): { disposition: ReturnType<typeof decideWarningDisposition>; update: VersionPlanTasklistGraphStatePatch } {
     const disposition = decideWarningDisposition(options.result)
-    const nextState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'decide_warning_disposition',
+    const update = applyVersionPlanTasklistGraphAction(options.state, {
         disposition,
         reason: disposition.reason,
+        type: 'decide_warning_disposition',
     })
 
     return {
         disposition,
-        state: nextState,
+        update,
     }
 }
 
-export function runRevisionEffectStep(options: { state: VersionPlanTasklistAgentState; writeChunk: WriteChunk }) {
-    const draft = options.state.artifacts.tasklistDraft
+export function runRevisionEffectStep(options: {
+    state: VersionPlanTasklistGraphStateAnnotationState
+    writeChunk: WriteChunk
+}): VersionPlanTasklistGraphStatePatch {
+    const draft = options.state.tasklist.draft
     const validationBefore = draft?.validationV1
     const validationAfter = draft?.validationV2 ?? validationBefore
 
     if (!validationBefore || !validationAfter) {
-        throw new Error('缺少 v1 / v2 结构校验结果，无法评估修正效果。')
+        throw new Error('Missing tasklist validation result.')
     }
 
     const effect = evaluateRevisionEffect({
-        hasManualReviewItems: options.state.artifacts.planning.manualReviewItems.length > 0,
+        hasManualReviewItems: options.state.planning.manualReviewItems.length > 0,
         validationAfter,
         validationBefore,
     })
-    const nextState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'evaluate_revision_effect',
+
+    return applyVersionPlanTasklistGraphAction(options.state, {
         effect,
         reason: `修正效果评估完成，最终决策为 ${getRevisionFinalDecisionLabel(effect.finalDecision)}。`,
+        type: 'evaluate_revision_effect',
     })
-
-    return nextState
 }
 
-export async function runReviseTasklistStep(options: TasklistAgentStepOperationOptions) {
-    const draft = options.state.artifacts.tasklistDraft
+export async function runReviseTasklistStep(options: TasklistAgentStepOperationOptions): Promise<VersionPlanTasklistGraphStatePatch> {
+    const draft = options.state.tasklist.draft
     const validationResult = draft?.validationV1
-    const warningDisposition = options.state.artifacts.planning.warningDisposition
+    const warningDisposition = options.state.planning.warningDisposition
 
     if (!draft || !validationResult || !warningDisposition) {
-        throw new Error('缺少 v1 草稿、校验结果或 warning disposition，无法执行自动修正。')
+        throw new Error('Missing draft, validation result, or warning disposition.')
     }
 
     const revisionValidationResult = createValidationResultForRevision(validationResult, warningDisposition.fixNow)
     const revisedDraftText = await reviseTasklistDraft(
         options.model,
-        options.state,
+        createPromptState(options.state),
         draft,
         revisionValidationResult,
         options.context.signal
     )
-    const advancedState = applyVersionPlanTasklistAgentAction(options.state, {
-        type: 'revise_tasklist',
+    const update = applyVersionPlanTasklistGraphAction(options.state, {
         reason: '根据结构校验 findings 自动修正一次任务清单草稿。',
+        type: 'revise_tasklist',
     })
-    const nextState = attachDraftContent(advancedState, revisedDraftText)
+    const revisedDraft = update.tasklist?.draft
 
-    return nextState
+    if (!revisedDraft) {
+        throw new Error('Missing revised tasklist draft placeholder.')
+    }
+
+    return {
+        ...update,
+        tasklist: {
+            draft: {
+                ...revisedDraft,
+                content: revisedDraftText,
+            },
+        },
+    }
 }

@@ -1,6 +1,5 @@
 import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
-
 export const VERSION_PLAN_TASKLIST_AGENT_NAME = 'version-plan-to-tasklist-agent'
 
 // 受控单 Agent 的预算上限集中放在这里，runner 只读取这些值，不在流程里散落 magic number。
@@ -213,7 +212,7 @@ export type VersionPlanTasklistAgentAction =
           type: 'final_answer'
       }
 
-// AgentState.status 表示“当前流程走到哪一步”，状态机会用它判断下一步 action 是否允许执行。
+// execution.status 表示当前受控流程走到哪一步，状态机会用它判断下一步 action 是否允许执行。
 // 通俗对照：
 // - idle：刚开始，还没读版本方案。
 // - plan_read：已经读取了用户显式引用的 version plan。
@@ -242,19 +241,3 @@ export type VersionPlanTasklistAgentStatus =
     | 'strategy_decided'
     | 'validated_v1'
     | 'validated_v2'
-
-// AgentState 是单轮 Agent 的唯一运行时事实源，runner 每执行一步都应返回新的 state。
-export interface VersionPlanTasklistAgentState {
-    agentName: typeof VERSION_PLAN_TASKLIST_AGENT_NAME
-    artifacts: VersionPlanTasklistIntermediateArtifacts
-    // counters 是 Agent 的“刹车片”：限制执行步数、补充上下文读取和自动修正次数。
-    counters: {
-        draftRevisions: number
-        optionalContextReads: number
-        steps: number
-    }
-    limits: typeof VERSION_PLAN_TASKLIST_AGENT_LIMITS
-    runId: string
-    status: VersionPlanTasklistAgentStatus
-    versionPlanReference: ChatComposerReference
-}

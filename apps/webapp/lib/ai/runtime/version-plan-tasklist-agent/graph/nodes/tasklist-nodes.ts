@@ -9,32 +9,30 @@ import { getRouteAfterWarningDisposition } from '../edges/route-after-warning-di
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '../graph-node-ids'
 import type { VersionPlanTasklistGraphNodeRuntime } from '../graph-node-runtime'
 import {
+    applyVersionPlanTasklistGraphStateUpdate,
     createGraphNodeRuntimeUpdate,
     createGraphRouteRuntimeUpdate,
-    createGraphStateUpdateFromAgentState,
-    toVersionPlanTasklistAgentState,
     type VersionPlanTasklistGraphStateAnnotationState,
-    type VersionPlanTasklistGraphStateAnnotationUpdate,
+    type VersionPlanTasklistGraphStatePatch,
 } from '../graph-state'
 
 export function createDraftTasklistV1Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function draftTasklistV1Node(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
-        const nextAgentState = await runDraftTasklistStep({
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const update = await runDraftTasklistStep({
             context: runtime.context,
             model: runtime.model,
-            state: agentState,
+            state,
             userGoal: runtime.userGoal,
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(nextAgentState),
+            ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.draftTasklistV1,
-                summary: `已生成任务清单草稿 v${nextAgentState.artifacts.tasklistDraft?.version ?? 1}。`,
+                summary: `已生成任务清单草稿 v${update.tasklist?.draft?.version ?? 1}。`,
             }),
         }
     }
@@ -43,17 +41,16 @@ export function createDraftTasklistV1Node(runtime: VersionPlanTasklistGraphNodeR
 export function createValidateTasklistV1Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function validateTasklistV1Node(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
         const result = await runValidateTasklistStep({
             context: runtime.context,
-            state: agentState,
+            state,
             title: '校验任务清单结构 v1',
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(result.state),
+            ...result.update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV1,
                 summary: `v1 结构校验：${result.result.status}，评分 ${result.result.score}。`,
@@ -63,29 +60,22 @@ export function createValidateTasklistV1Node(runtime: VersionPlanTasklistGraphNo
 }
 
 export function createDecideWarningDispositionNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
-    return function decideWarningDispositionNode(
-        state: VersionPlanTasklistGraphStateAnnotationState
-    ): VersionPlanTasklistGraphStateAnnotationUpdate {
-        const agentState = toVersionPlanTasklistAgentState(state)
-        const validationResult = agentState.artifacts.tasklistDraft?.validationV1
+    return function decideWarningDispositionNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
+        const validationResult = state.tasklist.draft?.validationV1
 
         if (!validationResult) {
-            throw new Error('缺少 v1 结构校验结果，无法判断 warning 处理方式。')
+            throw new Error('Missing v1 validation result.')
         }
 
         const result = runWarningDispositionStep({
             result: validationResult,
-            state: agentState,
+            state,
             writeChunk: runtime.writeChunk,
         })
-        const nextState = {
-            ...state,
-            ...createGraphStateUpdateFromAgentState(result.state),
-        }
-        const route = getRouteAfterWarningDisposition(nextState)
+        const route = getRouteAfterWarningDisposition(applyVersionPlanTasklistGraphStateUpdate(state, result.update))
 
         return {
-            ...createGraphStateUpdateFromAgentState(result.state),
+            ...result.update,
             graph: {
                 ...createGraphNodeRuntimeUpdate({
                     nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideWarningDisposition,
@@ -100,21 +90,20 @@ export function createDecideWarningDispositionNode(runtime: VersionPlanTasklistG
 export function createReviseTasklistV2Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function reviseTasklistV2Node(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
-        const nextAgentState = await runReviseTasklistStep({
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const update = await runReviseTasklistStep({
             context: runtime.context,
             model: runtime.model,
-            state: agentState,
+            state,
             userGoal: runtime.userGoal,
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(nextAgentState),
+            ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2,
-                summary: `已执行自动修正 ${nextAgentState.counters.draftRevisions} 次。`,
+                summary: `已执行自动修正 ${update.execution?.counters.draftRevisions ?? state.execution.counters.draftRevisions} 次。`,
             }),
         }
     }
@@ -123,17 +112,16 @@ export function createReviseTasklistV2Node(runtime: VersionPlanTasklistGraphNode
 export function createValidateTasklistV2Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function validateTasklistV2Node(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
         const result = await runValidateTasklistStep({
             context: runtime.context,
-            state: agentState,
+            state,
             title: '再次校验任务清单结构 v2',
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(result.state),
+            ...result.update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV2,
                 summary: `v2 结构校验：${result.result.status}，评分 ${result.result.score}。`,
@@ -143,19 +131,17 @@ export function createValidateTasklistV2Node(runtime: VersionPlanTasklistGraphNo
 }
 
 export function createEvaluateRevisionEffectNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
-    return function evaluateRevisionEffectNode(
-        state: VersionPlanTasklistGraphStateAnnotationState
-    ): VersionPlanTasklistGraphStateAnnotationUpdate {
-        const nextAgentState = runRevisionEffectStep({
-            state: toVersionPlanTasklistAgentState(state),
+    return function evaluateRevisionEffectNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
+        const update = runRevisionEffectStep({
+            state,
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(nextAgentState),
+            ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect,
-                summary: `修正效果结论：${nextAgentState.artifacts.planning.revisionEffect?.finalDecision ?? 'unknown'}。`,
+                summary: `修正效果结论：${update.planning?.revisionEffect?.finalDecision ?? 'unknown'}。`,
             }),
         }
     }

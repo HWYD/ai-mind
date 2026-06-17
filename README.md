@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.2.1：新增服务端 Model Provider Runtime 和白名单模型选择。本地可使用 Ollama，配置服务端 Key 后可切换 Qwen / DeepSeek；普通聊天和受控 `/tasklist` Agent 共用模型入口，API Key 不进入前端。
+> v0.2.4：Tasklist Agent 继续沿 LangGraph 路线收口，生产路径以 GraphState 作为内部运行态事实源；本版不新增 HITL、Resume 或持久化能力。
 
 ## 项目解决的问题
 
@@ -161,6 +161,8 @@ Capability Model 用来统一描述 Tool / Resource / Prompt：
 
 `v0.2.3` 后，这条链路只走 LangGraph `StateGraph`。Graph Runtime 是 `/tasklist + @docs://versions/*.md` 的唯一执行路径；Graph events、memory checkpoint 和脱敏 Graph Debug Summary 仍通过服务端配置独立控制。
 
+`v0.2.4` 继续把内部运行态收口为 GraphState 单一事实源。Graph nodes 直接读取 GraphState 分区并返回 GraphState patch，不再通过旧 AgentState 整包 adapter 往返转换；GraphState reducer 负责合并分区 patch，route 成功路径基于显式业务字段判断。
+
 这个 Agent 不是通用 Agent，也不自动扫描 docs 或写入文件。它的入口、步骤、工具、路由和停止条件都由 Runtime 控制。
 
 ### MCP Integration
@@ -176,7 +178,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.2.1`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.2.4`。
 
 已经验证：
 
@@ -202,6 +204,9 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Ollama / Qwen / DeepSeek 白名单模型选择。
 - Provider 错误标准化、输入输出限制和 usage 观测。
 - 默认开启的 IP / session 轻量限流。
+- Containerized production deployment 与 GitHub Actions 交付链路。
+- Tasklist Agent Graph Runtime 单路线。
+- Tasklist Agent GraphState 单事实源收口。
 
 当前非目标：
 
@@ -226,23 +231,23 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 5. [Releases](./docs/releases)：版本发布说明。
 6. [Tasklists](./docs/tasklists)：公开任务清单。
 
-## 当前版本：v0.2.1
+## 当前版本：v0.2.4
 
-这版的主线是把 AI Mind 从本地 Ollama 单一路径升级为服务端统一治理的 Model Provider Runtime：
+这版的主线是 Tasklist Agent Graph 单状态模型收口：在 v0.2.3 已经删除 legacy runner 和 runtime switch 后，让生产 graph nodes 直接以 GraphState 作为内部运行态事实源。
 
-- Model Catalog 统一管理模型白名单、Provider 实际模型名和能力声明。
-- 请求统一通过 `options.modelId` 选择模型，非法模型 fail closed。
-- 前端模型选择器从服务端事实源初始化，并按“线上模型 / 本地模型”分组。
-- Ollama、Qwen、DeepSeek 通过统一 Provider Registry 接入。
-- 普通聊天、Tool Calling 和 `/tasklist` Agent 共用同一模型创建入口。
-- Provider 原始错误被转换为稳定错误码和中文提示，日志只保留脱敏 metadata。
-- 服务端限制输入长度、chat / tasklist 输出 token 和请求超时。
-- 默认开启按 IP / HttpOnly session 的单实例每日限流。
-- usage / token 只做 best-effort 观测，不作为计费事实源。
+- `/tasklist + @docs://versions/*.md` 仍固定进入 LangGraph `StateGraph`。
+- 初始 GraphState 直接由 `runId`、显式 `versionPlanReference` 和 runtime config 创建。
+- Graph nodes 不再依赖 `toVersionPlanTasklistAgentState()` 执行业务逻辑。
+- Graph nodes 不再依赖 `createGraphStateUpdateFromAgentState()` 返回 patch。
+- 旧 `VersionPlanTasklistAgentState` 类型和旧状态机 API 已移除。
+- 领域状态机继续保留 guard 规则，并只提供 GraphState patch apply 语义。
+- GraphState reducer 合并分区 patch，route 成功路径基于显式业务字段判断。
+- graph tests 直接断言 GraphState、node patch 和显式 route 字段。
+- stream chunk、tasklist artifact、AgentTracePanel 和 Graph Debug Summary 保持兼容。
 
-v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallback、模型市场、成本看板或分布式限流，也不扩大 v0.2.0 Controlled Agent Graph 的权限边界。
+v0.2.4 不实现 HITL、LangGraph `interrupt()`、Resume API、Run History、AgentRun 数据库存储、新 Agent 类型或自由 tool calling。
 
-详细设计见 [v0.2.1 版本说明](./docs/versions/v0.2.1-online-demo-and-model-provider-runtime.md)。
+详细设计见 [v0.2.4 版本说明](./docs/versions/v0.2.4-tasklist-agent-graph-single-state-model.md)。
 
 ## 当前能力
 
@@ -313,7 +318,8 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 - v0.2.3 后 `/tasklist + @docs://versions/*.md` 固定走 Graph Runtime。
 - LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
 - LangGraph `StateGraph` 只替换编排层。
-- `AgentState` 只保存本轮草稿、planner artifact、校验结果和修正次数。
+- v0.2.4 后生产路径以 GraphState 作为内部运行态事实源。
+- GraphState 按 `input / source / planning / tasklist / execution / output / graph` 分区保存本轮运行态。
 - 一次 Planning Decision，只允许 5 类白名单 action。
 - `read_optional_context` 最多读取一个白名单上下文。
 - `TasklistStrategy` 影响 draft 的 Step 数量、拆分粒度、分组和优先级。
@@ -323,7 +329,7 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 - `PlanningDecisionAction` conditional edge。
 - `WarningDisposition` conditional edge。
 - `validate_tasklist_structure` 作为结构质量门。
-- Graph Runtime 复用受控领域 step operation。
+- Graph Runtime 复用受控领域 step operation 和状态机 guard。
 - Graph node / route / state patch summary 通过受控 stream chunk 展示。
 - memory checkpoint 由显式配置控制，可用于展示和调试，但不表示持久化、Resume 或产品级恢复能力。
 - Debug Summary 只展示脱敏白名单字段。
@@ -354,11 +360,11 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 - `apps/webapp/lib/ai/rate-limit/`
     - IP / session 轻量限流配置和单进程 Memory Store。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/`
-    - 受控单 Agent，负责从版本方案生成 tasklist 草稿；当前只保留 Graph Runtime、共享 step operation 和 graph-only runtime config。
+    - 受控单 Agent，负责从版本方案生成 tasklist 草稿；当前只保留 Graph Runtime、共享 step operation、GraphState 和 graph-only runtime config。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/graph/`
     - LangGraph `StateGraph`、graph nodes、route、GraphState、graph events 和 Debug Summary。
 - `apps/webapp/components/chat/message-list/parts/agent-trace-panel.tsx`
-    - Agent 执行过程展示面板，支持 legacy step 摘要、graph timeline 和折叠 Debug。
+    - Agent 执行过程展示面板，支持 graph timeline 和折叠 Debug。
 - `apps/webapp/components/chat/message-list/parts/agent-text-artifact-panel.tsx`
     - Agent 最终文本产物展示面板。
 - `apps/project-assistant-service/`
@@ -401,12 +407,13 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 4. `v0.1.1` 只开放一次 action 选择，不开放资源权限、工具权限、写入权限和循环权限。
 5. `v0.2.0` 只把这条受控链路迁移到 LangGraph `StateGraph`，不扩大 Agent 权限。
 6. `v0.2.1` 只改变模型来源和 Provider 治理，不改变 Agent 权限、资源白名单或工具边界。
+7. `v0.2.3` 和 `v0.2.4` 只做 Graph Runtime 与 GraphState 收口，不新增 Agent 能力。
 
 因此：
 
 - `/tasklist` 只有配合 `@docs://versions/*.md` 才进入 Agent。
 - `validate_tasklist_structure` 只做结构校验，不判断内容质量是否完美。
-- `tasklistDraft` 只存在本轮 `AgentState` 内存中。
+- `tasklistDraft` 只存在本轮 GraphState 内存中。
 - `PlanningDecisionAction` 必须通过 schema 和状态机约束。
 - `PlanningDecisionAction` 和 `WarningDisposition` 可以成为 graph route，但 route 不绕过 Runtime guard。
 - Agent Step 通过流式协议展示，但不变成完整调试台。
@@ -567,6 +574,9 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                      |
 | v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary |
 | v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                   |
+| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                             |
+| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                             |
+| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                   |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -593,6 +603,9 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Model Catalog / Multi-Provider Runtime
 - [x] 服务端白名单模型选择器
 - [x] Provider 错误标准化 / 默认轻量限流 / usage 观测
+- [x] Containerized production deployment
+- [x] Tasklist Agent Graph Runtime 单路线
+- [x] Tasklist Agent GraphState 单事实源收口
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

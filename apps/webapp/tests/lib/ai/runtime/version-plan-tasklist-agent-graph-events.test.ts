@@ -13,7 +13,6 @@ import {
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-events'
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-node-ids'
 import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
-import { createInitialVersionPlanTasklistAgentState } from '@/lib/ai/runtime/version-plan-tasklist-agent/state/state-machine'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const versionPlanReference: ChatComposerReference = {
@@ -26,11 +25,8 @@ const versionPlanReference: ChatComposerReference = {
 
 function createGraphState() {
     return createInitialVersionPlanTasklistGraphState({
-        agentState: createInitialVersionPlanTasklistAgentState({
-            runId: 'run-graph-events-test',
-            versionPlanReference,
-        }),
         conversationId: 'conversation-graph-events-test',
+        runId: 'run-graph-events-test',
         runtimeConfig: getTasklistAgentRuntimeConfig(
             {
                 AI_MIND_GRAPH_EVENTS: 'on',
@@ -38,6 +34,7 @@ function createGraphState() {
             'development'
         ),
         userGoal: '生成 tasklist',
+        versionPlanReference,
     })
 }
 

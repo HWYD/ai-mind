@@ -420,9 +420,8 @@ export class ChatOrchestrator {
         const skeletonResult = createVersionPlanTasklistAgentSkeleton(agentInvocation)
 
         logSkillRuntime('version-plan-tasklist-agent-skeleton', {
-            agent: skeletonResult.state.agentName,
-            status: skeletonResult.state.status,
-            versionPlanUri: skeletonResult.state.versionPlanReference.uri,
+            runId: skeletonResult.runId,
+            versionPlanUri: skeletonResult.versionPlanReference.uri,
         })
 
         const runtimeConfig = getTasklistAgentRuntimeConfig()
@@ -439,8 +438,9 @@ export class ChatOrchestrator {
             conversationId: this.request.conversationId,
             model: session.baseModel,
             runtimeConfig,
-            skeletonState: skeletonResult.state,
+            runId: skeletonResult.runId,
             userGoal,
+            versionPlanReference: skeletonResult.versionPlanReference,
             writeChunk: this.writeChunk,
         })
 

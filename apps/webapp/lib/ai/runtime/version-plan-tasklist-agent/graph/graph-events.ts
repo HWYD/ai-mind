@@ -3,18 +3,19 @@ import type { AgentStepSeverity, AgentStepStatus } from '@ai-mind/stream-core/pr
 import { createId } from '@/lib/ai/create-id'
 
 import type { WriteChunk } from '../../types'
-import type { VersionPlanTasklistGraphNodeId } from './graph-node-ids'
+import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS, type VersionPlanTasklistGraphNodeId } from './graph-node-ids'
 import type { VersionPlanTasklistGraphNodeRuntime } from './graph-node-runtime'
 import {
+    applyVersionPlanTasklistGraphStateUpdate,
     type VersionPlanTasklistGraphRoute,
     type VersionPlanTasklistGraphRuntimeStateUpdate,
     type VersionPlanTasklistGraphStateAnnotationState,
-    type VersionPlanTasklistGraphStateAnnotationUpdate,
+    type VersionPlanTasklistGraphStatePatch,
 } from './graph-state'
 
 export type GraphNodeHandler = (
     state: VersionPlanTasklistGraphStateAnnotationState
-) => Promise<VersionPlanTasklistGraphStateAnnotationUpdate> | VersionPlanTasklistGraphStateAnnotationUpdate
+) => Promise<VersionPlanTasklistGraphStatePatch> | VersionPlanTasklistGraphStatePatch
 
 interface GraphEventBase {
     agentName: string
@@ -155,9 +156,7 @@ export function emitGraphStatePatch(writeChunk: WriteChunk, options: EmitGraphSt
 
 // 从 node 返回的 LangGraph partial update 里取出我们自己维护的 graph runtime 摘要。
 // 这里不会读取完整业务 state，只消费 routes 和 statePatchSummaries 这两类可展示轨迹。
-function getGraphRuntimeUpdate(
-    update: VersionPlanTasklistGraphStateAnnotationUpdate
-): VersionPlanTasklistGraphRuntimeStateUpdate | undefined {
+function getGraphRuntimeUpdate(update: VersionPlanTasklistGraphStatePatch): VersionPlanTasklistGraphRuntimeStateUpdate | undefined {
     const graphUpdate = update.graph
 
     if (!graphUpdate || typeof graphUpdate !== 'object') {
@@ -173,7 +172,7 @@ function getGraphRuntimeUpdate(
 }
 
 // 找出当前 node 对应的 patch summary，用作 node-end 的简短说明。
-function getGraphUpdateSummary(update: VersionPlanTasklistGraphStateAnnotationUpdate, nodeId: VersionPlanTasklistGraphNodeId) {
+function getGraphUpdateSummary(update: VersionPlanTasklistGraphStatePatch, nodeId: VersionPlanTasklistGraphNodeId) {
     const statePatchSummaries = getGraphRuntimeUpdate(update)?.statePatchSummaries ?? []
 
     for (let index = statePatchSummaries.length - 1; index >= 0; index -= 1) {
@@ -187,12 +186,46 @@ function getGraphUpdateSummary(update: VersionPlanTasklistGraphStateAnnotationUp
     return undefined
 }
 
-function getGraphNodeResultDisplay(update: VersionPlanTasklistGraphStateAnnotationUpdate): GraphNodeResultDisplay {
-    const output =
-        update.output && typeof update.output === 'object' && 'status' in update.output
-            ? (update.output as { status?: 'failed' | 'final' | 'stopped' })
-            : undefined
-    const outputStatus = output?.status
+function createCompletedGraphNodeResult(severity: AgentStepSeverity = 'info', tags?: string[]): GraphNodeResultDisplay {
+    return tags
+        ? {
+              severity,
+              status: 'completed',
+              tags,
+          }
+        : {
+              severity,
+              status: 'completed',
+          }
+}
+
+function getValidationSeverity(status?: 'fail' | 'pass' | 'warning'): AgentStepSeverity {
+    switch (status) {
+        case 'fail':
+            return 'error'
+        case 'warning':
+            return 'warning'
+        default:
+            return 'info'
+    }
+}
+
+function getRevisionEffectSeverity(finalDecision?: 'blocked' | 'final' | 'final_with_manual_review_items'): AgentStepSeverity {
+    switch (finalDecision) {
+        case 'blocked':
+            return 'error'
+        case 'final_with_manual_review_items':
+            return 'warning'
+        default:
+            return 'info'
+    }
+}
+
+function getGraphNodeResultDisplay(
+    nodeId: VersionPlanTasklistGraphNodeId,
+    nextState: VersionPlanTasklistGraphStateAnnotationState
+): GraphNodeResultDisplay {
+    const outputStatus = nextState.output?.status
 
     if (outputStatus === 'failed') {
         return {
@@ -202,16 +235,39 @@ function getGraphNodeResultDisplay(update: VersionPlanTasklistGraphStateAnnotati
     }
 
     if (outputStatus === 'stopped') {
-        return {
-            severity: 'warning',
-            status: 'completed',
-            tags: ['status: stopped'],
-        }
+        return createCompletedGraphNodeResult('warning', ['status: stopped'])
     }
 
-    return {
-        severity: 'info',
-        status: 'completed',
+    switch (nodeId) {
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluatePlanReadiness: {
+            const readinessStatus = nextState.planning.readiness?.status
+
+            if (readinessStatus === 'blocked' || readinessStatus === 'needs_review') {
+                return createCompletedGraphNodeResult('warning')
+            }
+
+            return createCompletedGraphNodeResult()
+        }
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.planningDecision:
+            return createCompletedGraphNodeResult(
+                nextState.planning.decision?.type === 'proceed_with_manual_review_items' ? 'warning' : 'info'
+            )
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.readOptionalContext:
+            return createCompletedGraphNodeResult(nextState.planning.optionalContext?.status === 'failed' ? 'warning' : 'info')
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV1:
+            return createCompletedGraphNodeResult(getValidationSeverity(nextState.tasklist.draft?.validationV1?.status))
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV2:
+            return createCompletedGraphNodeResult(getValidationSeverity(nextState.tasklist.draft?.validationV2?.status))
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideWarningDisposition: {
+            const warningDisposition = nextState.planning.warningDisposition
+            const hasWarnings = (warningDisposition?.fixNow.length ?? 0) > 0 || (warningDisposition?.manualReviewItems.length ?? 0) > 0
+
+            return createCompletedGraphNodeResult(hasWarnings ? 'warning' : 'info')
+        }
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect:
+            return createCompletedGraphNodeResult(getRevisionEffectSeverity(nextState.planning.revisionEffect?.finalDecision))
+        default:
+            return createCompletedGraphNodeResult()
     }
 }
 
@@ -244,8 +300,9 @@ export function withGraphNodeEvents(
         try {
             const update = await node(state)
             const graphUpdate = getGraphRuntimeUpdate(update)
+            const nextState = applyVersionPlanTasklistGraphStateUpdate(state, update)
             const summary = getGraphUpdateSummary(update, nodeId)
-            const resultDisplay = getGraphNodeResultDisplay(update)
+            const resultDisplay = getGraphNodeResultDisplay(nodeId, nextState)
 
             for (const statePatch of graphUpdate?.statePatchSummaries ?? []) {
                 emitGraphStatePatch(runtime.writeChunk, {

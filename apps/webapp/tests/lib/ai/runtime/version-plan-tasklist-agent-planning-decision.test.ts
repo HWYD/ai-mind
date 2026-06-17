@@ -2,13 +2,19 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatSession } from '@/lib/ai/runtime/types'
+import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import {
-    applyVersionPlanTasklistAgentAction,
-    createInitialVersionPlanTasklistAgentState,
+    applyVersionPlanTasklistGraphStateUpdate,
+    createInitialVersionPlanTasklistGraphState,
+    type VersionPlanTasklistGraphStateAnnotationState,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
+import {
+    applyVersionPlanTasklistGraphAction,
     generateTasklistStrategy,
     parseVersionPlanTasklistPlanningDecisionAction,
     parseVersionPlanTasklistPlanningDecisionText,
-    validateVersionPlanTasklistAgentAction,
+    validateVersionPlanTasklistGraphAction,
+    type VersionPlanTasklistAgentAction,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
@@ -23,28 +29,66 @@ const versionPlanReference: ChatComposerReference = {
 }
 
 function createPlanReadState() {
-    return applyVersionPlanTasklistAgentAction(
-        createInitialVersionPlanTasklistAgentState({
+    return applyAction(createInitialState(), {
+        type: 'read_resource',
+        resourceUri: planUri,
+        reason: '读取测试 version plan。',
+    })
+}
+
+function createInitialState() {
+    return {
+        ...createInitialVersionPlanTasklistGraphState({
+            conversationId: 'conversation-planning-decision',
             runId: 'run-planning-decision',
+            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
+            userGoal: '生成 tasklist',
             versionPlanReference,
         }),
-        {
-            type: 'read_resource',
-            resourceUri: planUri,
-            reason: '读取测试 version plan。',
-        }
-    )
+        output: undefined,
+        source: {
+            versionPlanReference,
+            versionPlan: {
+                extract: {
+                    goals: ['接入 Planning Decision'],
+                    interfaceChanges: ['GraphState 记录 planning artifact'],
+                    keyChanges: ['新增有限决策'],
+                    nonGoals: ['不写 docs 文件'],
+                    summary: '从固定流程升级到有限决策。',
+                    targetVersion: 'v0.1.1',
+                    testPlan: ['验证 tasklist agent graph'],
+                    title: 'v0.1.1 Controlled Planner Lite',
+                },
+                reference: versionPlanReference,
+                uri: planUri,
+            },
+        },
+    }
+}
+
+function createPlanningPromptState(state: VersionPlanTasklistGraphStateAnnotationState) {
+    return {
+        artifacts: {
+            planning: state.planning,
+            versionPlan: state.source.versionPlan,
+        },
+        versionPlanReference: state.source.versionPlanReference,
+    }
+}
+
+function applyAction(state: VersionPlanTasklistGraphStateAnnotationState, action: VersionPlanTasklistAgentAction) {
+    return applyVersionPlanTasklistGraphStateUpdate(state, applyVersionPlanTasklistGraphAction(state, action))
 }
 
 function createReadinessCheckedState() {
-    return applyVersionPlanTasklistAgentAction(createPlanReadState(), {
+    return applyAction(createPlanReadState(), {
         type: 'check_plan_readiness',
         reason: '完成 rule-based readiness 检查。',
     })
 }
 
 function createOptionalContextReadState() {
-    const planningDecidedState = applyVersionPlanTasklistAgentAction(createReadinessCheckedState(), {
+    const planningDecidedState = applyAction(createReadinessCheckedState(), {
         type: 'planning_decision',
         decision: {
             type: 'read_optional_context',
@@ -54,7 +98,7 @@ function createOptionalContextReadState() {
         reason: '记录 Planning Decision。',
     })
 
-    return applyVersionPlanTasklistAgentAction(planningDecidedState, {
+    return applyAction(planningDecidedState, {
         type: 'read_resource',
         resourceUri: 'docs://architecture/runtime-boundary.md',
         reason: '读取白名单补充上下文。',
@@ -159,7 +203,7 @@ describe('runtime/version-plan-tasklist-agent planning decision schema', () => {
 
 describe('runtime/version-plan-tasklist-agent planning decision state machine', () => {
     it('plan_read 不能绕过 Planning Decision 直接 draft', () => {
-        const guardResult = validateVersionPlanTasklistAgentAction(createPlanReadState(), {
+        const guardResult = validateVersionPlanTasklistGraphAction(createPlanReadState(), {
             type: 'draft_tasklist',
             goal: '绕过 planner 直接生成 tasklist',
             planUri,
@@ -170,7 +214,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
     })
 
     it('plan_read 不能直接读取 optional context', () => {
-        const guardResult = validateVersionPlanTasklistAgentAction(createPlanReadState(), {
+        const guardResult = validateVersionPlanTasklistGraphAction(createPlanReadState(), {
             type: 'read_resource',
             resourceUri: 'docs://architecture/stream-core.md',
             reason: '未经过 Planning Decision 不能补读上下文。',
@@ -180,7 +224,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
     })
 
     it('非 read_optional_context 决策后不能读取 optional context', () => {
-        const planningDecidedState = applyVersionPlanTasklistAgentAction(createReadinessCheckedState(), {
+        const planningDecidedState = applyAction(createReadinessCheckedState(), {
             type: 'planning_decision',
             decision: {
                 type: 'proceed_to_tasklist_strategy',
@@ -188,7 +232,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             },
             reason: '记录 Planning Decision。',
         })
-        const guardResult = validateVersionPlanTasklistAgentAction(planningDecidedState, {
+        const guardResult = validateVersionPlanTasklistGraphAction(planningDecidedState, {
             type: 'read_resource',
             resourceUri: 'docs://architecture/runtime-boundary.md',
             reason: 'proceed 决策后不应再补读上下文。',
@@ -198,7 +242,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
     })
 
     it('read_optional_context 后只能读取决策指定的 resourceUri', () => {
-        const planningDecidedState = applyVersionPlanTasklistAgentAction(createReadinessCheckedState(), {
+        const planningDecidedState = applyAction(createReadinessCheckedState(), {
             type: 'planning_decision',
             decision: {
                 type: 'read_optional_context',
@@ -207,7 +251,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             },
             reason: '记录 Planning Decision。',
         })
-        const guardResult = validateVersionPlanTasklistAgentAction(planningDecidedState, {
+        const guardResult = validateVersionPlanTasklistGraphAction(planningDecidedState, {
             type: 'read_resource',
             resourceUri: 'docs://architecture/stream-core.md',
             reason: '不能改读另一个白名单资源。',
@@ -218,7 +262,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
 
     it('能推进 readiness_checked、planning_decided 和 strategy_decided 状态', () => {
         const readinessCheckedState = createReadinessCheckedState()
-        const planningDecidedState = applyVersionPlanTasklistAgentAction(readinessCheckedState, {
+        const planningDecidedState = applyAction(readinessCheckedState, {
             type: 'planning_decision',
             decision: {
                 type: 'proceed_to_tasklist_strategy',
@@ -226,7 +270,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             },
             reason: '记录 Planning Decision。',
         })
-        const strategyDecidedState = applyVersionPlanTasklistAgentAction(planningDecidedState, {
+        const strategyDecidedState = applyAction(planningDecidedState, {
             type: 'decide_tasklist_strategy',
             strategy: {
                 expectedStepRange: [3, 5],
@@ -238,13 +282,13 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             reason: '进入 tasklist 拆分策略判断。',
         })
 
-        expect(readinessCheckedState.status).toBe('readiness_checked')
-        expect(planningDecidedState.status).toBe('planning_decided')
-        expect(strategyDecidedState.status).toBe('strategy_decided')
+        expect(readinessCheckedState.execution.status).toBe('readiness_checked')
+        expect(planningDecidedState.execution.status).toBe('planning_decided')
+        expect(strategyDecidedState.execution.status).toBe('strategy_decided')
     })
 
     it('read_optional_context 决策后最多能读取一个白名单补充上下文', () => {
-        const planningDecidedState = applyVersionPlanTasklistAgentAction(createReadinessCheckedState(), {
+        const planningDecidedState = applyAction(createReadinessCheckedState(), {
             type: 'planning_decision',
             decision: {
                 type: 'read_optional_context',
@@ -253,19 +297,19 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             },
             reason: '记录 Planning Decision。',
         })
-        const optionalContextReadState = applyVersionPlanTasklistAgentAction(planningDecidedState, {
+        const optionalContextReadState = applyAction(planningDecidedState, {
             type: 'read_resource',
             resourceUri: 'docs://architecture/runtime-boundary.md',
             reason: '读取白名单补充上下文。',
         })
-        const guardResult = validateVersionPlanTasklistAgentAction(optionalContextReadState, {
+        const guardResult = validateVersionPlanTasklistGraphAction(optionalContextReadState, {
             type: 'read_resource',
             resourceUri: 'docs://architecture/stream-core.md',
             reason: '尝试读取第二个补充上下文。',
         })
 
-        expect(optionalContextReadState.status).toBe('optional_context_read')
-        expect(optionalContextReadState.counters.optionalContextReads).toBe(1)
+        expect(optionalContextReadState.execution.status).toBe('optional_context_read')
+        expect(optionalContextReadState.execution.counters.optionalContextReads).toBe(1)
         expect(guardResult.success).toBe(false)
     })
 
@@ -281,7 +325,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             invoke: vi.fn().mockResolvedValue(new AIMessage({ content: JSON.stringify(strategy) })),
         } as unknown as ChatSession['baseModel']
 
-        const result = await generateTasklistStrategy(model, createOptionalContextReadState(), '生成 tasklist')
+        const result = await generateTasklistStrategy(model, createPlanningPromptState(createOptionalContextReadState()), '生成 tasklist')
 
         expect(result.expectedStepRange).toEqual([4, 6])
         expect(result.grouping).toEqual(['Runtime', 'Tests'])
@@ -289,7 +333,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
     })
 
     it('ask_clarification 后进入 stopped，不能继续推进 draft', () => {
-        const stoppedState = applyVersionPlanTasklistAgentAction(createReadinessCheckedState(), {
+        const stoppedState = applyAction(createReadinessCheckedState(), {
             type: 'planning_decision',
             decision: {
                 type: 'ask_clarification',
@@ -298,19 +342,19 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             },
             reason: '记录澄清决策。',
         })
-        const guardResult = validateVersionPlanTasklistAgentAction(stoppedState, {
+        const guardResult = validateVersionPlanTasklistGraphAction(stoppedState, {
             type: 'draft_tasklist',
             goal: '继续生成 tasklist',
             planUri,
             reason: 'stopped 后不应继续。',
         })
 
-        expect(stoppedState.status).toBe('stopped')
+        expect(stoppedState.execution.status).toBe('stopped')
         expect(guardResult.success).toBe(false)
     })
 
     it('stop_with_boundary_message 后进入 stopped，不能继续推进 draft', () => {
-        const stoppedState = applyVersionPlanTasklistAgentAction(createReadinessCheckedState(), {
+        const stoppedState = applyAction(createReadinessCheckedState(), {
             type: 'planning_decision',
             decision: {
                 type: 'stop_with_boundary_message',
@@ -319,32 +363,35 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             },
             reason: '记录边界停止决策。',
         })
-        const guardResult = validateVersionPlanTasklistAgentAction(stoppedState, {
+        const guardResult = validateVersionPlanTasklistGraphAction(stoppedState, {
             type: 'draft_tasklist',
             goal: '继续生成 tasklist',
             planUri,
             reason: 'stopped 后不应继续。',
         })
 
-        expect(stoppedState.status).toBe('stopped')
+        expect(stoppedState.execution.status).toBe('stopped')
         expect(guardResult.success).toBe(false)
     })
 
     it('超过 maxSteps = 12 后 fail closed', () => {
         const state = {
             ...createPlanReadState(),
-            counters: {
-                draftRevisions: 0,
-                optionalContextReads: 0,
-                steps: 12,
+            execution: {
+                ...createPlanReadState().execution,
+                counters: {
+                    draftRevisions: 0,
+                    optionalContextReads: 0,
+                    steps: 12,
+                },
             },
         }
-        const guardResult = validateVersionPlanTasklistAgentAction(state, {
+        const guardResult = validateVersionPlanTasklistGraphAction(state, {
             type: 'check_plan_readiness',
             reason: '超过 step 上限后不允许继续。',
         })
 
-        expect(state.limits.maxSteps).toBe(12)
+        expect(state.execution.limits.maxSteps).toBe(12)
         expect(guardResult.success).toBe(false)
     })
 })

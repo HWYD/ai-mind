@@ -6,10 +6,8 @@ import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '../graph-node-ids'
 import type { VersionPlanTasklistGraphNodeRuntime } from '../graph-node-runtime'
 import {
     createGraphNodeRuntimeUpdate,
-    createGraphStateUpdateFromAgentState,
-    toVersionPlanTasklistAgentState,
     type VersionPlanTasklistGraphStateAnnotationState,
-    type VersionPlanTasklistGraphStateAnnotationUpdate,
+    type VersionPlanTasklistGraphStatePatch,
 } from '../graph-state'
 
 function getStoppedPlanningDecision(
@@ -18,26 +16,24 @@ function getStoppedPlanningDecision(
     const decision = state.planning.decision
 
     if (decision?.type !== 'ask_clarification' && decision?.type !== 'stop_with_boundary_message') {
-        throw new Error('当前 PlanningDecisionAction 不是 stopped path。')
+        throw new Error('Current PlanningDecisionAction is not a stopped path.')
     }
 
     return decision
 }
 
 export function createEmitFinalArtifactNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
-    return function emitFinalArtifactNode(
-        state: VersionPlanTasklistGraphStateAnnotationState
-    ): VersionPlanTasklistGraphStateAnnotationUpdate {
-        const nextAgentState = runFinalAnswerStep({
-            state: toVersionPlanTasklistAgentState(state),
+    return function emitFinalArtifactNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
+        const update = runFinalAnswerStep({
+            state,
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(nextAgentState),
+            ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.emitFinalArtifact,
-                summary: `已输出最终任务清单产物，Agent 状态：${nextAgentState.status}。`,
+                summary: `已输出最终任务清单产物，Agent 状态：${update.execution?.status ?? 'final'}。`,
             }),
             output: {
                 status: 'final',
@@ -48,9 +44,7 @@ export function createEmitFinalArtifactNode(runtime: VersionPlanTasklistGraphNod
 }
 
 export function createAskClarificationNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
-    return function askClarificationNode(
-        state: VersionPlanTasklistGraphStateAnnotationState
-    ): VersionPlanTasklistGraphStateAnnotationUpdate {
+    return function askClarificationNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
         const decision = getStoppedPlanningDecision(state)
 
         writeStaticTextPart(runtime.writeChunk, buildStoppedPlanningDecisionAnswer(decision))
@@ -69,9 +63,7 @@ export function createAskClarificationNode(runtime: VersionPlanTasklistGraphNode
 }
 
 export function createStopWithBoundaryMessageNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
-    return function stopWithBoundaryMessageNode(
-        state: VersionPlanTasklistGraphStateAnnotationState
-    ): VersionPlanTasklistGraphStateAnnotationUpdate {
+    return function stopWithBoundaryMessageNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
         const decision = getStoppedPlanningDecision(state)
 
         writeStaticTextPart(runtime.writeChunk, buildStoppedPlanningDecisionAnswer(decision))

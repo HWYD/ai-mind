@@ -1,9 +1,16 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 
+import type { ChatComposerReference } from '@/lib/ai/types/chat'
+
 import { getMessageContentText } from '../../message-content'
 import type { ChatSession } from '../../types'
 import { parseVersionPlanTasklistPlanningDecisionOutputText, parseVersionPlanTasklistStrategy } from '../contract/planner-output-schema'
-import type { PlanningDecisionOutput, TasklistStrategy, VersionPlanTasklistAgentState } from '../contract/types'
+import type {
+    PlanningDecisionOutput,
+    TasklistStrategy,
+    VersionPlanTasklistIntermediateArtifacts,
+    VersionPlanTasklistPlanningArtifacts,
+} from '../contract/types'
 import { VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS } from '../contract/types'
 
 export type ControlledPlannerOutputStage = 'planning_decision' | 'tasklist_strategy'
@@ -112,7 +119,15 @@ function formatListForPrompt(title: string, items: string[]) {
     return [title, ...items.map(item => `- ${item}`)].join('\n')
 }
 
-function formatPlanningInput(state: VersionPlanTasklistAgentState) {
+export interface PlanningPromptState {
+    artifacts: {
+        planning: VersionPlanTasklistPlanningArtifacts
+        versionPlan?: VersionPlanTasklistIntermediateArtifacts['versionPlan']
+    }
+    versionPlanReference: ChatComposerReference
+}
+
+function formatPlanningInput(state: PlanningPromptState) {
     const extract = state.artifacts.versionPlan?.extract
 
     if (!extract) {
@@ -132,7 +147,7 @@ function formatPlanningInput(state: VersionPlanTasklistAgentState) {
     ].join('\n\n')
 }
 
-function formatOptionalContextForPrompt(state: VersionPlanTasklistAgentState) {
+function formatOptionalContextForPrompt(state: PlanningPromptState) {
     const optionalContext = state.artifacts.planning.optionalContext
 
     if (!optionalContext) {
@@ -162,7 +177,7 @@ function getModelResponseText(response: unknown) {
     return ''
 }
 
-export function buildPlanningDecisionMessages(state: VersionPlanTasklistAgentState, userGoal: string) {
+export function buildPlanningDecisionMessages(state: PlanningPromptState, userGoal: string) {
     return [
         new SystemMessage(PLANNING_DECISION_SYSTEM_PROMPT),
         new HumanMessage(
@@ -187,7 +202,7 @@ export function buildPlanningDecisionMessages(state: VersionPlanTasklistAgentSta
     ]
 }
 
-export function buildTasklistStrategyMessages(state: VersionPlanTasklistAgentState, userGoal: string) {
+export function buildTasklistStrategyMessages(state: PlanningPromptState, userGoal: string) {
     return [
         new SystemMessage(TASKLIST_STRATEGY_SYSTEM_PROMPT),
         new HumanMessage(
@@ -212,7 +227,7 @@ export function buildTasklistStrategyMessages(state: VersionPlanTasklistAgentSta
 
 export async function generatePlanningDecisionOutput(
     model: ChatSession['baseModel'],
-    state: VersionPlanTasklistAgentState,
+    state: PlanningPromptState,
     userGoal: string,
     signal?: AbortSignal
 ): Promise<PlanningDecisionOutput> {
@@ -229,7 +244,7 @@ export async function generatePlanningDecisionOutput(
 
 export async function generateTasklistStrategy(
     model: ChatSession['baseModel'],
-    state: VersionPlanTasklistAgentState,
+    state: PlanningPromptState,
     userGoal: string,
     signal?: AbortSignal
 ): Promise<TasklistStrategy> {

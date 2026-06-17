@@ -1,5 +1,5 @@
-import type { VersionPlanTasklistAgentState } from '../contract/types'
+import type { VersionPlanTasklistGraphStateAnnotationState } from '../graph/graph-state'
 
-export function getNextStepIndex(state: VersionPlanTasklistAgentState) {
-    return state.counters.steps + 1
+export function getNextStepIndex(state: VersionPlanTasklistGraphStateAnnotationState) {
+    return state.execution.counters.steps + 1
 }

@@ -2,95 +2,87 @@ import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 import {
     VERSION_PLAN_TASKLIST_AGENT_LIMITS,
-    VERSION_PLAN_TASKLIST_AGENT_NAME,
     VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS,
     type VersionPlanTasklistAgentAction,
-    type VersionPlanTasklistAgentState,
+    type VersionPlanTasklistAgentStatus,
+    type VersionPlanTasklistPlanningArtifacts,
 } from '../contract/types'
+import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
 
 const SUPPLEMENTAL_RESOURCE_URIS = new Set<string>(VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS)
 
 export interface AgentActionGuardResult {
-    // validate 只返回结果，不修改 state；apply 才负责真正推进状态。
     reason?: string
     success: boolean
 }
 
-export function createInitialVersionPlanTasklistAgentState(options: {
-    runId: string
+type StateMachineView = {
+    counters: {
+        draftRevisions: number
+        optionalContextReads: number
+        steps: number
+    }
+    limits: typeof VERSION_PLAN_TASKLIST_AGENT_LIMITS
+    planning: VersionPlanTasklistPlanningArtifacts
+    status: VersionPlanTasklistAgentStatus
     versionPlanReference: ChatComposerReference
-}): VersionPlanTasklistAgentState {
-    // 初始状态只保存用户显式引用的 version plan，不主动读取任何文件。
+}
+
+function createGraphStateView(state: VersionPlanTasklistGraphStateAnnotationState): StateMachineView {
     return {
-        agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
-        artifacts: {
-            planning: {
-                manualReviewItems: [],
-            },
-        },
-        counters: {
-            draftRevisions: 0,
-            optionalContextReads: 0,
-            steps: 0,
-        },
-        limits: VERSION_PLAN_TASKLIST_AGENT_LIMITS,
-        runId: options.runId,
-        status: 'idle',
-        versionPlanReference: options.versionPlanReference,
+        counters: state.execution.counters,
+        limits: state.execution.limits,
+        planning: state.planning,
+        status: state.execution.status,
+        versionPlanReference: state.source.versionPlanReference,
     }
 }
 
-// 状态机是 Agent 的硬边界：模型可以提出 action，但只有当前状态允许的 action 才会被执行。
-export function validateVersionPlanTasklistAgentAction(
-    state: VersionPlanTasklistAgentState,
-    action: VersionPlanTasklistAgentAction
-): AgentActionGuardResult {
-    if (state.counters.steps >= state.limits.maxSteps) {
+function validateVersionPlanTasklistActionView(view: StateMachineView, action: VersionPlanTasklistAgentAction): AgentActionGuardResult {
+    if (view.counters.steps >= view.limits.maxSteps) {
         return {
-            reason: `Agent step 数已达到上限 ${state.limits.maxSteps}。`,
+            reason: `Agent step limit reached: ${view.limits.maxSteps}.`,
             success: false,
         }
     }
 
     switch (action.type) {
         case 'read_resource': {
-            if (state.status === 'idle') {
-                // 第一轮 read_resource 必须读取用户显式引用的 version plan，不能先读补充上下文。
-                return action.resourceUri === state.versionPlanReference.uri
+            if (view.status === 'idle') {
+                return action.resourceUri === view.versionPlanReference.uri
                     ? { success: true }
                     : {
-                          reason: 'Agent 第一轮只能读取用户显式引用的 version plan。',
+                          reason: 'The first resource read must target the explicit version plan.',
                           success: false,
                       }
             }
 
-            if (state.status !== 'planning_decided') {
-                // 补充上下文只能发生在规划决策明确选择 read_optional_context 之后，避免 Agent 越跑越发散。
+            if (view.status !== 'planning_decided') {
                 return {
-                    reason: '补充上下文只能在规划决策明确选择 read_optional_context 后读取。',
+                    reason: 'Optional context can only be read after a read_optional_context planning decision.',
                     success: false,
                 }
             }
 
-            const planningDecision = state.artifacts.planning.decision
+            const planningDecision = view.planning.decision
 
             if (planningDecision?.type !== 'read_optional_context') {
                 return {
-                    reason: '当前规划决策没有授权读取补充上下文。',
+                    reason: 'The current planning decision did not authorize optional context reading.',
                     success: false,
                 }
             }
 
             if (action.resourceUri !== planningDecision.resourceUri) {
                 return {
-                    reason: '只能读取规划决策指定的补充上下文资源。',
+                    reason: 'Only the optional context resource selected by the planning decision can be read.',
                     success: false,
                 }
             }
 
-            if (state.counters.optionalContextReads >= state.limits.maxOptionalContextReads) {
+            if (view.counters.optionalContextReads >= view.limits.maxOptionalContextReads) {
                 return {
-                    reason: `补充上下文读取次数已达到上限 ${state.limits.maxOptionalContextReads}。`,
+                    reason: `Optional context read limit reached: ${view.limits.maxOptionalContextReads}.`,
                     success: false,
                 }
             }
@@ -98,257 +90,252 @@ export function validateVersionPlanTasklistAgentAction(
             return SUPPLEMENTAL_RESOURCE_URIS.has(action.resourceUri)
                 ? { success: true }
                 : {
-                      reason: '该资源不在当前 Agent 允许读取的补充上下文范围内。',
+                      reason: 'Optional context resource is not allowed for this agent.',
                       success: false,
                   }
         }
         case 'check_plan_readiness':
-            return state.status === 'plan_read'
+            return view.status === 'plan_read'
                 ? { success: true }
                 : {
-                      reason: '只能在读取 version plan 后检查方案完整性。',
+                      reason: 'Plan readiness can only be checked after reading the version plan.',
                       success: false,
                   }
         case 'planning_decision':
-            return state.status === 'readiness_checked'
+            return view.status === 'readiness_checked'
                 ? { success: true }
                 : {
-                      reason: '只能在完成方案完整性检查后执行规划决策。',
+                      reason: 'Planning decision can only run after readiness check.',
                       success: false,
                   }
         case 'decide_tasklist_strategy':
-            return state.status === 'planning_decided' || state.status === 'optional_context_read'
+            return view.status === 'planning_decided' || view.status === 'optional_context_read'
                 ? { success: true }
                 : {
-                      reason: '只能在规划决策决定继续后判断任务清单拆分策略。',
+                      reason: 'Tasklist strategy can only be decided after planning decision or optional context read.',
                       success: false,
                   }
         case 'draft_tasklist':
-            if (state.status !== 'strategy_decided') {
+            if (view.status !== 'strategy_decided') {
                 return {
-                    reason: '必须先完成规划决策和任务清单拆分策略判断，才能生成任务清单草稿。',
+                    reason: 'Tasklist draft can only be generated after strategy decision.',
                     success: false,
                 }
             }
 
-            return action.planUri === state.versionPlanReference.uri
+            return action.planUri === view.versionPlanReference.uri
                 ? { success: true }
                 : {
-                      reason: '任务清单草稿必须基于本轮显式引用的 version plan。',
+                      reason: 'Tasklist draft must be generated from the explicit version plan.',
                       success: false,
                   }
         case 'call_tool':
-            // v0.1.0 只保留结构校验这个受控工具；其他质量检查不进入本版 Agent 链路。
-            return state.status === 'drafted_v1' || state.status === 'revised_v2'
+            return view.status === 'drafted_v1' || view.status === 'revised_v2'
                 ? { success: true }
                 : {
-                      reason: '只有生成任务清单草稿后，才能执行结构校验。',
+                      reason: 'Tasklist validation can only run after a draft exists.',
                       success: false,
                   }
         case 'decide_warning_disposition':
-            return state.status === 'validated_v1'
+            return view.status === 'validated_v1'
                 ? { success: true }
                 : {
-                      reason: '只能在 v1 结构校验后判断 warning 处理方式。',
+                      reason: 'Warning disposition can only run after v1 validation.',
                       success: false,
                   }
         case 'evaluate_revision_effect':
-            return state.status === 'validated_v1' || state.status === 'validated_v2'
+            return view.status === 'validated_v1' || view.status === 'validated_v2'
                 ? { success: true }
                 : {
-                      reason: '只能在任务清单结构校验后评估修正效果。',
+                      reason: 'Revision effect can only be evaluated after validation.',
                       success: false,
                   }
         case 'revise_tasklist':
-            if (state.status !== 'validated_v1') {
+            if (view.status !== 'validated_v1') {
                 return {
-                    reason: '只有 v1 结构校验后，才允许执行一次自动修正。',
+                    reason: 'Tasklist revision can only run after v1 validation.',
                     success: false,
                 }
             }
 
-            return state.counters.draftRevisions < state.limits.maxDraftRevisions
+            return view.counters.draftRevisions < view.limits.maxDraftRevisions
                 ? { success: true }
                 : {
-                      reason: `任务清单自动修正次数已达到上限 ${state.limits.maxDraftRevisions}。`,
+                      reason: `Tasklist revision limit reached: ${view.limits.maxDraftRevisions}.`,
                       success: false,
                   }
         case 'final_answer':
-            // final 必须在结构校验和修正效果评估之后，确保最终输出有 deterministic Quality Gate 结论。
-            return state.status === 'revision_effect_evaluated'
+            return view.status === 'revision_effect_evaluated'
                 ? { success: true }
                 : {
-                      reason: '最终回答前必须完成任务清单结构校验和修正效果评估。',
+                      reason: 'Final answer can only be emitted after revision effect evaluation.',
                       success: false,
                   }
         default:
             return {
-                reason: '未知 Agent action。',
+                reason: 'Unknown agent action.',
                 success: false,
             }
     }
 }
 
-/**
- * 根据一个受控 Agent action 推进状态机，并返回推进后的最新 state。
- *
- * 这里是状态变更的唯一入口：先复用 guard 校验当前状态是否允许执行该 action，
- * 再统一递增 step 计数、写入对应 artifact，并切换到下一个 Agent status。
- * 如果 action 不符合当前状态边界，会直接抛错，避免调用方绕过状态机写出非法状态。
- */
-export function applyVersionPlanTasklistAgentAction(
-    state: VersionPlanTasklistAgentState,
+export function validateVersionPlanTasklistGraphAction(
+    state: VersionPlanTasklistGraphStateAnnotationState,
     action: VersionPlanTasklistAgentAction
-): VersionPlanTasklistAgentState {
-    const guardResult = validateVersionPlanTasklistAgentAction(state, action)
+): AgentActionGuardResult {
+    return validateVersionPlanTasklistActionView(createGraphStateView(state), action)
+}
 
+function assertActionAllowed(guardResult: AgentActionGuardResult) {
     if (!guardResult.success) {
-        throw new Error(guardResult.reason ?? 'Agent action 被 Runtime 状态机拒绝。')
+        throw new Error(guardResult.reason ?? 'Agent action rejected by runtime state machine.')
     }
+}
+
+export function applyVersionPlanTasklistGraphAction(
+    state: VersionPlanTasklistGraphStateAnnotationState,
+    action: VersionPlanTasklistAgentAction
+): VersionPlanTasklistGraphStatePatch {
+    assertActionAllowed(validateVersionPlanTasklistGraphAction(state, action))
 
     const counters = {
-        ...state.counters,
-        steps: state.counters.steps + 1,
-    }
-    const artifacts = {
-        ...state.artifacts,
+        steps: state.execution.counters.steps + 1,
     }
 
     switch (action.type) {
         case 'read_resource':
-            if (state.status === 'idle') {
-                artifacts.versionPlan = {
-                    reference: state.versionPlanReference,
-                    uri: action.resourceUri,
+            if (state.execution.status === 'idle') {
+                return {
+                    execution: {
+                        counters,
+                        status: 'plan_read',
+                    },
+                    source: {
+                        versionPlan: {
+                            reference: state.source.versionPlanReference,
+                            uri: action.resourceUri,
+                        },
+                    },
                 }
-            } else {
-                counters.optionalContextReads += 1
             }
 
             return {
-                ...state,
-                artifacts,
-                counters,
-                status: state.status === 'idle' ? 'plan_read' : 'optional_context_read',
+                execution: {
+                    counters: {
+                        ...counters,
+                        optionalContextReads: state.execution.counters.optionalContextReads + 1,
+                    },
+                    status: 'optional_context_read',
+                },
             }
         case 'check_plan_readiness':
             return {
-                ...state,
-                counters,
-                status: 'readiness_checked',
+                execution: {
+                    counters,
+                    status: 'readiness_checked',
+                },
             }
         case 'planning_decision':
             return {
-                ...state,
-                artifacts: {
-                    ...artifacts,
-                    planning: {
-                        ...artifacts.planning,
-                        decision: action.decision,
-                        manualReviewItems:
-                            action.decision.type === 'proceed_with_manual_review_items'
-                                ? [...artifacts.planning.manualReviewItems, ...action.decision.reviewItems]
-                                : artifacts.planning.manualReviewItems,
-                    },
+                execution: {
+                    counters,
+                    status:
+                        action.decision.type === 'ask_clarification' || action.decision.type === 'stop_with_boundary_message'
+                            ? 'stopped'
+                            : 'planning_decided',
                 },
-                counters,
-                status:
-                    action.decision.type === 'ask_clarification' || action.decision.type === 'stop_with_boundary_message'
-                        ? 'stopped'
-                        : 'planning_decided',
+                planning: {
+                    decision: action.decision,
+                    manualReviewItems:
+                        action.decision.type === 'proceed_with_manual_review_items'
+                            ? [...state.planning.manualReviewItems, ...action.decision.reviewItems]
+                            : state.planning.manualReviewItems,
+                },
             }
         case 'decide_tasklist_strategy':
             return {
-                ...state,
-                artifacts: {
-                    ...artifacts,
-                    planning: {
-                        ...artifacts.planning,
-                        strategy: action.strategy,
-                    },
+                execution: {
+                    counters,
+                    status: 'strategy_decided',
                 },
-                counters,
-                status: 'strategy_decided',
+                planning: {
+                    strategy: action.strategy,
+                },
             }
         case 'draft_tasklist':
-            // 状态推进时只创建 artifact 槽位；真实 Markdown 草稿由受控生成阶段写入。
-            artifacts.tasklistDraft = {
-                content: '',
-                createdAtStep: counters.steps,
-                planUri: action.planUri,
-                targetVersion: action.targetVersion,
-                version: 1,
-            }
-
             return {
-                ...state,
-                artifacts,
-                counters,
-                status: 'drafted_v1',
+                execution: {
+                    counters,
+                    status: 'drafted_v1',
+                },
+                tasklist: {
+                    draft: {
+                        content: '',
+                        createdAtStep: counters.steps,
+                        planUri: action.planUri,
+                        targetVersion: action.targetVersion,
+                        version: 1,
+                    },
+                },
             }
         case 'call_tool':
             return {
-                ...state,
-                counters,
-                status: state.status === 'revised_v2' ? 'validated_v2' : 'validated_v1',
+                execution: {
+                    counters,
+                    status: state.execution.status === 'revised_v2' ? 'validated_v2' : 'validated_v1',
+                },
             }
         case 'decide_warning_disposition':
             return {
-                ...state,
-                artifacts: {
-                    ...artifacts,
-                    planning: {
-                        ...artifacts.planning,
-                        // 只在不触发 v2 时把 disposition 的复核项并入最终复核点；如果会修正，待后续 revision effect 再判断剩余问题。
-                        manualReviewItems:
-                            action.disposition.fixNow.length === 0
-                                ? [...artifacts.planning.manualReviewItems, ...action.disposition.manualReviewItems]
-                                : artifacts.planning.manualReviewItems,
-                        warningDisposition: action.disposition,
-                    },
+                execution: {
+                    counters,
+                    status: 'validated_v1',
                 },
-                counters,
-                status: 'validated_v1',
+                planning: {
+                    manualReviewItems:
+                        action.disposition.fixNow.length === 0
+                            ? [...state.planning.manualReviewItems, ...action.disposition.manualReviewItems]
+                            : state.planning.manualReviewItems,
+                    warningDisposition: action.disposition,
+                },
             }
         case 'evaluate_revision_effect':
             return {
-                ...state,
-                artifacts: {
-                    ...artifacts,
-                    planning: {
-                        ...artifacts.planning,
-                        revisionEffect: action.effect,
-                    },
+                execution: {
+                    counters,
+                    status: 'revision_effect_evaluated',
                 },
-                counters,
-                status: 'revision_effect_evaluated',
+                planning: {
+                    revisionEffect: action.effect,
+                },
             }
         case 'revise_tasklist':
             return {
-                ...state,
-                artifacts: {
-                    ...artifacts,
-                    tasklistDraft: artifacts.tasklistDraft
+                execution: {
+                    counters: {
+                        ...counters,
+                        draftRevisions: state.execution.counters.draftRevisions + 1,
+                    },
+                    status: 'revised_v2',
+                },
+                tasklist: {
+                    draft: state.tasklist.draft
                         ? {
-                              ...artifacts.tasklistDraft,
+                              ...state.tasklist.draft,
                               updatedAtStep: counters.steps,
                               version: 2,
                           }
                         : undefined,
                 },
-                counters: {
-                    ...counters,
-                    draftRevisions: counters.draftRevisions + 1,
-                },
-                status: 'revised_v2',
             }
         case 'final_answer':
             return {
-                ...state,
-                counters,
-                status: 'final',
+                execution: {
+                    counters,
+                    status: 'final',
+                },
             }
         default:
-            return state
+            return {}
     }
 }

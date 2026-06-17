@@ -8,8 +8,9 @@ import { MCPHostError, toErrorMessage } from '@/lib/ai/mcp/protocol/errors'
 
 import { throwIfAborted, writeStreamErrorChunk } from '../../stream-errors'
 import type { ChatExecutionContext, WriteChunk } from '../../types'
-import type { VersionPlanTasklistAgentState, VersionPlanTasklistOptionalContextResourceUri } from '../contract/types'
-import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
+import type { VersionPlanTasklistOptionalContextResourceUri } from '../contract/types'
+import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
+import { applyVersionPlanTasklistGraphAction } from '../state/state-machine'
 
 const PROJECT_ASSISTANT_SERVER_ID = 'project-assistant-service'
 const LATEST_CONTEXT_RESOURCE_NAME = 'latest-context'
@@ -24,8 +25,8 @@ interface ReadOptionalContextOptions {
 }
 
 export interface OptionalContextReadResult {
-    state: VersionPlanTasklistAgentState
     success: boolean
+    update: VersionPlanTasklistGraphStatePatch
 }
 
 function extractTextFromContentParts(contentParts: Array<unknown> | undefined) {
@@ -107,8 +108,8 @@ async function readOptionalContextContent(resourceUri: VersionPlanTasklistOption
     })
 }
 
-function attachOptionalContextFailure(
-    state: VersionPlanTasklistAgentState,
+function createOptionalContextFailurePlanningPatch(
+    state: VersionPlanTasklistGraphStateAnnotationState,
     options: {
         errorMessage: string
         location: 'local' | 'remote'
@@ -116,98 +117,84 @@ function attachOptionalContextFailure(
         resourceUri: VersionPlanTasklistOptionalContextResourceUri
         serverId: string
     }
-): VersionPlanTasklistAgentState {
+) {
     return {
-        ...state,
-        artifacts: {
-            ...state.artifacts,
-            planning: {
-                ...state.artifacts.planning,
-                manualReviewItems: [
-                    ...state.artifacts.planning.manualReviewItems,
-                    {
-                        detail: `${options.resourceUri} 读取失败：${options.errorMessage}。本轮已降级为仅基于 version plan 继续生成。`,
-                        severity: 'warning',
-                        title: '补充上下文读取失败',
-                    },
-                ],
-                optionalContext: {
-                    errorMessage: options.errorMessage,
-                    location: options.location,
-                    resourceName: options.resourceName,
-                    serverId: options.serverId,
-                    status: 'failed',
-                    uri: options.resourceUri,
-                },
+        manualReviewItems: [
+            ...state.planning.manualReviewItems,
+            {
+                detail: `${options.resourceUri} 读取失败：${options.errorMessage}。本轮已降级为仅基于 version plan 继续生成。`,
+                severity: 'warning' as const,
+                title: '补充上下文读取失败',
             },
+        ],
+        optionalContext: {
+            errorMessage: options.errorMessage,
+            location: options.location,
+            resourceName: options.resourceName,
+            serverId: options.serverId,
+            status: 'failed' as const,
+            uri: options.resourceUri,
         },
     }
 }
 
-/**
- * Agent 专用 optional context 读取函数，只允许读取 PlanningDecisionAction 指定的 1 个白名单资源。
- */
 export async function readOptionalContextForTasklistAgent(
-    state: VersionPlanTasklistAgentState,
+    state: VersionPlanTasklistGraphStateAnnotationState,
     options: ReadOptionalContextOptions
 ): Promise<OptionalContextReadResult> {
     const resourcePartId = createId()
     const metadata = getOptionalContextResourceMetadata(options.resourceUri)
-    const advancedState = applyVersionPlanTasklistAgentAction(state, {
-        type: 'read_resource',
-        resourceUri: options.resourceUri,
+    const advancedUpdate = applyVersionPlanTasklistGraphAction(state, {
         reason: '读取规划决策指定的白名单补充上下文。',
+        resourceUri: options.resourceUri,
+        type: 'read_resource',
     })
 
     options.writeChunk({
-        type: 'resource-start',
+        location: metadata.location,
         partId: resourcePartId,
         resourceName: metadata.resourceName,
-        uri: options.resourceUri,
-        source: 'mcp',
-        location: metadata.location,
         serverId: metadata.serverId,
+        source: 'mcp',
+        type: 'resource-start',
+        uri: options.resourceUri,
     })
 
     try {
         throwIfAborted(options.context.signal)
         const resource = await readOptionalContextContent(options.resourceUri)
-        const nextState: VersionPlanTasklistAgentState = {
-            ...advancedState,
-            artifacts: {
-                ...advancedState.artifacts,
-                planning: {
-                    ...advancedState.artifacts.planning,
-                    optionalContext: {
-                        content: resource.content,
-                        contentPreview: resource.contentPreview,
-                        location: metadata.location,
-                        previewChars: resource.previewChars,
-                        resourceName: resource.resourceName,
-                        serverId: resource.serverId,
-                        status: 'completed',
-                        uri: options.resourceUri,
-                    },
+        const update: VersionPlanTasklistGraphStatePatch = {
+            ...advancedUpdate,
+            planning: {
+                optionalContext: {
+                    content: resource.content,
+                    contentPreview: resource.contentPreview,
+                    location: metadata.location,
+                    previewChars: resource.previewChars,
+                    resourceName: resource.resourceName,
+                    serverId: resource.serverId,
+                    status: 'completed',
+                    uri: options.resourceUri,
                 },
             },
         }
 
         options.writeChunk({
-            type: 'resource-end',
-            partId: resourcePartId,
-            resourceName: resource.resourceName,
-            uri: resource.uri,
-            source: 'mcp',
-            location: metadata.location,
-            serverId: resource.serverId,
             contentPreview: resource.contentPreview,
             isTruncated: resource.truncated,
+            location: metadata.location,
+            partId: resourcePartId,
             previewChars: resource.previewChars,
+            resourceName: resource.resourceName,
+            serverId: resource.serverId,
+            source: 'mcp',
+            type: 'resource-end',
+            uri: resource.uri,
         })
 
         return {
-            state: nextState,
             success: true,
+            update,
         }
     } catch (error) {
         if (options.context.signal?.aborted) {
@@ -215,31 +202,34 @@ export async function readOptionalContextForTasklistAgent(
         }
 
         const errorMessage = toErrorMessage(error)
-        const nextState = attachOptionalContextFailure(advancedState, {
-            errorMessage,
-            location: metadata.location,
-            resourceName: metadata.resourceName,
-            resourceUri: options.resourceUri,
-            serverId: metadata.serverId,
-        })
+        const update: VersionPlanTasklistGraphStatePatch = {
+            ...advancedUpdate,
+            planning: createOptionalContextFailurePlanningPatch(state, {
+                errorMessage,
+                location: metadata.location,
+                resourceName: metadata.resourceName,
+                resourceUri: options.resourceUri,
+                serverId: metadata.serverId,
+            }),
+        }
 
         writeStreamErrorChunk(options.writeChunk, {
-            scope: 'resource',
             errorCode: toMCPStreamErrorCode(error),
-            retryable: true,
+            location: metadata.location,
             message: errorMessage,
-            stage: 'runtime',
             partId: resourcePartId,
             resourceName: metadata.resourceName,
-            uri: options.resourceUri,
-            source: 'mcp',
-            location: metadata.location,
+            retryable: true,
+            scope: 'resource',
             serverId: metadata.serverId,
+            source: 'mcp',
+            stage: 'runtime',
+            uri: options.resourceUri,
         })
 
         return {
-            state: nextState,
             success: false,
+            update,
         }
     }
 }

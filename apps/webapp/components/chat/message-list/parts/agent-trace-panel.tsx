@@ -40,6 +40,10 @@ function getGraphNodeStatusIcon(node: AgentGraphNodeEntry) {
         case 'skipped':
             return <CircleDashed className="size-4 text-muted-foreground" strokeWidth={2.2} />
         case 'completed':
+            if (node.severity === 'error') {
+                return <XCircle className="size-4 text-rose-500" strokeWidth={2.2} />
+            }
+
             return node.severity === 'warning' ? (
                 <TriangleAlert className="size-4 text-amber-500" strokeWidth={2.2} />
             ) : (

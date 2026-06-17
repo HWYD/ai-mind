@@ -11,65 +11,40 @@ import { getRouteAfterTasklistStrategy } from '../edges/route-after-tasklist-str
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '../graph-node-ids'
 import type { VersionPlanTasklistGraphNodeRuntime } from '../graph-node-runtime'
 import {
+    applyVersionPlanTasklistGraphStateUpdate,
     createGraphNodeRuntimeUpdate,
     createGraphRouteRuntimeUpdate,
-    createGraphStateUpdateFromAgentState,
-    toVersionPlanTasklistAgentState,
     type VersionPlanTasklistGraphStateAnnotationState,
-    type VersionPlanTasklistGraphStateAnnotationUpdate,
+    type VersionPlanTasklistGraphStatePatch,
 } from '../graph-state'
-
-function attachPendingDecisionStrategy(
-    state: ReturnType<typeof toVersionPlanTasklistAgentState>,
-    strategy: ReturnType<typeof toVersionPlanTasklistAgentState>['artifacts']['planning']['strategy']
-) {
-    if (!strategy) {
-        return state
-    }
-
-    return {
-        ...state,
-        artifacts: {
-            ...state.artifacts,
-            planning: {
-                ...state.artifacts.planning,
-                strategy,
-            },
-        },
-    }
-}
 
 export function createReadVersionPlanNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function readVersionPlanNode(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
-        const result = await readVersionPlanForTasklistAgent(agentState, {
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const result = await readVersionPlanForTasklistAgent(state, {
             context: runtime.context,
-            stepIndex: getNextStepIndex(agentState),
+            stepIndex: getNextStepIndex(state),
             userGoal: runtime.userGoal,
             writeChunk: runtime.writeChunk,
         })
 
-        if ('errorMessage' in result) {
+        if (result.success === false) {
             const output = {
                 errorMessage: result.errorMessage,
                 status: 'failed' as const,
                 textSummary: '版本方案读取失败，未生成任务清单草稿。',
             }
-            const nextState = {
+            const route = getRouteAfterReadVersionPlan({
                 ...state,
-                ...createGraphStateUpdateFromAgentState(result.state),
                 output,
-            }
-            const route = getRouteAfterReadVersionPlan(nextState)
+            })
 
             return {
-                ...createGraphStateUpdateFromAgentState(result.state),
                 graph: {
                     ...createGraphNodeRuntimeUpdate({
                         nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.readVersionPlan,
-                        summary: '版本方案读取失败，graph 停止继续生成任务清单。',
+                        summary: '版本方案读取失败，Graph 停止继续生成任务清单。',
                     }),
                     ...createGraphRouteRuntimeUpdate(route),
                 },
@@ -77,14 +52,11 @@ export function createReadVersionPlanNode(runtime: VersionPlanTasklistGraphNodeR
             }
         }
 
-        const nextState = {
-            ...state,
-            ...createGraphStateUpdateFromAgentState(result.state),
-        }
+        const nextState = applyVersionPlanTasklistGraphStateUpdate(state, result.update)
         const route = getRouteAfterReadVersionPlan(nextState)
 
         return {
-            ...createGraphStateUpdateFromAgentState(result.state),
+            ...result.update,
             graph: {
                 ...createGraphNodeRuntimeUpdate({
                     nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.readVersionPlan,
@@ -97,20 +69,17 @@ export function createReadVersionPlanNode(runtime: VersionPlanTasklistGraphNodeR
 }
 
 export function createEvaluatePlanReadinessNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
-    return function evaluatePlanReadinessNode(
-        state: VersionPlanTasklistGraphStateAnnotationState
-    ): VersionPlanTasklistGraphStateAnnotationUpdate {
-        const nextAgentState = runPlanReadinessStep({
-            state: toVersionPlanTasklistAgentState(state),
+    return function evaluatePlanReadinessNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
+        const update = runPlanReadinessStep({
+            state,
             writeChunk: runtime.writeChunk,
         })
-        const readiness = nextAgentState.artifacts.planning.readiness
 
         return {
-            ...createGraphStateUpdateFromAgentState(nextAgentState),
+            ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluatePlanReadiness,
-                summary: `方案完整性状态：${readiness?.status ?? 'unknown'}。`,
+                summary: `方案完整性状态：${state.planning.readiness?.status ?? 'unknown'}。`,
             }),
         }
     }
@@ -119,25 +88,30 @@ export function createEvaluatePlanReadinessNode(runtime: VersionPlanTasklistGrap
 export function createPlanningDecisionNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function planningDecisionNode(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
         try {
-            const agentState = toVersionPlanTasklistAgentState(state)
             const result = await runPlanningDecisionStep({
                 context: runtime.context,
                 model: runtime.model,
-                state: agentState,
+                state,
                 userGoal: runtime.userGoal,
                 writeChunk: runtime.writeChunk,
             })
-            const nextAgentState = attachPendingDecisionStrategy(result.state, result.output.strategy)
-            const nextState = {
-                ...state,
-                ...createGraphStateUpdateFromAgentState(nextAgentState),
-            }
+            const update =
+                result.output.strategy && result.update.planning
+                    ? {
+                          ...result.update,
+                          planning: {
+                              ...result.update.planning,
+                              strategy: result.output.strategy,
+                          },
+                      }
+                    : result.update
+            const nextState = applyVersionPlanTasklistGraphStateUpdate(state, update)
             const route = getRouteAfterPlanningDecision(nextState)
 
             return {
-                ...createGraphStateUpdateFromAgentState(nextAgentState),
+                ...update,
                 graph: {
                     ...createGraphNodeRuntimeUpdate({
                         nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.planningDecision,
@@ -159,11 +133,10 @@ export function createPlanningDecisionNode(runtime: VersionPlanTasklistGraphNode
                 status: 'stopped' as const,
                 textSummary: '规划决策输出不符合受控 JSON schema，本轮已安全停止。',
             }
-            const nextState = {
+            const route = getRouteAfterPlanningDecision({
                 ...state,
                 output,
-            }
-            const route = getRouteAfterPlanningDecision(nextState)
+            })
 
             return {
                 graph: {
@@ -182,23 +155,22 @@ export function createPlanningDecisionNode(runtime: VersionPlanTasklistGraphNode
 export function createReadOptionalContextNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function readOptionalContextNode(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
-        const decision = agentState.artifacts.planning.decision
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const decision = state.planning.decision
 
         if (decision?.type !== 'read_optional_context') {
-            throw new Error('当前 PlanningDecisionAction 未授权读取补充上下文。')
+            throw new Error('Current PlanningDecisionAction did not authorize optional context reading.')
         }
 
-        const result = await readOptionalContextForTasklistAgent(agentState, {
+        const result = await readOptionalContextForTasklistAgent(state, {
             context: runtime.context,
             resourceUri: decision.resourceUri,
-            stepIndex: getNextStepIndex(agentState),
+            stepIndex: getNextStepIndex(state),
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            ...createGraphStateUpdateFromAgentState(result.state),
+            ...result.update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.readOptionalContext,
                 summary: `补充上下文读取${result.success ? '完成' : '失败并降级'}：${decision.resourceUri}。`,
@@ -210,35 +182,31 @@ export function createReadOptionalContextNode(runtime: VersionPlanTasklistGraphN
 export function createDecideTasklistStrategyNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function decideTasklistStrategyNode(
         state: VersionPlanTasklistGraphStateAnnotationState
-    ): Promise<VersionPlanTasklistGraphStateAnnotationUpdate> {
-        const agentState = toVersionPlanTasklistAgentState(state)
-        const decision = agentState.artifacts.planning.decision
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const decision = state.planning.decision
         const strategy =
             decision?.type === 'proceed_to_tasklist_strategy' || decision?.type === 'proceed_with_manual_review_items'
-                ? agentState.artifacts.planning.strategy
+                ? state.planning.strategy
                 : undefined
 
         try {
-            const nextAgentState = await runTasklistStrategyStep({
+            const update = await runTasklistStrategyStep({
                 context: runtime.context,
                 model: runtime.model,
-                state: agentState,
+                state,
                 strategy,
                 userGoal: runtime.userGoal,
                 writeChunk: runtime.writeChunk,
             })
-            const nextState = {
-                ...state,
-                ...createGraphStateUpdateFromAgentState(nextAgentState),
-            }
+            const nextState = applyVersionPlanTasklistGraphStateUpdate(state, update)
             const route = getRouteAfterTasklistStrategy(nextState)
 
             return {
-                ...createGraphStateUpdateFromAgentState(nextAgentState),
+                ...update,
                 graph: {
                     ...createGraphNodeRuntimeUpdate({
                         nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideTasklistStrategy,
-                        summary: `任务清单策略：${nextAgentState.artifacts.planning.strategy?.granularity ?? 'unknown'}。`,
+                        summary: `任务清单策略：${update.planning?.strategy?.granularity ?? 'unknown'}。`,
                     }),
                     ...createGraphRouteRuntimeUpdate(route),
                 },
@@ -256,11 +224,10 @@ export function createDecideTasklistStrategyNode(runtime: VersionPlanTasklistGra
                 status: 'stopped' as const,
                 textSummary: '任务清单拆分策略输出不符合受控 JSON schema，本轮已安全停止。',
             }
-            const nextState = {
+            const route = getRouteAfterTasklistStrategy({
                 ...state,
                 output,
-            }
-            const route = getRouteAfterTasklistStrategy(nextState)
+            })
 
             return {
                 graph: {

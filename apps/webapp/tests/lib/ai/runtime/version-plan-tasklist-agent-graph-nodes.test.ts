@@ -17,11 +17,7 @@ import type { ChatSession } from '@/lib/ai/runtime/types'
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import { createVersionPlanTasklistGraph } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/create-version-plan-tasklist-graph'
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-node-ids'
-import {
-    createInitialVersionPlanTasklistGraphState,
-    toVersionPlanTasklistAgentState,
-} from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
-import { createInitialVersionPlanTasklistAgentState } from '@/lib/ai/runtime/version-plan-tasklist-agent/state/state-machine'
+import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const planUri = 'docs://versions/v0.2.0-controlled-agent-graph.md'
@@ -193,15 +189,12 @@ async function runGraphWithResponses(...responses: string[]) {
     const model = createModel(...responses)
     const writtenChunks: ChatStreamChunk[] = []
     const runtimeConfig = getTasklistAgentRuntimeConfig({}, 'development')
-    const agentState = createInitialVersionPlanTasklistAgentState({
-        runId: 'run-graph-nodes-test',
-        versionPlanReference,
-    })
     const graphState = createInitialVersionPlanTasklistGraphState({
-        agentState,
         conversationId: 'conversation-graph-test',
+        runId: 'run-graph-nodes-test',
         runtimeConfig,
         userGoal: '基于这个版本方案生成 tasklist 草稿',
+        versionPlanReference,
     })
     const result = await createVersionPlanTasklistGraph({
         runtime: {
@@ -224,10 +217,6 @@ function getStatePatchSummaryText(result: Awaited<ReturnType<typeof runGraphWith
     return result.graph.statePatchSummaries.map(summary => summary.summary).join('\n')
 }
 
-function toAgentState(result: Awaited<ReturnType<typeof runGraphWithResponses>>['result']) {
-    return toVersionPlanTasklistAgentState(result)
-}
-
 describe('runtime/version-plan-tasklist-agent graph nodes', () => {
     beforeEach(() => {
         resourceMocks.readDocsResource.mockReset()
@@ -236,11 +225,10 @@ describe('runtime/version-plan-tasklist-agent graph nodes', () => {
 
     it('覆盖 ready -> final 主路径，并记录 graph 轨迹', async () => {
         const { model, result, writtenChunks } = await runGraphWithResponses(proceedPlanningOutput, validTasklist)
-        const agentState = toAgentState(result)
 
         expect(result.execution.status).toBe('final')
         expect(result.output?.status).toBe('final')
-        expect(agentState.artifacts.planning.decision?.type).toBe('proceed_to_tasklist_strategy')
+        expect(result.planning.decision?.type).toBe('proceed_to_tasklist_strategy')
         expect(result.planning.strategy?.granularity).toBe('medium')
         expect(result.tasklist.draft?.version).toBe(1)
         expect(result.tasklist.draft?.validationV1?.status).toBe('pass')

@@ -2,11 +2,7 @@
 
 import { getMessageContentText } from '@/lib/ai/runtime/message-content'
 import type { TasklistStrategy } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
-import {
-    applyVersionPlanTasklistAgentAction,
-    buildDraftTasklistMessages,
-    createInitialVersionPlanTasklistAgentState,
-} from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
+import { buildDraftTasklistMessages } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const planUri = 'docs://versions/v0.1.1-controlled-planner-lite.md'
@@ -20,15 +16,6 @@ const versionPlanReference: ChatComposerReference = {
 }
 
 function createStateWithStrategy(granularity: 'coarse' | 'detailed' | 'medium' = 'medium') {
-    const initialState = createInitialVersionPlanTasklistAgentState({
-        runId: 'run-draft-generator',
-        versionPlanReference,
-    })
-    const planReadState = applyVersionPlanTasklistAgentAction(initialState, {
-        type: 'read_resource',
-        resourceUri: planUri,
-        reason: '读取测试 version plan。',
-    })
     const strategy: TasklistStrategy = {
         expectedStepRange: granularity === 'coarse' ? [2, 3] : granularity === 'detailed' ? [6, 8] : [3, 5],
         granularity,
@@ -38,11 +25,9 @@ function createStateWithStrategy(granularity: 'coarse' | 'detailed' | 'medium' =
     }
 
     return {
-        ...planReadState,
         artifacts: {
-            ...planReadState.artifacts,
             planning: {
-                ...planReadState.artifacts.planning,
+                manualReviewItems: [],
                 strategy,
             },
             versionPlan: {
@@ -61,7 +46,7 @@ function createStateWithStrategy(granularity: 'coarse' | 'detailed' | 'medium' =
                 ].join('\n'),
                 extract: {
                     goals: ['接入 Planning Decision', '生成受控 tasklist'],
-                    interfaceChanges: ['AgentState 增加 planning artifact'],
+                    interfaceChanges: ['GraphState 增加 planning artifact'],
                     keyChanges: ['新增有限决策', '保持 Runtime 边界'],
                     nonGoals: ['不写 docs 文件'],
                     summary: '从固定流程升级到有限决策。',
@@ -74,6 +59,7 @@ function createStateWithStrategy(granularity: 'coarse' | 'detailed' | 'medium' =
                 uri: planUri,
             },
         },
+        versionPlanReference,
     }
 }
 

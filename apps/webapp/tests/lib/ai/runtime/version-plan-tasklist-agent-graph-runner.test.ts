@@ -15,7 +15,6 @@ vi.mock('@/lib/ai/mcp/adapters', () => ({
 import type { ChatSession } from '@/lib/ai/runtime/types'
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import { runVersionPlanTasklistGraph } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/run-version-plan-tasklist-graph'
-import { createInitialVersionPlanTasklistAgentState } from '@/lib/ai/runtime/version-plan-tasklist-agent/state/state-machine'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const planUri = 'docs://versions/v0.2.0-controlled-agent-graph.md'
@@ -217,17 +216,14 @@ function mockResources(versionPlanContent = readyVersionPlanContent) {
 async function runGraphRunnerWithEnv(env: Record<string, string | undefined>, ...responses: string[]) {
     const model = createModel(...responses)
     const writtenChunks: ChatStreamChunk[] = []
-    const skeletonState = createInitialVersionPlanTasklistAgentState({
-        runId: 'run-graph-runner-test',
-        versionPlanReference,
-    })
     const result = await runVersionPlanTasklistGraph({
         context: {},
         conversationId: 'conversation-graph-runner-test',
         model,
+        runId: 'run-graph-runner-test',
         runtimeConfig: getTasklistAgentRuntimeConfig(env, 'development'),
-        skeletonState,
         userGoal: '基于这个版本方案生成 tasklist 草稿',
+        versionPlanReference,
         writeChunk: chunk => writtenChunks.push(chunk),
     })
 
@@ -251,12 +247,12 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
     it('ready plan 可生成 v1、校验并 final，且 tasklist 正文只通过 artifact 输出', async () => {
         const { model, result, writtenChunks } = await runGraphRunner(proceedPlanningOutput, validTasklist)
 
-        expect(result.state.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('final')
         expect(result.graphState.graph.checkpointMode).toBe('off')
         expect(result.graphState.output?.status).toBe('final')
-        expect(result.state.artifacts.tasklistDraft?.version).toBe(1)
-        expect(result.state.artifacts.tasklistDraft?.validationV1?.status).toBe('pass')
-        expect(result.state.artifacts.planning.revisionEffect?.finalDecision).toBe('final')
+        expect(result.graphState.tasklist.draft?.version).toBe(1)
+        expect(result.graphState.tasklist.draft?.validationV1?.status).toBe('pass')
+        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final')
         expect(model.invoke).toHaveBeenCalledTimes(2)
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type.startsWith('agent-graph-'))).toBe(false)
@@ -272,7 +268,7 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             validTasklist
         )
 
-        expect(result.state.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('final')
         expect(result.graphState.graph.checkpointMode).toBe('off')
         expect(result.graphState.threadId).toBe('tasklist-agent:conversation-graph-runner-test:run-graph-runner-test')
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
@@ -288,7 +284,7 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             validTasklist
         )
 
-        expect(result.state.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('final')
         expect(result.graphState.graph.checkpointMode).toBe('memory')
         expect(result.graphState.threadId).toBe('tasklist-agent:conversation-graph-runner-test:run-graph-runner-test')
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
@@ -362,25 +358,44 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         expect(JSON.stringify(writtenChunks.filter(chunk => chunk.type === 'agent-graph-state-patch'))).not.toContain('tasklistDraft')
     })
 
+    it('warning 路径会把关键 graph 节点标记为 warning severity', async () => {
+        const { writtenChunks } = await runGraphRunnerWithEnv(
+            {
+                AI_MIND_GRAPH_EVENTS: 'on',
+            },
+            proceedPlanningOutput,
+            warningTasklist
+        )
+
+        const warningNodeIds = writtenChunks
+            .filter(
+                (chunk): chunk is Extract<ChatStreamChunk, { type: 'agent-graph-node-end' }> =>
+                    chunk.type === 'agent-graph-node-end' && chunk.severity === 'warning'
+            )
+            .map(chunk => chunk.nodeId)
+
+        expect(warningNodeIds).toEqual(expect.arrayContaining(['validateTasklistV1', 'decideWarningDisposition', 'evaluateRevisionEffect']))
+    })
+
     it('needs_review 可继续并输出人工复核点', async () => {
         mockResources(needsReviewVersionPlanContent)
 
         const { result, writtenChunks } = await runGraphRunner(manualReviewPlanningOutput, validTasklist)
 
-        expect(result.state.status).toBe('final')
-        expect(result.state.artifacts.planning.readiness?.status).toBe('needs_review')
-        expect(result.state.artifacts.planning.decision?.type).toBe('proceed_with_manual_review_items')
-        expect(result.state.artifacts.planning.manualReviewItems.some(item => item.title === 'Interface Changes 较弱')).toBe(true)
-        expect(result.state.artifacts.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
+        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.planning.readiness?.status).toBe('needs_review')
+        expect(result.graphState.planning.decision?.type).toBe('proceed_with_manual_review_items')
+        expect(result.graphState.planning.manualReviewItems.some(item => item.title === 'Interface Changes 较弱')).toBe(true)
+        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('Interface Changes 较弱'))).toBe(true)
     })
 
     it('ask_clarification 进入 stopped，不生成 draft', async () => {
         const { model, result, writtenChunks } = await runGraphRunner(askClarificationPlanningOutput)
 
-        expect(result.state.status).toBe('stopped')
+        expect(result.graphState.execution.status).toBe('stopped')
         expect(result.graphState.output?.status).toBe('stopped')
-        expect(result.state.artifacts.tasklistDraft).toBeUndefined()
+        expect(result.graphState.tasklist.draft).toBeUndefined()
         expect(model.invoke).toHaveBeenCalledTimes(1)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('请补充这个版本最核心'))).toBe(true)
     })
@@ -388,9 +403,9 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
     it('stop_with_boundary_message 进入 stopped，不生成 draft', async () => {
         const { result, writtenChunks } = await runGraphRunner(stopPlanningOutput)
 
-        expect(result.state.status).toBe('stopped')
+        expect(result.graphState.execution.status).toBe('stopped')
         expect(result.graphState.output?.status).toBe('stopped')
-        expect(result.state.artifacts.tasklistDraft).toBeUndefined()
+        expect(result.graphState.tasklist.draft).toBeUndefined()
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('当前输入不是 version plan'))).toBe(true)
     })
 
@@ -401,10 +416,10 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             validTasklist
         )
 
-        expect(result.state.status).toBe('final')
-        expect(result.state.artifacts.planning.optionalContext?.status).toBe('completed')
-        expect(result.state.artifacts.planning.strategy?.granularity).toBe('medium')
-        expect(result.state.artifacts.tasklistDraft?.version).toBe(1)
+        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.planning.optionalContext?.status).toBe('completed')
+        expect(result.graphState.planning.strategy?.granularity).toBe('medium')
+        expect(result.graphState.tasklist.draft?.version).toBe(1)
         expect(model.invoke).toHaveBeenCalledTimes(3)
         expect(writtenChunks.some(chunk => chunk.type === 'resource-end' && chunk.uri === optionalContextUri)).toBe(true)
     })
@@ -432,30 +447,30 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             validTasklist
         )
 
-        expect(result.state.status).toBe('final')
-        expect(result.state.artifacts.planning.optionalContext?.status).toBe('failed')
-        expect(result.state.artifacts.planning.manualReviewItems.some(item => item.title === '补充上下文读取失败')).toBe(true)
-        expect(result.state.artifacts.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
+        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.planning.optionalContext?.status).toBe('failed')
+        expect(result.graphState.planning.manualReviewItems.some(item => item.title === '补充上下文读取失败')).toBe(true)
+        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
         expect(writtenChunks.some(chunk => chunk.type === 'error' && chunk.scope === 'resource')).toBe(true)
     })
 
     it('只有人工复核 warning 时不触发 v2，直接完成 revision effect', async () => {
         const { result } = await runGraphRunner(proceedPlanningOutput, warningTasklist)
 
-        expect(result.state.status).toBe('final')
-        expect(result.state.counters.draftRevisions).toBe(0)
-        expect(result.state.artifacts.tasklistDraft?.version).toBe(1)
-        expect(result.state.artifacts.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
+        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.counters.draftRevisions).toBe(0)
+        expect(result.graphState.tasklist.draft?.version).toBe(1)
+        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
     })
 
     it('fixNow 时最多生成 v2、再次校验且不生成 v3', async () => {
         const { model, result, writtenChunks } = await runGraphRunner(proceedPlanningOutput, fixableWarningTasklist, validTasklist)
 
-        expect(result.state.status).toBe('final')
-        expect(result.state.counters.draftRevisions).toBe(1)
-        expect(result.state.artifacts.tasklistDraft?.version).toBe(2)
-        expect(result.state.artifacts.tasklistDraft?.validationV1?.status).toBe('warning')
-        expect(result.state.artifacts.tasklistDraft?.validationV2?.status).toBe('pass')
+        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.counters.draftRevisions).toBe(1)
+        expect(result.graphState.tasklist.draft?.version).toBe(2)
+        expect(result.graphState.tasklist.draft?.validationV1?.status).toBe('warning')
+        expect(result.graphState.tasklist.draft?.validationV2?.status).toBe('pass')
         expect(model.invoke).toHaveBeenCalledTimes(3)
         expect(writtenChunks.filter(chunk => chunk.type === 'tool-end' && chunk.toolName === 'validate_tasklist_structure')).toHaveLength(2)
     })
@@ -466,8 +481,8 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         const { model, result, writtenChunks } = await runGraphRunner(proceedPlanningOutput, validTasklist)
 
         expect(result.graphState.output?.status).toBe('failed')
-        expect(result.state.status).toBe('idle')
-        expect(result.state.artifacts.tasklistDraft).toBeUndefined()
+        expect(result.graphState.execution.status).toBe('idle')
+        expect(result.graphState.tasklist.draft).toBeUndefined()
         expect(model.invoke).not.toHaveBeenCalled()
         expect(writtenChunks.some(chunk => chunk.type === 'error' && chunk.scope === 'resource')).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('版本方案读取失败'))).toBe(true)
@@ -482,8 +497,8 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         )
 
         expect(result.graphState.output?.status).toBe('stopped')
-        expect(result.state.status).toBe('readiness_checked')
-        expect(result.state.artifacts.tasklistDraft).toBeUndefined()
+        expect(result.graphState.execution.status).toBe('readiness_checked')
+        expect(result.graphState.tasklist.draft).toBeUndefined()
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(false)
         expect(
             writtenChunks.some(
@@ -509,8 +524,8 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         )
 
         expect(result.graphState.output?.status).toBe('stopped')
-        expect(result.state.status).toBe('readiness_checked')
-        expect(result.state.artifacts.tasklistDraft).toBeUndefined()
+        expect(result.graphState.execution.status).toBe('readiness_checked')
+        expect(result.graphState.tasklist.draft).toBeUndefined()
         expect(
             writtenChunks.some(
                 chunk =>
@@ -536,9 +551,9 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         )
 
         expect(result.graphState.output?.status).toBe('stopped')
-        expect(result.state.status).toBe('optional_context_read')
-        expect(result.state.artifacts.planning.optionalContext?.status).toBe('completed')
-        expect(result.state.artifacts.tasklistDraft).toBeUndefined()
+        expect(result.graphState.execution.status).toBe('optional_context_read')
+        expect(result.graphState.planning.optionalContext?.status).toBe('completed')
+        expect(result.graphState.tasklist.draft).toBeUndefined()
         expect(
             writtenChunks.some(
                 chunk =>

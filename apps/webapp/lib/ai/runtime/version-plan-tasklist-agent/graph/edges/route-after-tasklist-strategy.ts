@@ -15,7 +15,7 @@ export function getRouteAfterTasklistStrategy(state: VersionPlanTasklistGraphSta
         }
     }
 
-    if (state.execution.status === 'strategy_decided') {
+    if (state.planning.strategy) {
         return {
             fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideTasklistStrategy,
             label: 'strategy_decided',
