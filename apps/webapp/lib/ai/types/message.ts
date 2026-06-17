@@ -75,19 +75,6 @@ export interface PromptPart extends BasePart {
 export type AgentStepStatus = 'completed' | 'failed' | 'running' | 'skipped'
 export type AgentStepSeverity = 'error' | 'info' | 'warning'
 
-export interface AgentStepEntry {
-    actionType: string
-    durationMs?: number
-    error?: string
-    partId: string
-    severity?: AgentStepSeverity
-    status: AgentStepStatus
-    stepIndex: number
-    summary?: string
-    tags?: string[]
-    title: string
-}
-
 export interface AgentGraphNodeEntry {
     durationMs?: number
     error?: string
@@ -119,10 +106,9 @@ export interface AgentGraphTrace {
 export interface AgentStepPart extends BasePart {
     type: 'agent-step'
     agentName: string
-    graph?: AgentGraphTrace
+    graph: AgentGraphTrace
     runId: string
     status: AgentStepStatus
-    steps: AgentStepEntry[]
 }
 
 export interface AgentTextArtifactViewModel {

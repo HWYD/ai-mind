@@ -70,7 +70,7 @@ export const ComposerResourceMenu = forwardRef<
 
     if (items.length === 0) {
         return (
-            <div className="relative w-[400px] rounded-2xl border border-border/80 bg-popover p-3 text-sm text-muted-foreground shadow-xl">
+            <div className="relative w-[min(80vw,400px)] rounded-2xl border border-border/80 bg-popover p-3 text-sm text-muted-foreground shadow-xl sm:w-[400px]">
                 没有匹配的资源
                 <div className="absolute bottom-[-6px] left-1/2 size-3 -translate-x-1/2 rotate-45 border-r border-b border-border/80 bg-popover" />
             </div>
@@ -78,8 +78,8 @@ export const ComposerResourceMenu = forwardRef<
     }
 
     return (
-        <div className="relative w-[420px] rounded-2xl border border-border/80 bg-popover p-2 shadow-xl shadow-black/10">
-            <div className="max-h-[420px] space-y-1 overflow-y-auto pr-1">
+        <div className="relative w-[min(80vw,420px)] rounded-2xl border border-border/80 bg-popover p-2 shadow-xl shadow-black/10 sm:w-[420px]">
+            <div className="max-h-[340px] space-y-1 overflow-y-auto pr-1 sm:max-h-[420px]">
                 {items.map((item, index) => {
                     const isSelected = index === boundedSelectedIndex
                     const Icon = item.source === 'remote' ? Server : FileText

@@ -5,9 +5,8 @@ import type { VersionPlanTasklistGraphStateAnnotationState } from './graph-state
 export type VersionPlanTasklistGraphDebugSummary = AgentGraphDebugSummary
 
 export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphDebugSummary {
-    const agentState = graphState.agentState
-    const planning = agentState.artifacts.planning
-    const tasklistDraft = agentState.artifacts.tasklistDraft
+    const { execution, planning } = graphState
+    const tasklistDraft = graphState.tasklist.draft
 
     return {
         checkpointMode: graphState.graph.checkpointMode,
@@ -17,7 +16,7 @@ export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphState
                   type: planning.decision.type,
               }
             : undefined,
-        draftRevisions: agentState.counters.draftRevisions,
+        draftRevisions: execution.counters.draftRevisions,
         lastRoute: graphState.graph.lastRoute
             ? {
                   fromNodeId: graphState.graph.lastRoute.fromNodeId,
@@ -26,15 +25,15 @@ export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphState
               }
             : undefined,
         manualReviewItemCount: planning.manualReviewItems.length,
-        maxDraftRevisions: agentState.limits.maxDraftRevisions,
-        maxOptionalContextReads: agentState.limits.maxOptionalContextReads,
-        maxSteps: agentState.limits.maxSteps,
+        maxDraftRevisions: execution.limits.maxDraftRevisions,
+        maxOptionalContextReads: execution.limits.maxOptionalContextReads,
+        maxSteps: execution.limits.maxSteps,
         optionalContext: planning.optionalContext
             ? {
                   status: planning.optionalContext.status,
               }
             : undefined,
-        optionalContextReads: agentState.counters.optionalContextReads,
+        optionalContextReads: execution.counters.optionalContextReads,
         readiness: planning.readiness
             ? {
                   status: planning.readiness.status,
@@ -45,9 +44,9 @@ export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphState
                   finalDecision: planning.revisionEffect.finalDecision,
               }
             : undefined,
-        runId: agentState.runId,
+        runId: execution.runId,
         runtimeMode: graphState.graph.runtimeMode,
-        stepCount: agentState.counters.steps,
+        stepCount: execution.counters.steps,
         strategy: planning.strategy
             ? {
                   expectedStepRange: planning.strategy.expectedStepRange,

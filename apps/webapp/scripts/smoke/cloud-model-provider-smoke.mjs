@@ -76,11 +76,13 @@ function summarizeTasklist(modelId, result) {
         .filter(chunk => chunk.type === 'artifact-delta')
         .map(chunk => chunk.delta)
         .join('')
-    const completedSteps = result.chunks.filter(chunk => chunk.type === 'agent-step-end' && chunk.status === 'completed')
     const artifactCompleted = result.chunks.some(chunk => chunk.type === 'artifact-end' && chunk.status === 'completed')
-    const completedActionTypes = completedSteps.map(step => step.actionType)
-    const validationSteps = completedSteps.filter(step => step.actionType === 'call_tool')
-    const revisionCompleted = completedActionTypes.includes('revise_tasklist')
+    const completedGraphNodes = result.chunks.filter(chunk => chunk.type === 'agent-graph-node-end' && chunk.status === 'completed')
+    const validationNodes = completedGraphNodes.filter(
+        chunk => chunk.nodeId === 'validateTasklistV1' || chunk.nodeId === 'validateTasklistV2'
+    )
+    const completedNodeIds = completedGraphNodes.map(node => node.nodeId)
+    const revisionCompleted = completedNodeIds.includes('reviseTasklistV2')
     const summary = {
         type: 'tasklist',
         modelId,
@@ -89,13 +91,13 @@ function summarizeTasklist(modelId, result) {
         errorCode: getErrorCode(result.chunks),
         artifactCompleted,
         artifactCharCount: artifactText.length,
-        completedStepCount: completedSteps.length,
-        completedActionTypes,
-        graphNodeCount: result.chunks.filter(chunk => chunk.type === 'agent-graph-node-end' && chunk.status === 'completed').length,
-        planningDecisionCompleted: completedActionTypes.includes('planning_decision'),
-        draftCompleted: completedActionTypes.includes('draft_tasklist'),
-        validationV1: validationSteps[0] ? { severity: validationSteps[0].severity, tags: validationSteps[0].tags ?? [] } : null,
-        validationV2: validationSteps[1] ? { severity: validationSteps[1].severity, tags: validationSteps[1].tags ?? [] } : null,
+        completedNodeCount: completedGraphNodes.length,
+        completedNodeIds,
+        graphNodeCount: completedGraphNodes.length,
+        planningDecisionCompleted: completedNodeIds.includes('planningDecision'),
+        draftCompleted: completedNodeIds.includes('draftTasklistV1'),
+        validationV1: validationNodes[0] ? { severity: validationNodes[0].severity, tags: validationNodes[0].tags ?? [] } : null,
+        validationV2: validationNodes[1] ? { severity: validationNodes[1].severity, tags: validationNodes[1].tags ?? [] } : null,
         revisionCompleted,
     }
 

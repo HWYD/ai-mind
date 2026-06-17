@@ -49,6 +49,12 @@ interface EmitGraphStatePatchOptions extends GraphEventBase {
     patchSummary: string
 }
 
+interface GraphNodeResultDisplay {
+    severity?: AgentStepSeverity
+    status: Exclude<AgentStepStatus, 'running'>
+    tags?: string[]
+}
+
 const GRAPH_NODE_TITLES: Record<VersionPlanTasklistGraphNodeId, string> = {
     askClarification: '输出澄清问题',
     decideTasklistStrategy: '决定任务清单策略',
@@ -74,8 +80,8 @@ export function getGraphNodeTitle(nodeId: VersionPlanTasklistGraphNodeId) {
 // 每个 graph event 都需要带上本轮 Agent 的最小定位信息；这里不返回完整 AgentState。
 function getGraphEventBase(state: VersionPlanTasklistGraphStateAnnotationState): GraphEventBase {
     return {
-        agentName: state.agentState.agentName,
-        runId: state.agentState.runId,
+        agentName: state.execution.agentName,
+        runId: state.execution.runId,
         threadId: state.threadId,
     }
 }
@@ -181,6 +187,34 @@ function getGraphUpdateSummary(update: VersionPlanTasklistGraphStateAnnotationUp
     return undefined
 }
 
+function getGraphNodeResultDisplay(update: VersionPlanTasklistGraphStateAnnotationUpdate): GraphNodeResultDisplay {
+    const output =
+        update.output && typeof update.output === 'object' && 'status' in update.output
+            ? (update.output as { status?: 'failed' | 'final' | 'stopped' })
+            : undefined
+    const outputStatus = output?.status
+
+    if (outputStatus === 'failed') {
+        return {
+            severity: 'error',
+            status: 'failed',
+        }
+    }
+
+    if (outputStatus === 'stopped') {
+        return {
+            severity: 'warning',
+            status: 'completed',
+            tags: ['status: stopped'],
+        }
+    }
+
+    return {
+        severity: 'info',
+        status: 'completed',
+    }
+}
+
 // 给 graph node 套一层事件包装：
 // - events 关闭时直接返回原 node，保证 graph runner 行为不变。
 // - events 开启时发送 node start/end、route 和 state patch summary。
@@ -211,6 +245,7 @@ export function withGraphNodeEvents(
             const update = await node(state)
             const graphUpdate = getGraphRuntimeUpdate(update)
             const summary = getGraphUpdateSummary(update, nodeId)
+            const resultDisplay = getGraphNodeResultDisplay(update)
 
             for (const statePatch of graphUpdate?.statePatchSummaries ?? []) {
                 emitGraphStatePatch(runtime.writeChunk, {
@@ -232,9 +267,10 @@ export function withGraphNodeEvents(
                 durationMs: Date.now() - startedAt,
                 nodeId,
                 partId: nodePartId,
-                severity: 'info',
-                status: 'completed',
+                severity: resultDisplay.severity,
+                status: resultDisplay.status,
                 summary,
+                tags: resultDisplay.tags,
             })
 
             return update

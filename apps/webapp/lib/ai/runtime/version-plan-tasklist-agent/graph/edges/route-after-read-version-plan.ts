@@ -15,7 +15,7 @@ export function getRouteAfterReadVersionPlan(state: VersionPlanTasklistGraphStat
         }
     }
 
-    if (state.agentState.status === 'plan_read') {
+    if (state.execution.status === 'plan_read') {
         return {
             fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.readVersionPlan,
             label: 'read_succeeded',

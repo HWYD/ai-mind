@@ -18,14 +18,7 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type {
-    AgentGraphNodeEntry,
-    AgentGraphRouteEntry,
-    AgentGraphTrace,
-    AgentStepEntry,
-    AgentStepPart,
-    SkillPart,
-} from '@/lib/ai/types/message'
+import type { AgentGraphNodeEntry, AgentGraphRouteEntry, AgentGraphTrace, AgentStepPart, SkillPart } from '@/lib/ai/types/message'
 import { cn } from '@/lib/utils'
 
 import {
@@ -34,33 +27,9 @@ import {
     getAgentTraceStatusValueLabel,
     getAgentTraceTagClassName,
     getAgentTraceTagLabel,
-    getStepClassName,
-    getStepDisplaySummary,
     localizeAgentTraceText,
 } from './agent-trace-formatters'
-import {
-    type AgentDetailPart,
-    buildGraphNodeInlineDetails,
-    buildStepInlineDetails,
-    type StepInlineDetail,
-} from './agent-trace-inline-details'
-
-function getStepStatusIcon(step: AgentStepEntry) {
-    switch (step.status) {
-        case 'failed':
-            return <XCircle className="size-4 text-rose-500" strokeWidth={2.2} />
-        case 'running':
-            return <LoaderCircle className="size-4 animate-spin text-sky-500" strokeWidth={2.2} />
-        case 'skipped':
-            return <CircleDashed className="size-4 text-muted-foreground" strokeWidth={2.2} />
-        case 'completed':
-            return step.severity === 'warning' ? (
-                <TriangleAlert className="size-4 text-amber-500" strokeWidth={2.2} />
-            ) : (
-                <CheckCircle2 className="size-4 text-emerald-500" strokeWidth={2.2} />
-            )
-    }
-}
+import { type AgentDetailPart, buildGraphNodeInlineDetails, type StepInlineDetail } from './agent-trace-inline-details'
 
 function getGraphNodeStatusIcon(node: AgentGraphNodeEntry) {
     switch (node.status) {
@@ -127,68 +96,6 @@ function getGraphRevisionCount(graph?: AgentGraphTrace) {
 
 function getGraphRouteKey(route: AgentGraphRouteEntry) {
     return `${route.fromNodeId}:${route.routeLabel}:${route.toNodeId}:${route.reason ?? ''}`
-}
-
-function isLegacyStepForGraphNode(node: AgentGraphNodeEntry, step: AgentStepEntry) {
-    switch (node.nodeId) {
-        case 'readVersionPlan':
-            return step.actionType === 'read_resource' && step.title.includes('版本方案')
-        case 'evaluatePlanReadiness':
-            return step.actionType === 'check_plan_readiness'
-        case 'planningDecision':
-            return step.actionType === 'planning_decision'
-        case 'readOptionalContext':
-            return step.actionType === 'read_resource' && step.title.includes('补充上下文')
-        case 'decideTasklistStrategy':
-            return step.actionType === 'decide_tasklist_strategy'
-        case 'draftTasklistV1':
-            return step.actionType === 'draft_tasklist'
-        case 'validateTasklistV1':
-            return step.actionType === 'call_tool' && step.title.includes('v1')
-        case 'decideWarningDisposition':
-            return step.actionType === 'decide_warning_disposition'
-        case 'reviseTasklistV2':
-            return step.actionType === 'revise_tasklist'
-        case 'validateTasklistV2':
-            return step.actionType === 'call_tool' && step.title.includes('v2')
-        case 'evaluateRevisionEffect':
-            return step.actionType === 'evaluate_revision_effect'
-        case 'emitFinalArtifact':
-            return step.actionType === 'final_answer'
-        case 'askClarification':
-        case 'stopWithBoundaryMessage':
-            return step.actionType === 'planning_decision'
-        default:
-            return false
-    }
-}
-
-function buildGraphNodeLegacySteps(nodes: AgentGraphNodeEntry[], steps: AgentStepEntry[]) {
-    const usedStepIds = new Set<string>()
-    const legacyStepsByNodeId = new Map<string, AgentStepEntry>()
-
-    for (const node of nodes) {
-        const legacyStep = steps.find(step => !usedStepIds.has(step.partId) && isLegacyStepForGraphNode(node, step))
-
-        if (legacyStep) {
-            usedStepIds.add(legacyStep.partId)
-            legacyStepsByNodeId.set(node.nodeId, legacyStep)
-        }
-    }
-
-    return legacyStepsByNodeId
-}
-
-function getGraphNodeDisplaySeverity(node: AgentGraphNodeEntry, legacyStep?: AgentStepEntry) {
-    if (node.severity === 'error' || node.severity === 'warning') {
-        return node.severity
-    }
-
-    return legacyStep?.severity ?? node.severity
-}
-
-function getGraphNodeDisplayTags(node: AgentGraphNodeEntry, legacyStep?: AgentStepEntry) {
-    return node.tags?.length ? node.tags : legacyStep?.tags
 }
 
 function getVisibleGraphPatchSummaries(node: AgentGraphNodeEntry, displaySummary?: string) {
@@ -358,20 +265,16 @@ function renderGraphDebugSummary(summary: GraphDebugSummary) {
 export function AgentTracePanel({ detailParts = [], part }: { detailParts?: AgentDetailPart[]; part: AgentStepPart }) {
     const [isExpanded, setIsExpanded] = useState(true)
     const [isDebugExpanded, setIsDebugExpanded] = useState(false)
-    const graphDebugSummary = part.graph?.debugSummary
-    const hasGraphTimeline = Boolean(part.graph && (part.graph.nodes.length > 0 || part.graph.routes.length > 0))
-    const hasGraph = Boolean(part.graph && (hasGraphTimeline || graphDebugSummary))
-    const showLegacyStepTimeline = !hasGraphTimeline && part.steps.length > 0
-    const revisionCount = Math.max(
-        part.steps.filter(step => step.actionType === 'revise_tasklist').length,
-        getGraphRevisionCount(part.graph)
-    )
+    const graphDebugSummary = part.graph.debugSummary
+    const hasGraphTimeline = part.graph.nodes.length > 0 || part.graph.routes.length > 0
+    const hasGraph = hasGraphTimeline || Boolean(graphDebugSummary)
+    const revisionCount = getGraphRevisionCount(part.graph)
     const skillBadge = detailParts.find((detailPart): detailPart is SkillPart => detailPart.type === 'skill')?.skillId
-    const stepInlineDetails = buildStepInlineDetails(part.steps, detailParts)
-    const graphNodeInlineDetails = part.graph
-        ? buildGraphNodeInlineDetails(part.graph.nodes, detailParts)
-        : new Map<string, StepInlineDetail[]>()
-    const graphNodeLegacySteps = part.graph ? buildGraphNodeLegacySteps(part.graph.nodes, part.steps) : new Map<string, AgentStepEntry>()
+    const graphNodeInlineDetails = buildGraphNodeInlineDetails(part.graph.nodes, detailParts)
+
+    if (!hasGraph) {
+        return null
+    }
 
     return (
         <Card size="sm" className="mb-3 overflow-hidden border-border/60 shadow-sm">
@@ -382,17 +285,13 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
                             <Bot className="size-[18px]" strokeWidth={2.2} />
                         </span>
                         <div className="min-w-0">
-                            <CardTitle className="text-base">{hasGraph ? 'Agent Graph 执行过程' : 'Agent 执行过程'}</CardTitle>
+                            <CardTitle className="text-base">Agent Graph 执行过程</CardTitle>
                             <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                 <span>版本方案转任务清单</span>
-                                {hasGraph ? (
-                                    <>
-                                        <span>·</span>
-                                        <Badge variant="outline" className="h-5 rounded-full bg-sky-50 px-2 text-[0.68rem] text-sky-700">
-                                            LangGraph
-                                        </Badge>
-                                    </>
-                                ) : null}
+                                <span>·</span>
+                                <Badge variant="outline" className="h-5 rounded-full bg-sky-50 px-2 text-[0.68rem] text-sky-700">
+                                    LangGraph
+                                </Badge>
                                 {skillBadge ? (
                                     <>
                                         <span>·</span>
@@ -404,7 +303,7 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
                                 <span>·</span>
                                 <span>{getAgentStatusLabel(part.status)}</span>
                                 <span>·</span>
-                                <span>{hasGraphTimeline ? `${part.graph?.nodes.length ?? 0} 个节点` : `${part.steps.length} 步`}</span>
+                                <span>{`${part.graph?.nodes.length ?? 0} 个节点`}</span>
                                 <span>·</span>
                                 <span>修正 {revisionCount} 次</span>
                             </div>
@@ -426,20 +325,14 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
 
             {isExpanded ? (
                 <CardContent className="pt-4">
-                    {hasGraphTimeline && part.graph ? (
+                    {hasGraphTimeline ? (
                         <div className="space-y-3">
                             <div className="relative space-y-1.5 before:absolute before:top-4 before:bottom-4 before:left-4 before:w-px before:bg-border">
                                 {part.graph.nodes.map(node => {
-                                    const legacyStep = graphNodeLegacySteps.get(node.nodeId)
-                                    const displayNode = {
-                                        ...node,
-                                        severity: getGraphNodeDisplaySeverity(node, legacyStep),
-                                        tags: getGraphNodeDisplayTags(node, legacyStep),
-                                    }
                                     const duration = formatDuration(node.durationMs)
                                     const displayError = localizeAgentTraceText(node.error)
                                     const displaySummary = localizeAgentTraceText(node.summary)
-                                    const visibleTags = displayNode.tags?.slice(0, 3) ?? []
+                                    const visibleTags = node.tags?.slice(0, 3) ?? []
                                     const visiblePatchSummaries = getVisibleGraphPatchSummaries(node, displaySummary)
                                     const inlineDetails = graphNodeInlineDetails.get(node.nodeId) ?? []
                                     const nodeRoutes = getGraphNodeRoutes(part.graph, node.nodeId)
@@ -449,11 +342,11 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
                                             key={node.nodeId}
                                             className={cn(
                                                 'relative grid grid-cols-[2rem_1fr] gap-3 rounded-xl border p-3',
-                                                getGraphNodeClassName(displayNode)
+                                                getGraphNodeClassName(node)
                                             )}
                                         >
                                             <div className="relative z-10 mt-0.5 grid size-8 place-items-center rounded-full bg-background shadow-xs ring-1 ring-border">
-                                                {getGraphNodeStatusIcon(displayNode)}
+                                                {getGraphNodeStatusIcon(node)}
                                             </div>
 
                                             <div className="min-w-0">
@@ -550,66 +443,6 @@ export function AgentTracePanel({ detailParts = [], part }: { detailParts?: Agen
                                     )
                                 })}
                             </div>
-                        </div>
-                    ) : null}
-
-                    {showLegacyStepTimeline ? (
-                        <div className="relative space-y-1.5 before:absolute before:top-4 before:bottom-4 before:left-4 before:w-px before:bg-border">
-                            {part.steps.map(step => {
-                                const duration = formatDuration(step.durationMs)
-                                const displayError = localizeAgentTraceText(step.error)
-                                const displaySummary = getStepDisplaySummary(step)
-                                const displayTitle = localizeAgentTraceText(step.title) ?? step.title
-                                const visibleTags = step.tags?.slice(0, 3) ?? []
-                                const inlineDetails = stepInlineDetails.get(step.stepIndex) ?? []
-
-                                return (
-                                    <div
-                                        key={step.partId}
-                                        className={cn(
-                                            'relative grid grid-cols-[2rem_1fr] gap-3 rounded-xl border p-3',
-                                            getStepClassName(step)
-                                        )}
-                                    >
-                                        <div className="relative z-10 mt-0.5 grid size-8 place-items-center rounded-full bg-background shadow-xs ring-1 ring-border">
-                                            {getStepStatusIcon(step)}
-                                        </div>
-
-                                        <div className="min-w-0">
-                                            <div className="flex flex-wrap items-start justify-between gap-2">
-                                                <div className="flex min-w-0 items-center gap-2">
-                                                    <Badge variant="secondary" className="size-6 rounded-full px-0 text-xs">
-                                                        {step.stepIndex}
-                                                    </Badge>
-                                                    <h4 className="truncate text-sm font-semibold text-foreground">{displayTitle}</h4>
-                                                </div>
-                                                {duration ? <span className="text-xs text-muted-foreground">{duration}</span> : null}
-                                            </div>
-
-                                            {displaySummary ? (
-                                                <p className="mt-1 text-sm leading-6 text-muted-foreground">{displaySummary}</p>
-                                            ) : null}
-                                            {displayError ? <p className="mt-1 text-sm leading-6 text-rose-600">{displayError}</p> : null}
-
-                                            {visibleTags.length > 0 ? (
-                                                <div className="mt-2 flex flex-wrap gap-2">
-                                                    {visibleTags.map(tag => (
-                                                        <Badge
-                                                            key={`${step.partId}:${tag}`}
-                                                            variant="outline"
-                                                            className={getAgentTraceTagClassName(tag)}
-                                                        >
-                                                            {getAgentTraceTagLabel(tag)}
-                                                        </Badge>
-                                                    ))}
-                                                </div>
-                                            ) : null}
-
-                                            {renderInlineDetails(step.partId, inlineDetails)}
-                                        </div>
-                                    </div>
-                                )
-                            })}
                         </div>
                     ) : null}
 

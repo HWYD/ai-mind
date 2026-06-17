@@ -17,7 +17,7 @@ function getAssistantMessage(state: StreamMessageState) {
 }
 
 describe('stream-message-reducer', () => {
-    it('按 chunk 顺序聚合 text 与 tool part', () => {
+    it('按 chunk 顺序聚合 text 和 tool part', () => {
         let state = reduceChunks([
             { type: 'start', messageId: 'assistant-1' },
             { type: 'text-start', partId: 'text-1' },
@@ -66,7 +66,7 @@ describe('stream-message-reducer', () => {
                 type: 'error',
                 errorCode: 'TOOL_EXECUTION_FAILED',
                 input: 'value=1, from=kg, to=m',
-                message: '单位类型不兼容',
+                message: '单位类型不兼容。',
                 partId: 'tool-1',
                 retryable: false,
                 scope: 'tool',
@@ -77,7 +77,7 @@ describe('stream-message-reducer', () => {
         const toolPart = getAssistantMessage(state)?.parts.find(part => part.type === 'tool')
 
         expect(toolPart).toMatchObject({
-            error: '单位类型不兼容',
+            error: '单位类型不兼容。',
             status: 'failed',
             type: 'tool',
         })
@@ -192,7 +192,6 @@ describe('stream-message-reducer', () => {
             },
             runId: 'run-graph',
             status: 'completed',
-            steps: [],
             type: 'agent-step',
         })
     })
@@ -283,15 +282,6 @@ describe('stream-message-reducer', () => {
         const state = reduceChunks([
             { type: 'start', messageId: 'assistant-graph-debug' },
             {
-                actionType: 'planning_decision',
-                agentName: 'version-plan-to-tasklist-agent',
-                partId: 'legacy-decision',
-                runId: 'run-graph',
-                stepIndex: 1,
-                title: '执行 Planning Decision',
-                type: 'agent-step-start',
-            },
-            {
                 agentName: 'version-plan-to-tasklist-agent',
                 partId: 'graph-debug-summary',
                 runId: 'run-graph',
@@ -347,12 +337,6 @@ describe('stream-message-reducer', () => {
                 routes: [],
                 runtime: 'LangGraph',
             },
-            steps: [
-                {
-                    partId: 'legacy-decision',
-                    status: 'running',
-                },
-            ],
         })
     })
 })

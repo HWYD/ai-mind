@@ -26,10 +26,9 @@ import type {
 } from './types'
 import {
     createVersionPlanTasklistAgentSkeleton,
+    getTasklistAgentRuntimeConfig,
     resolveVersionPlanTasklistAgentInvocation,
-    runLegacyVersionPlanTasklistAgentRuntime,
     runVersionPlanTasklistGraph,
-    selectTasklistAgentRuntime,
 } from './version-plan-tasklist-agent'
 
 interface ChatOrchestratorOptions {
@@ -426,33 +425,20 @@ export class ChatOrchestrator {
             versionPlanUri: skeletonResult.state.versionPlanReference.uri,
         })
 
-        const runtimeSelection = selectTasklistAgentRuntime(agentInvocation)
+        const runtimeConfig = getTasklistAgentRuntimeConfig()
         const userGoal = getLastUserMessageText(this.request)
 
         logSkillRuntime('version-plan-tasklist-agent-runtime-selected', {
-            graphCheckpointMode: runtimeSelection?.config.graphCheckpointMode ?? 'off',
-            graphDebugViewEnabled: runtimeSelection?.config.graphDebugViewEnabled ?? false,
-            graphEventsEnabled: runtimeSelection?.config.graphEventsEnabled ?? false,
-            runtimeMode: runtimeSelection?.runtimeMode ?? 'legacy',
+            graphCheckpointMode: runtimeConfig.graphCheckpointMode,
+            graphDebugViewEnabled: runtimeConfig.graphDebugViewEnabled,
+            graphEventsEnabled: runtimeConfig.graphEventsEnabled,
         })
 
-        if (runtimeSelection?.runtimeMode === 'graph') {
-            await runVersionPlanTasklistGraph({
-                context: this.context,
-                conversationId: this.request.conversationId,
-                model: session.baseModel,
-                runtimeConfig: runtimeSelection.config,
-                skeletonState: skeletonResult.state,
-                userGoal,
-                writeChunk: this.writeChunk,
-            })
-
-            return true
-        }
-
-        await runLegacyVersionPlanTasklistAgentRuntime({
+        await runVersionPlanTasklistGraph({
             context: this.context,
+            conversationId: this.request.conversationId,
             model: session.baseModel,
+            runtimeConfig,
             skeletonState: skeletonResult.state,
             userGoal,
             writeChunk: this.writeChunk,

@@ -4,7 +4,6 @@ import type { WriteChunk } from '../../types'
 import type { PlanningDecisionAction, RevisionEffectResult, VersionPlanTasklistAgentState } from '../contract/types'
 import { isControlledPlannerOutputError } from '../planner/planning-decision'
 import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
-import { endAgentStep, getNextStepIndex, startAgentStep } from './tasklist-agent-step-stream'
 
 export function getRevisionFinalDecisionLabel(finalDecision: RevisionEffectResult['finalDecision']) {
     const labels: Record<RevisionEffectResult['finalDecision'], string> = {
@@ -102,14 +101,6 @@ function buildFinalAnswerSummary(state: VersionPlanTasklistAgentState) {
 }
 
 export function runFinalAnswerStep(options: { state: VersionPlanTasklistAgentState; writeChunk: WriteChunk }) {
-    const stepIndex = getNextStepIndex(options.state)
-    const step = startAgentStep({
-        actionType: 'final_answer',
-        state: options.state,
-        stepIndex,
-        title: '输出最终回答',
-        writeChunk: options.writeChunk,
-    })
     const draft = options.state.artifacts.tasklistDraft
     const validationResult = draft?.validationV2 ?? draft?.validationV1
     const answer = buildFinalAnswerSummary(options.state)
@@ -134,7 +125,6 @@ export function runFinalAnswerStep(options: { state: VersionPlanTasklistAgentSta
                 targetVersion: draft.targetVersion,
                 validated: true,
             },
-            sourceStepId: step.partId,
             title: `${draft.targetVersion && draft.targetVersion !== 'unknown' ? `${draft.targetVersion} ` : ''}任务清单草稿`,
         })
     } catch (error) {
@@ -151,34 +141,10 @@ export function runFinalAnswerStep(options: { state: VersionPlanTasklistAgentSta
         } catch {
             // 如果底层 writer 已经不可写，保持原始错误向上抛出。
         }
-
-        endAgentStep({
-            actionType: 'final_answer',
-            durationStartedAt: step.startedAt,
-            error: error instanceof Error ? error.message : '任务清单产物输出失败。',
-            partId: step.partId,
-            severity: 'error',
-            state: finalState,
-            status: 'failed',
-            stepIndex,
-            title: '输出最终回答',
-            writeChunk: options.writeChunk,
-        })
         throw error
     }
 
     writeStaticTextPart(options.writeChunk, answer)
-    endAgentStep({
-        actionType: 'final_answer',
-        durationStartedAt: step.startedAt,
-        partId: step.partId,
-        state: finalState,
-        stepIndex,
-        summary: `已输出任务清单草稿 v${finalState.artifacts.tasklistDraft?.version ?? 1} 产物和结构校验结论。`,
-        tags: [`revision: ${finalState.counters.draftRevisions}`],
-        title: '输出最终回答',
-        writeChunk: options.writeChunk,
-    })
 
     return finalState
 }

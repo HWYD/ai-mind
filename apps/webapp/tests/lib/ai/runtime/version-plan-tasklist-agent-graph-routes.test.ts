@@ -1,7 +1,11 @@
 import { END } from '@langchain/langgraph'
 import { describe, expect, it } from 'vitest'
 
-import type { PlanningDecisionAction, WarningDisposition } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/types'
+import type {
+    PlanningDecisionAction,
+    VersionPlanTasklistPlanningArtifacts,
+    WarningDisposition,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/types'
 import {
     getRouteAfterPlanningDecision,
     routeAfterPlanningDecision,
@@ -20,6 +24,7 @@ import {
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/edges/route-after-warning-disposition'
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-node-ids'
 import {
+    createGraphStateUpdateFromAgentState,
     createInitialVersionPlanTasklistGraphRuntimeState,
     type VersionPlanTasklistGraphStateAnnotationState,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
@@ -35,22 +40,21 @@ const versionPlanReference = {
     uri: planUri,
 } as const
 
-function createGraphState(
-    planning: VersionPlanTasklistGraphStateAnnotationState['agentState']['artifacts']['planning']
-): VersionPlanTasklistGraphStateAnnotationState {
+function createGraphState(planning: VersionPlanTasklistPlanningArtifacts): VersionPlanTasklistGraphStateAnnotationState {
     const agentState = createInitialVersionPlanTasklistAgentState({
         runId: 'run-route-test',
         versionPlanReference,
     })
+    const statePatch = createGraphStateUpdateFromAgentState({
+        ...agentState,
+        artifacts: {
+            ...agentState.artifacts,
+            planning,
+        },
+    })
 
     return {
-        agentState: {
-            ...agentState,
-            artifacts: {
-                ...agentState.artifacts,
-                planning,
-            },
-        },
+        ...statePatch,
         graph: createInitialVersionPlanTasklistGraphRuntimeState(),
         input: {
             planUri,
@@ -68,8 +72,8 @@ describe('runtime/version-plan-tasklist-agent graph read version plan route', ()
         })
         const state = {
             ...baseState,
-            agentState: {
-                ...baseState.agentState,
+            execution: {
+                ...baseState.execution,
                 status: 'plan_read' as const,
             },
         }
@@ -225,8 +229,8 @@ describe('runtime/version-plan-tasklist-agent graph tasklist strategy routes', (
         })
         const state = {
             ...baseState,
-            agentState: {
-                ...baseState.agentState,
+            execution: {
+                ...baseState.execution,
                 status: 'strategy_decided' as const,
             },
         }

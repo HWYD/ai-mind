@@ -1,4 +1,4 @@
-import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
+﻿import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatSession } from '@/lib/ai/runtime/types'
@@ -8,6 +8,7 @@ import {
     emitGraphNodeStart,
     emitGraphRoute,
     emitGraphStatePatch,
+    type GraphNodeHandler,
     withGraphNodeEvents,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-events'
 import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-node-ids'
@@ -33,7 +34,6 @@ function createGraphState() {
         runtimeConfig: getTasklistAgentRuntimeConfig(
             {
                 AI_MIND_GRAPH_EVENTS: 'on',
-                AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
             },
             'development'
         ),
@@ -105,7 +105,6 @@ describe('runtime/version-plan-tasklist-agent graph events', () => {
             runtimeConfig: getTasklistAgentRuntimeConfig(
                 {
                     AI_MIND_GRAPH_EVENTS: 'on',
-                    AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
                 },
                 'development'
             ),
@@ -127,6 +126,55 @@ describe('runtime/version-plan-tasklist-agent graph events', () => {
             error: 'first line second line with stack-like detail',
             severity: 'error',
             status: 'failed',
+            type: 'agent-graph-node-end',
+        })
+    })
+
+    it('emits warning completed node end when node returns a controlled stopped output', async () => {
+        const chunks: ChatStreamChunk[] = []
+        const runtime = {
+            context: {},
+            model: { invoke: vi.fn() } as unknown as ChatSession['baseModel'],
+            runtimeConfig: getTasklistAgentRuntimeConfig(
+                {
+                    AI_MIND_GRAPH_EVENTS: 'on',
+                },
+                'development'
+            ),
+            userGoal: '生成 tasklist',
+            writeChunk: (chunk: ChatStreamChunk) => chunks.push(chunk),
+        }
+        const node: GraphNodeHandler = () => ({
+            graph: {
+                currentNode: 'planningDecision',
+                statePatchSummaries: [
+                    {
+                        nodeId: 'planningDecision',
+                        summary: '规划决策输出不符合受控 JSON schema，本轮已安全停止。',
+                    },
+                ],
+                visitedNodes: ['planningDecision'],
+            },
+            output: {
+                status: 'stopped',
+                textSummary: '规划决策输出不符合受控 JSON schema，本轮已安全停止。',
+            },
+        })
+
+        await withGraphNodeEvents(
+            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.planningDecision,
+            node,
+            runtime
+        )({
+            ...createGraphState(),
+            output: undefined,
+        })
+
+        expect(chunks.map(chunk => chunk.type)).toEqual(['agent-graph-node-start', 'agent-graph-state-patch', 'agent-graph-node-end'])
+        expect(chunks[2]).toMatchObject({
+            severity: 'warning',
+            status: 'completed',
+            tags: ['status: stopped'],
             type: 'agent-graph-node-end',
         })
     })

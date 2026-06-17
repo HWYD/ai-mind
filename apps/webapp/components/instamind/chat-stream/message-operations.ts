@@ -4,7 +4,6 @@ import type {
     AgentGraphNodeEntry,
     AgentGraphRouteEntry,
     AgentGraphTrace,
-    AgentStepEntry,
     AgentStepPart,
     AgentTextArtifactViewModel,
     MindMessage,
@@ -15,7 +14,7 @@ import type {
     ToolPart,
 } from '@/lib/ai/types/message'
 
-import { createAgentGraphStepPart, createAgentStepPart, createReasoningPart, createTextPart } from './message-factory'
+import { createAgentGraphStepPart, createReasoningPart, createTextPart } from './message-factory'
 
 export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
     return messages.filter(message => {
@@ -261,36 +260,20 @@ export function updatePromptPart(
 
 type AgentGraphNodeUpdate = Partial<Omit<AgentGraphNodeEntry, 'nodeId'>> & Pick<AgentGraphNodeEntry, 'nodeId'>
 
-function getAgentStepPartStatus(steps: AgentStepEntry[], graph?: AgentGraphTrace): AgentStepPart['status'] {
-    const graphNodes = graph?.nodes ?? []
-
-    if (steps.some(step => step.status === 'running') || graphNodes.some(node => node.status === 'running')) {
+function getAgentStepPartStatus(graph: AgentGraphTrace): AgentStepPart['status'] {
+    if (graph.nodes.some(node => node.status === 'running')) {
         return 'running'
     }
 
-    if (steps.some(step => step.status === 'failed') || graphNodes.some(node => node.status === 'failed')) {
+    if (graph.nodes.some(node => node.status === 'failed')) {
         return 'failed'
     }
 
-    if (steps.length > 0 && steps.every(step => step.status === 'skipped')) {
-        return 'skipped'
-    }
-
-    if (steps.length === 0 && graphNodes.length > 0 && graphNodes.every(node => node.status === 'skipped')) {
+    if (graph.nodes.length > 0 && graph.nodes.every(node => node.status === 'skipped')) {
         return 'skipped'
     }
 
     return 'completed'
-}
-
-function upsertAgentStep(steps: AgentStepEntry[], entry: AgentStepEntry) {
-    const existingIndex = steps.findIndex(step => step.partId === entry.partId)
-
-    if (existingIndex === -1) {
-        return [...steps, entry].sort((left, right) => left.stepIndex - right.stepIndex)
-    }
-
-    return steps.map(step => (step.partId === entry.partId ? { ...step, ...entry } : step))
 }
 
 function createGraphNodeFromUpdate(update: AgentGraphNodeUpdate, fallbackStepIndex: number): AgentGraphNodeEntry {
@@ -333,10 +316,6 @@ function upsertAgentGraphNode(nodes: AgentGraphNodeEntry[], update: AgentGraphNo
     })
 }
 
-function getAgentGraphTrace(part: AgentStepPart | undefined): AgentGraphTrace {
-    return part?.graph ?? { nodes: [], routes: [], runtime: 'LangGraph' }
-}
-
 function appendAgentGraphRoute(routes: AgentGraphRouteEntry[], route: AgentGraphRouteEntry) {
     const routeExists = routes.some(
         existingRoute =>
@@ -347,47 +326,6 @@ function appendAgentGraphRoute(routes: AgentGraphRouteEntry[], route: AgentGraph
     )
 
     return routeExists ? routes : [...routes, route]
-}
-
-export function upsertAgentStepPart(
-    messages: MindMessage[],
-    messageId: string,
-    entry: AgentStepEntry,
-    runId: string,
-    agentName: string
-): MindMessage[] {
-    return messages.map(message => {
-        if (message.id !== messageId) {
-            return message
-        }
-
-        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
-
-        if (!existingPart) {
-            return {
-                ...message,
-                parts: [...message.parts, createAgentStepPart(entry, runId, agentName)],
-            }
-        }
-
-        const nextSteps = upsertAgentStep(existingPart.steps, entry)
-
-        return {
-            ...message,
-            parts: message.parts.map(part => {
-                if (part.type !== 'agent-step' || part.runId !== runId) {
-                    return part
-                }
-
-                return {
-                    ...part,
-                    agentName,
-                    status: getAgentStepPartStatus(nextSteps, part.graph),
-                    steps: nextSteps,
-                }
-            }),
-        }
-    })
 }
 
 export function upsertAgentGraphNodePart(
@@ -411,10 +349,9 @@ export function upsertAgentGraphNodePart(
             }
         }
 
-        const graph = getAgentGraphTrace(existingPart)
         const nextGraph = {
-            ...graph,
-            nodes: upsertAgentGraphNode(graph.nodes, node),
+            ...existingPart.graph,
+            nodes: upsertAgentGraphNode(existingPart.graph.nodes, node),
         }
 
         return {
@@ -428,7 +365,7 @@ export function upsertAgentGraphNodePart(
                     ...part,
                     agentName,
                     graph: nextGraph,
-                    status: getAgentStepPartStatus(part.steps, nextGraph),
+                    status: getAgentStepPartStatus(nextGraph),
                 }
             }),
         }
@@ -465,16 +402,14 @@ export function appendAgentGraphRoutePart(
                             runtime: 'LangGraph',
                         },
                         status: 'completed',
-                        steps: [],
                     },
                 ],
             }
         }
 
-        const graph = getAgentGraphTrace(existingPart)
         const nextGraph = {
-            ...graph,
-            routes: appendAgentGraphRoute(graph.routes, route),
+            ...existingPart.graph,
+            routes: appendAgentGraphRoute(existingPart.graph.routes, route),
         }
 
         return {
@@ -488,7 +423,7 @@ export function appendAgentGraphRoutePart(
                     ...part,
                     agentName,
                     graph: nextGraph,
-                    status: getAgentStepPartStatus(part.steps, nextGraph),
+                    status: getAgentStepPartStatus(nextGraph),
                 }
             }),
         }
@@ -526,15 +461,13 @@ export function upsertAgentGraphDebugSummaryPart(
                             runtime: 'LangGraph',
                         },
                         status: 'completed',
-                        steps: [],
                     },
                 ],
             }
         }
 
-        const graph = getAgentGraphTrace(existingPart)
         const nextGraph = {
-            ...graph,
+            ...existingPart.graph,
             debugSummary: summary,
         }
 
@@ -549,7 +482,7 @@ export function upsertAgentGraphDebugSummaryPart(
                     ...part,
                     agentName,
                     graph: nextGraph,
-                    status: getAgentStepPartStatus(part.steps, nextGraph),
+                    status: getAgentStepPartStatus(nextGraph),
                 }
             }),
         }

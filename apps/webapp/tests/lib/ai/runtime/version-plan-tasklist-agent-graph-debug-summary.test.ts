@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import type { VersionPlanTasklistAgentState } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/types'
@@ -125,7 +125,6 @@ function createGraphState() {
             runtimeConfig: getTasklistAgentRuntimeConfig(
                 {
                     AI_MIND_GRAPH_CHECKPOINT: 'memory',
-                    AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
                 },
                 'development'
             ),

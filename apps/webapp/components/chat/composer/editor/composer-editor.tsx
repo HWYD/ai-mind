@@ -8,7 +8,7 @@ import { type Editor, EditorContent, type JSONContent, ReactRenderer, useEditor 
 import StarterKit from '@tiptap/starter-kit'
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from '@tiptap/suggestion'
 import { useEffect, useRef } from 'react'
-import tippy, { type Instance as TippyInstance } from 'tippy.js'
+import tippy, { type Instance as TippyInstance, type Props as TippyProps } from 'tippy.js'
 
 import type { ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
@@ -40,6 +40,14 @@ interface SuggestionPluginState {
     active?: boolean
 }
 
+function isMobileComposerViewport() {
+    return typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+}
+
+function getComposerSuggestionOffset(): [number, number] {
+    return isMobileComposerViewport() ? [0, 8] : [0, 12]
+}
+
 function getPlainTextFromView(view: EditorView) {
     return getPlainTextFromContent(view.state.doc.toJSON())
 }
@@ -57,6 +65,47 @@ function isComposerSuggestionActive(state: EditorState) {
 
 function getFallbackClientRect() {
     return new DOMRect(0, 0, 0, 0)
+}
+
+function getComposerSuggestionReferenceRect<T>(props: SuggestionProps<T>) {
+    if (!isMobileComposerViewport()) {
+        return props.clientRect?.() ?? getFallbackClientRect()
+    }
+
+    const composerRoot =
+        props.editor.view.dom.closest('.ai-composer-editor') ?? props.editor.view.dom.parentElement ?? props.editor.view.dom
+
+    return composerRoot.getBoundingClientRect()
+}
+
+function createComposerSuggestionPopupOptions<T>(props: SuggestionProps<T>, content: HTMLElement): Partial<TippyProps> {
+    const mobile = isMobileComposerViewport()
+
+    return {
+        appendTo: () => document.body,
+        arrow: false,
+        content,
+        duration: 100,
+        getReferenceClientRect: () => getComposerSuggestionReferenceRect(props),
+        interactive: true,
+        maxWidth: 'none' as const,
+        offset: getComposerSuggestionOffset(),
+        placement: mobile ? ('top' as const) : ('top-start' as const),
+        popperOptions: {
+            modifiers: [
+                {
+                    name: 'flip',
+                    options: {
+                        fallbackPlacements: mobile ? [] : ['bottom-start', 'top-end'],
+                    },
+                },
+            ],
+            strategy: mobile ? ('fixed' as const) : ('absolute' as const),
+        },
+        showOnCreate: true,
+        trigger: 'manual' as const,
+        zIndex: 80,
+    }
 }
 
 // 触发字符前缀规则用于避免普通路径、URL 中的 / 被误识别成命令入口。
@@ -151,25 +200,25 @@ function createSlashCommandExtension() {
                                     props,
                                 })
 
-                                popup = tippy(document.body, {
-                                    appendTo: () => document.body,
-                                    arrow: false,
-                                    content: component.element,
-                                    duration: 100,
-                                    getReferenceClientRect: () => props.clientRect?.() ?? getFallbackClientRect(),
-                                    interactive: true,
-                                    maxWidth: 'none',
-                                    offset: [0, 12],
-                                    placement: 'top-start',
-                                    showOnCreate: true,
-                                    trigger: 'manual',
-                                    zIndex: 80,
-                                })
+                                popup = tippy(document.body, createComposerSuggestionPopupOptions(props, component.element))
                             },
                             onUpdate: (props: SuggestionProps<CommandSuggestionItem>) => {
                                 component?.updateProps(props)
                                 popup?.setProps({
-                                    getReferenceClientRect: () => props.clientRect?.() ?? getFallbackClientRect(),
+                                    getReferenceClientRect: () => getComposerSuggestionReferenceRect(props),
+                                    offset: getComposerSuggestionOffset(),
+                                    placement: isMobileComposerViewport() ? 'top' : 'top-start',
+                                    popperOptions: {
+                                        modifiers: [
+                                            {
+                                                name: 'flip',
+                                                options: {
+                                                    fallbackPlacements: isMobileComposerViewport() ? [] : ['bottom-start', 'top-end'],
+                                                },
+                                            },
+                                        ],
+                                        strategy: isMobileComposerViewport() ? 'fixed' : 'absolute',
+                                    },
                                 })
                             },
                             onKeyDown: (props: SuggestionKeyDownProps) => {
@@ -233,25 +282,25 @@ function createResourceReferenceExtension() {
                                     props,
                                 })
 
-                                popup = tippy(document.body, {
-                                    appendTo: () => document.body,
-                                    arrow: false,
-                                    content: component.element,
-                                    duration: 100,
-                                    getReferenceClientRect: () => props.clientRect?.() ?? getFallbackClientRect(),
-                                    interactive: true,
-                                    maxWidth: 'none',
-                                    offset: [0, 12],
-                                    placement: 'top-start',
-                                    showOnCreate: true,
-                                    trigger: 'manual',
-                                    zIndex: 80,
-                                })
+                                popup = tippy(document.body, createComposerSuggestionPopupOptions(props, component.element))
                             },
                             onUpdate: (props: SuggestionProps<ResourceSuggestionItem>) => {
                                 component?.updateProps(props)
                                 popup?.setProps({
-                                    getReferenceClientRect: () => props.clientRect?.() ?? getFallbackClientRect(),
+                                    getReferenceClientRect: () => getComposerSuggestionReferenceRect(props),
+                                    offset: getComposerSuggestionOffset(),
+                                    placement: isMobileComposerViewport() ? 'top' : 'top-start',
+                                    popperOptions: {
+                                        modifiers: [
+                                            {
+                                                name: 'flip',
+                                                options: {
+                                                    fallbackPlacements: isMobileComposerViewport() ? [] : ['bottom-start', 'top-end'],
+                                                },
+                                            },
+                                        ],
+                                        strategy: isMobileComposerViewport() ? 'fixed' : 'absolute',
+                                    },
                                 })
                             },
                             onKeyDown: (props: SuggestionKeyDownProps) => {

@@ -1,4 +1,4 @@
-import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
+﻿import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { AIMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -43,7 +43,7 @@ const readyVersionPlanContent = `
 
 ## Key Changes
 
-- 复用 legacy step operation
+- 复用 shared domain step operation
 - 接入受控 conditional edge
 
 ## Interface Changes
@@ -239,12 +239,7 @@ async function runGraphRunnerWithEnv(env: Record<string, string | undefined>, ..
 }
 
 async function runGraphRunner(...responses: string[]) {
-    return runGraphRunnerWithEnv(
-        {
-            AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
-        },
-        ...responses
-    )
+    return runGraphRunnerWithEnv({}, ...responses)
 }
 
 describe('runtime/version-plan-tasklist-agent graph runner', () => {
@@ -272,7 +267,6 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         const { result, writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_CHECKPOINT: 'off',
-                AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
             },
             proceedPlanningOutput,
             validTasklist
@@ -289,7 +283,6 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         const { result, writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_CHECKPOINT: 'memory',
-                AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
             },
             proceedPlanningOutput,
             validTasklist
@@ -307,7 +300,6 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         const { result, writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_DEBUG_VIEW: 'on',
-                AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
             },
             proceedPlanningOutput,
             validTasklist
@@ -348,7 +340,6 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         const { result, writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_EVENTS: 'on',
-                AI_MIND_TASKLIST_AGENT_RUNTIME: 'graph',
             },
             proceedPlanningOutput,
             validTasklist
@@ -366,7 +357,7 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-state-patch' && chunk.patchSummary.includes('version plan'))).toBe(
             true
         )
-        expect(writtenChunks.some(chunk => chunk.type === 'agent-step-start')).toBe(true)
+        expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-node-end' && chunk.nodeId === 'planningDecision')).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
         expect(JSON.stringify(writtenChunks.filter(chunk => chunk.type === 'agent-graph-state-patch'))).not.toContain('tasklistDraft')
     })
@@ -483,7 +474,12 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
     })
 
     it('非法 planner 输出会受控停止且不冒泡成 runtime error', async () => {
-        const { result, writtenChunks } = await runGraphRunner('not json')
+        const { result, writtenChunks } = await runGraphRunnerWithEnv(
+            {
+                AI_MIND_GRAPH_EVENTS: 'on',
+            },
+            'not json'
+        )
 
         expect(result.graphState.output?.status).toBe('stopped')
         expect(result.state.status).toBe('readiness_checked')
@@ -491,7 +487,11 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(false)
         expect(
             writtenChunks.some(
-                chunk => chunk.type === 'agent-step-end' && chunk.actionType === 'planning_decision' && chunk.status === 'failed'
+                chunk =>
+                    chunk.type === 'agent-graph-node-end' &&
+                    chunk.nodeId === 'planningDecision' &&
+                    chunk.status === 'completed' &&
+                    chunk.severity === 'warning'
             )
         ).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('规划决策输出不符合受控 JSON schema'))).toBe(
@@ -501,14 +501,23 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
     })
 
     it('缺少 strategy 的 planner 输出会受控停止', async () => {
-        const { result, writtenChunks } = await runGraphRunner(missingStrategyPlanningOutput)
+        const { result, writtenChunks } = await runGraphRunnerWithEnv(
+            {
+                AI_MIND_GRAPH_EVENTS: 'on',
+            },
+            missingStrategyPlanningOutput
+        )
 
         expect(result.graphState.output?.status).toBe('stopped')
         expect(result.state.status).toBe('readiness_checked')
         expect(result.state.artifacts.tasklistDraft).toBeUndefined()
         expect(
             writtenChunks.some(
-                chunk => chunk.type === 'agent-step-end' && chunk.actionType === 'planning_decision' && chunk.status === 'failed'
+                chunk =>
+                    chunk.type === 'agent-graph-node-end' &&
+                    chunk.nodeId === 'planningDecision' &&
+                    chunk.status === 'completed' &&
+                    chunk.severity === 'warning'
             )
         ).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('规划决策输出不符合受控 JSON schema'))).toBe(
@@ -518,7 +527,13 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
     })
 
     it('补充上下文后的非法 strategy 输出会受控停止', async () => {
-        const { result, writtenChunks } = await runGraphRunner(readOptionalContextPlanningOutput, 'not json')
+        const { result, writtenChunks } = await runGraphRunnerWithEnv(
+            {
+                AI_MIND_GRAPH_EVENTS: 'on',
+            },
+            readOptionalContextPlanningOutput,
+            'not json'
+        )
 
         expect(result.graphState.output?.status).toBe('stopped')
         expect(result.state.status).toBe('optional_context_read')
@@ -526,7 +541,11 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         expect(result.state.artifacts.tasklistDraft).toBeUndefined()
         expect(
             writtenChunks.some(
-                chunk => chunk.type === 'agent-step-end' && chunk.actionType === 'decide_tasklist_strategy' && chunk.status === 'failed'
+                chunk =>
+                    chunk.type === 'agent-graph-node-end' &&
+                    chunk.nodeId === 'decideTasklistStrategy' &&
+                    chunk.status === 'completed' &&
+                    chunk.severity === 'warning'
             )
         ).toBe(true)
         expect(

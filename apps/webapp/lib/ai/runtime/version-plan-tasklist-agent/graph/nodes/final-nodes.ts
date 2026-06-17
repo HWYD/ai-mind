@@ -6,6 +6,8 @@ import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '../graph-node-ids'
 import type { VersionPlanTasklistGraphNodeRuntime } from '../graph-node-runtime'
 import {
     createGraphNodeRuntimeUpdate,
+    createGraphStateUpdateFromAgentState,
+    toVersionPlanTasklistAgentState,
     type VersionPlanTasklistGraphStateAnnotationState,
     type VersionPlanTasklistGraphStateAnnotationUpdate,
 } from '../graph-state'
@@ -13,7 +15,7 @@ import {
 function getStoppedPlanningDecision(
     state: VersionPlanTasklistGraphStateAnnotationState
 ): Extract<PlanningDecisionAction, { type: 'ask_clarification' | 'stop_with_boundary_message' }> {
-    const decision = state.agentState.artifacts.planning.decision
+    const decision = state.planning.decision
 
     if (decision?.type !== 'ask_clarification' && decision?.type !== 'stop_with_boundary_message') {
         throw new Error('当前 PlanningDecisionAction 不是 stopped path。')
@@ -27,12 +29,12 @@ export function createEmitFinalArtifactNode(runtime: VersionPlanTasklistGraphNod
         state: VersionPlanTasklistGraphStateAnnotationState
     ): VersionPlanTasklistGraphStateAnnotationUpdate {
         const nextAgentState = runFinalAnswerStep({
-            state: state.agentState,
+            state: toVersionPlanTasklistAgentState(state),
             writeChunk: runtime.writeChunk,
         })
 
         return {
-            agentState: nextAgentState,
+            ...createGraphStateUpdateFromAgentState(nextAgentState),
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.emitFinalArtifact,
                 summary: `已输出最终任务清单产物，Agent 状态：${nextAgentState.status}。`,
@@ -54,7 +56,6 @@ export function createAskClarificationNode(runtime: VersionPlanTasklistGraphNode
         writeStaticTextPart(runtime.writeChunk, buildStoppedPlanningDecisionAnswer(decision))
 
         return {
-            agentState: state.agentState,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.askClarification,
                 summary: '已输出澄清问题，本轮 graph 停止。',
@@ -76,7 +77,6 @@ export function createStopWithBoundaryMessageNode(runtime: VersionPlanTasklistGr
         writeStaticTextPart(runtime.writeChunk, buildStoppedPlanningDecisionAnswer(decision))
 
         return {
-            agentState: state.agentState,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.stopWithBoundaryMessage,
                 summary: '已输出边界停止提示，本轮 graph 停止。',

@@ -69,7 +69,7 @@ export const ComposerCommandMenu = forwardRef<
 
     if (items.length === 0) {
         return (
-            <div className="relative w-[360px] rounded-2xl border border-border/80 bg-popover p-3 text-sm text-muted-foreground shadow-xl">
+            <div className="relative w-[min(80vw,360px)] rounded-2xl border border-border/80 bg-popover p-3 text-sm text-muted-foreground shadow-xl sm:w-[360px]">
                 没有匹配的命令
                 <div className="absolute bottom-[-6px] left-1/2 size-3 -translate-x-1/2 rotate-45 border-r border-b border-border/80 bg-popover" />
             </div>
@@ -77,8 +77,8 @@ export const ComposerCommandMenu = forwardRef<
     }
 
     return (
-        <div className="relative w-[380px] rounded-2xl border border-border/80 bg-popover p-2 shadow-xl shadow-black/10">
-            <div className="space-y-1">
+        <div className="relative w-[min(80vw,380px)] rounded-2xl border border-border/80 bg-popover p-2 shadow-xl shadow-black/10 sm:w-[380px]">
+            <div className="max-h-[300px] space-y-1 overflow-y-auto pr-1 sm:max-h-none sm:overflow-visible sm:pr-0">
                 {items.map((item, index) => {
                     const Icon = commandIconByName[item.name]
                     const isSelected = index === boundedSelectedIndex

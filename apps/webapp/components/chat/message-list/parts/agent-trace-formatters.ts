@@ -1,6 +1,6 @@
-import type { AgentStepEntry, AgentStepPart, PromptPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
+import type { AgentStepPart, PromptPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
 
-export type DetailRuntimeStatus = AgentStepEntry['status'] | PromptPart['status'] | ResourcePart['status'] | ToolPart['status']
+export type DetailRuntimeStatus = AgentStepPart['status'] | PromptPart['status'] | ResourcePart['status'] | ToolPart['status']
 type AgentTraceTagVariant = 'danger' | 'evidence' | 'meta' | 'revision' | 'score' | 'warning'
 
 const agentTraceGranularityLabels: Record<string, string> = {
@@ -49,18 +49,6 @@ export function getAgentStatusLabel(status: AgentStepPart['status']) {
     }
 }
 
-export function getStepClassName(step: AgentStepEntry) {
-    if (step.status === 'failed' || step.severity === 'error') {
-        return 'border-rose-200 bg-rose-50/70'
-    }
-
-    if (step.severity === 'warning') {
-        return 'border-amber-200/70 bg-amber-50/20'
-    }
-
-    return 'border-transparent bg-transparent'
-}
-
 export function getAgentTraceStatusValueLabel(value: string) {
     return agentTraceStatusLabels[value] ?? value
 }
@@ -71,7 +59,6 @@ export function localizeAgentTraceText(text?: string) {
     }
 
     return text
-        .replaceAll('执行 Planning Decision', '执行规划决策')
         .replaceAll('Planning Decision', '规划决策')
         .replaceAll('TasklistStrategy', '任务清单拆分策略')
         .replaceAll('tasklistDraft', '任务清单草稿')
@@ -272,17 +259,6 @@ function getAttentionTagCount(tags?: string[]) {
 
         return variant === 'danger' || variant === 'warning'
     }).length
-}
-
-export function getStepDisplaySummary(step: AgentStepEntry) {
-    const attentionTagCount = getAttentionTagCount(step.tags)
-    const isSecondValidationStep = step.actionType === 'call_tool' && step.title.includes('再次校验')
-
-    if (isSecondValidationStep && attentionTagCount > 0) {
-        return `再次校验完成，仍有 ${attentionTagCount} 个需人工确认的问题。`
-    }
-
-    return localizeAgentTraceText(step.summary)
 }
 
 export function formatDuration(durationMs?: number) {

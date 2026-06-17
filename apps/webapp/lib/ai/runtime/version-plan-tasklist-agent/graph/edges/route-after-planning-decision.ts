@@ -20,7 +20,7 @@ export function getRouteAfterPlanningDecision(state: VersionPlanTasklistGraphSta
         }
     }
 
-    const decision = state.agentState.artifacts.planning.decision
+    const decision = state.planning.decision
 
     if (!decision) {
         throw new Error('缺少 PlanningDecisionAction，无法决定 graph 下一跳。')

@@ -1,6 +1,6 @@
 {
     "name": "ai-mind",
-    "version": "0.2.1",
+    "version": "0.2.3",
     "packageManager": "pnpm@10.18.3",
     "main": "index.js",
     "scripts": {

@@ -1,4 +1,4 @@
-import { AIMessage, ToolMessage } from '@langchain/core/messages'
+﻿import { AIMessage, ToolMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -18,7 +18,6 @@ const runtimeMocks = vi.hoisted(() => {
         streamAssistantParts: vi.fn(),
         streamPlanningResponse: vi.fn(),
         stripMessageText: vi.fn(),
-        runLegacyVersionPlanTasklistAgentRuntime: vi.fn(),
         runVersionPlanTasklistGraph: vi.fn(),
         writeStaticTextPart: vi.fn(),
         writeToolValidationErrors: vi.fn(),
@@ -65,10 +64,6 @@ vi.mock('@/lib/ai/runtime/tool-runtime', () => ({
 
 vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent/graph/run-version-plan-tasklist-graph', () => ({
     runVersionPlanTasklistGraph: runtimeMocks.runVersionPlanTasklistGraph,
-}))
-
-vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent/runtime/legacy-tasklist-agent-runtime', () => ({
-    runLegacyVersionPlanTasklistAgentRuntime: runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime,
 }))
 
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
@@ -243,10 +238,6 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.formatToolInput.mockReturnValue('1+1')
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(false)
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(true)
-        runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime.mockResolvedValue({
-            state: {},
-            status: 'completed',
-        })
         runtimeMocks.runVersionPlanTasklistGraph.mockResolvedValue({
             graphState: {},
             state: {},
@@ -335,9 +326,7 @@ describe('runtime/chat-orchestrator', () => {
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('graph runtime 配置不影响普通问答主链路', async () => {
-        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
-
+    it('Tasklist Graph Runtime 不影响普通问答主链路', async () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
         const writtenChunks: Array<{ type: string; scope?: string }> = []
@@ -352,16 +341,13 @@ describe('runtime/chat-orchestrator', () => {
         await orchestrator.run()
 
         expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
-        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('graph runtime 配置不影响 /summary @docs 普通 Composer Context 链路', async () => {
-        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
-
+    it('Tasklist Graph Runtime 不影响 /summary @docs 普通 Composer Context 链路', async () => {
         const request = createSummaryDocsRequest()
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
@@ -380,7 +366,6 @@ describe('runtime/chat-orchestrator', () => {
         await orchestrator.run()
 
         expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
-        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
         expect(runtimeMocks.executeComposerContextInvocation).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
@@ -388,9 +373,7 @@ describe('runtime/chat-orchestrator', () => {
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('graph runtime 配置不让 /check 误入 tasklist Agent', async () => {
-        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
-
+    it('Tasklist Graph Runtime 不让 /check 误入 tasklist Agent', async () => {
         const request = createCheckRequest()
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
@@ -406,7 +389,6 @@ describe('runtime/chat-orchestrator', () => {
         await orchestrator.run()
 
         expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
-        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
@@ -646,7 +628,7 @@ describe('runtime/chat-orchestrator', () => {
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('/tasklist 默认使用 legacy runtime 并短路普通链路', async () => {
+    it('/tasklist 默认使用 Graph Runtime 并短路普通链路', async () => {
         const request = createTasklistRequest()
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
@@ -660,23 +642,28 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).toHaveBeenCalledWith(
+        expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledWith(
             expect.objectContaining({
                 context: createExecutionContext(),
+                conversationId: request.conversationId,
                 model: session.baseModel,
+                runtimeConfig: expect.objectContaining({
+                    graphCheckpointMode: 'off',
+                    graphDebugViewEnabled: false,
+                    graphEventsEnabled: false,
+                }),
                 userGoal: '基于这个版本方案生成 tasklist 草稿',
                 writeChunk: expect.any(Function),
             })
         )
-        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
         expect(session.baseModel.stream).not.toHaveBeenCalled()
         expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('/tasklist 显式 graph runtime 时进入 graph runner', async () => {
-        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+    it('历史 runtime env 存在时仍进入 Graph Runtime', async () => {
+        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'legacy')
 
         const request = createTasklistRequest()
         const session = createSession()
@@ -697,20 +684,20 @@ describe('runtime/chat-orchestrator', () => {
                 conversationId: request.conversationId,
                 model: session.baseModel,
                 runtimeConfig: expect.objectContaining({
-                    runtimeMode: 'graph',
+                    graphCheckpointMode: 'off',
+                    graphDebugViewEnabled: false,
+                    graphEventsEnabled: false,
                 }),
                 userGoal: '基于这个版本方案生成 tasklist 草稿',
                 writeChunk: expect.any(Function),
             })
         )
-        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
         expect(session.baseModel.stream).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('graph runtime 失败时不会运行中切回 legacy', async () => {
-        vi.stubEnv('AI_MIND_TASKLIST_AGENT_RUNTIME', 'graph')
+    it('Graph Runtime 失败时直接返回 runtime error', async () => {
         runtimeMocks.runVersionPlanTasklistGraph.mockRejectedValueOnce(new Error('graph failed'))
 
         const request = createTasklistRequest()
@@ -727,7 +714,6 @@ describe('runtime/chat-orchestrator', () => {
         await orchestrator.run()
 
         expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.runLegacyVersionPlanTasklistAgentRuntime).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
         expectSingleTerminalChunk(writtenChunks)
     })

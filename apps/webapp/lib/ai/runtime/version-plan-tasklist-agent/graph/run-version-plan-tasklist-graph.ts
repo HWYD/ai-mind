@@ -8,7 +8,11 @@ import type { TasklistAgentRuntimeConfig } from '../config/agent-runtime-config'
 import type { VersionPlanTasklistAgentState } from '../contract/types'
 import { createVersionPlanTasklistGraph } from './create-version-plan-tasklist-graph'
 import { buildGraphDebugSummary } from './graph-debug-summary'
-import { createInitialVersionPlanTasklistGraphState, type VersionPlanTasklistGraphStateAnnotationState } from './graph-state'
+import {
+    createInitialVersionPlanTasklistGraphState,
+    toVersionPlanTasklistAgentState,
+    type VersionPlanTasklistGraphStateAnnotationState,
+} from './graph-state'
 
 export interface RunVersionPlanTasklistGraphOptions {
     context: ChatExecutionContext
@@ -53,14 +57,14 @@ function writeGraphDebugSummary(
     graphState: VersionPlanTasklistGraphStateAnnotationState,
     runtimeConfig: TasklistAgentRuntimeConfig
 ) {
-    if (runtimeConfig.runtimeMode !== 'graph' || !runtimeConfig.graphDebugViewEnabled) {
+    if (!runtimeConfig.graphDebugViewEnabled) {
         return
     }
 
     writeChunk({
-        agentName: graphState.agentState.agentName,
+        agentName: graphState.execution.agentName,
         partId: createId(),
-        runId: graphState.agentState.runId,
+        runId: graphState.execution.runId,
         summary: buildGraphDebugSummary(graphState),
         threadId: graphState.threadId,
         type: 'agent-graph-debug-summary',
@@ -103,6 +107,6 @@ export async function runVersionPlanTasklistGraph(options: RunVersionPlanTasklis
 
     return {
         graphState,
-        state: graphState.agentState,
+        state: toVersionPlanTasklistAgentState(graphState),
     }
 }

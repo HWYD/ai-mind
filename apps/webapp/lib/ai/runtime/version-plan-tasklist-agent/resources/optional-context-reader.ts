@@ -151,9 +151,7 @@ export async function readOptionalContextForTasklistAgent(
     state: VersionPlanTasklistAgentState,
     options: ReadOptionalContextOptions
 ): Promise<OptionalContextReadResult> {
-    const agentStepPartId = createId()
     const resourcePartId = createId()
-    const startedAt = Date.now()
     const metadata = getOptionalContextResourceMetadata(options.resourceUri)
     const advancedState = applyVersionPlanTasklistAgentAction(state, {
         type: 'read_resource',
@@ -161,15 +159,6 @@ export async function readOptionalContextForTasklistAgent(
         reason: '读取规划决策指定的白名单补充上下文。',
     })
 
-    options.writeChunk({
-        type: 'agent-step-start',
-        partId: agentStepPartId,
-        runId: state.runId,
-        agentName: state.agentName,
-        stepIndex: options.stepIndex,
-        actionType: 'read_resource',
-        title: '读取补充上下文',
-    })
     options.writeChunk({
         type: 'resource-start',
         partId: resourcePartId,
@@ -215,20 +204,6 @@ export async function readOptionalContextForTasklistAgent(
             isTruncated: resource.truncated,
             previewChars: resource.previewChars,
         })
-        options.writeChunk({
-            type: 'agent-step-end',
-            partId: agentStepPartId,
-            runId: state.runId,
-            agentName: state.agentName,
-            stepIndex: options.stepIndex,
-            actionType: 'read_resource',
-            status: 'completed',
-            title: '读取补充上下文',
-            summary: `已读取补充上下文 ${resource.resourceName}。`,
-            durationMs: Date.now() - startedAt,
-            severity: 'info',
-            tags: [options.resourceUri],
-        })
 
         return {
             state: nextState,
@@ -260,20 +235,6 @@ export async function readOptionalContextForTasklistAgent(
             source: 'mcp',
             location: metadata.location,
             serverId: metadata.serverId,
-        })
-        options.writeChunk({
-            type: 'agent-step-end',
-            partId: agentStepPartId,
-            runId: state.runId,
-            agentName: state.agentName,
-            stepIndex: options.stepIndex,
-            actionType: 'read_resource',
-            status: 'completed',
-            title: '读取补充上下文',
-            summary: `补充上下文读取失败，已降级为仅基于 version plan 继续：${errorMessage}`,
-            durationMs: Date.now() - startedAt,
-            severity: 'warning',
-            tags: [options.resourceUri, 'degraded'],
         })
 
         return {

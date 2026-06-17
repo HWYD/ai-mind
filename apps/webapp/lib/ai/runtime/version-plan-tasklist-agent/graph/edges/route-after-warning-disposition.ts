@@ -6,7 +6,7 @@ export type WarningDispositionRouteTarget =
     | typeof VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2
 
 export function getRouteAfterWarningDisposition(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphRoute {
-    const disposition = state.agentState.artifacts.planning.warningDisposition
+    const disposition = state.planning.warningDisposition
 
     if (!disposition) {
         throw new Error('缺少 WarningDisposition，无法决定 graph 下一跳。')

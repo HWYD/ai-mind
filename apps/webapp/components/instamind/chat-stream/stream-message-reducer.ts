@@ -25,7 +25,6 @@ import {
     updateToolPart,
     upsertAgentGraphDebugSummaryPart,
     upsertAgentGraphNodePart,
-    upsertAgentStepPart,
 } from './message-operations'
 
 /** 当前流正在写入的 assistant message 与文本 part 指针。 */
@@ -215,43 +214,6 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
             })
         case 'skill-selected':
             return appendActivePart(state, createSkillPart(chunk.skillId, chunk.name, chunk.description))
-        case 'agent-step-start':
-            return updateActiveMessage(state, (messages, messageId) =>
-                upsertAgentStepPart(
-                    messages,
-                    messageId,
-                    {
-                        actionType: chunk.actionType,
-                        partId: chunk.partId,
-                        status: 'running',
-                        stepIndex: chunk.stepIndex,
-                        title: chunk.title,
-                    },
-                    chunk.runId,
-                    chunk.agentName
-                )
-            )
-        case 'agent-step-end':
-            return updateActiveMessage(state, (messages, messageId) =>
-                upsertAgentStepPart(
-                    messages,
-                    messageId,
-                    {
-                        actionType: chunk.actionType,
-                        durationMs: chunk.durationMs,
-                        error: chunk.error,
-                        partId: chunk.partId,
-                        severity: chunk.severity,
-                        status: chunk.status,
-                        stepIndex: chunk.stepIndex,
-                        summary: chunk.summary,
-                        tags: chunk.tags,
-                        title: chunk.title ?? chunk.actionType,
-                    },
-                    chunk.runId,
-                    chunk.agentName
-                )
-            )
         case 'agent-graph-node-start':
             return updateActiveMessage(state, (messages, messageId) =>
                 upsertAgentGraphNodePart(

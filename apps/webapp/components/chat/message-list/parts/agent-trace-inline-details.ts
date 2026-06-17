@@ -1,4 +1,4 @@
-import type { AgentGraphNodeEntry, AgentStepEntry, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
+import type { AgentGraphNodeEntry, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
 
 import { getAgentTraceStatusValueLabel, getDetailStatusLabel } from './agent-trace-formatters'
 
@@ -40,53 +40,6 @@ function getValidationToolSummary(part: ToolPart, validateIndex: number) {
         label: `工具调用 v${validateIndex}`,
         value: `validate_tasklist_structure：${statusLabel}${score}`,
     }
-}
-
-export function buildStepInlineDetails(steps: AgentStepEntry[], detailParts: AgentDetailPart[]) {
-    const detailsByStepIndex = new Map<number, StepInlineDetail[]>()
-    const resourceDetails = detailParts.filter((detailPart): detailPart is ResourcePart => detailPart.type === 'resource')
-    const validationToolDetails = detailParts.filter(
-        (detailPart): detailPart is ToolPart => detailPart.type === 'tool' && detailPart.toolName === 'validate_tasklist_structure'
-    )
-    let resourceIndex = 0
-    let validationToolIndex = 0
-
-    // 受控 Agent 路径按固定顺序执行：读资源 -> 生成 -> 校验 -> 修正 -> 再校验。
-    // 展示层按这个顺序把底层 Resource/Tool 事实贴回对应 step，避免在消息流里重复铺开调试卡片。
-    for (const step of steps) {
-        const details: StepInlineDetail[] = []
-
-        if (step.actionType === 'read_resource') {
-            const resource = resourceDetails[resourceIndex]
-
-            if (resource) {
-                resourceIndex += 1
-                details.push({
-                    icon: 'resource',
-                    label: '资源读取',
-                    value: `${resource.uri}：${getDetailStatusLabel(resource.status)}`,
-                })
-            }
-        }
-
-        if (step.actionType === 'call_tool') {
-            const tool = validationToolDetails[validationToolIndex]
-
-            if (tool) {
-                validationToolIndex += 1
-                details.push({
-                    icon: 'tool',
-                    ...getValidationToolSummary(tool, validationToolIndex),
-                })
-            }
-        }
-
-        if (details.length > 0) {
-            detailsByStepIndex.set(step.stepIndex, details)
-        }
-    }
-
-    return detailsByStepIndex
 }
 
 export function buildGraphNodeInlineDetails(nodes: AgentGraphNodeEntry[], detailParts: AgentDetailPart[]) {

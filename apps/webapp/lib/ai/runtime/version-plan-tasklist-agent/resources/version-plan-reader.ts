@@ -82,20 +82,7 @@ export async function readVersionPlanForTasklistAgent(
     state: VersionPlanTasklistAgentState,
     options: ReadVersionPlanOptions
 ): Promise<VersionPlanReadResult> {
-    const agentStepPartId = createId()
     const resourcePartId = createId()
-    const startedAt = Date.now()
-
-    // 同一次 read_resource 会同时展示 Agent Step 和 Resource 卡片：前者解释流程，后者展示被读取的资源事实。
-    options.writeChunk({
-        type: 'agent-step-start',
-        partId: agentStepPartId,
-        runId: state.runId,
-        agentName: state.agentName,
-        stepIndex: options.stepIndex,
-        actionType: 'read_resource',
-        title: '读取版本方案',
-    })
     options.writeChunk({
         type: 'resource-start',
         partId: resourcePartId,
@@ -145,7 +132,6 @@ export async function readVersionPlanForTasklistAgent(
             },
         }
 
-        // 先结束 Resource 卡片，再结束 Agent Step，UI 上会先看到读取事实，再看到流程摘要和耗时。
         options.writeChunk({
             type: 'resource-end',
             partId: resourcePartId,
@@ -157,20 +143,6 @@ export async function readVersionPlanForTasklistAgent(
             contentPreview: resource.contentPreview,
             isTruncated: resource.truncated,
             previewChars: resource.previewChars,
-        })
-        options.writeChunk({
-            type: 'agent-step-end',
-            partId: agentStepPartId,
-            runId: state.runId,
-            agentName: state.agentName,
-            stepIndex: options.stepIndex,
-            actionType: 'read_resource',
-            status: 'completed',
-            title: '读取版本方案',
-            summary: `已读取 ${resource.resourceName}，识别目标版本 ${extract.targetVersion}。`,
-            durationMs: Date.now() - startedAt,
-            severity: 'info',
-            tags: [`targetVersion: ${extract.targetVersion}`, `Goals: ${extract.goals.length}`, `Non-goals: ${extract.nonGoals.length}`],
         })
 
         return {
@@ -187,20 +159,6 @@ export async function readVersionPlanForTasklistAgent(
         const errorMessage = toErrorMessage(error)
 
         writeVersionPlanResourceError(options.writeChunk, resourcePartId, error, state)
-        options.writeChunk({
-            type: 'agent-step-end',
-            partId: agentStepPartId,
-            runId: state.runId,
-            agentName: state.agentName,
-            stepIndex: options.stepIndex,
-            actionType: 'read_resource',
-            status: 'failed',
-            title: '读取版本方案',
-            summary: '版本方案读取失败，Agent 已停止继续生成 tasklist 草稿。',
-            durationMs: Date.now() - startedAt,
-            severity: 'error',
-            error: errorMessage,
-        })
 
         return {
             errorMessage,

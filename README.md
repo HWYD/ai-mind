@@ -80,9 +80,7 @@ flowchart TD
     BINDING --> SOURCES["内置能力 / 本地 MCP / 远程 MCP"]
 
     RUNTIME -. 受控 Agent 入口 .-> AGENT["受控任务清单 Agent<br/>/tasklist + versions 文档"]
-    AGENT --> SELECTOR["服务端运行器选择"]
-    SELECTOR --> LEGACY["Legacy Runner"]
-    SELECTOR --> GRAPH["LangGraph Runner"]
+    AGENT --> GRAPH["Graph Runtime<br/>LangGraph StateGraph"]
     AGENT --> SHARED["共享业务状态与边界<br/>Steps / Guards / Validation"]
 ```
 
@@ -91,7 +89,7 @@ flowchart TD
 - `ChatOrchestrator / ChatSession` 负责会话构建、执行路径选择、planning、工具执行、上下文注入、受控 Agent 入口和最终回答。
 - `Model Catalog` 在 API 边界把稳定 `modelId` 解析为受控模型选择；运行时再通过 `Provider Registry` 创建 Ollama、Qwen 或 DeepSeek 模型实例。
 - 能力体系通过 Skill 的 `capabilitySelectors`、Capability Catalog 和本轮绑定结果，分别承接 Tool 调用以及 Resource / Prompt 上下文调用；MCP 是外部能力来源，不直接进入主运行时编排。
-- 受控任务清单 Agent 只在 `/tasklist + @docs://versions/*.md` 入口启动。服务端在请求开始前选择 Legacy 或 LangGraph Runner，两者复用同一套业务状态、Steps、Guards 和 Validation 规则。
+- 受控任务清单 Agent 只在 `/tasklist + @docs://versions/*.md` 入口启动。服务端固定进入 Graph Runtime，Graph nodes 复用同一套受控领域状态、Steps、Guards 和 Validation 规则。
 - `@ai-mind/stream-core` 统一定义 NDJSON chunk、生命周期、错误和 Artifact 协议；前端消费流并转换为消息、Agent Trace 和 Artifact 展示，后端不直接依赖 React 组件。
 - 图中的实线表示请求与响应主链路，虚线表示聊天运行时调用的受控模块，不表示模块之间按顺序串行执行。
 
@@ -131,7 +129,7 @@ flowchart TD
 - Catalog 统一管理稳定模型 ID、Provider 实际模型名和能力声明。
 - 前端只选择服务端当前可用的白名单模型，不提交 API Key、base URL 或任意模型名。
 - Ollama、Qwen、DeepSeek 的参数和错误差异停留在 Provider 层。
-- 普通聊天、Tool Calling 和 tasklist legacy / graph runner 共用同一模型创建入口。
+- 普通聊天、Tool Calling 和 tasklist Graph Runtime 共用同一模型创建入口。
 - `modelId` 只改变模型来源，不改变 Tool、Skill、MCP 或 Agent 权限。
 
 ### Capability Model
@@ -161,7 +159,7 @@ Capability Model 用来统一描述 Tool / Resource / Prompt：
 
 `v0.1.1` 在这条受控链路上增加“一次受控规划决策”：Runtime 先用规则判断 version plan readiness，再让模型在 5 类白名单 action 中做一次有限选择，并通过 `TasklistStrategy` 影响 tasklist draft。
 
-`v0.2.0` 将这条链路的编排层迁移到 LangGraph `StateGraph`。Graph runner 与 legacy runner 共用业务 step operation，并通过服务端 runtime config 在请求开始前选择；release 默认仍保留 `legacy`，需要验证 graph 时显式设置 `AI_MIND_TASKLIST_AGENT_RUNTIME=graph`。
+`v0.2.3` 后，这条链路只走 LangGraph `StateGraph`。Graph Runtime 是 `/tasklist + @docs://versions/*.md` 的唯一执行路径；Graph events、memory checkpoint 和脱敏 Graph Debug Summary 仍通过服务端配置独立控制。
 
 这个 Agent 不是通用 Agent，也不自动扫描 docs 或写入文件。它的入口、步骤、工具、路由和停止条件都由 Runtime 控制。
 
@@ -198,7 +196,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Controlled Agent Graph。
 - Graph node / route / state patch 流式摘要。
 - AgentTracePanel Graph timeline。
-- development-only memory checkpoint。
+- memory checkpoint（显式配置，主要用于展示和调试）。
 - 脱敏 Debug Summary。
 - Model Catalog 与 Model Provider Runtime。
 - Ollama / Qwen / DeepSeek 白名单模型选择。
@@ -260,7 +258,7 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 - Capability-driven Tool Runtime。
 - Composer payload hint 消费。
 - Runtime-controlled Agent path。
-- Server-configured tasklist Agent legacy / graph runtime selection。
+- Tasklist Agent Graph Runtime 单一路线。
 
 ### Model Provider Runtime
 
@@ -312,8 +310,8 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 
 - `Version Plan to Tasklist Agent`
 - 入口：`/tasklist + @docs://versions/*.md`
-- server-side `legacy / graph` runtime selection。
-- release 默认 `legacy`，graph 需要服务端 env 显式开启。
+- v0.2.3 后 `/tasklist + @docs://versions/*.md` 固定走 Graph Runtime。
+- LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
 - LangGraph `StateGraph` 只替换编排层。
 - `AgentState` 只保存本轮草稿、planner artifact、校验结果和修正次数。
 - 一次 Planning Decision，只允许 5 类白名单 action。
@@ -325,9 +323,9 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 - `PlanningDecisionAction` conditional edge。
 - `WarningDisposition` conditional edge。
 - `validate_tasklist_structure` 作为结构质量门。
-- Graph runner 与 legacy runner 共用业务 step operation。
+- Graph Runtime 复用受控领域 step operation。
 - Graph node / route / state patch summary 通过受控 stream chunk 展示。
-- development-only memory checkpoint，production 强制关闭。
+- memory checkpoint 由显式配置控制，可用于展示和调试，但不表示持久化、Resume 或产品级恢复能力。
 - Debug Summary 只展示脱敏白名单字段。
 - `AgentTracePanel` 展示 readiness、decision、strategy、warning disposition、revision effect、graph timeline 和折叠 Debug 摘要。
 - `AgentTextArtifactPanel` 展示最终 tasklist Markdown 正文。
@@ -356,7 +354,7 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 - `apps/webapp/lib/ai/rate-limit/`
     - IP / session 轻量限流配置和单进程 Memory Store。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/`
-    - 受控单 Agent，负责从版本方案生成 tasklist 草稿；包含 legacy runner、graph runner、共享 step operation 和 runtime config。
+    - 受控单 Agent，负责从版本方案生成 tasklist 草稿；当前只保留 Graph Runtime、共享 step operation 和 graph-only runtime config。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/graph/`
     - LangGraph `StateGraph`、graph nodes、route、GraphState、graph events 和 Debug Summary。
 - `apps/webapp/components/chat/message-list/parts/agent-trace-panel.tsx`
@@ -383,15 +381,15 @@ v0.2.1 不做用户自带 Key、任意模型输入、多 Provider 自动 fallbac
 
 如果想从代码层面理解项目，可以优先看下面几个入口：
 
-| Area                   | Path                                                                                                               | What to Look For                                                                                       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| Runtime 主编排         | [apps/webapp/lib/ai/runtime](./apps/webapp/lib/ai/runtime)                                                         | 聊天 session、planning、tool execution、Agent stage、final answer 和错误收口                           |
-| Model Provider Runtime | [apps/webapp/lib/ai/model-provider](./apps/webapp/lib/ai/model-provider)                                           | Model Catalog、Provider Registry、模型创建、错误标准化和 usage 观测                                    |
-| Agent Runtime          | [apps/webapp/lib/ai/runtime/version-plan-tasklist-agent](./apps/webapp/lib/ai/runtime/version-plan-tasklist-agent) | 受控单 Agent、legacy / graph runner、StateGraph、状态机、step operation、final answer 和 artifact 输出 |
-| Stream Core            | [packages/stream-core/src](./packages/stream-core/src)                                                             | NDJSON chunk 协议、stream lifecycle、error chunk、agent-step、artifact 和 writer                       |
-| Capability Model       | [apps/webapp/lib/ai/capabilities](./apps/webapp/lib/ai/capabilities)                                               | capability catalog、selector 解析和 active tool binding                                                |
-| Composer V1            | [apps/webapp/components/chat/composer](./apps/webapp/components/chat/composer)                                     | Tiptap 输入层、command chip、resource chip、模型选择器、菜单和序列化                                   |
-| MCP Integration        | [apps/webapp/lib/ai/mcp](./apps/webapp/lib/ai/mcp)                                                                 | MCP client、server registry、transport、Tool / Resource / Prompt adapter                               |
+| Area                   | Path                                                                                                               | What to Look For                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Runtime 主编排         | [apps/webapp/lib/ai/runtime](./apps/webapp/lib/ai/runtime)                                                         | 聊天 session、planning、tool execution、Agent stage、final answer 和错误收口                   |
+| Model Provider Runtime | [apps/webapp/lib/ai/model-provider](./apps/webapp/lib/ai/model-provider)                                           | Model Catalog、Provider Registry、模型创建、错误标准化和 usage 观测                            |
+| Agent Runtime          | [apps/webapp/lib/ai/runtime/version-plan-tasklist-agent](./apps/webapp/lib/ai/runtime/version-plan-tasklist-agent) | 受控单 Agent、Graph Runtime、StateGraph、状态机、step operation、final answer 和 artifact 输出 |
+| Stream Core            | [packages/stream-core/src](./packages/stream-core/src)                                                             | NDJSON chunk 协议、stream lifecycle、error chunk、agent-step、artifact 和 writer               |
+| Capability Model       | [apps/webapp/lib/ai/capabilities](./apps/webapp/lib/ai/capabilities)                                               | capability catalog、selector 解析和 active tool binding                                        |
+| Composer V1            | [apps/webapp/components/chat/composer](./apps/webapp/components/chat/composer)                                     | Tiptap 输入层、command chip、resource chip、模型选择器、菜单和序列化                           |
+| MCP Integration        | [apps/webapp/lib/ai/mcp](./apps/webapp/lib/ai/mcp)                                                                 | MCP client、server registry、transport、Tool / Resource / Prompt adapter                       |
 
 ## v0.1.x / v0.2.x 的关键判断
 
@@ -591,7 +589,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Agent Text Artifact 最终产物展示
 - [x] Controlled Agent Graph（LangGraph StateGraph）
 - [x] Graph events / AgentTracePanel timeline
-- [x] Development-only checkpoint / Debug Summary
+- [x] Graph checkpoint / Debug Summary
 - [x] Model Catalog / Multi-Provider Runtime
 - [x] 服务端白名单模型选择器
 - [x] Provider 错误标准化 / 默认轻量限流 / usage 观测

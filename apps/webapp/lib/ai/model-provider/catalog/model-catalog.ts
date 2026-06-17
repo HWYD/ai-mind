@@ -52,6 +52,40 @@ export const modelCatalog = [
         provider: 'ollama',
         providerModel: 'qwen3:14b',
     },
+    // {
+    //     availableIn: ['development', 'production'],
+    //     capabilities: {
+    //         chat: true,
+    //         embedding: false,
+    //         jsonOutput: true,
+    //         streaming: true,
+    //         tasklist: true,
+    //         toolCalling: true,
+    //     },
+    //     enabled: true,
+    //     id: 'deepseek/deepseek-v4-flash',
+    //     label: 'deepseek-v4-flash',
+    //     modelKey: 'deepseek-v4-flash',
+    //     provider: 'deepseek',
+    //     providerModel: 'deepseek-v4-flash',
+    // },
+    // {
+    //     availableIn: ['development', 'production'],
+    //     capabilities: {
+    //         chat: true,
+    //         embedding: false,
+    //         jsonOutput: true,
+    //         streaming: true,
+    //         tasklist: true,
+    //         toolCalling: true,
+    //     },
+    //     enabled: true,
+    //     id: 'deepseek/deepseek-v4-pro',
+    //     label: 'deepseek-v4-pro',
+    //     modelKey: 'deepseek-v4-pro',
+    //     provider: 'deepseek',
+    //     providerModel: 'deepseek-v4-pro',
+    // },
     {
         availableIn: ['development', 'production'],
         capabilities: {
@@ -66,7 +100,7 @@ export const modelCatalog = [
         id: 'deepseek/deepseek-v4-flash',
         label: 'deepseek-v4-flash',
         modelKey: 'deepseek-v4-flash',
-        provider: 'deepseek',
+        provider: 'qwen',
         providerModel: 'deepseek-v4-flash',
     },
     {
@@ -83,7 +117,7 @@ export const modelCatalog = [
         id: 'deepseek/deepseek-v4-pro',
         label: 'deepseek-v4-pro',
         modelKey: 'deepseek-v4-pro',
-        provider: 'deepseek',
+        provider: 'qwen',
         providerModel: 'deepseek-v4-pro',
     },
     {

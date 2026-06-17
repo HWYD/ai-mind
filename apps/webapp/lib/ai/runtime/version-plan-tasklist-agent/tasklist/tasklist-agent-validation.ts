@@ -9,7 +9,6 @@ import type { ChatExecutionContext, WriteChunk } from '../../types'
 import type { VersionPlanTasklistAgentState } from '../contract/types'
 import { getVersionPlanTasklistAgentToolDefinitionMap } from '../resources/agent-tools'
 import { applyVersionPlanTasklistAgentAction } from '../state/state-machine'
-import { endAgentStep, getNextStepIndex, startAgentStep } from '../stream/tasklist-agent-step-stream'
 
 const VALIDATE_TASKLIST_TOOL_NAME = 'validate_tasklist_structure'
 
@@ -30,30 +29,6 @@ function createValidateTasklistToolCall(state: VersionPlanTasklistAgentState): T
         },
         type: 'tool_call',
     }
-}
-
-function getValidationTags(result: TasklistValidationResult) {
-    if (result.status === 'pass') {
-        return [`score: ${result.score}`]
-    }
-
-    return [
-        `score: ${result.score}`,
-        ...result.blockingIssues.map(issue => issue.code),
-        ...result.weakSections.map(section => section.code),
-    ].slice(0, 3)
-}
-
-function getValidationSummary(result: TasklistValidationResult) {
-    if (result.status === 'pass') {
-        return `结构校验通过，评分 ${result.score}。`
-    }
-
-    if (result.status === 'fail') {
-        return `结构校验发现 ${result.blockingIssues.length} 个阻塞问题和 ${result.weakSections.length} 个弱项。`
-    }
-
-    return `结构校验发现 ${result.weakSections.length} 个可改进弱项。`
 }
 
 export function createValidationResultForRevision(result: TasklistValidationResult, fixNow: string[]): TasklistValidationResult {
@@ -77,73 +52,34 @@ export async function runValidateTasklistStep(options: {
     title: string
     writeChunk: WriteChunk
 }) {
-    const stepIndex = getNextStepIndex(options.state)
-    const step = startAgentStep({
-        actionType: 'call_tool',
-        state: options.state,
-        stepIndex,
-        title: options.title,
-        writeChunk: options.writeChunk,
+    const toolCall = createValidateTasklistToolCall(options.state)
+    const toolDefinitionMap = new Map<string, ChatToolDefinition>(getVersionPlanTasklistAgentToolDefinitionMap())
+    const executedToolResult = await executeToolCall(toolCall, options.context, options.writeChunk, {
+        errorStage: 'tool-execution',
+        toolDefinitionMap,
     })
 
-    try {
-        const toolCall = createValidateTasklistToolCall(options.state)
-        const toolDefinitionMap = new Map<string, ChatToolDefinition>(getVersionPlanTasklistAgentToolDefinitionMap())
-        const executedToolResult = await executeToolCall(toolCall, options.context, options.writeChunk, {
-            errorStage: 'tool-execution',
-            toolDefinitionMap,
-        })
+    if (!executedToolResult.success) {
+        throw new Error(executedToolResult.output)
+    }
 
-        if (!executedToolResult.success) {
-            throw new Error(executedToolResult.output)
-        }
+    const parsedResult = tasklistValidationResultSchema.safeParse(executedToolResult.rawResult)
 
-        const parsedResult = tasklistValidationResultSchema.safeParse(executedToolResult.rawResult)
+    if (!parsedResult.success) {
+        throw new Error('validate_tasklist_structure 返回结果不符合预期 schema。')
+    }
 
-        if (!parsedResult.success) {
-            throw new Error('validate_tasklist_structure 返回结果不符合预期 schema。')
-        }
+    const advancedState = applyVersionPlanTasklistAgentAction(options.state, {
+        type: 'call_tool',
+        arguments: toolCall.args as Record<string, unknown>,
+        reason: '执行任务清单结构质量门校验。',
+        toolName: VALIDATE_TASKLIST_TOOL_NAME,
+    })
+    const nextState = attachValidationResult(advancedState, parsedResult.data)
 
-        const advancedState = applyVersionPlanTasklistAgentAction(options.state, {
-            type: 'call_tool',
-            arguments: toolCall.args as Record<string, unknown>,
-            reason: '执行任务清单结构质量门校验。',
-            toolName: VALIDATE_TASKLIST_TOOL_NAME,
-        })
-        const nextState = attachValidationResult(advancedState, parsedResult.data)
-        const severity = parsedResult.data.status === 'pass' ? 'info' : 'warning'
-
-        endAgentStep({
-            actionType: 'call_tool',
-            durationStartedAt: step.startedAt,
-            partId: step.partId,
-            severity,
-            state: nextState,
-            stepIndex,
-            summary: getValidationSummary(parsedResult.data),
-            tags: getValidationTags(parsedResult.data),
-            title: options.title,
-            writeChunk: options.writeChunk,
-        })
-
-        return {
-            result: parsedResult.data,
-            state: nextState,
-        }
-    } catch (error) {
-        endAgentStep({
-            actionType: 'call_tool',
-            durationStartedAt: step.startedAt,
-            error: error instanceof Error ? error.message : '任务清单结构校验失败。',
-            partId: step.partId,
-            severity: 'error',
-            state: options.state,
-            status: 'failed',
-            stepIndex,
-            title: options.title,
-            writeChunk: options.writeChunk,
-        })
-        throw error
+    return {
+        result: parsedResult.data,
+        state: nextState,
     }
 }
 
