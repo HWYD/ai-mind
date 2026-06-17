@@ -1,5 +1,6 @@
-# AI Mind Release — 腾讯云 TCR 双镜像发布与 SSH 部署
+# AI Mind Release — 腾讯云 TCR 双镜像发布
 # 触发：v*.*.* tag 或 workflow_dispatch
+# 只负责构建并推送 production 镜像，不执行 SSH 部署。
 # 不注入模型 API Key、MCP Token、SSL 私钥。
 
 name: Release (TCR)
@@ -57,7 +58,7 @@ jobs:
         name: Build and push webapp to TCR
         runs-on: ubuntu-latest
         needs: prepare
-        timeout-minutes: 60
+        timeout-minutes: 120
 
         steps:
             - uses: actions/checkout@v4
@@ -86,6 +87,8 @@ jobs:
                   target: webapp-runner
                   platforms: linux/amd64
                   push: true
+                  provenance: false
+                  sbom: false
                   build-args: |
                       OCI_CREATED=${{ github.event.repository.updated_at }}
                       OCI_REVISION=${{ github.sha }}
@@ -94,13 +97,12 @@ jobs:
                   tags: |
                       ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-webapp:production
                   cache-from: type=gha,scope=webapp-release
-                  cache-to: type=gha,scope=webapp-release,mode=min
 
     build-project-assistant-service:
         name: Build and push project-assistant-service to TCR
         runs-on: ubuntu-latest
         needs: prepare
-        timeout-minutes: 60
+        timeout-minutes: 120
 
         steps:
             - uses: actions/checkout@v4
@@ -129,6 +131,8 @@ jobs:
                   target: project-assistant-service-runner
                   platforms: linux/amd64
                   push: true
+                  provenance: false
+                  sbom: false
                   build-args: |
                       OCI_CREATED=${{ github.event.repository.updated_at }}
                       OCI_REVISION=${{ github.sha }}
@@ -137,4 +141,3 @@ jobs:
                   tags: |
                       ${{ env.REGISTRY }}/${{ secrets.TCR_NAMESPACE }}/ai-mind-project-assistant-service:production
                   cache-from: type=gha,scope=pas-release
-                  cache-to: type=gha,scope=pas-release,mode=min
