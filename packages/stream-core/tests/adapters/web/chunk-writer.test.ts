@@ -22,6 +22,22 @@ describe('createNdjsonChunkWriter', () => {
         expect(writtenLines).toEqual(['{"type":"finish"}\n'])
     })
 
+    it('writes heartbeat as an empty ndjson line', () => {
+        const decoder = new TextDecoder()
+        const writtenLines: string[] = []
+        const controller = {
+            close: vi.fn(),
+            enqueue: vi.fn((chunk: Uint8Array) => {
+                writtenLines.push(decoder.decode(chunk))
+            }),
+        } as unknown as ReadableStreamDefaultController<Uint8Array>
+
+        const writer = createNdjsonChunkWriter(controller)
+        writer.writeHeartbeat()
+
+        expect(writtenLines).toEqual(['\n'])
+    })
+
     it('closes only once and blocks writes after close', () => {
         const controller = {
             close: vi.fn(),

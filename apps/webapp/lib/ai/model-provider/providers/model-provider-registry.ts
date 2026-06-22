@@ -18,8 +18,10 @@ export interface CreateChatModelOptions {
     config: ModelProviderConfig
     enableReasoning?: boolean
     maxOutputTokens?: number
+    maxRetries?: number
     resolvedModelSelection: ResolvedModelSelection
     temperature?: number
+    timeoutMs?: number
 }
 
 /**
@@ -34,9 +36,11 @@ export function createChatModel(options: CreateChatModelOptions): AiMindChatMode
         config,
         enableReasoning: options.enableReasoning,
         maxOutputTokens: options.maxOutputTokens,
+        maxRetries: options.maxRetries,
         resolvedModelSelection,
         routeType: resolvedModelSelection.routeType,
         temperature: options.temperature,
+        timeoutMs: options.timeoutMs,
     }
 
     const model = provider.createModel(createOptions)

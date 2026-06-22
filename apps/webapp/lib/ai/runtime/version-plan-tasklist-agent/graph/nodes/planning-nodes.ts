@@ -92,7 +92,9 @@ export function createPlanningDecisionNode(runtime: VersionPlanTasklistGraphNode
         try {
             const result = await runPlanningDecisionStep({
                 context: runtime.context,
-                model: runtime.model,
+                model: runtime.models.planning.model,
+                modelStage: 'planning-decision',
+                modelTimeoutMs: runtime.models.planning.timeoutMs,
                 state,
                 userGoal: runtime.userGoal,
                 writeChunk: runtime.writeChunk,
@@ -192,7 +194,9 @@ export function createDecideTasklistStrategyNode(runtime: VersionPlanTasklistGra
         try {
             const update = await runTasklistStrategyStep({
                 context: runtime.context,
-                model: runtime.model,
+                model: runtime.models.planning.model,
+                modelStage: 'tasklist-strategy',
+                modelTimeoutMs: runtime.models.planning.timeoutMs,
                 state,
                 strategy,
                 userGoal: runtime.userGoal,

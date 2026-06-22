@@ -13,6 +13,7 @@ export interface ChunkWriter {
     close: () => void
     isClosed: () => boolean
     writeChunk: WriteChunk
+    writeHeartbeat: () => void
 }
 
 export function createNdjsonChunkWriter(controller: ReadableStreamDefaultController<Uint8Array>, encoder = new TextEncoder()): ChunkWriter {
@@ -34,13 +35,13 @@ export function createNdjsonChunkWriter(controller: ReadableStreamDefaultControl
         }
     }
 
-    const writeChunk: WriteChunk = chunk => {
+    const enqueue = (value: string) => {
         if (closed) {
             return
         }
 
         try {
-            controller.enqueue(encoder.encode(toNdjsonLine(chunk)))
+            controller.enqueue(encoder.encode(value))
         } catch (error) {
             if (isControllerClosedError(error)) {
                 closed = true
@@ -51,9 +52,15 @@ export function createNdjsonChunkWriter(controller: ReadableStreamDefaultControl
         }
     }
 
+    const writeChunk: WriteChunk = chunk => {
+        enqueue(toNdjsonLine(chunk))
+    }
+
     return {
         close,
         isClosed: () => closed,
         writeChunk,
+        // NDJSON 消费端会忽略空行；代理仍能观察到数据活动，避免长模型步骤被判定为空闲连接。
+        writeHeartbeat: () => enqueue('\n'),
     }
 }

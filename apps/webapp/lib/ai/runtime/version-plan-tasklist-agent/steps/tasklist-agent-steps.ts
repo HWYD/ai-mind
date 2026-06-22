@@ -3,6 +3,7 @@ import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure
 import type { ChatExecutionContext, ChatSession, WriteChunk } from '../../types'
 import type { PlanningDecisionOutput, TasklistStrategy } from '../contract/types'
 import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
+import { runTasklistAgentModelStep, type TasklistAgentModelStageName } from '../model/tasklist-agent-model-execution'
 import { generatePlanningDecisionOutput, generateTasklistStrategy } from '../planner/planning-decision'
 import { applyVersionPlanTasklistGraphAction } from '../state/state-machine'
 import { getRevisionFinalDecisionLabel } from '../stream/tasklist-agent-output'
@@ -14,6 +15,8 @@ import { decideWarningDisposition } from '../tasklist/warning-disposition'
 interface TasklistAgentStepOperationOptions {
     context: ChatExecutionContext
     model: ChatSession['baseModel']
+    modelStage: TasklistAgentModelStageName
+    modelTimeoutMs: number
     state: VersionPlanTasklistGraphStateAnnotationState
     userGoal: string
     writeChunk: WriteChunk
@@ -50,12 +53,12 @@ export async function runPlanningDecisionStep(options: TasklistAgentStepOperatio
     output: PlanningDecisionOutput
     update: VersionPlanTasklistGraphStatePatch
 }> {
-    const output = await generatePlanningDecisionOutput(
-        options.model,
-        createPromptState(options.state),
-        options.userGoal,
-        options.context.signal
-    )
+    const output = await runTasklistAgentModelStep({
+        operation: signal => generatePlanningDecisionOutput(options.model, createPromptState(options.state), options.userGoal, signal),
+        signal: options.context.signal,
+        stage: options.modelStage,
+        timeoutMs: options.modelTimeoutMs,
+    })
     const update = applyVersionPlanTasklistGraphAction(options.state, {
         decision: output.decision,
         reason: output.decision.reason,
@@ -73,7 +76,12 @@ export async function runTasklistStrategyStep(
 ): Promise<VersionPlanTasklistGraphStatePatch> {
     const strategy =
         options.strategy ??
-        (await generateTasklistStrategy(options.model, createPromptState(options.state), options.userGoal, options.context.signal))
+        (await runTasklistAgentModelStep({
+            operation: signal => generateTasklistStrategy(options.model, createPromptState(options.state), options.userGoal, signal),
+            signal: options.context.signal,
+            stage: options.modelStage,
+            timeoutMs: options.modelTimeoutMs,
+        }))
 
     return applyVersionPlanTasklistGraphAction(options.state, {
         reason: strategy.reason,
@@ -84,7 +92,12 @@ export async function runTasklistStrategyStep(
 
 export async function runDraftTasklistStep(options: TasklistAgentStepOperationOptions): Promise<VersionPlanTasklistGraphStatePatch> {
     const versionPlan = options.state.source.versionPlan
-    const draftText = await generateTasklistDraft(options.model, createPromptState(options.state), options.userGoal, options.context.signal)
+    const draftText = await runTasklistAgentModelStep({
+        operation: signal => generateTasklistDraft(options.model, createPromptState(options.state), options.userGoal, signal),
+        signal: options.context.signal,
+        stage: options.modelStage,
+        timeoutMs: options.modelTimeoutMs,
+    })
     const update = applyVersionPlanTasklistGraphAction(options.state, {
         goal: options.userGoal || '基于版本方案生成任务清单草稿',
         planUri: versionPlan?.uri ?? options.state.source.versionPlanReference.uri,
@@ -162,13 +175,12 @@ export async function runReviseTasklistStep(options: TasklistAgentStepOperationO
     }
 
     const revisionValidationResult = createValidationResultForRevision(validationResult, warningDisposition.fixNow)
-    const revisedDraftText = await reviseTasklistDraft(
-        options.model,
-        createPromptState(options.state),
-        draft,
-        revisionValidationResult,
-        options.context.signal
-    )
+    const revisedDraftText = await runTasklistAgentModelStep({
+        operation: signal => reviseTasklistDraft(options.model, createPromptState(options.state), draft, revisionValidationResult, signal),
+        signal: options.context.signal,
+        stage: options.modelStage,
+        timeoutMs: options.modelTimeoutMs,
+    })
     const update = applyVersionPlanTasklistGraphAction(options.state, {
         reason: '根据结构校验 findings 自动修正一次任务清单草稿。',
         type: 'revise_tasklist',

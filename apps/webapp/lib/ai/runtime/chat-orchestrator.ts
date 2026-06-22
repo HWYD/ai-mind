@@ -25,6 +25,7 @@ import type {
     WriteChunk,
 } from './types'
 import {
+    createTasklistAgentModelSet,
     createVersionPlanTasklistAgentSkeleton,
     getTasklistAgentRuntimeConfig,
     resolveVersionPlanTasklistAgentInvocation,
@@ -425,6 +426,10 @@ export class ChatOrchestrator {
         })
 
         const runtimeConfig = getTasklistAgentRuntimeConfig()
+        const models = createTasklistAgentModelSet({
+            enableReasoning: this.request.options?.enableReasoning,
+            resolvedModelSelection: this.context.resolvedModelSelection,
+        })
         const userGoal = getLastUserMessageText(this.request)
 
         logSkillRuntime('version-plan-tasklist-agent-runtime-selected', {
@@ -436,7 +441,7 @@ export class ChatOrchestrator {
         await runVersionPlanTasklistGraph({
             context: this.context,
             conversationId: this.request.conversationId,
-            model: session.baseModel,
+            models,
             runtimeConfig,
             runId: skeletonResult.runId,
             userGoal,

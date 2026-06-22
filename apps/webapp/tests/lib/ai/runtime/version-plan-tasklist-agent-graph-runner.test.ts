@@ -219,7 +219,10 @@ async function runGraphRunnerWithEnv(env: Record<string, string | undefined>, ..
     const result = await runVersionPlanTasklistGraph({
         context: {},
         conversationId: 'conversation-graph-runner-test',
-        model,
+        models: {
+            drafting: { model, timeoutMs: 300_000 },
+            planning: { model, timeoutMs: 90_000 },
+        },
         runId: 'run-graph-runner-test',
         runtimeConfig: getTasklistAgentRuntimeConfig(env, 'development'),
         userGoal: '基于这个版本方案生成 tasklist 草稿',
@@ -257,6 +260,28 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type.startsWith('agent-graph-'))).toBe(false)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('## Step 1：Graph State'))).toBe(false)
+    })
+
+    it('规划节点与草稿节点使用各自的模型执行策略', async () => {
+        const planningModel = createModel(proceedPlanningOutput)
+        const draftingModel = createModel(validTasklist)
+
+        await runVersionPlanTasklistGraph({
+            context: {},
+            conversationId: 'conversation-model-routing-test',
+            models: {
+                drafting: { model: draftingModel, timeoutMs: 300_000 },
+                planning: { model: planningModel, timeoutMs: 90_000 },
+            },
+            runId: 'run-model-routing-test',
+            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
+            userGoal: '基于这个版本方案生成 tasklist 草稿',
+            versionPlanReference,
+            writeChunk: vi.fn(),
+        })
+
+        expect(planningModel.invoke).toHaveBeenCalledTimes(1)
+        expect(draftingModel.invoke).toHaveBeenCalledTimes(1)
     })
 
     it('checkpoint 关闭时仍可完成 graph runner 且不改变 final artifact', async () => {

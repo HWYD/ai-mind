@@ -13,9 +13,11 @@ export interface ModelProviderCreateOptions {
     config: ModelProviderConfig
     enableReasoning?: boolean
     maxOutputTokens?: number
+    maxRetries?: number
     resolvedModelSelection: ResolvedModelSelection
     routeType: ModelRouteType
     temperature?: number
+    timeoutMs?: number
 }
 
 export interface ModelProvider {

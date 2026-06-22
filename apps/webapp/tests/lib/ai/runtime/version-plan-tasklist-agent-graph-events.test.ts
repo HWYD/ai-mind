@@ -96,9 +96,13 @@ describe('runtime/version-plan-tasklist-agent graph events', () => {
 
     it('emits a failed node end with sanitized error when node throws', async () => {
         const chunks: ChatStreamChunk[] = []
+        const model = { invoke: vi.fn() } as unknown as ChatSession['baseModel']
         const runtime = {
             context: {},
-            model: { invoke: vi.fn() } as unknown as ChatSession['baseModel'],
+            models: {
+                drafting: { model, timeoutMs: 300_000 },
+                planning: { model, timeoutMs: 90_000 },
+            },
             runtimeConfig: getTasklistAgentRuntimeConfig(
                 {
                     AI_MIND_GRAPH_EVENTS: 'on',
@@ -129,9 +133,13 @@ describe('runtime/version-plan-tasklist-agent graph events', () => {
 
     it('emits warning completed node end when node returns a controlled stopped output', async () => {
         const chunks: ChatStreamChunk[] = []
+        const model = { invoke: vi.fn() } as unknown as ChatSession['baseModel']
         const runtime = {
             context: {},
-            model: { invoke: vi.fn() } as unknown as ChatSession['baseModel'],
+            models: {
+                drafting: { model, timeoutMs: 300_000 },
+                planning: { model, timeoutMs: 90_000 },
+            },
             runtimeConfig: getTasklistAgentRuntimeConfig(
                 {
                     AI_MIND_GRAPH_EVENTS: 'on',

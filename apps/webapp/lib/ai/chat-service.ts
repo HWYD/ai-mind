@@ -9,8 +9,11 @@ import type { ChatRequest } from '@/lib/ai/types/chat'
 
 export type { ChatExecutionContext, ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
 
+const STREAM_HEARTBEAT_INTERVAL_MS = 15_000
+
 async function createChatStreamResult(request: ChatRequest, context: ResolvedChatExecutionContext): Promise<StreamResult> {
     let closed = false
+    let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     let writerRef: ChunkWriter | null = null
 
     const responseStream = new ReadableStream<Uint8Array>({
@@ -26,8 +29,25 @@ async function createChatStreamResult(request: ChatRequest, context: ResolvedCha
                 }
 
                 closed = true
+                if (heartbeatTimer) {
+                    clearInterval(heartbeatTimer)
+                    heartbeatTimer = null
+                }
                 writer.close()
             }
+
+            heartbeatTimer = setInterval(() => {
+                if (isClosed()) {
+                    closeStream()
+                    return
+                }
+
+                try {
+                    writer.writeHeartbeat()
+                } catch {
+                    closeStream()
+                }
+            }, STREAM_HEARTBEAT_INTERVAL_MS)
 
             const run = async () => {
                 try {
@@ -91,6 +111,10 @@ async function createChatStreamResult(request: ChatRequest, context: ResolvedCha
         cancel() {
             logChatCancellation('response stream consumer cancelled')
             closed = true
+            if (heartbeatTimer) {
+                clearInterval(heartbeatTimer)
+                heartbeatTimer = null
+            }
             writerRef?.close()
         },
     })
@@ -98,6 +122,7 @@ async function createChatStreamResult(request: ChatRequest, context: ResolvedCha
     const headers: Record<string, string> = {
         'Content-Type': 'application/x-ndjson; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
+        'X-Accel-Buffering': 'no',
     }
 
     if (context.setCookie) {

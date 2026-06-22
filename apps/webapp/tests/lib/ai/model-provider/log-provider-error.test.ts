@@ -39,4 +39,22 @@ describe('logProviderError', () => {
         expect(payload).toContain('a'.repeat(200))
         expect(payload).not.toContain('a'.repeat(201))
     })
+
+    it('记录 Tasklist 超时的安全定位字段', () => {
+        const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        const error = Object.assign(new Error('Tasklist Agent stage timed out.'), {
+            code: 'MODEL_PROVIDER_TIMEOUT',
+            stage: 'planning-decision',
+            timeoutMs: 90_000,
+        })
+
+        logProviderError(error)
+
+        const [, payload] = consoleSpy.mock.calls[0]
+        expect(JSON.parse(payload)).toMatchObject({
+            code: 'MODEL_PROVIDER_TIMEOUT',
+            stage: 'planning-decision',
+            timeoutMs: 90_000,
+        })
+    })
 })

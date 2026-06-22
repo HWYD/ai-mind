@@ -85,17 +85,19 @@ export class OpenAICompatibleProvider implements ModelProvider {
             configuration: {
                 baseURL,
             },
+            maxRetries: options.maxRetries,
             maxTokens: maxOutputTokens,
             model: modelName,
             streaming: true,
             temperature,
-            timeout: config.timeoutMs,
+            timeout: options.timeoutMs ?? config.timeoutMs,
             // 当前 Qwen / DeepSeek capability 未声明 reasoning；enableReasoning 与 Ollama 特有 think 均不透传。
         })
     }
 
     normalizeError(error: unknown): NormalizedProviderError {
         const message = error instanceof Error ? error.message : String(error)
+        const code = (error as { code?: unknown }).code
         const status = (error as Record<string, unknown>).status as number | undefined
 
         // 401 / 403 → 鉴权失败
@@ -163,7 +165,13 @@ export class OpenAICompatibleProvider implements ModelProvider {
         }
 
         // timeout
-        if (message.includes('timeout') || message.includes('ETIMEDOUT') || message.includes('Request timed out')) {
+        if (
+            code === 'MODEL_PROVIDER_TIMEOUT' ||
+            message.includes('timeout') ||
+            message.includes('timed out') ||
+            message.includes('ETIMEDOUT') ||
+            message.includes('Request timed out')
+        ) {
             return {
                 code: 'MODEL_PROVIDER_TIMEOUT',
                 message: '模型响应超时，请稍后重试。',

@@ -94,6 +94,16 @@ describe('Ollama Provider via createChatModel', () => {
         expect(model.think).toBe(true)
     })
 
+    it('maps tasklist stage retry count', () => {
+        const handle = createChatModel({
+            config: createTestConfig(),
+            maxRetries: 1,
+            resolvedModelSelection: createTestSelection({ routeType: 'tasklist' }),
+        })
+
+        expect((handle.model as unknown as { caller: { maxRetries: number } }).caller.maxRetries).toBe(1)
+    })
+
     it('chat / tasklist 分别使用对应上限，未启用 reasoning 时不强制开启 think', () => {
         const config = createTestConfig()
         const chatHandle = createChatModel({
@@ -131,5 +141,21 @@ describe('Ollama Provider via createChatModel', () => {
                 providerModel: 'qwen3:8b',
             })
         )
+    })
+
+    it('normalizes tasklist stage timeout as a safe provider error', () => {
+        const handle = createChatModel({
+            config: createTestConfig(),
+            resolvedModelSelection: createTestSelection(),
+        })
+        const normalized = handle.normalizeError({
+            code: 'MODEL_PROVIDER_TIMEOUT',
+            message: 'Tasklist stage exceeded its execution budget.',
+        })
+
+        expect(normalized).toMatchObject({
+            code: 'MODEL_PROVIDER_TIMEOUT',
+            retryable: true,
+        })
     })
 })

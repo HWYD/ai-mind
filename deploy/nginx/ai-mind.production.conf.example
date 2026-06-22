@@ -42,6 +42,8 @@ server {
         proxy_cache off;
         add_header X-Accel-Buffering no;
 
+        # 应用会发送 15 秒 heartbeat；代理超时只作为传输层安全余量，
+        # Tasklist Agent 的阶段业务超时必须小于这里的 600 秒。
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
     }

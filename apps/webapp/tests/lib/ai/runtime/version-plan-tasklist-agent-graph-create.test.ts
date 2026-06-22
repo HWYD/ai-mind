@@ -15,7 +15,10 @@ describe('runtime/version-plan-tasklist-agent graph create', () => {
             createVersionPlanTasklistGraph({
                 runtime: {
                     context: {},
-                    model,
+                    models: {
+                        drafting: { model, timeoutMs: 300_000 },
+                        planning: { model, timeoutMs: 90_000 },
+                    },
                     runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
                     userGoal: '生成 v0.2.0 tasklist',
                     writeChunk: vi.fn(),

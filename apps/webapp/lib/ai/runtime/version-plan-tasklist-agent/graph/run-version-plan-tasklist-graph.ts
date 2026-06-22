@@ -4,8 +4,9 @@ import { MemorySaver } from '@langchain/langgraph'
 import { createId } from '@/lib/ai/create-id'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-import type { ChatExecutionContext, ChatSession, WriteChunk } from '../../types'
+import type { ChatExecutionContext, WriteChunk } from '../../types'
 import type { TasklistAgentRuntimeConfig } from '../config/agent-runtime-config'
+import type { TasklistAgentModelSet } from '../model/tasklist-agent-model-set'
 import { createVersionPlanTasklistGraph } from './create-version-plan-tasklist-graph'
 import { buildGraphDebugSummary } from './graph-debug-summary'
 import { createInitialVersionPlanTasklistGraphState, type VersionPlanTasklistGraphStateAnnotationState } from './graph-state'
@@ -13,7 +14,7 @@ import { createInitialVersionPlanTasklistGraphState, type VersionPlanTasklistGra
 export interface RunVersionPlanTasklistGraphOptions {
     context: ChatExecutionContext
     conversationId: string
-    model: ChatSession['baseModel']
+    models: TasklistAgentModelSet
     runId: string
     runtimeConfig: TasklistAgentRuntimeConfig
     userGoal: string
@@ -77,7 +78,7 @@ export async function runVersionPlanTasklistGraph(options: RunVersionPlanTasklis
         checkpointer: createGraphCheckpointer(options.runtimeConfig),
         runtime: {
             context: options.context,
-            model: options.model,
+            models: options.models,
             runtimeConfig: options.runtimeConfig,
             userGoal: options.userGoal,
             writeChunk: options.writeChunk,

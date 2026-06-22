@@ -60,5 +60,6 @@ export function createVersionPlanTasklistAgentSkeleton(
 }
 
 export { runVersionPlanTasklistGraph } from './graph/run-version-plan-tasklist-graph'
+export { createTasklistAgentModelSet } from './model/tasklist-agent-model-set'
 export { readVersionPlanForTasklistAgent } from './resources/version-plan-reader'
 export { getTasklistAgentRuntimeConfig } from './config/agent-runtime-config'

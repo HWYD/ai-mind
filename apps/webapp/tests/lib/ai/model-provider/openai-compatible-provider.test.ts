@@ -294,6 +294,21 @@ describe('OpenAICompatibleProvider', () => {
 
             expect((model as { timeout?: number }).timeout).toBe(12_345)
         })
+
+        it('allows tasklist stages to override request timeout and retry count', () => {
+            const provider = new OpenAICompatibleProvider('deepseek', deepseekCapabilities)
+
+            const model = provider.createModel({
+                config: createTestConfig({ deepseek: { apiKey: 'sk-test-key', baseURL: 'https://api.deepseek.com' } }),
+                maxRetries: 1,
+                resolvedModelSelection: createDeepSeekSelection({ routeType: 'tasklist' }),
+                routeType: 'tasklist',
+                timeoutMs: 45_000,
+            })
+
+            expect((model as { timeout?: number }).timeout).toBe(45_000)
+            expect((model as unknown as { caller: { maxRetries: number } }).caller.maxRetries).toBe(1)
+        })
     })
 
     describe('错误归一化', () => {
@@ -322,6 +337,19 @@ describe('OpenAICompatibleProvider', () => {
             expect(normalized.message.length).toBeGreaterThan(0)
             expect(normalized.message).not.toContain('Request timed out')
             expect(normalized.logMeta).toMatchObject({ provider: providerName, errorType: 'timeout' })
+        })
+
+        it('recognizes tasklist stage timeout error codes', () => {
+            const provider = new OpenAICompatibleProvider('qwen', qwenCapabilities)
+            const normalized = provider.normalizeError({
+                code: 'MODEL_PROVIDER_TIMEOUT',
+                message: 'Tasklist stage exceeded its execution budget.',
+            })
+
+            expect(normalized).toMatchObject({
+                code: 'MODEL_PROVIDER_TIMEOUT',
+                retryable: true,
+            })
         })
     })
 })

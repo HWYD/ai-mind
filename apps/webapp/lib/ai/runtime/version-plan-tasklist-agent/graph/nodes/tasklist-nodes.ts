@@ -22,7 +22,9 @@ export function createDraftTasklistV1Node(runtime: VersionPlanTasklistGraphNodeR
     ): Promise<VersionPlanTasklistGraphStatePatch> {
         const update = await runDraftTasklistStep({
             context: runtime.context,
-            model: runtime.model,
+            model: runtime.models.drafting.model,
+            modelStage: 'tasklist-draft',
+            modelTimeoutMs: runtime.models.drafting.timeoutMs,
             state,
             userGoal: runtime.userGoal,
             writeChunk: runtime.writeChunk,
@@ -93,7 +95,9 @@ export function createReviseTasklistV2Node(runtime: VersionPlanTasklistGraphNode
     ): Promise<VersionPlanTasklistGraphStatePatch> {
         const update = await runReviseTasklistStep({
             context: runtime.context,
-            model: runtime.model,
+            model: runtime.models.drafting.model,
+            modelStage: 'tasklist-revision',
+            modelTimeoutMs: runtime.models.drafting.timeoutMs,
             state,
             userGoal: runtime.userGoal,
             writeChunk: runtime.writeChunk,

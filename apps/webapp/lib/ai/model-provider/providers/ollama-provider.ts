@@ -28,6 +28,7 @@ export class OllamaProvider implements ModelProvider {
         return new ChatOllama({
             baseUrl: config.ollama.baseURL,
             callbacks: [createModelUsageCallback(resolvedModelSelection)],
+            maxRetries: options.maxRetries,
             model: resolvedModelSelection.providerModel,
             numPredict: maxOutputTokens,
             streaming: true,
@@ -39,6 +40,16 @@ export class OllamaProvider implements ModelProvider {
 
     normalizeError(error: unknown): NormalizedProviderError {
         const message = error instanceof Error ? error.message : String(error)
+        const code = (error as { code?: unknown }).code
+
+        if (code === 'MODEL_PROVIDER_TIMEOUT' || message.includes('timeout') || message.includes('timed out')) {
+            return {
+                code: 'MODEL_PROVIDER_TIMEOUT',
+                message: '模型响应超时，请稍后重试。',
+                retryable: true,
+                logMeta: { provider: 'ollama', errorType: 'timeout' },
+            }
+        }
 
         // Ollama 连接不可用：常见于 baseURL 无法访问、Ollama 未启动
         if (

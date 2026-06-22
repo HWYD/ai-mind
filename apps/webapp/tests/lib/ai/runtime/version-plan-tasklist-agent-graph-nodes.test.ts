@@ -199,7 +199,10 @@ async function runGraphWithResponses(...responses: string[]) {
     const result = await createVersionPlanTasklistGraph({
         runtime: {
             context: {},
-            model,
+            models: {
+                drafting: { model, timeoutMs: 300_000 },
+                planning: { model, timeoutMs: 90_000 },
+            },
             runtimeConfig,
             userGoal: graphState.input.userGoal,
             writeChunk: chunk => writtenChunks.push(chunk),

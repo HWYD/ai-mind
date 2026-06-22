@@ -646,7 +646,16 @@ describe('runtime/chat-orchestrator', () => {
             expect.objectContaining({
                 context: createExecutionContext(),
                 conversationId: request.conversationId,
-                model: session.baseModel,
+                models: expect.objectContaining({
+                    drafting: expect.objectContaining({
+                        model: expect.any(Object),
+                        timeoutMs: 300_000,
+                    }),
+                    planning: expect.objectContaining({
+                        model: expect.any(Object),
+                        timeoutMs: 90_000,
+                    }),
+                }),
                 runtimeConfig: expect.objectContaining({
                     graphCheckpointMode: 'off',
                     graphDebugViewEnabled: false,
@@ -682,7 +691,16 @@ describe('runtime/chat-orchestrator', () => {
             expect.objectContaining({
                 context: createExecutionContext(),
                 conversationId: request.conversationId,
-                model: session.baseModel,
+                models: expect.objectContaining({
+                    drafting: expect.objectContaining({
+                        model: expect.any(Object),
+                        timeoutMs: 300_000,
+                    }),
+                    planning: expect.objectContaining({
+                        model: expect.any(Object),
+                        timeoutMs: 90_000,
+                    }),
+                }),
                 runtimeConfig: expect.objectContaining({
                     graphCheckpointMode: 'off',
                     graphDebugViewEnabled: false,
