@@ -78,6 +78,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
         const maxOutputTokens =
             options.maxOutputTokens != null ? Math.min(options.maxOutputTokens, configMaxOutputTokens) : configMaxOutputTokens
         const modelName = resolvedModelSelection.providerModel
+        const modelKwargs =
+            this.provider === 'qwen' && options.enableReasoning != null
+                ? {
+                      enable_thinking: options.enableReasoning,
+                  }
+                : undefined
 
         return new ChatOpenAI({
             apiKey,
@@ -88,6 +94,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             maxRetries: options.maxRetries,
             maxTokens: maxOutputTokens,
             model: modelName,
+            modelKwargs,
             streaming: true,
             temperature,
             timeout: options.timeoutMs ?? config.timeoutMs,

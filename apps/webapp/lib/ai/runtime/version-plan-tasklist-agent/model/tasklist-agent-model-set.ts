@@ -25,15 +25,15 @@ export const TASKLIST_AGENT_MODEL_POLICIES = {
     drafting: {
         maxOutputTokens: 8192,
         maxRetries: 1,
-        requestTimeoutMs: 120_000,
+        requestTimeoutMs: 180_000,
         stepTimeoutMs: 300_000,
         temperature: 0.3,
     },
     planning: {
         maxOutputTokens: 1024,
         maxRetries: 1,
-        requestTimeoutMs: 45_000,
-        stepTimeoutMs: 90_000,
+        requestTimeoutMs: 120_000,
+        stepTimeoutMs: 160_000,
         temperature: 0,
     },
 } as const satisfies Record<'drafting' | 'planning', TasklistAgentModelPolicy>

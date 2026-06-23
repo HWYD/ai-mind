@@ -261,23 +261,39 @@ describe('OpenAICompatibleProvider', () => {
             expect((tasklistModel as { maxTokens?: number }).maxTokens).toBe(8192)
         })
 
-        it.each([
-            ['deepseek', deepseekCapabilities, createDeepSeekSelection()],
-            ['qwen', qwenCapabilities, createQwenSelection()],
-        ] as const)('%s 不消费 enableReasoning，也不携带 Ollama think 参数', (providerName, capabilities, selection) => {
-            const provider = new OpenAICompatibleProvider(providerName, capabilities)
+        it('DeepSeek 不透传未声明的 reasoning 参数', () => {
+            const provider = new OpenAICompatibleProvider('deepseek', deepseekCapabilities)
             const model = provider.createModel({
                 config: createTestConfig({
                     deepseek: { apiKey: 'sk-test-key', baseURL: 'https://api.deepseek.com' },
                     qwen: { apiKey: 'sk-test-key', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
                 }),
                 enableReasoning: true,
-                resolvedModelSelection: selection,
+                resolvedModelSelection: createDeepSeekSelection(),
                 routeType: 'chat',
             }) as { reasoning?: unknown; think?: unknown }
 
             expect(model.reasoning).toBeUndefined()
             expect(model.think).toBeUndefined()
+        })
+
+        it.each([
+            [false, false],
+            [true, true],
+        ])('Qwen 将 enableReasoning=%s 映射为 enable_thinking=%s', (enableReasoning, expected) => {
+            const provider = new OpenAICompatibleProvider('qwen', qwenCapabilities)
+            const model = provider.createModel({
+                config: createTestConfig({
+                    qwen: { apiKey: 'sk-test-key', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+                }),
+                enableReasoning,
+                resolvedModelSelection: createQwenSelection(),
+                routeType: 'tasklist',
+            }) as { modelKwargs?: Record<string, unknown> }
+
+            expect(model.modelKwargs).toEqual({
+                enable_thinking: expected,
+            })
         })
 
         it('把 Provider timeout 配置传给 ChatOpenAI', () => {
