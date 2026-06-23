@@ -325,6 +325,27 @@ describe('OpenAICompatibleProvider', () => {
             expect((model as { timeout?: number }).timeout).toBe(45_000)
             expect((model as unknown as { caller: { maxRetries: number } }).caller.maxRetries).toBe(1)
         })
+
+        it('keeps chat streaming by default and allows tasklist stages to disable it', () => {
+            const provider = new OpenAICompatibleProvider('deepseek', deepseekCapabilities)
+            const config = createTestConfig({
+                deepseek: { apiKey: 'sk-test-key', baseURL: 'https://api.deepseek.com' },
+            })
+            const chatModel = provider.createModel({
+                config,
+                resolvedModelSelection: createDeepSeekSelection(),
+                routeType: 'chat',
+            })
+            const tasklistModel = provider.createModel({
+                config,
+                resolvedModelSelection: createDeepSeekSelection({ routeType: 'tasklist' }),
+                routeType: 'tasklist',
+                streaming: false,
+            })
+
+            expect((chatModel as { streaming?: boolean }).streaming).toBe(true)
+            expect((tasklistModel as { streaming?: boolean }).streaming).toBe(false)
+        })
     })
 
     describe('错误归一化', () => {

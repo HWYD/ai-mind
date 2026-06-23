@@ -95,7 +95,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             maxTokens: maxOutputTokens,
             model: modelName,
             modelKwargs,
-            streaming: true,
+            streaming: options.streaming ?? true,
             temperature,
             timeout: options.timeoutMs ?? config.timeoutMs,
             // 当前 Qwen / DeepSeek capability 未声明 reasoning；enableReasoning 与 Ollama 特有 think 均不透传。

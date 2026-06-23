@@ -20,6 +20,7 @@ export interface CreateChatModelOptions {
     maxOutputTokens?: number
     maxRetries?: number
     resolvedModelSelection: ResolvedModelSelection
+    streaming?: boolean
     temperature?: number
     timeoutMs?: number
 }
@@ -39,6 +40,7 @@ export function createChatModel(options: CreateChatModelOptions): AiMindChatMode
         maxRetries: options.maxRetries,
         resolvedModelSelection,
         routeType: resolvedModelSelection.routeType,
+        streaming: options.streaming,
         temperature: options.temperature,
         timeoutMs: options.timeoutMs,
     }

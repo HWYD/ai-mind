@@ -31,7 +31,7 @@ export class OllamaProvider implements ModelProvider {
             maxRetries: options.maxRetries,
             model: resolvedModelSelection.providerModel,
             numPredict: maxOutputTokens,
-            streaming: true,
+            streaming: options.streaming ?? true,
             temperature,
             // enableReasoning 只映射到明确声明支持 reasoning 的 Provider 参数。
             think: this.capabilities.reasoning ? options.enableReasoning : undefined,

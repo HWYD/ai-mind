@@ -46,6 +46,7 @@ describe('tasklist agent model set', () => {
                 enableReasoning: false,
                 maxOutputTokens: TASKLIST_AGENT_MODEL_POLICIES.planning.maxOutputTokens,
                 maxRetries: TASKLIST_AGENT_MODEL_POLICIES.planning.maxRetries,
+                streaming: false,
                 temperature: TASKLIST_AGENT_MODEL_POLICIES.planning.temperature,
                 timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.planning.requestTimeoutMs,
             })
@@ -56,6 +57,7 @@ describe('tasklist agent model set', () => {
                 enableReasoning: true,
                 maxOutputTokens: TASKLIST_AGENT_MODEL_POLICIES.drafting.maxOutputTokens,
                 maxRetries: TASKLIST_AGENT_MODEL_POLICIES.drafting.maxRetries,
+                streaming: false,
                 temperature: TASKLIST_AGENT_MODEL_POLICIES.drafting.temperature,
                 timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.drafting.requestTimeoutMs,
             })

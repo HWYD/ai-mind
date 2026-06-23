@@ -104,6 +104,21 @@ describe('Ollama Provider via createChatModel', () => {
         expect((handle.model as unknown as { caller: { maxRetries: number } }).caller.maxRetries).toBe(1)
     })
 
+    it('allows tasklist stages to disable streaming without changing the chat default', () => {
+        const chatHandle = createChatModel({
+            config: createTestConfig(),
+            resolvedModelSelection: createTestSelection(),
+        })
+        const tasklistHandle = createChatModel({
+            config: createTestConfig(),
+            resolvedModelSelection: createTestSelection({ routeType: 'tasklist' }),
+            streaming: false,
+        })
+
+        expect((chatHandle.model as { streaming?: boolean }).streaming).toBe(true)
+        expect((tasklistHandle.model as { streaming?: boolean }).streaming).toBe(false)
+    })
+
     it('chat / tasklist 分别使用对应上限，未启用 reasoning 时不强制开启 think', () => {
         const config = createTestConfig()
         const chatHandle = createChatModel({

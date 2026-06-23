@@ -16,6 +16,7 @@ export interface ModelProviderCreateOptions {
     maxRetries?: number
     resolvedModelSelection: ResolvedModelSelection
     routeType: ModelRouteType
+    streaming?: boolean
     temperature?: number
     timeoutMs?: number
 }

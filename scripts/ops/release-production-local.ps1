@@ -2,6 +2,7 @@
 param(
   [switch]$Deploy,
   [switch]$SyncEnv,
+  [string]$Version = "",
   [string]$SecretsDir = "D:\secrets\ai-mind\production",
   [string]$TcrEnvPath = ""
 )
@@ -151,16 +152,48 @@ try {
       Where-Object { $_ -match "^v\d+\.\d+\.\d+$" }
   )
 
-  if ($versionTags.Count -eq 0) {
-    throw "Current commit has no release tag matching v*.*.* (for example v0.2.5). Release is not allowed."
+  $requestedVersion = $Version.Trim()
+  $localVersionPattern =
+    "^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-" +
+    "(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)" +
+    "(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*$"
+
+  if ($requestedVersion) {
+    if ($requestedVersion -notmatch $localVersionPattern) {
+      throw (
+        "-Version must be a SemVer prerelease such as 0.2.5-local.1 or 0.2.5-hotfix.1. " +
+        "Stable versions such as 0.2.5 must be released from a v0.2.5 Git tag."
+      )
+    }
+
+    if ($versionTags.Count -gt 0) {
+      throw (
+        "-Version local fallback mode cannot be used when the current commit has a stable release tag: " +
+        "$($versionTags -join ', '). Omit -Version to use the tag release mode."
+      )
+    }
+
+    $releaseMode = "local-fallback"
+    $versionTag = "none"
+    $releaseVersion = $requestedVersion
+  }
+  else {
+    if ($versionTags.Count -eq 0) {
+      throw (
+        "Current commit has no release tag matching v*.*.*. " +
+        "Create a stable tag or pass a prerelease -Version such as 0.2.5-local.1."
+      )
+    }
+
+    if ($versionTags.Count -gt 1) {
+      throw "Current commit has multiple semantic version tags: $($versionTags -join ', '). Keep exactly one release tag."
+    }
+
+    $releaseMode = "tag"
+    $versionTag = $versionTags[0]
+    $releaseVersion = $versionTag.Substring(1)
   }
 
-  if ($versionTags.Count -gt 1) {
-    throw "Current commit has multiple semantic version tags: $($versionTags -join ', '). Keep exactly one release tag."
-  }
-
-  $versionTag = $versionTags[0]
-  $version = $versionTag.Substring(1)
   $commitSha = (& git rev-parse HEAD).Trim()
   if ($LASTEXITCODE -ne 0 -or !$commitSha) {
     throw "Failed to resolve the current commit SHA."
@@ -173,8 +206,9 @@ try {
   Write-Host "Git working tree is clean."
 
   Write-Stage "Version resolved"
+  Write-Host "Release mode: $releaseMode"
   Write-Host "Tag: $versionTag"
-  Write-Host "Version: $version"
+  Write-Host "Version: $releaseVersion"
   Write-Host "Commit: $commitShaShort"
 
   Write-Stage "Docker checks"
@@ -223,7 +257,7 @@ try {
     "--build-arg",
     "OCI_SOURCE=$ociSource",
     "--build-arg",
-    "OCI_VERSION=$version"
+    "OCI_VERSION=$releaseVersion"
   )
 
   Write-Stage "Build webapp"
@@ -274,7 +308,9 @@ try {
   }
 
   Write-Stage "Final summary"
-  Write-Host "Version: $version"
+  Write-Host "Release mode: $releaseMode"
+  Write-Host "Git tag: $versionTag"
+  Write-Host "Version: $releaseVersion"
   Write-Host "Commit: $commitShaShort"
   Write-Host "Webapp image: $webappImage"
   Write-Host "Project Assistant Service image: $projectAssistantServiceImage"

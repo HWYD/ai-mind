@@ -44,12 +44,14 @@ export function createTasklistAgentModelSet(options: {
 }): TasklistAgentModelSet {
     const config = getModelProviderConfig()
 
+    // Tasklist 使用 invoke 等待完整结果，避免内部调用误走 SSE 聚合链路。
     const planningHandle = createChatModel({
         config,
         enableReasoning: false,
         maxOutputTokens: TASKLIST_AGENT_MODEL_POLICIES.planning.maxOutputTokens,
         maxRetries: TASKLIST_AGENT_MODEL_POLICIES.planning.maxRetries,
         resolvedModelSelection: options.resolvedModelSelection,
+        streaming: false,
         temperature: TASKLIST_AGENT_MODEL_POLICIES.planning.temperature,
         timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.planning.requestTimeoutMs,
     })
@@ -59,6 +61,7 @@ export function createTasklistAgentModelSet(options: {
         maxOutputTokens: TASKLIST_AGENT_MODEL_POLICIES.drafting.maxOutputTokens,
         maxRetries: TASKLIST_AGENT_MODEL_POLICIES.drafting.maxRetries,
         resolvedModelSelection: options.resolvedModelSelection,
+        streaming: false,
         temperature: TASKLIST_AGENT_MODEL_POLICIES.drafting.temperature,
         timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.drafting.requestTimeoutMs,
     })
