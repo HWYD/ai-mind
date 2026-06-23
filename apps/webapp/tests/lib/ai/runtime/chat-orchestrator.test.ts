@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
+import { TASKLIST_AGENT_MODEL_POLICIES } from '@/lib/ai/runtime/version-plan-tasklist-agent/model/tasklist-agent-model-set'
 
 const runtimeMocks = vi.hoisted(() => {
     return {
@@ -649,11 +650,11 @@ describe('runtime/chat-orchestrator', () => {
                 models: expect.objectContaining({
                     drafting: expect.objectContaining({
                         model: expect.any(Object),
-                        timeoutMs: 300_000,
+                        timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.drafting.stepTimeoutMs,
                     }),
                     planning: expect.objectContaining({
                         model: expect.any(Object),
-                        timeoutMs: 90_000,
+                        timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.planning.stepTimeoutMs,
                     }),
                 }),
                 runtimeConfig: expect.objectContaining({
@@ -694,11 +695,11 @@ describe('runtime/chat-orchestrator', () => {
                 models: expect.objectContaining({
                     drafting: expect.objectContaining({
                         model: expect.any(Object),
-                        timeoutMs: 300_000,
+                        timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.drafting.stepTimeoutMs,
                     }),
                     planning: expect.objectContaining({
                         model: expect.any(Object),
-                        timeoutMs: 90_000,
+                        timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.planning.stepTimeoutMs,
                     }),
                 }),
                 runtimeConfig: expect.objectContaining({

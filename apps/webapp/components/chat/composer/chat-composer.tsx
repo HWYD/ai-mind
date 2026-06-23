@@ -148,7 +148,7 @@ export function ChatComposer({
                 </CardContent>
             </Card>
 
-            <div className="mt-2.5 text-center">
+            <div className="hidden sm:block mt-2.5 text-center">
                 <span className="text-xs text-muted-foreground">{footerText}</span>
             </div>
         </form>
