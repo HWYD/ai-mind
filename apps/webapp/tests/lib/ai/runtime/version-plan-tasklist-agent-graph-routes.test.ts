@@ -16,6 +16,14 @@ import {
     routeAfterReadVersionPlan,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/edges/route-after-read-version-plan'
 import {
+    getRouteAfterStrategyReview,
+    routeAfterStrategyReview,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/edges/route-after-strategy-review'
+import {
+    getRouteAfterTasklistRevisionReview,
+    routeAfterTasklistRevisionReview,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/edges/route-after-tasklist-revision-review'
+import {
     getRouteAfterTasklistStrategy,
     routeAfterTasklistStrategy,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/edges/route-after-tasklist-strategy'
@@ -214,29 +222,29 @@ describe('runtime/version-plan-tasklist-agent graph planning routes', () => {
 })
 
 describe('runtime/version-plan-tasklist-agent graph tasklist strategy routes', () => {
-    it('strategy 成功后进入 draftTasklistV1', () => {
+    it('strategy 成功后进入 reviewTasklistStrategy', () => {
         const baseState = createGraphState({
             manualReviewItems: [],
         })
-        const state = {
+        const state: VersionPlanTasklistGraphStateAnnotationState = {
             ...baseState,
             planning: {
                 ...baseState.planning,
                 strategy: {
-                    expectedStepRange: [3, 5] as [number, number],
                     granularity: 'medium' as const,
-                    grouping: ['Runtime', 'Tests'],
-                    priority: ['先做 runtime', '再补测试'],
-                    reason: '版本目标清晰。',
+                    grouping: 'by_phase' as const,
+                    notes: '先做 runtime，再补测试。',
+                    priorityFocus: ['core_runtime', 'tests'],
+                    stepCountRange: '3-5' as const,
                 },
             },
         }
 
-        expect(routeAfterTasklistStrategy(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.draftTasklistV1)
+        expect(routeAfterTasklistStrategy(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistStrategy)
         expect(getRouteAfterTasklistStrategy(state)).toMatchObject({
             fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideTasklistStrategy,
             label: 'strategy_decided',
-            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.draftTasklistV1,
+            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistStrategy,
         })
     })
 
@@ -270,44 +278,218 @@ describe('runtime/version-plan-tasklist-agent graph tasklist strategy routes', (
     })
 })
 
-describe('runtime/version-plan-tasklist-agent graph warning routes', () => {
+describe('runtime/version-plan-tasklist-agent graph strategy review routes', () => {
     it.each([
         [
             {
-                fixNow: ['missing_steps'],
-                manualReviewItems: [],
-                reason: '存在需要自动修正的问题。',
+                status: 'strategy_reviewed' as const,
+                human: {
+                    strategyReview: {
+                        decision: {
+                            type: 'approve' as const,
+                        },
+                        reviewRound: 1 as const,
+                    },
+                },
             },
-            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2,
-            'fix_now',
+            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.draftTasklistV1,
+            'strategy_approved',
         ],
         [
             {
-                fixNow: [],
-                manualReviewItems: [
-                    {
-                        detail: '测试计划需要人工确认。',
-                        severity: 'warning',
-                        title: '测试计划较粗',
+                status: 'strategy_feedback_received' as const,
+                human: {
+                    strategyReview: {
+                        decision: {
+                            feedback: '请调整策略。',
+                            type: 'respond' as const,
+                        },
+                        reviewRound: 1 as const,
                     },
-                ],
-                reason: '只有人工复核项。',
+                },
             },
-            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect,
-            'no_auto_revision',
+            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.regenerateTasklistStrategy,
+            'strategy_feedback_received',
         ],
-    ] as Array<[WarningDisposition, string, string]>)('根据 fixNow 路由到 %s', (warningDisposition, expectedNodeId, label) => {
-        const state = createGraphState({
+        [
+            {
+                status: 'stopped' as const,
+                human: {
+                    strategyReview: {
+                        decision: {
+                            reason: '不接受当前策略。',
+                            type: 'reject' as const,
+                        },
+                        reviewRound: 1 as const,
+                    },
+                },
+            },
+            END,
+            'strategy_rejected',
+        ],
+    ])('根据 strategy review 状态路由到 %s', ({ status, human }, expectedNodeId, label) => {
+        const state = {
+            ...createGraphState({
+                manualReviewItems: [],
+            }),
+            execution: {
+                ...createGraphState({
+                    manualReviewItems: [],
+                }).execution,
+                status,
+            },
+            human,
+        }
+
+        expect(routeAfterStrategyReview(state)).toBe(expectedNodeId)
+        expect(getRouteAfterStrategyReview(state)).toMatchObject({
+            fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistStrategy,
+            label,
+            toNodeId: expectedNodeId,
+        })
+    })
+
+    it('strategy review 未产生可路由状态时 fail closed', () => {
+        expect(() =>
+            routeAfterStrategyReview(
+                createGraphState({
+                    manualReviewItems: [],
+                })
+            )
+        ).toThrow('Strategy Review 未产生可路由状态')
+    })
+})
+
+describe('runtime/version-plan-tasklist-agent graph warning routes', () => {
+    const fixNowDisposition: WarningDisposition = {
+        fixNow: ['missing_steps'],
+        manualReviewItems: [],
+        reason: '存在需要立即修订的问题。',
+    }
+
+    function createWarningRouteState(options: {
+        draftRevisions?: number
+        draftVersion: 1 | 2 | 3
+        hasRevisionReview?: boolean
+        warningDisposition: WarningDisposition
+    }) {
+        const baseState = createGraphState({
             manualReviewItems: [],
+            warningDisposition: options.warningDisposition,
+        })
+
+        return {
+            ...baseState,
+            execution: {
+                ...baseState.execution,
+                counters: {
+                    ...baseState.execution.counters,
+                    draftRevisions: options.draftRevisions ?? 0,
+                },
+            },
+            human: options.hasRevisionReview
+                ? {
+                      tasklistRevisionReview: {
+                          decision: {
+                              type: 'approve' as const,
+                          },
+                          reviewRound: 1 as const,
+                      },
+                  }
+                : baseState.human,
+            tasklist: {
+                draft: {
+                    content: '# Tasklist\n',
+                    createdAtStep: 1,
+                    planUri,
+                    targetVersion: 'v0.2.0',
+                    version: options.draftVersion,
+                },
+            },
+        }
+    }
+
+    it('v1 fixNow 首次进入 Revision Review，而不是直接自动修订', () => {
+        const state = createWarningRouteState({
+            draftVersion: 1,
+            warningDisposition: fixNowDisposition,
+        })
+
+        expect(routeAfterWarningDisposition(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistRevision)
+        expect(getRouteAfterWarningDisposition(state)).toMatchObject({
+            fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideWarningDisposition,
+            label: 'fix_now_review_required',
+            reason: fixNowDisposition.reason,
+            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistRevision,
+        })
+    })
+
+    it('v1 已完成 Revision Review 后才进入 v2 修订', () => {
+        const state = createWarningRouteState({
+            draftVersion: 1,
+            hasRevisionReview: true,
+            warningDisposition: fixNowDisposition,
+        })
+
+        expect(routeAfterWarningDisposition(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2)
+        expect(getRouteAfterWarningDisposition(state)).toMatchObject({
+            label: 'fix_now',
+            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2,
+        })
+    })
+
+    it('v2 fixNow 在预算内自动进入 v3 修订，不再二次 HITL', () => {
+        const state = createWarningRouteState({
+            draftRevisions: 1,
+            draftVersion: 2,
+            hasRevisionReview: true,
+            warningDisposition: fixNowDisposition,
+        })
+
+        expect(routeAfterWarningDisposition(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV3)
+        expect(getRouteAfterWarningDisposition(state)).toMatchObject({
+            label: 'fix_now_auto_revision',
+            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV3,
+        })
+    })
+
+    it('无 fixNow 时直接进入 revision effect，manual-only warning 不触发 HITL', () => {
+        const warningDisposition: WarningDisposition = {
+            fixNow: [],
+            manualReviewItems: [
+                {
+                    detail: '测试计划需要人工确认。',
+                    severity: 'warning',
+                    title: '测试计划较粗',
+                },
+            ],
+            reason: '只有人工复核项。',
+        }
+        const state = createWarningRouteState({
+            draftVersion: 1,
             warningDisposition,
         })
 
-        expect(routeAfterWarningDisposition(state)).toBe(expectedNodeId)
+        expect(routeAfterWarningDisposition(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect)
         expect(getRouteAfterWarningDisposition(state)).toMatchObject({
-            fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideWarningDisposition,
-            label,
+            label: 'no_auto_revision',
             reason: warningDisposition.reason,
-            toNodeId: expectedNodeId,
+            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect,
+        })
+    })
+
+    it('v3 或预算耗尽后不再生成 v4，直接进入 revision effect', () => {
+        const state = createWarningRouteState({
+            draftRevisions: 2,
+            draftVersion: 3,
+            hasRevisionReview: true,
+            warningDisposition: fixNowDisposition,
+        })
+
+        expect(routeAfterWarningDisposition(state)).toBe(VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect)
+        expect(getRouteAfterWarningDisposition(state)).toMatchObject({
+            label: 'revision_budget_exhausted',
+            toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect,
         })
     })
 
@@ -319,5 +501,87 @@ describe('runtime/version-plan-tasklist-agent graph warning routes', () => {
                 })
             )
         ).toThrow('缺少 WarningDisposition')
+    })
+})
+
+describe('runtime/version-plan-tasklist-agent graph tasklist revision review routes', () => {
+    it.each([
+        [
+            {
+                decision: {
+                    type: 'approve' as const,
+                },
+                executionStatus: 'tasklist_revision_reviewed' as const,
+            },
+            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2,
+            'tasklist_revision_approved',
+        ],
+        [
+            {
+                decision: {
+                    feedback: '修订时强调 checkpoint resume 验证。',
+                    type: 'respond' as const,
+                },
+                executionStatus: 'tasklist_revision_reviewed' as const,
+            },
+            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2,
+            'tasklist_revision_feedback_received',
+        ],
+        [
+            {
+                decision: {
+                    markdown: '# Edited Tasklist\n',
+                    type: 'edit' as const,
+                },
+                executionStatus: 'revised_v2' as const,
+            },
+            VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV2,
+            'tasklist_revision_edited',
+        ],
+        [
+            {
+                decision: {
+                    reason: '不继续修订。',
+                    type: 'reject' as const,
+                },
+                executionStatus: 'stopped' as const,
+            },
+            END,
+            'tasklist_revision_rejected',
+        ],
+    ])('根据 revision review 决策路由到 %s', ({ decision, executionStatus }, expectedNodeId, label) => {
+        const baseState = createGraphState({
+            manualReviewItems: [],
+        })
+        const state = {
+            ...baseState,
+            execution: {
+                ...baseState.execution,
+                status: executionStatus,
+            },
+            human: {
+                tasklistRevisionReview: {
+                    decision,
+                    reviewRound: 1 as const,
+                },
+            },
+        }
+
+        expect(routeAfterTasklistRevisionReview(state)).toBe(expectedNodeId)
+        expect(getRouteAfterTasklistRevisionReview(state)).toMatchObject({
+            fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistRevision,
+            label,
+            toNodeId: expectedNodeId,
+        })
+    })
+
+    it('revision review 未产生可路由状态时 fail closed', () => {
+        expect(() =>
+            routeAfterTasklistRevisionReview(
+                createGraphState({
+                    manualReviewItems: [],
+                })
+            )
+        ).toThrow('Tasklist Revision Review 未产生可路由状态')
     })
 })

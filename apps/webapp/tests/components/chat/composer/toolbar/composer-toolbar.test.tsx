@@ -117,4 +117,30 @@ describe('ComposerToolbar model selector', () => {
 
         expect(document.body.hasAttribute('data-scroll-locked')).toBe(false)
     })
+
+    it('disabled 时发送按钮锁定并使用弱化样式', () => {
+        render(
+            <ComposerToolbar
+                disabled
+                enableReasoning
+                isModelLoading={false}
+                model="qwen/qwen3.6-plus"
+                modelGroups={modelGroups}
+                onEnableReasoningChange={vi.fn()}
+                onInsertTrigger={vi.fn()}
+                onModelChange={vi.fn()}
+                onSkillModeChange={vi.fn()}
+                onStop={vi.fn()}
+                onSubmit={vi.fn()}
+                sendDisabled
+                skillMode="auto"
+                status="ready"
+            />
+        )
+
+        const sendButton = screen.getByRole('button', { name: '发送消息' })
+
+        expect((sendButton as HTMLButtonElement).disabled).toBe(true)
+        expect(sendButton.className).toContain('bg-muted')
+    })
 })

@@ -50,7 +50,7 @@ export function buildControlledPlannerOutputFailureAnswer(error: unknown) {
 
 function buildFinalAnswerSummary(state: VersionPlanTasklistGraphStateAnnotationState) {
     const draft = state.tasklist.draft
-    const validationResult = draft?.validationV2 ?? draft?.validationV1
+    const validationResult = draft?.validationV3 ?? draft?.validationV2 ?? draft?.validationV1
     const revisionEffect = state.planning.revisionEffect
 
     if (!draft || !validationResult || !revisionEffect) {
@@ -92,7 +92,7 @@ function buildFinalAnswerSummary(state: VersionPlanTasklistGraphStateAnnotationS
         '- 剩余问题：',
         ...remainingIssueLines,
         ...(revisionEffect.finalDecision === 'blocked'
-            ? ['', '> 当前任务清单草稿仍未通过结构校验，不建议直接采用；本版不会继续生成 v3。']
+            ? ['', '> 当前任务清单草稿仍未通过结构校验，不建议直接采用；本版最多只允许两轮受控修订。']
             : []),
         '',
         '## 人工确认点',
@@ -106,7 +106,7 @@ export function runFinalAnswerStep(options: {
     writeChunk: WriteChunk
 }): VersionPlanTasklistGraphStatePatch {
     const draft = options.state.tasklist.draft
-    const validationResult = draft?.validationV2 ?? draft?.validationV1
+    const validationResult = draft?.validationV3 ?? draft?.validationV2 ?? draft?.validationV1
     const answer = buildFinalAnswerSummary(options.state)
     const update = applyVersionPlanTasklistGraphAction(options.state, {
         reason: '输出任务清单草稿、结构校验结论和人工确认点。',

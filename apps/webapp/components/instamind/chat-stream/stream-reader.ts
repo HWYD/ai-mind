@@ -17,7 +17,7 @@ function parseChatStreamLine(line: string): ChatStreamChunk {
         throw new Error('服务端返回了无法解析的流式数据。')
     }
 
-    return parsedChunk.data
+    return parsedChunk.data as ChatStreamChunk
 }
 
 export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: (chunk: ChatStreamChunk) => void) {

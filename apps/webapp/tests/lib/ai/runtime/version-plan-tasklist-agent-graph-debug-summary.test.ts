@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import { buildGraphDebugSummary } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-debug-summary'
-import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
+import {
+    createInitialVersionPlanTasklistGraphState,
+    type VersionPlanTasklistGraphStateAnnotationState,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 
 const versionPlanReference = {
     id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
@@ -12,7 +15,7 @@ const versionPlanReference = {
     uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
 } as const
 
-function createGraphState() {
+function createGraphState(): VersionPlanTasklistGraphStateAnnotationState {
     const initialState = createInitialVersionPlanTasklistGraphState({
         conversationId: 'conversation-debug-summary-test',
         runId: 'run-debug-summary-test',
@@ -31,9 +34,10 @@ function createGraphState() {
         execution: {
             ...initialState.execution,
             counters: {
-                draftRevisions: 1,
+                draftRevisions: 2,
                 optionalContextReads: 1,
-                steps: 10,
+                steps: 14,
+                strategyRegenerations: 1,
             },
         },
         graph: {
@@ -93,11 +97,11 @@ function createGraphState() {
                 scoreBefore: 80,
             },
             strategy: {
-                expectedStepRange: [3, 5] as [number, number],
                 granularity: 'medium' as const,
-                grouping: ['Graph State', 'Runner'],
-                priority: ['Graph State first'],
-                reason: 'strategy reason must not enter debug summary.',
+                grouping: 'by_phase' as const,
+                notes: 'strategy notes must not enter debug summary.',
+                priorityFocus: ['state_model', 'core_runtime'],
+                stepCountRange: '3-5' as const,
             },
             warningDisposition: {
                 fixNow: ['Add execution discipline'],
@@ -147,7 +151,15 @@ function createGraphState() {
                     status: 'pass' as const,
                     weakSections: [],
                 },
-                version: 2 as const,
+                validationV3: {
+                    blockingIssues: [],
+                    missingSections: [],
+                    revisionHints: [],
+                    score: 98,
+                    status: 'pass' as const,
+                    weakSections: [],
+                },
+                version: 3 as const,
             },
         },
     }
@@ -161,16 +173,17 @@ describe('runtime/version-plan-tasklist-agent graph debug summary', () => {
             decision: {
                 type: 'proceed_to_tasklist_strategy',
             },
-            draftRevisions: 1,
+            draftRevisions: 2,
             lastRoute: {
                 fromNodeId: 'decideWarningDisposition',
                 label: 'no_auto_revision',
                 toNodeId: 'evaluateRevisionEffect',
             },
             manualReviewItemCount: 1,
-            maxDraftRevisions: 1,
+            maxDraftRevisions: 2,
             maxOptionalContextReads: 1,
-            maxSteps: 12,
+            maxStrategyRegenerations: 1,
+            maxSteps: 20,
             optionalContext: {
                 status: 'completed',
             },
@@ -183,7 +196,8 @@ describe('runtime/version-plan-tasklist-agent graph debug summary', () => {
             },
             runId: 'run-debug-summary-test',
             runtimeMode: 'graph',
-            stepCount: 10,
+            stepCount: 14,
+            strategyRegenerations: 1,
             strategy: {
                 expectedStepRange: [3, 5],
                 granularity: 'medium',
@@ -195,6 +209,10 @@ describe('runtime/version-plan-tasklist-agent graph debug summary', () => {
             },
             validationV2: {
                 score: 96,
+                status: 'pass',
+            },
+            validationV3: {
+                score: 98,
                 status: 'pass',
             },
             visitedNodes: ['readVersionPlan', 'planningDecision', 'emitFinalArtifact'],

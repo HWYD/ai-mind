@@ -6,6 +6,32 @@
 name: ai-mind-production
 
 services:
+  postgres:
+    image: postgres:16-bookworm
+    env_file:
+      - ./env/postgres.production.env
+    environment:
+      TZ: Asia/Shanghai
+    expose:
+      - "5432"
+    volumes:
+      - ai-mind-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    stop_grace_period: 30s
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: 50m
+        max-file: 3
+
   project-assistant-service:
     image: ${AI_MIND_PROJECT_ASSISTANT_SERVICE_IMAGE?AI_MIND_PROJECT_ASSISTANT_SERVICE_IMAGE is required}:${AI_MIND_IMAGE_TAG?AI_MIND_IMAGE_TAG is required}
     env_file:
@@ -44,6 +70,8 @@ services:
   webapp:
     image: ${AI_MIND_WEBAPP_IMAGE?AI_MIND_WEBAPP_IMAGE is required}:${AI_MIND_IMAGE_TAG?AI_MIND_IMAGE_TAG is required}
     depends_on:
+      postgres:
+        condition: service_healthy
       project-assistant-service:
         condition: service_healthy
     env_file:
@@ -80,3 +108,6 @@ services:
           memory: 1200M
         reservations:
           memory: 256M
+
+volumes:
+  ai-mind-postgres-data:

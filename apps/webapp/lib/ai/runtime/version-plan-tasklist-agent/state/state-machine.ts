@@ -5,9 +5,14 @@ import {
     VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS,
     type VersionPlanTasklistAgentAction,
     type VersionPlanTasklistAgentStatus,
+    type VersionPlanTasklistDraftArtifact,
     type VersionPlanTasklistPlanningArtifacts,
 } from '../contract/types'
-import type { VersionPlanTasklistGraphStateAnnotationState, VersionPlanTasklistGraphStatePatch } from '../graph/graph-state'
+import type {
+    VersionPlanTasklistGraphHumanState,
+    VersionPlanTasklistGraphStateAnnotationState,
+    VersionPlanTasklistGraphStatePatch,
+} from '../graph/graph-state'
 
 const SUPPLEMENTAL_RESOURCE_URIS = new Set<string>(VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS)
 
@@ -21,7 +26,10 @@ type StateMachineView = {
         draftRevisions: number
         optionalContextReads: number
         steps: number
+        strategyRegenerations: number
     }
+    draft?: VersionPlanTasklistDraftArtifact
+    human: VersionPlanTasklistGraphHumanState
     limits: typeof VERSION_PLAN_TASKLIST_AGENT_LIMITS
     planning: VersionPlanTasklistPlanningArtifacts
     status: VersionPlanTasklistAgentStatus
@@ -31,6 +39,8 @@ type StateMachineView = {
 function createGraphStateView(state: VersionPlanTasklistGraphStateAnnotationState): StateMachineView {
     return {
         counters: state.execution.counters,
+        draft: state.tasklist.draft,
+        human: state.human,
         limits: state.execution.limits,
         planning: state.planning,
         status: state.execution.status,
@@ -115,8 +125,36 @@ function validateVersionPlanTasklistActionView(view: StateMachineView, action: V
                       reason: 'Tasklist strategy can only be decided after planning decision or optional context read.',
                       success: false,
                   }
-        case 'draft_tasklist':
+        case 'apply_strategy_review_decision':
             if (view.status !== 'strategy_decided') {
+                return {
+                    reason: 'Strategy review decision can only be applied after strategy decision.',
+                    success: false,
+                }
+            }
+
+            return action.decision.type === 'respond' && view.counters.strategyRegenerations >= view.limits.maxStrategyRegenerations
+                ? {
+                      reason: `Strategy regeneration limit reached: ${view.limits.maxStrategyRegenerations}.`,
+                      success: false,
+                  }
+                : { success: true }
+        case 'regenerate_tasklist_strategy':
+            if (view.status !== 'strategy_feedback_received') {
+                return {
+                    reason: 'Tasklist strategy can only be regenerated after strategy review feedback.',
+                    success: false,
+                }
+            }
+
+            return view.counters.strategyRegenerations < view.limits.maxStrategyRegenerations
+                ? { success: true }
+                : {
+                      reason: `Strategy regeneration limit reached: ${view.limits.maxStrategyRegenerations}.`,
+                      success: false,
+                  }
+        case 'draft_tasklist':
+            if (view.status !== 'strategy_decided' && view.status !== 'strategy_reviewed') {
                 return {
                     reason: 'Tasklist draft can only be generated after strategy decision.',
                     success: false,
@@ -130,30 +168,82 @@ function validateVersionPlanTasklistActionView(view: StateMachineView, action: V
                       success: false,
                   }
         case 'call_tool':
-            return view.status === 'drafted_v1' || view.status === 'revised_v2'
+            return view.status === 'drafted_v1' || view.status === 'revised_v2' || view.status === 'revised_v3'
                 ? { success: true }
                 : {
                       reason: 'Tasklist validation can only run after a draft exists.',
                       success: false,
                   }
         case 'decide_warning_disposition':
-            return view.status === 'validated_v1'
+            return view.status === 'validated_v1' || view.status === 'validated_v2' || view.status === 'validated_v3'
                 ? { success: true }
                 : {
-                      reason: 'Warning disposition can only run after v1 validation.',
+                      reason: 'Warning disposition can only run after validation.',
                       success: false,
                   }
+        case 'apply_tasklist_revision_review_decision':
+            if (view.status !== 'warning_disposition_decided') {
+                return {
+                    reason: 'Tasklist revision review decision can only be applied after warning disposition.',
+                    success: false,
+                }
+            }
+
+            if (!view.draft || view.draft.version !== 1) {
+                return {
+                    reason: 'Tasklist revision review is only allowed for the initial draft.',
+                    success: false,
+                }
+            }
+
+            if (!view.planning.warningDisposition || view.planning.warningDisposition.fixNow.length === 0) {
+                return {
+                    reason: 'Tasklist revision review requires fixNow findings.',
+                    success: false,
+                }
+            }
+
+            if (view.human.tasklistRevisionReview) {
+                return {
+                    reason: 'Tasklist revision review can only happen once per run.',
+                    success: false,
+                }
+            }
+
+            return action.decision.type !== 'reject' && view.counters.draftRevisions >= view.limits.maxDraftRevisions
+                ? {
+                      reason: `Tasklist revision limit reached: ${view.limits.maxDraftRevisions}.`,
+                      success: false,
+                  }
+                : { success: true }
         case 'evaluate_revision_effect':
-            return view.status === 'validated_v1' || view.status === 'validated_v2'
+            return view.status === 'warning_disposition_decided' ||
+                view.status === 'validated_v1' ||
+                view.status === 'validated_v2' ||
+                view.status === 'validated_v3'
                 ? { success: true }
                 : {
                       reason: 'Revision effect can only be evaluated after validation.',
                       success: false,
                   }
         case 'revise_tasklist':
-            if (view.status !== 'validated_v1') {
+            if (view.status !== 'warning_disposition_decided' && view.status !== 'tasklist_revision_reviewed') {
                 return {
-                    reason: 'Tasklist revision can only run after v1 validation.',
+                    reason: 'Tasklist revision can only run after warning disposition or revision review.',
+                    success: false,
+                }
+            }
+
+            if (!view.draft || view.draft.version >= 3) {
+                return {
+                    reason: 'Tasklist revision requires a draft that can advance to the next controlled version.',
+                    success: false,
+                }
+            }
+
+            if (!view.planning.warningDisposition || view.planning.warningDisposition.fixNow.length === 0) {
+                return {
+                    reason: 'Tasklist revision requires fixNow findings.',
                     success: false,
                 }
             }
@@ -262,6 +352,46 @@ export function applyVersionPlanTasklistGraphAction(
                     strategy: action.strategy,
                 },
             }
+        case 'apply_strategy_review_decision': {
+            const reviewRound = state.execution.counters.strategyRegenerations > 0 ? 2 : 1
+
+            return {
+                execution: {
+                    counters,
+                    status:
+                        action.decision.type === 'reject'
+                            ? 'stopped'
+                            : action.decision.type === 'respond'
+                              ? 'strategy_feedback_received'
+                              : 'strategy_reviewed',
+                },
+                human: {
+                    strategyReview: {
+                        decision: action.decision,
+                        reviewRound,
+                    },
+                },
+                planning:
+                    action.decision.type === 'edit'
+                        ? {
+                              strategy: action.decision.strategy,
+                          }
+                        : undefined,
+            }
+        }
+        case 'regenerate_tasklist_strategy':
+            return {
+                execution: {
+                    counters: {
+                        ...counters,
+                        strategyRegenerations: state.execution.counters.strategyRegenerations + 1,
+                    },
+                    status: 'strategy_decided',
+                },
+                planning: {
+                    strategy: action.strategy,
+                },
+            }
         case 'draft_tasklist':
             return {
                 execution: {
@@ -282,14 +412,19 @@ export function applyVersionPlanTasklistGraphAction(
             return {
                 execution: {
                     counters,
-                    status: state.execution.status === 'revised_v2' ? 'validated_v2' : 'validated_v1',
+                    status:
+                        state.tasklist.draft?.version === 3
+                            ? 'validated_v3'
+                            : state.tasklist.draft?.version === 2
+                              ? 'validated_v2'
+                              : 'validated_v1',
                 },
             }
         case 'decide_warning_disposition':
             return {
                 execution: {
                     counters,
-                    status: 'validated_v1',
+                    status: 'warning_disposition_decided',
                 },
                 planning: {
                     manualReviewItems:
@@ -299,6 +434,63 @@ export function applyVersionPlanTasklistGraphAction(
                     warningDisposition: action.disposition,
                 },
             }
+        case 'apply_tasklist_revision_review_decision': {
+            if (action.decision.type === 'reject') {
+                return {
+                    execution: {
+                        counters,
+                        status: 'stopped',
+                    },
+                    human: {
+                        tasklistRevisionReview: {
+                            decision: action.decision,
+                            reviewRound: 1,
+                        },
+                    },
+                }
+            }
+
+            if (action.decision.type === 'edit') {
+                return {
+                    execution: {
+                        counters: {
+                            ...counters,
+                            draftRevisions: state.execution.counters.draftRevisions + 1,
+                        },
+                        status: 'revised_v2',
+                    },
+                    human: {
+                        tasklistRevisionReview: {
+                            decision: action.decision,
+                            reviewRound: 1,
+                        },
+                    },
+                    tasklist: {
+                        draft: state.tasklist.draft
+                            ? {
+                                  ...state.tasklist.draft,
+                                  content: action.decision.markdown,
+                                  updatedAtStep: counters.steps,
+                                  version: 2,
+                              }
+                            : undefined,
+                    },
+                }
+            }
+
+            return {
+                execution: {
+                    counters,
+                    status: 'tasklist_revision_reviewed',
+                },
+                human: {
+                    tasklistRevisionReview: {
+                        decision: action.decision,
+                        reviewRound: 1,
+                    },
+                },
+            }
+        }
         case 'evaluate_revision_effect':
             return {
                 execution: {
@@ -309,25 +501,28 @@ export function applyVersionPlanTasklistGraphAction(
                     revisionEffect: action.effect,
                 },
             }
-        case 'revise_tasklist':
+        case 'revise_tasklist': {
+            const nextDraftVersion = state.tasklist.draft?.version === 2 ? 3 : 2
+
             return {
                 execution: {
                     counters: {
                         ...counters,
                         draftRevisions: state.execution.counters.draftRevisions + 1,
                     },
-                    status: 'revised_v2',
+                    status: nextDraftVersion === 3 ? 'revised_v3' : 'revised_v2',
                 },
                 tasklist: {
                     draft: state.tasklist.draft
                         ? {
                               ...state.tasklist.draft,
                               updatedAtStep: counters.steps,
-                              version: 2,
+                              version: nextDraftVersion,
                           }
                         : undefined,
                 },
             }
+        }
         case 'final_answer':
             return {
                 execution: {

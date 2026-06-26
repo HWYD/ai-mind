@@ -3,9 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 
 describe('runtime/version-plan-tasklist-agent runtime config', () => {
-    it('默认关闭 graph 附加能力', () => {
+    it('development 默认使用 memory checkpoint，并关闭 graph 事件与 debug', () => {
         expect(getTasklistAgentRuntimeConfig({}, 'development')).toEqual({
-            graphCheckpointMode: 'off',
+            graphCheckpointMode: 'memory',
+            graphDebugViewEnabled: false,
+            graphEventsEnabled: false,
+        })
+    })
+
+    it('production 默认使用 postgres checkpoint', () => {
+        expect(getTasklistAgentRuntimeConfig({}, 'production')).toEqual({
+            graphCheckpointMode: 'postgres',
             graphDebugViewEnabled: false,
             graphEventsEnabled: false,
         })
@@ -26,6 +34,17 @@ describe('runtime/version-plan-tasklist-agent runtime config', () => {
             graphDebugViewEnabled: true,
             graphEventsEnabled: true,
         })
+    })
+
+    it('允许显式选择 postgres durable checkpoint', () => {
+        expect(
+            getTasklistAgentRuntimeConfig(
+                {
+                    AI_MIND_GRAPH_CHECKPOINT: 'postgres',
+                },
+                'production'
+            ).graphCheckpointMode
+        ).toBe('postgres')
     })
 
     it('非法 graph 附加配置按受控默认值 fail closed', () => {
@@ -55,7 +74,7 @@ describe('runtime/version-plan-tasklist-agent runtime config', () => {
                 'development'
             )
         ).toEqual({
-            graphCheckpointMode: 'off',
+            graphCheckpointMode: 'memory',
             graphDebugViewEnabled: false,
             graphEventsEnabled: true,
         })

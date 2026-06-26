@@ -28,6 +28,19 @@ describe('chat stream graph chunks', () => {
             },
             {
                 agentName: 'version-plan-to-tasklist-agent',
+                durationMs: 5,
+                nodeId: 'reviewTasklistStrategy',
+                partId: 'graph-node-paused',
+                runId: 'run-1',
+                severity: 'info',
+                status: 'paused',
+                summary: 'Graph 已暂停，等待人工审核后 resume。',
+                tags: ['status: interrupted'],
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-node-end',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
                 fromNodeId: 'readVersionPlan',
                 partId: 'graph-route',
                 reason: '读取成功。',
@@ -51,7 +64,7 @@ describe('chat stream graph chunks', () => {
                 partId: 'graph-debug-summary',
                 runId: 'run-1',
                 summary: {
-                    checkpointMode: 'memory',
+                    checkpointMode: 'postgres',
                     currentNode: 'emitFinalArtifact',
                     decision: {
                         type: 'proceed_to_tasklist_strategy',
@@ -81,9 +94,42 @@ describe('chat stream graph chunks', () => {
         expect(chunks.map(chunk => chunk.type)).toEqual([
             'agent-graph-node-start',
             'agent-graph-node-end',
+            'agent-graph-node-end',
             'agent-graph-route',
             'agent-graph-state-patch',
             'agent-graph-debug-summary',
         ])
+    })
+})
+
+describe('chat stream HITL chunks', () => {
+    it('accepts generic interrupt and resume chunks in the protocol union', () => {
+        const chunks = [
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-1',
+                interruptKind: 'strategy_review',
+                payload: {
+                    kind: 'strategy_review',
+                    nodeName: 'reviewTasklistStrategy',
+                    runId: 'run-1',
+                    threadId: 'tasklist-agent:conversation-1:run-1',
+                },
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-interrupt',
+            },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-1',
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-resume',
+            },
+        ] satisfies ChatStreamChunk[]
+
+        expect(chunks.map(chunk => chunk.type)).toEqual(['agent-interrupt', 'agent-resume'])
     })
 })

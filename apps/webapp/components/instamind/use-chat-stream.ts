@@ -8,7 +8,7 @@ import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequest, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
-import type { MindMessage } from '@/lib/ai/types/message'
+import type { AgentInterruptPart, MindMessage } from '@/lib/ai/types/message'
 
 import { createMessage, createTextPart } from './chat-stream/message-factory'
 import { getLastUserTurnForRegeneration, pruneTransientMessages, removeMessage, removeUserTurnPair } from './chat-stream/message-operations'
@@ -27,6 +27,9 @@ import { useStreamTextBuffer } from './chat-stream/use-stream-text-buffer'
 // 文本/推理 delta 的批量刷新窗口。流式 token 先进入 buffer，再按约 40ms + rAF 合并写入 React state。
 // 调大：Markdown 解析和 DOM 更新更少但打字感更钝；调小：更实时但更容易触发渲染/滚动抖动。
 const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
+// 兼容旧实现残留的本地 key。v0.3.0 明确不支持刷新后恢复 pending HITL；
+// 如果后续重新启用，必须同时恢复 assistant message、interrupt payload 和同消息续写上下文，而不是只拉起一张审核卡。
+const PENDING_AGENT_RUN_STORAGE_KEY = 'ai-mind:pending-agent-run-id'
 
 type ChatRequestError = Error & {
     code?: string
@@ -53,6 +56,29 @@ interface UseChatStreamOptions {
     skillMode?: ChatSkillMode
     model?: ChatModel
     enableReasoning?: boolean
+}
+
+export interface PendingAgentInterrupt {
+    messageId: string
+    part: AgentInterruptPart
+}
+
+function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterrupt | null {
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+        const message = messages[messageIndex]
+        const interruptPart = message.parts.find(
+            (part): part is AgentInterruptPart => part.type === 'agent-interrupt' && part.status === 'pending'
+        )
+
+        if (interruptPart) {
+            return {
+                messageId: message.id,
+                part: interruptPart,
+            }
+        }
+    }
+
+    return null
 }
 
 export function useChatStream(options: UseChatStreamOptions = {}) {
@@ -127,6 +153,14 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     useEffect(() => {
         syncMessageSnapshots(messages)
     }, [messages])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+
+        window.localStorage.removeItem(PENDING_AGENT_RUN_STORAGE_KEY)
+    }, [])
 
     /**
      * 重置 active part 指针。
@@ -216,6 +250,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         const text = resolveComposerSubmissionText(input, composer)
 
         if (!text || abortControllerRef.current) {
+            return false
+        }
+
+        if (findPendingAgentInterrupt(messagesRef.current)) {
             return false
         }
 
@@ -321,6 +359,72 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         return submitTurn(messagesRef.current, input, composer, displaySegments)
     }
 
+    async function resumeAgentRun(decision: unknown) {
+        const pendingInterrupt = findPendingAgentInterrupt(messagesRef.current)
+
+        if (!pendingInterrupt || abortControllerRef.current || status === 'submitted' || status === 'streaming') {
+            return false
+        }
+
+        const controller = new AbortController()
+
+        textBuffer.clear()
+        setError(null)
+        setStatus('submitted')
+        abortControllerRef.current = controller
+
+        try {
+            const response = await fetch(`/api/agent-runs/${encodeURIComponent(pendingInterrupt.part.runId)}/resume`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    decision,
+                    interruptId: pendingInterrupt.part.interruptId,
+                }),
+                signal: controller.signal,
+            })
+
+            if (!response.ok) {
+                const responseJson = await response.json().catch(() => null)
+                const errorMessage = responseJson?.error ?? `恢复 AgentRun 失败，状态码：${response.status}`
+                const errorCode = typeof responseJson?.code === 'string' ? responseJson.code : null
+
+                throw new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage)
+            }
+
+            if (!response.body) {
+                throw new Error('恢复响应缺少可读取的流式内容。')
+            }
+
+            setStatus('streaming')
+            await consumeNdjsonStream(response.body, handleChunk)
+
+            if (!controller.signal.aborted) {
+                setStatus('ready')
+            }
+
+            return true
+        } catch (resumeError) {
+            textBuffer.flush()
+
+            if (isAbortError(resumeError)) {
+                setStatus('ready')
+                return false
+            }
+
+            setStatus('ready')
+            throw resumeError
+        } finally {
+            textBuffer.flush()
+
+            if (abortControllerRef.current === controller) {
+                abortControllerRef.current = null
+            }
+        }
+    }
+
     function cancel() {
         if (!abortControllerRef.current) {
             return
@@ -330,7 +434,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     }
 
     function deleteUserTurn(userMessageId: string) {
-        if (status === 'submitted' || status === 'streaming') {
+        if (status === 'submitted' || status === 'streaming' || findPendingAgentInterrupt(messagesRef.current)) {
             return false
         }
 
@@ -340,7 +444,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     }
 
     async function regenerateLastTurn() {
-        if (status === 'submitted' || status === 'streaming') {
+        if (status === 'submitted' || status === 'streaming' || findPendingAgentInterrupt(messagesRef.current)) {
             return false
         }
 
@@ -358,7 +462,9 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         messages,
         status,
         error,
+        pendingInterrupt: findPendingAgentInterrupt(messages),
         sendMessage,
+        resumeAgentRun,
         cancel,
         deleteUserTurn,
         regenerateLastTurn,

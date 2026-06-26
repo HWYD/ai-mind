@@ -10,7 +10,7 @@ export interface SkillSelectedChunk {
     description?: string
 }
 
-export type AgentStepStatus = 'completed' | 'failed' | 'running' | 'skipped'
+export type AgentStepStatus = 'completed' | 'failed' | 'paused' | 'running' | 'skipped'
 export type AgentStepSeverity = 'error' | 'info' | 'warning'
 
 export interface AgentGraphNodeStartChunk {
@@ -68,7 +68,7 @@ export interface AgentGraphDebugRouteSummary {
 }
 
 export interface AgentGraphDebugSummary {
-    checkpointMode: 'memory' | 'off'
+    checkpointMode: 'memory' | 'off' | 'postgres'
     currentNode?: string
     decision?: {
         type: string
@@ -78,6 +78,7 @@ export interface AgentGraphDebugSummary {
     manualReviewItemCount: number
     maxDraftRevisions: number
     maxOptionalContextReads: number
+    maxStrategyRegenerations?: number
     maxSteps: number
     optionalContext?: {
         status: string
@@ -92,6 +93,7 @@ export interface AgentGraphDebugSummary {
     runId: string
     runtimeMode: 'graph'
     stepCount: number
+    strategyRegenerations?: number
     strategy?: {
         expectedStepRange: [number, number]
         granularity: string
@@ -102,6 +104,10 @@ export interface AgentGraphDebugSummary {
         status: string
     }
     validationV2?: {
+        score: number
+        status: string
+    }
+    validationV3?: {
         score: number
         status: string
     }
@@ -119,6 +125,26 @@ export interface AgentGraphDebugSummaryChunk {
     threadId: string
     agentName: string
     summary: AgentGraphDebugSummary
+}
+
+export interface AgentInterruptChunk {
+    type: 'agent-interrupt'
+    agentName: string
+    assistantMessageId: string
+    interruptId: string
+    interruptKind: string
+    payload: unknown
+    runId: string
+    threadId: string
+}
+
+export interface AgentResumeChunk {
+    type: 'agent-resume'
+    agentName: string
+    assistantMessageId: string
+    interruptId: string
+    runId: string
+    threadId: string
 }
 
 export interface TextStartChunk {
@@ -322,6 +348,8 @@ export type ChatStreamChunk =
     | AgentGraphRouteChunk
     | AgentGraphStatePatchChunk
     | AgentGraphDebugSummaryChunk
+    | AgentInterruptChunk
+    | AgentResumeChunk
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk

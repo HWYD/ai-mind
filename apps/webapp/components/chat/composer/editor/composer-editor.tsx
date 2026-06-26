@@ -327,32 +327,38 @@ function createResourceReferenceExtension() {
 
 export function ComposerEditor({
     className,
+    disabled = false,
     onChange,
     onComposerChange,
     onEditorChange,
     onStop,
+    placeholder = COMPOSER_PLACEHOLDER,
     onSubmit,
     status,
     value,
 }: {
     className?: string
+    disabled?: boolean
     onChange: (value: string) => void
     onComposerChange?: (payload: ComposerPayload) => void
     onEditorChange?: (editor: Editor | null) => void
     onStop: () => void
+    placeholder?: string
     onSubmit: (value: string) => void | Promise<void>
     status: ChatStatus
     value: string
 }) {
     const onStopRef = useRef(onStop)
     const onSubmitRef = useRef(onSubmit)
+    const disabledRef = useRef(disabled)
     const statusRef = useRef(status)
 
     useEffect(() => {
+        disabledRef.current = disabled
         onStopRef.current = onStop
         onSubmitRef.current = onSubmit
         statusRef.current = status
-    }, [onStop, onSubmit, status])
+    }, [disabled, onStop, onSubmit, status])
 
     const editor = useEditor({
         extensions: [
@@ -372,7 +378,7 @@ export function ComposerEditor({
                 strike: false,
             }),
             Placeholder.configure({
-                placeholder: COMPOSER_PLACEHOLDER,
+                placeholder,
             }),
             CommandChipNode,
             ResourceChipNode,
@@ -386,6 +392,11 @@ export function ComposerEditor({
                 class: 'min-h-12 max-h-[180px] overflow-y-auto outline-none',
             },
             handleKeyDown: (view, event) => {
+                if (disabledRef.current) {
+                    event.preventDefault()
+                    return true
+                }
+
                 if (isComposerSuggestionActive(view.state)) {
                     // 菜单打开时 Enter 交给 Suggestion 菜单选择项，不能穿透成发送。
                     return false
@@ -407,7 +418,12 @@ export function ComposerEditor({
                 return true
             },
         },
+        editable: !disabled,
         onUpdate: ({ editor: updatedEditor }) => {
+            if (disabledRef.current) {
+                return
+            }
+
             const payload = serializeComposerPayload(updatedEditor)
 
             onChange(payload.plainText)
@@ -430,6 +446,14 @@ export function ComposerEditor({
             return
         }
 
+        editor.setEditable(!disabled)
+    }, [disabled, editor])
+
+    useEffect(() => {
+        if (!editor) {
+            return
+        }
+
         if (value !== getEditorPlainText(editor)) {
             editor.commands.setContent(textToTiptapContent(value), { emitUpdate: false })
             onComposerChange?.(serializeComposerPayload(editor))
@@ -437,8 +461,8 @@ export function ComposerEditor({
     }, [editor, onComposerChange, value])
 
     return (
-        <div className={cn('ai-composer-editor min-h-12 text-[15px] leading-6 text-foreground', className)}>
-            {editor ? <EditorContent editor={editor} /> : <div className="min-h-12 text-muted-foreground">{COMPOSER_PLACEHOLDER}</div>}
+        <div className={cn('ai-composer-editor min-h-12 text-[15px] leading-6 text-foreground', disabled && 'opacity-60', className)}>
+            {editor ? <EditorContent editor={editor} /> : <div className="min-h-12 text-muted-foreground">{placeholder}</div>}
         </div>
     )
 }

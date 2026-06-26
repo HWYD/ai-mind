@@ -14,7 +14,7 @@ import { executeCapabilityContextInvocations, resolveCapabilityContextInvocation
 import { buildSystemMessages, createChatSession } from './chat-session'
 import { executeComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
 import { PromptRuntimeError, resolvePromptContextInvocation } from './prompt-context'
-import { logSkillRuntime, throwIfAborted, writeStreamErrorChunk } from './stream-errors'
+import { logSkillRuntime, normalizeKnownRuntimeError, throwIfAborted, writeStreamErrorChunk } from './stream-errors'
 import { executeToolCall, formatToolInput, normalizeAndValidateToolCalls, writeToolValidationErrors } from './tool-runtime'
 import type {
     ChatExecutionContext,
@@ -29,7 +29,7 @@ import {
     createVersionPlanTasklistAgentSkeleton,
     getTasklistAgentRuntimeConfig,
     resolveVersionPlanTasklistAgentInvocation,
-    runVersionPlanTasklistGraph,
+    startVersionPlanTasklistAgentRun,
 } from './version-plan-tasklist-agent'
 
 interface ChatOrchestratorOptions {
@@ -109,6 +109,7 @@ export class ChatOrchestrator {
     private readonly isClosed: () => boolean
     private readonly request: ChatRequest
     private readonly writeChunk: WriteChunk
+    private readonly assistantMessageId = createId()
     private modelHandle: AiMindChatModelHandle | null = null
 
     constructor(options: ChatOrchestratorOptions) {
@@ -124,7 +125,6 @@ export class ChatOrchestrator {
 
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
         // 普通 Tool Calling 的 planning 阶段仍沿用 Skill + Tool prompt 组合。
-        // v0.1.0 Agent 不走这里，它由 runVersionPlanTasklistAgentEntryStage 提前接管。
         return [
             ...buildSystemMessages(
                 session.skillSystemPrompt,
@@ -431,6 +431,11 @@ export class ChatOrchestrator {
             resolvedModelSelection: this.context.resolvedModelSelection,
         })
         const userGoal = getLastUserMessageText(this.request)
+        const sessionId = this.context.sessionId
+
+        if (!sessionId) {
+            throw new Error('Tasklist Agent requires an owned chat session.')
+        }
 
         logSkillRuntime('version-plan-tasklist-agent-runtime-selected', {
             graphCheckpointMode: runtimeConfig.graphCheckpointMode,
@@ -438,12 +443,16 @@ export class ChatOrchestrator {
             graphEventsEnabled: runtimeConfig.graphEventsEnabled,
         })
 
-        await runVersionPlanTasklistGraph({
+        await startVersionPlanTasklistAgentRun({
+            assistantMessageId: this.assistantMessageId,
             context: this.context,
             conversationId: this.request.conversationId,
+            modelId: this.context.resolvedModelSelection.modelId,
             models,
-            runtimeConfig,
+            reasoningEnabled: this.shouldEmitReasoning(),
             runId: skeletonResult.runId,
+            runtimeConfig,
+            sessionId,
             userGoal,
             versionPlanReference: skeletonResult.versionPlanReference,
             writeChunk: this.writeChunk,
@@ -463,7 +472,7 @@ export class ChatOrchestrator {
             // 先发 start，让前端立即创建 assistant 占位。
             // createChatSession 会解析 Skill / Tool Binding，Agent 场景还可能命中远端 capability 可用性判断；
             // 如果等这些前置准备完成再发首包，用户会看到“按钮已禁用但消息区空白”的假死状态。
-            lifecycle.emitStartOnce()
+            lifecycle.emitStartOnce(this.assistantMessageId)
 
             const session = await createChatSession(this.request, this.context.resolvedModelSelection)
 
@@ -581,6 +590,18 @@ export class ChatOrchestrator {
 
             if (isInvalidSkillError(error)) {
                 throw error
+            }
+
+            const knownRuntimeError = normalizeKnownRuntimeError(error)
+
+            if (knownRuntimeError) {
+                lifecycle.emitRuntimeErrorOnce({
+                    errorCode: knownRuntimeError.code,
+                    retryable: knownRuntimeError.retryable,
+                    message: knownRuntimeError.message,
+                    stage: 'runtime',
+                })
+                return
             }
 
             // 使用 Provider 层 normalizeError 产出标准化 stream error chunk

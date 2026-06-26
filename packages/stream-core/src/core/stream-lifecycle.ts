@@ -30,7 +30,7 @@ export class StreamLifecycle {
         this.writeChunk = options.writeChunk
     }
 
-    emitStartOnce() {
+    emitStartOnce(messageId?: string) {
         if (this.started || this.terminated || this.isClosed()) {
             return false
         }
@@ -38,7 +38,7 @@ export class StreamLifecycle {
         this.started = true
         this.writeChunk({
             type: 'start',
-            messageId: createId(),
+            messageId: messageId ?? createId(),
         })
 
         return true

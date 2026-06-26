@@ -9,6 +9,7 @@ import {
     FileText,
     GitBranch,
     LoaderCircle,
+    PauseCircle,
     TriangleAlert,
     Wrench,
     XCircle,
@@ -37,6 +38,8 @@ function getGraphNodeStatusIcon(node: AgentGraphNodeEntry) {
             return <XCircle className="size-4 text-rose-500" strokeWidth={2.2} />
         case 'running':
             return <LoaderCircle className="size-4 animate-spin text-sky-500" strokeWidth={2.2} />
+        case 'paused':
+            return <PauseCircle className="size-4 text-sky-500" strokeWidth={2.2} />
         case 'skipped':
             return <CircleDashed className="size-4 text-muted-foreground" strokeWidth={2.2} />
         case 'completed':
@@ -56,6 +59,8 @@ function getGraphNodeClassName(node: AgentGraphNodeEntry) {
     switch (node.status) {
         case 'failed':
             return 'border-rose-200 bg-rose-50/70'
+        case 'paused':
+            return 'border-sky-200 bg-sky-50/60'
         case 'completed':
         case 'running':
         case 'skipped':
@@ -75,6 +80,7 @@ const graphRouteLabels: Record<string, string> = {
     ask_clarification: '需要澄清',
     controlled_output_failed: '受控输出失败',
     fix_now: '进入自动修正',
+    fix_now_review_required: '需要人工授权修订',
     no_auto_revision: '无需自动修正',
     proceed_to_tasklist_strategy: '继续拆分策略',
     proceed_with_manual_review_items: '带人工复核继续',
@@ -82,8 +88,16 @@ const graphRouteLabels: Record<string, string> = {
     read_optional_context: '读取补充上下文',
     read_succeeded: '读取成功',
     strategy_failed: '策略失败',
+    strategy_approved: '确认策略',
+    strategy_edited: '修改策略后继续',
+    strategy_feedback_received: '补充策略要求',
+    strategy_rejected: '拒绝策略',
     strategy_ready: '策略就绪',
     stop_with_boundary_message: '边界停止',
+    tasklist_revision_approved: '同意修订',
+    tasklist_revision_edited: '直接编辑后校验',
+    tasklist_revision_feedback_received: '补充修订要求',
+    tasklist_revision_rejected: '拒绝修订',
 }
 
 function getGraphRouteLabel(routeLabel: string) {
@@ -225,6 +239,8 @@ function buildGraphDebugSummaryGroups(summary: GraphDebugSummary): GraphDebugSum
                 },
                 { label: 'validationV2.status', value: formatDebugStatus(summary.validationV2?.status) },
                 { label: 'validationV2.score', value: formatDebugValue(summary.validationV2?.score) },
+                { label: 'validationV3.status', value: formatDebugStatus(summary.validationV3?.status) },
+                { label: 'validationV3.score', value: formatDebugValue(summary.validationV3?.score) },
                 { label: 'revisionEffect.finalDecision', value: formatDebugValue(summary.revisionEffect?.finalDecision) },
             ],
         },
@@ -237,6 +253,10 @@ function buildGraphDebugSummaryGroups(summary: GraphDebugSummary): GraphDebugSum
                     value: `${summary.optionalContextReads} / ${summary.maxOptionalContextReads}`,
                 },
                 { label: 'draftRevisions / maxDraftRevisions', value: `${summary.draftRevisions} / ${summary.maxDraftRevisions}` },
+                {
+                    label: 'strategyRegenerations / maxStrategyRegenerations',
+                    value: `${summary.strategyRegenerations ?? 0} / ${summary.maxStrategyRegenerations ?? 1}`,
+                },
             ],
         },
         {

@@ -10,6 +10,22 @@ export type {
     VersionPlanTasklistAgentStatus,
     WarningDisposition,
 } from './contract/types'
+export type {
+    AgentReviewDecisionType,
+    StrategyReviewDecision,
+    StrategyReviewInterruptPayload,
+    TasklistAgentInterruptPayload,
+    TasklistRevisionReviewDecision,
+    TasklistRevisionReviewInterruptPayload,
+} from './contract/hitl-review-schema'
+export {
+    agentReviewDecisionTypes,
+    strategyReviewDecisionSchema,
+    strategyReviewInterruptPayloadSchema,
+    tasklistAgentInterruptPayloadSchema,
+    tasklistRevisionReviewDecisionSchema,
+    tasklistRevisionReviewInterruptPayloadSchema,
+} from './contract/hitl-review-schema'
 export {
     parseVersionPlanTasklistPlanningDecisionAction,
     parseVersionPlanTasklistPlanningDecisionOutput,
@@ -20,6 +36,14 @@ export {
     versionPlanTasklistPlanningDecisionOutputSchema,
     versionPlanTasklistStrategySchema,
 } from './contract/planner-output-schema'
+export {
+    getTasklistStrategyStepCountBounds,
+    tasklistStrategyGranularities,
+    tasklistStrategyGroupings,
+    tasklistStrategyPriorityFocuses,
+    tasklistStrategySchema,
+    tasklistStrategyStepCountRanges,
+} from './contract/tasklist-strategy-schema'
 export {
     parseVersionPlanTasklistAgentAction,
     parseVersionPlanTasklistPlannerActionText,
@@ -38,5 +62,5 @@ export {
 export { getVersionPlanTasklistAgentToolDefinitionMap, isVersionPlanTasklistAgentToolAllowed } from './resources/agent-tools'
 export { applyVersionPlanTasklistGraphAction, validateVersionPlanTasklistGraphAction } from './state/state-machine'
 export { evaluateRevisionEffect } from './tasklist/revision-effect'
-export { buildDraftTasklistMessages } from './tasklist/tasklist-draft-generator'
+export { buildDraftTasklistMessages, buildReviseTasklistMessages } from './tasklist/tasklist-draft-generator'
 export { decideWarningDisposition } from './tasklist/warning-disposition'

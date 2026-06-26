@@ -1,5 +1,6 @@
 import type { AgentGraphDebugSummary } from '@ai-mind/stream-core/protocol'
 
+import { getTasklistStrategyStepCountBounds } from '../contract/tasklist-strategy-schema'
 import type { VersionPlanTasklistGraphStateAnnotationState } from './graph-state'
 
 export type VersionPlanTasklistGraphDebugSummary = AgentGraphDebugSummary
@@ -27,6 +28,7 @@ export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphState
         manualReviewItemCount: planning.manualReviewItems.length,
         maxDraftRevisions: execution.limits.maxDraftRevisions,
         maxOptionalContextReads: execution.limits.maxOptionalContextReads,
+        maxStrategyRegenerations: execution.limits.maxStrategyRegenerations,
         maxSteps: execution.limits.maxSteps,
         optionalContext: planning.optionalContext
             ? {
@@ -47,9 +49,10 @@ export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphState
         runId: execution.runId,
         runtimeMode: graphState.graph.runtimeMode,
         stepCount: execution.counters.steps,
+        strategyRegenerations: execution.counters.strategyRegenerations,
         strategy: planning.strategy
             ? {
-                  expectedStepRange: planning.strategy.expectedStepRange,
+                  expectedStepRange: getTasklistStrategyStepCountBounds(planning.strategy.stepCountRange),
                   granularity: planning.strategy.granularity,
               }
             : undefined,
@@ -64,6 +67,12 @@ export function buildGraphDebugSummary(graphState: VersionPlanTasklistGraphState
             ? {
                   score: tasklistDraft.validationV2.score,
                   status: tasklistDraft.validationV2.status,
+              }
+            : undefined,
+        validationV3: tasklistDraft?.validationV3
+            ? {
+                  score: tasklistDraft.validationV3.score,
+                  status: tasklistDraft.validationV3.status,
               }
             : undefined,
         visitedNodes: [...graphState.graph.visitedNodes],

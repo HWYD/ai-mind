@@ -7,6 +7,13 @@ import {
 } from '@ai-mind/stream-core/protocol'
 import { z } from 'zod'
 
+import { tasklistStrategySchema } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/tasklist-strategy-schema'
+import {
+    tasklistBlockingIssueSchema,
+    tasklistValidationStatusSchema,
+    tasklistWeakSectionSchema,
+} from '@/lib/ai/tools/tasklist-structure/tasklist-structure-types'
+
 const agentTextArtifactMetadataSchema = z.object({
     charCount: z.number().int().nonnegative().optional(),
     generatedFrom: z.string().min(1).optional(),
@@ -22,7 +29,7 @@ const agentGraphExpectedStepRangeSchema = z.custom<[number, number]>(
 
 const agentGraphDebugSummarySchema = z
     .object({
-        checkpointMode: z.enum(['memory', 'off']),
+        checkpointMode: z.enum(['memory', 'off', 'postgres']),
         currentNode: z.string().min(1).optional(),
         decision: z
             .object({
@@ -42,6 +49,7 @@ const agentGraphDebugSummarySchema = z
         manualReviewItemCount: z.number().int().nonnegative(),
         maxDraftRevisions: z.number().int().nonnegative(),
         maxOptionalContextReads: z.number().int().nonnegative(),
+        maxStrategyRegenerations: z.number().int().nonnegative().optional(),
         maxSteps: z.number().int().positive(),
         optionalContext: z
             .object({
@@ -65,6 +73,7 @@ const agentGraphDebugSummarySchema = z
         runId: z.string().min(1),
         runtimeMode: z.literal('graph'),
         stepCount: z.number().int().nonnegative(),
+        strategyRegenerations: z.number().int().nonnegative().optional(),
         strategy: z
             .object({
                 expectedStepRange: agentGraphExpectedStepRangeSchema,
@@ -87,6 +96,13 @@ const agentGraphDebugSummarySchema = z
             })
             .strict()
             .optional(),
+        validationV3: z
+            .object({
+                score: z.number().min(0).max(100),
+                status: z.string().min(1),
+            })
+            .strict()
+            .optional(),
         visitedNodes: z.array(z.string().min(1)),
         warningDisposition: z
             .object({
@@ -98,7 +114,122 @@ const agentGraphDebugSummarySchema = z
     })
     .strict()
 
-export const chatStreamChunkSchema = z.discriminatedUnion('type', [
+const strategyReviewRoundOnePayloadSchema = z
+    .object({
+        allowedDecisions: z.tuple([z.literal('approve'), z.literal('edit'), z.literal('reject'), z.literal('respond')]),
+        data: z
+            .object({
+                planUri: z.string().trim().min(1),
+                reviewRound: z.literal(1),
+                strategy: tasklistStrategySchema,
+                targetVersion: z.string().trim().min(1).optional(),
+            })
+            .strict(),
+        kind: z.literal('strategy_review'),
+        nodeName: z.literal('reviewTasklistStrategy'),
+        runId: z.string().trim().min(1),
+        threadId: z.string().trim().min(1),
+    })
+    .strict()
+
+const strategyReviewRoundTwoPayloadSchema = z
+    .object({
+        allowedDecisions: z.tuple([z.literal('approve'), z.literal('edit'), z.literal('reject')]),
+        data: z
+            .object({
+                planUri: z.string().trim().min(1),
+                reviewRound: z.literal(2),
+                strategy: tasklistStrategySchema,
+                targetVersion: z.string().trim().min(1).optional(),
+            })
+            .strict(),
+        kind: z.literal('strategy_review'),
+        nodeName: z.literal('reviewTasklistStrategy'),
+        runId: z.string().trim().min(1),
+        threadId: z.string().trim().min(1),
+    })
+    .strict()
+
+const strategyReviewInterruptPayloadSchema = z.union([strategyReviewRoundOnePayloadSchema, strategyReviewRoundTwoPayloadSchema])
+
+const tasklistRevisionReviewInterruptPayloadSchema = z
+    .object({
+        allowedDecisions: z.tuple([z.literal('approve'), z.literal('edit'), z.literal('reject'), z.literal('respond')]),
+        data: z
+            .object({
+                fixNow: z.array(z.string().trim().min(1)).min(1).max(20),
+                markdown: z.string().min(1).max(100_000),
+                reviewRound: z.literal(1),
+                revision: z.literal(1),
+                validation: z
+                    .object({
+                        blockingIssues: z.array(tasklistBlockingIssueSchema.strict()).max(50),
+                        score: z.number().min(0).max(100),
+                        status: tasklistValidationStatusSchema,
+                        weakSections: z.array(tasklistWeakSectionSchema.strict()).max(50),
+                    })
+                    .strict(),
+            })
+            .strict(),
+        kind: z.literal('tasklist_revision_review'),
+        nodeName: z.literal('reviewTasklistRevision'),
+        runId: z.string().trim().min(1),
+        threadId: z.string().trim().min(1),
+    })
+    .strict()
+
+const tasklistAgentInterruptPayloadSchema = z.union([strategyReviewInterruptPayloadSchema, tasklistRevisionReviewInterruptPayloadSchema])
+
+const agentInterruptChunkSchema = z
+    .object({
+        type: z.literal('agent-interrupt'),
+        agentName: z.string().min(1),
+        assistantMessageId: z.string().min(1),
+        interruptId: z.string().min(1),
+        interruptKind: z.enum(['strategy_review', 'tasklist_revision_review']),
+        payload: tasklistAgentInterruptPayloadSchema,
+        runId: z.string().min(1),
+        threadId: z.string().min(1),
+    })
+    .strict()
+    .superRefine((chunk, context) => {
+        if (chunk.payload.kind !== chunk.interruptKind) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'interruptKind must match payload.kind.',
+                path: ['payload', 'kind'],
+            })
+        }
+
+        if (chunk.payload.runId !== chunk.runId) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'runId must match payload.runId.',
+                path: ['payload', 'runId'],
+            })
+        }
+
+        if (chunk.payload.threadId !== chunk.threadId) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'threadId must match payload.threadId.',
+                path: ['payload', 'threadId'],
+            })
+        }
+    })
+
+const agentResumeChunkSchema = z
+    .object({
+        type: z.literal('agent-resume'),
+        agentName: z.string().min(1),
+        assistantMessageId: z.string().min(1),
+        interruptId: z.string().min(1),
+        runId: z.string().min(1),
+        threadId: z.string().min(1),
+    })
+    .strict()
+
+const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
     z.object({
         type: z.literal('start'),
         messageId: z.string().min(1),
@@ -126,7 +257,7 @@ export const chatStreamChunkSchema = z.discriminatedUnion('type', [
         threadId: z.string().min(1),
         agentName: z.string().min(1),
         nodeId: z.string().min(1),
-        status: z.enum(['completed', 'failed', 'skipped']),
+        status: z.enum(['completed', 'failed', 'paused', 'skipped']),
         summary: z.string().optional(),
         durationMs: z.number().int().nonnegative().optional(),
         severity: z.enum(['error', 'info', 'warning']).optional(),
@@ -295,3 +426,5 @@ export const chatStreamChunkSchema = z.discriminatedUnion('type', [
         promptName: z.string().min(1).optional(),
     }),
 ])
+
+export const chatStreamChunkSchema = z.union([baseChatStreamChunkSchema, agentInterruptChunkSchema, agentResumeChunkSchema])

@@ -8,6 +8,7 @@ set -euo pipefail
 
 DEPLOY_ROOT="${AI_MIND_DEPLOY_ROOT:-/srv/ai-mind}"
 COMPOSE_FILE="${DEPLOY_ROOT}/compose.production.yml"
+POSTGRES_ENV_FILE="${DEPLOY_ROOT}/env/postgres.production.env"
 WEBAPP_ENV_FILE="${DEPLOY_ROOT}/env/webapp.production.env"
 PAS_ENV_FILE="${DEPLOY_ROOT}/env/project-assistant-service.production.env"
 RELEASE_ENV_FILE="${DEPLOY_ROOT}/.release.env"
@@ -32,6 +33,48 @@ compose() {
     docker compose --env-file "$RELEASE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
+wait_postgres_healthy() {
+    local timeout_seconds="${1:-120}"
+    local elapsed=0
+
+    while [ "$elapsed" -lt "$timeout_seconds" ]; do
+        local status_output
+        status_output="$(compose ps 2>/dev/null || true)"
+
+        if printf '%s\n' "$status_output" | grep -Eq 'postgres.+healthy'; then
+            log "postgres 已 healthy"
+            return 0
+        fi
+
+        sleep 5
+        elapsed=$((elapsed + 5))
+    done
+
+    return 1
+}
+
+start_postgres() {
+    log "starting colocated postgres"
+    compose up -d postgres
+
+    if ! wait_postgres_healthy 120; then
+        fail "postgres 未能在预期时间内进入 healthy。"
+    fi
+}
+
+run_database_setup() {
+    log "running database migrations and LangGraph checkpoint setup"
+    start_postgres
+    compose run --rm --no-deps --entrypoint pnpm webapp --dir /app db:setup:deploy
+}
+
+restore_previous_release_env() {
+    if [ -f "$RELEASE_ENV_PREVIOUS_FILE" ]; then
+        cp "$RELEASE_ENV_PREVIOUS_FILE" "$RELEASE_ENV_FILE"
+        log "restored previous release metadata after database setup failure"
+    fi
+}
+
 wait_healthy() {
     local timeout_seconds="${1:-180}"
     local elapsed=0
@@ -40,9 +83,10 @@ wait_healthy() {
         local status_output
         status_output="$(compose ps 2>/dev/null || true)"
 
-        if printf '%s\n' "$status_output" | grep -Eq 'project-assistant-service.+healthy' \
+        if printf '%s\n' "$status_output" | grep -Eq 'postgres.+healthy' \
+            && printf '%s\n' "$status_output" | grep -Eq 'project-assistant-service.+healthy' \
             && printf '%s\n' "$status_output" | grep -Eq 'webapp.+healthy'; then
-            log "webapp 和 project-assistant-service 均已 healthy"
+            log "postgres、webapp 和 project-assistant-service 均已 healthy"
             return 0
         fi
 
@@ -103,6 +147,7 @@ rollback() {
 }
 
 [ -f "$COMPOSE_FILE" ] || fail "找不到 compose.production.yml：$COMPOSE_FILE"
+[ -f "$POSTGRES_ENV_FILE" ] || fail "找不到生产 env：$POSTGRES_ENV_FILE"
 [ -f "$WEBAPP_ENV_FILE" ] || fail "找不到生产 env：$WEBAPP_ENV_FILE"
 [ -f "$PAS_ENV_FILE" ] || fail "找不到生产 env：$PAS_ENV_FILE"
 [ -x "${DEPLOY_ROOT}/scripts/verify-production.sh" ] || fail "找不到可执行的 verify-production.sh"
@@ -130,6 +175,10 @@ compose config > /dev/null
 
 log "开始拉取镜像并启动容器"
 compose pull
+if ! run_database_setup; then
+    restore_previous_release_env
+    fail "database setup failed; deployment stopped before starting the new containers."
+fi
 compose up -d --remove-orphans
 
 ROLLED_BACK=0

@@ -22,13 +22,16 @@ const versionPlanReference = {
 } as const
 
 function createGraphState() {
-    return createInitialVersionPlanTasklistGraphState({
-        conversationId: 'conversation-1',
-        runId: 'run-graph-state-test',
-        runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
-        userGoal: 'Generate v0.2.0 tasklist',
-        versionPlanReference,
-    })
+    return {
+        ...createInitialVersionPlanTasklistGraphState({
+            conversationId: 'conversation-1',
+            runId: 'run-graph-state-test',
+            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
+            userGoal: 'Generate v0.2.0 tasklist',
+            versionPlanReference,
+        }),
+        output: undefined,
+    }
 }
 
 function walkJsonObject(value: unknown, visit: (value: unknown) => void) {
@@ -83,6 +86,7 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
                     draftRevisions: 0,
                     optionalContextReads: 0,
                     steps: 0,
+                    strategyRegenerations: 0,
                 },
                 limits: VERSION_PLAN_TASKLIST_AGENT_LIMITS,
                 runId: 'run-graph-state-test',
@@ -95,6 +99,7 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
                 statePatchSummaries: [],
                 visitedNodes: [],
             },
+            human: {},
             input: {
                 planUri: versionPlanReference.uri,
                 userGoal: 'Generate v0.2.0 tasklist',
@@ -111,7 +116,17 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
     })
 
     it('keeps initial GraphState JSON-serializable and free of runtime objects', () => {
-        const graphState = createGraphState()
+        const graphState = applyVersionPlanTasklistGraphStateUpdate(createGraphState(), {
+            human: {
+                strategyReview: {
+                    decision: {
+                        type: 'respond',
+                        feedback: '请更偏重 GraphState 迁移风险。',
+                    },
+                    reviewRound: 1,
+                },
+            },
+        })
 
         expect(() => JSON.stringify(graphState)).not.toThrow()
         expect(JSON.parse(JSON.stringify(graphState))).toEqual(graphState)
@@ -215,13 +230,21 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
                     },
                     status: 'validated_v1',
                 },
+                human: {
+                    strategyReview: {
+                        decision: {
+                            type: 'approve',
+                        },
+                        reviewRound: 1,
+                    },
+                },
                 planning: {
                     strategy: {
-                        expectedStepRange: [3, 5],
                         granularity: 'medium',
-                        grouping: ['Runtime'],
-                        priority: ['先收状态'],
-                        reason: '保持中等粒度。',
+                        grouping: 'by_phase',
+                        notes: '先收状态。',
+                        priorityFocus: ['state_model'],
+                        stepCountRange: '3-5',
                     },
                 },
                 tasklist: {},
@@ -234,6 +257,14 @@ describe('runtime/version-plan-tasklist-agent graph state', () => {
                     steps: 6,
                 },
                 status: 'validated_v1',
+            },
+            human: {
+                strategyReview: {
+                    decision: {
+                        type: 'approve',
+                    },
+                    reviewRound: 1,
+                },
             },
             planning: {
                 decision: {

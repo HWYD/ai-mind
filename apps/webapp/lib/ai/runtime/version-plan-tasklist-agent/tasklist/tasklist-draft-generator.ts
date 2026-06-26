@@ -5,6 +5,11 @@ import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 import { getMessageContentText } from '../../message-content'
 import type { ChatSession } from '../../types'
+import {
+    getTasklistStrategyStepCountBounds,
+    type TasklistStrategyGrouping,
+    type TasklistStrategyPriorityFocus,
+} from '../contract/tasklist-strategy-schema'
 import type {
     VersionPlanTasklistDraftArtifact,
     VersionPlanTasklistIntermediateArtifacts,
@@ -113,24 +118,43 @@ function formatTasklistStrategyForPrompt(state: TasklistDraftPromptState) {
         return '未生成 TasklistStrategy。'
     }
 
+    const [minSteps, maxSteps] = getTasklistStrategyStepCountBounds(strategy.stepCountRange)
     const granularityInstructions: Record<typeof strategy.granularity, string> = {
-        coarse: '使用粗粒度拆分，Step 数量靠近 expectedStepRange 下限，避免生成过多 Step；每个 Step 只保留关键 checklist。',
-        detailed:
-            '使用细粒度拆分，Step 数量可以靠近 expectedStepRange 上限，checklist 要更具体，但不得新增 version plan 中没有的能力范围。',
-        medium: '使用中等粒度拆分，Step 数量尽量落在 expectedStepRange 中间区间，保持每个 Step 可实现、可验证。',
+        coarse: '使用粗粒度拆分，Step 数量靠近范围下限，避免生成过多 Step；每个 Step 只保留关键 checklist。',
+        detailed: '使用细粒度拆分，Step 数量可以靠近范围上限，checklist 要更具体，但不得新增 version plan 中没有的能力范围。',
+        medium: '使用中等粒度拆分，Step 数量尽量落在范围中间区间，保持每个 Step 可实现、可验证。',
+    }
+    const groupingInstructions: Record<TasklistStrategyGrouping, string> = {
+        by_module: '按代码模块和职责边界组织 Step。',
+        by_phase: '按实施阶段和依赖顺序组织 Step。',
+        by_risk: '按风险优先级组织 Step，先处理高风险主链。',
+        by_test_flow: '按验证流程组织 Step，让实现与测试逐步闭环。',
+    }
+    const priorityFocusLabels: Record<TasklistStrategyPriorityFocus, string> = {
+        compatibility: '向后兼容',
+        core_runtime: '核心 Runtime',
+        deployment: '部署交付',
+        docs: '文档资产',
+        frontend_ui: '前端交互',
+        state_model: '状态模型',
+        tests: '测试验证',
     }
 
     return [
         `granularity：${strategy.granularity}`,
-        `expectedStepRange：${strategy.expectedStepRange[0]}-${strategy.expectedStepRange[1]}`,
-        formatListForPrompt('grouping（Step 标题和章节优先按这些分组组织）', strategy.grouping),
-        formatListForPrompt('priority（checklist 和执行顺序优先遵循）', strategy.priority),
-        `reason：${strategy.reason}`,
+        `stepCountRange：${strategy.stepCountRange}`,
+        `grouping：${strategy.grouping}`,
+        `groupingInstruction：${groupingInstructions[strategy.grouping]}`,
+        formatListForPrompt(
+            'priorityFocus（checklist 和执行顺序优先覆盖）',
+            strategy.priorityFocus.map(priorityFocus => priorityFocusLabels[priorityFocus])
+        ),
+        `notes：${strategy.notes ?? '无'}`,
         '',
         '生成约束：',
-        `- Step 数量尽量落在 ${strategy.expectedStepRange[0]}-${strategy.expectedStepRange[1]} 个之间；如果 version plan 信息不足，不要为了凑数量编造范围。`,
-        '- Step 标题和顺序优先围绕 grouping 组织。',
-        '- 每个 Step 内 checklist 的先后顺序优先遵循 priority。',
+        `- Step 数量尽量落在 ${minSteps}-${maxSteps} 个之间；如果 version plan 信息不足，不要为了凑数量编造范围。`,
+        `- ${groupingInstructions[strategy.grouping]}`,
+        '- 每个 Step 内 checklist 的先后顺序优先覆盖 priorityFocus。',
         `- ${granularityInstructions[strategy.granularity]}`,
     ].join('\n')
 }
@@ -227,7 +251,8 @@ export function buildDraftTasklistMessages(state: TasklistDraftPromptState, user
 export function buildReviseTasklistMessages(
     state: TasklistDraftPromptState,
     draft: VersionPlanTasklistDraftArtifact,
-    validationResult: TasklistValidationResult
+    validationResult: TasklistValidationResult,
+    revisionFeedback?: string
 ) {
     return [
         new SystemMessage(REVISE_SYSTEM_PROMPT),
@@ -244,6 +269,7 @@ export function buildReviseTasklistMessages(
                 'planExtract：',
                 formatPlanExtractForPrompt(state),
                 '',
+                ...(revisionFeedback ? ['人工修订反馈：', revisionFeedback, ''] : []),
                 '原始 tasklist 草稿：',
                 draft.content,
             ].join('\n')
@@ -275,16 +301,17 @@ export async function generateTasklistDraft(
 }
 
 /**
- * 调用基础模型修正 tasklist 草稿，最多用于 v1 -> v2 的一次结构补全。
+ * 调用基础模型修正 tasklist 草稿，最多用于 v1 -> v2 -> v3 的受控结构补全。
  */
 export async function reviseTasklistDraft(
     model: ChatSession['baseModel'],
     state: TasklistDraftPromptState,
     draft: VersionPlanTasklistDraftArtifact,
     validationResult: TasklistValidationResult,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    revisionFeedback?: string
 ) {
-    const response = await model.invoke(buildReviseTasklistMessages(state, draft, validationResult), { signal })
+    const response = await model.invoke(buildReviseTasklistMessages(state, draft, validationResult, revisionFeedback), { signal })
     const revisedText = stripMarkdownFence(getModelResponseText(response))
 
     if (!revisedText) {

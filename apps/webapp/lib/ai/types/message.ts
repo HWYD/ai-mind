@@ -1,8 +1,11 @@
 import type { AgentArtifactFormat, AgentArtifactKind, AgentGraphDebugSummary } from '@ai-mind/stream-core/protocol'
 
+import type { TasklistAgentInterruptPayload } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/hitl-review-schema'
+
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from './chat'
 
 export type MindRole = 'system' | 'user' | 'assistant'
+export type MindMessageStatus = 'completed' | 'failed' | 'paused' | 'resuming' | 'streaming'
 export type CapabilitySource = 'internal' | 'mcp'
 export type CapabilityLocation = 'local' | 'remote'
 
@@ -72,7 +75,7 @@ export interface PromptPart extends BasePart {
     error?: string
 }
 
-export type AgentStepStatus = 'completed' | 'failed' | 'running' | 'skipped'
+export type AgentStepStatus = 'completed' | 'failed' | 'paused' | 'running' | 'skipped'
 export type AgentStepSeverity = 'error' | 'info' | 'warning'
 
 export interface AgentGraphNodeEntry {
@@ -111,6 +114,18 @@ export interface AgentStepPart extends BasePart {
     status: AgentStepStatus
 }
 
+export type AgentInterruptPartStatus = 'decided' | 'failed' | 'pending' | 'rejected' | 'submitting'
+
+export interface AgentInterruptPart extends BasePart {
+    type: 'agent-interrupt'
+    interruptId: string
+    interruptKind: 'strategy_review' | 'tasklist_revision_review'
+    payload: TasklistAgentInterruptPayload
+    runId: string
+    status: AgentInterruptPartStatus
+    threadId: string
+}
+
 export interface AgentTextArtifactViewModel {
     artifactId: string
     artifactKind: AgentArtifactKind
@@ -130,7 +145,15 @@ export interface AgentTextArtifactViewModel {
     title: string
 }
 
-export type MindMessagePart = TextPart | ReasoningPart | ToolPart | ResourcePart | SkillPart | PromptPart | AgentStepPart
+export type MindMessagePart =
+    | TextPart
+    | ReasoningPart
+    | ToolPart
+    | ResourcePart
+    | SkillPart
+    | PromptPart
+    | AgentStepPart
+    | AgentInterruptPart
 
 export interface MindMessage {
     id: string
@@ -139,4 +162,5 @@ export interface MindMessage {
     artifacts?: AgentTextArtifactViewModel[]
     createdAt: string
     composer?: ChatComposerPayload
+    status?: MindMessageStatus
 }

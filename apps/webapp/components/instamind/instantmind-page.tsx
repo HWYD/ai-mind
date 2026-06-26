@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import type { ChatModelsInitialState } from '@/lib/ai/models'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatSkillMode } from '@/lib/ai/types/chat'
 
+import { HumanReviewComposerPanel } from './human-review/human-review-composer-panel'
 import { useChatAutoScroll } from './use-chat-auto-scroll'
 import { useChatModels } from './use-chat-models'
 import { useChatStream } from './use-chat-stream'
@@ -28,11 +29,13 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         modelGroups,
         setModel,
     } = useChatModels(initialChatModelsState)
-    const { messages, status, error, sendMessage, cancel, deleteUserTurn, regenerateLastTurn } = useChatStream({
-        skillMode,
-        model,
-        enableReasoning,
-    })
+    const { messages, status, error, pendingInterrupt, sendMessage, resumeAgentRun, cancel, deleteUserTurn, regenerateLastTurn } =
+        useChatStream({
+            skillMode,
+            model,
+            enableReasoning,
+        })
+    const hasPendingReview = Boolean(pendingInterrupt)
     const isStreamingOutput = status === 'submitted' || status === 'streaming'
     const { inputContainerRef, bottomSpacing, showScrollToBottom, resetAutoScrollForNewTurn, restoreAutoFollowAndScrollToBottom } =
         useChatAutoScroll({
@@ -41,6 +44,10 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         })
 
     async function handleSubmit(value: string, composer?: ChatComposerPayload, displaySegments?: ChatComposerDisplaySegment[]) {
+        if (hasPendingReview) {
+            return false
+        }
+
         resetAutoScrollForNewTurn()
 
         // sendMessage 内部会立即写入用户消息并切到 submitted；这里返回 true 代表 Composer 可以立刻清空草稿，
@@ -50,7 +57,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleSelectSuggestion(suggestion: EmptyStateSuggestion) {
-        if (status === 'submitted' || status === 'streaming') {
+        if (status === 'submitted' || status === 'streaming' || hasPendingReview) {
             return
         }
 
@@ -58,7 +65,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleSelectFollowUpQuestion(question: string) {
-        if (status === 'submitted' || status === 'streaming') {
+        if (status === 'submitted' || status === 'streaming' || hasPendingReview) {
             return
         }
 
@@ -69,6 +76,12 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         resetAutoScrollForNewTurn()
 
         return regenerateLastTurn()
+    }
+
+    async function handleResumeDecision(decision: Parameters<typeof resumeAgentRun>[0]) {
+        resetAutoScrollForNewTurn()
+
+        return resumeAgentRun(decision)
     }
 
     return (
@@ -98,6 +111,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                     messages={messages}
                     status={status}
                     enableReasoning={enableReasoning}
+                    actionsDisabled={hasPendingReview}
                     onDeleteUserTurn={deleteUserTurn}
                     onRegenerateLastTurn={handleRegenerateLastTurn}
                     onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
@@ -128,7 +142,10 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                     </div>
 
                     <div ref={inputContainerRef}>
+                        <HumanReviewComposerPanel pendingInterrupt={pendingInterrupt} onResumeDecision={handleResumeDecision} />
                         <ChatComposer
+                            disabled={hasPendingReview}
+                            placeholder={hasPendingReview ? '请先处理上方人工审核，普通输入已锁定。' : undefined}
                             status={status}
                             skillMode={skillMode}
                             model={model}

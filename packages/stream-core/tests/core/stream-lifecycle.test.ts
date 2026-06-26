@@ -27,6 +27,21 @@ describe('StreamLifecycle', () => {
         expect(recorder.chunks[0]).toMatchObject({ type: 'start' })
     })
 
+    it('can emit start chunk with caller-provided message id', () => {
+        const recorder = createChunkRecorder()
+        const lifecycle = new StreamLifecycle({
+            context: {},
+            isClosed: () => false,
+            writeChunk: recorder.writeChunk,
+        })
+
+        expect(lifecycle.emitStartOnce('assistant-existing-message')).toBe(true)
+        expect(recorder.chunks[0]).toEqual({
+            type: 'start',
+            messageId: 'assistant-existing-message',
+        })
+    })
+
     it('emits finish chunk once when stream is open', () => {
         const recorder = createChunkRecorder()
         const lifecycle = new StreamLifecycle({

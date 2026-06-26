@@ -1,9 +1,14 @@
 FROM node:22-bookworm-slim AS base
 
 ENV PNPM_HOME=/pnpm
+ENV COREPACK_HOME=/pnpm/corepack
 ENV PATH="${PNPM_HOME}:${PATH}"
 
-RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable \
+    && corepack prepare pnpm@10.18.3 --activate
 
 WORKDIR /app
 
@@ -12,6 +17,7 @@ FROM base AS workspace-deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/webapp/package.json apps/webapp/package.json
 COPY apps/project-assistant-service/package.json apps/project-assistant-service/package.json
+COPY packages/database/package.json packages/database/package.json
 COPY packages/stream-core/package.json packages/stream-core/package.json
 
 RUN pnpm install --frozen-lockfile
@@ -22,6 +28,7 @@ COPY . .
 
 RUN pnpm --filter @ai-mind/stream-core build
 RUN pnpm --dir apps/project-assistant-service build
+RUN pnpm --filter @ai-mind/database db:generate
 RUN pnpm --dir apps/webapp build
 # 将 next.config.ts 预编译为纯 JS/.mjs，避免生产容器运行期动态安装 TypeScript
 RUN node -e "const ts=require('typescript');const src=require('fs').readFileSync('apps/webapp/next.config.ts','utf8');const r=ts.transpileModule(src,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ESNext}});require('fs').writeFileSync('apps/webapp/next.config.mjs',r.outputText)"
@@ -33,6 +40,7 @@ ENV NODE_ENV=production
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/webapp/package.json apps/webapp/package.json
 COPY apps/project-assistant-service/package.json apps/project-assistant-service/package.json
+COPY packages/database/package.json packages/database/package.json
 COPY packages/stream-core/package.json packages/stream-core/package.json
 
 RUN pnpm install --prod --frozen-lockfile --ignore-scripts
@@ -62,12 +70,19 @@ COPY --from=workspace-production-deps --chown=node:node /app/pnpm-lock.yaml /app
 COPY --from=workspace-production-deps --chown=node:node /app/pnpm-workspace.yaml /app/pnpm-workspace.yaml
 COPY --from=workspace-production-deps --chown=node:node /app/node_modules /app/node_modules
 COPY --from=workspace-production-deps --chown=node:node /app/apps/webapp/node_modules /app/apps/webapp/node_modules
+COPY --from=workspace-production-deps --chown=node:node /app/packages/database/node_modules /app/packages/database/node_modules
 
 COPY --from=workspace-builder --chown=node:node /app/apps/webapp/.next /app/apps/webapp/.next
 COPY --from=workspace-builder --chown=node:node /app/apps/webapp/public /app/apps/webapp/public
 COPY --from=workspace-builder --chown=node:node /app/apps/webapp/package.json /app/apps/webapp/package.json
 COPY --from=workspace-builder --chown=node:node /app/apps/webapp/next.config.mjs /app/apps/webapp/next.config.mjs
+COPY --from=workspace-builder --chown=node:node /app/apps/webapp/scripts /app/apps/webapp/scripts
 COPY --from=workspace-builder --chown=node:node /app/apps/webapp/lib/ai/mcp/servers /app/apps/webapp/lib/ai/mcp/servers
+COPY --from=workspace-builder --chown=node:node /app/packages/database/package.json /app/packages/database/package.json
+COPY --from=workspace-builder --chown=node:node /app/packages/database/prisma.config.ts /app/packages/database/prisma.config.ts
+COPY --from=workspace-builder --chown=node:node /app/packages/database/prisma /app/packages/database/prisma
+COPY --from=workspace-builder --chown=node:node /app/packages/database/src /app/packages/database/src
+COPY --from=workspace-builder --chown=node:node /app/packages/database/generated /app/packages/database/generated
 COPY --from=workspace-builder --chown=node:node /app/packages/stream-core/package.json /app/packages/stream-core/package.json
 COPY --from=workspace-builder --chown=node:node /app/packages/stream-core/build /app/packages/stream-core/build
 COPY --from=workspace-builder --chown=node:node /app/docs /app/docs

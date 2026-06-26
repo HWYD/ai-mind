@@ -109,6 +109,154 @@ describe('stream-message-reducer', () => {
         })
     })
 
+    it('agent-interrupt 会写入当前 assistant message 并让 finish 保持 paused', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-hitl' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-hitl',
+                interruptId: 'interrupt-strategy',
+                interruptKind: 'strategy_review',
+                payload: {
+                    allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                    data: {
+                        planUri: 'docs://versions/v0.3.0.md',
+                        reviewRound: 1,
+                        strategy: {
+                            granularity: 'medium',
+                            grouping: 'by_phase',
+                            priorityFocus: ['core_runtime'],
+                            stepCountRange: '5-8',
+                        },
+                    },
+                    kind: 'strategy_review',
+                    nodeName: 'reviewTasklistStrategy',
+                    runId: 'run-hitl',
+                    threadId: 'tasklist-agent:c1:run-hitl',
+                },
+                runId: 'run-hitl',
+                threadId: 'tasklist-agent:c1:run-hitl',
+                type: 'agent-interrupt',
+            },
+            { type: 'finish' },
+        ])
+
+        const assistantMessage = getAssistantMessage(state)
+        const interruptPart = assistantMessage?.parts.find(part => part.type === 'agent-interrupt')
+
+        expect(assistantMessage?.status).toBe('paused')
+        expect(interruptPart).toMatchObject({
+            interruptId: 'interrupt-strategy',
+            interruptKind: 'strategy_review',
+            status: 'pending',
+            type: 'agent-interrupt',
+        })
+        expect(state.activeStream.messageId).toBeNull()
+    })
+
+    it('duplicate agent-interrupt chunk 不重复创建审核卡', () => {
+        const interruptChunk: ChatStreamChunk = {
+            agentName: 'version-plan-to-tasklist-agent',
+            assistantMessageId: 'assistant-hitl',
+            interruptId: 'interrupt-strategy',
+            interruptKind: 'strategy_review',
+            payload: {
+                allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                data: {
+                    planUri: 'docs://versions/v0.3.0.md',
+                    reviewRound: 1,
+                    strategy: {
+                        granularity: 'medium',
+                        grouping: 'by_phase',
+                        priorityFocus: ['core_runtime'],
+                        stepCountRange: '5-8',
+                    },
+                },
+                kind: 'strategy_review',
+                nodeName: 'reviewTasklistStrategy',
+                runId: 'run-hitl',
+                threadId: 'tasklist-agent:c1:run-hitl',
+            },
+            runId: 'run-hitl',
+            threadId: 'tasklist-agent:c1:run-hitl',
+            type: 'agent-interrupt',
+        }
+        const state = reduceChunks([{ type: 'start', messageId: 'assistant-hitl' }, interruptChunk, interruptChunk])
+        const assistantMessage = getAssistantMessage(state)
+
+        expect(assistantMessage?.parts.filter(part => part.type === 'agent-interrupt')).toHaveLength(1)
+        expect(assistantMessage?.status).toBe('paused')
+    })
+
+    it('agent-resume 会把 active stream 指回原 assistant message，后续 artifact 继续追加到同一消息', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-resume' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-resume',
+                interruptId: 'interrupt-strategy',
+                interruptKind: 'strategy_review',
+                payload: {
+                    allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                    data: {
+                        planUri: 'docs://versions/v0.3.0.md',
+                        reviewRound: 1,
+                        strategy: {
+                            granularity: 'medium',
+                            grouping: 'by_phase',
+                            priorityFocus: ['core_runtime'],
+                            stepCountRange: '5-8',
+                        },
+                    },
+                    kind: 'strategy_review',
+                    nodeName: 'reviewTasklistStrategy',
+                    runId: 'run-resume',
+                    threadId: 'tasklist-agent:c1:run-resume',
+                },
+                runId: 'run-resume',
+                threadId: 'tasklist-agent:c1:run-resume',
+                type: 'agent-interrupt',
+            },
+            { type: 'finish' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-resume',
+                interruptId: 'interrupt-strategy',
+                runId: 'run-resume',
+                threadId: 'tasklist-agent:c1:run-resume',
+                type: 'agent-resume',
+            },
+            {
+                type: 'artifact-start',
+                artifactId: 'artifact-resumed',
+                artifactKind: 'tasklist',
+                artifactType: 'text',
+                format: 'markdown',
+                title: 'Tasklist',
+            },
+            {
+                type: 'artifact-delta',
+                artifactId: 'artifact-resumed',
+                delta: '# Resumed Tasklist\n',
+            },
+            { type: 'finish' },
+        ])
+
+        const assistantMessage = getAssistantMessage(state)
+        const interruptPart = assistantMessage?.parts.find(part => part.type === 'agent-interrupt')
+
+        expect(assistantMessage?.id).toBe('assistant-resume')
+        expect(assistantMessage?.status).toBe('completed')
+        expect(interruptPart).toMatchObject({
+            interruptId: 'interrupt-strategy',
+            status: 'decided',
+        })
+        expect(assistantMessage?.artifacts?.[0]).toMatchObject({
+            artifactId: 'artifact-resumed',
+            content: '# Resumed Tasklist\n',
+        })
+    })
+
     it('artifact chunks 聚合到 message.artifacts', () => {
         const state = reduceChunks([
             { type: 'start', messageId: 'assistant-artifact' },

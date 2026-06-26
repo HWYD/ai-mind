@@ -18,6 +18,7 @@ import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { type ChatModel, type ChatModelGroup, type PublicChatModel } from '@/lib/ai/models'
 import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import { cn } from '@/lib/utils'
 
 const skillModeLabels: Record<ChatSkillMode, string> = {
     auto: '自动',
@@ -56,6 +57,7 @@ function ModelOptionIcon({ model }: { model: PublicChatModel }) {
 }
 
 export function ComposerToolbar({
+    disabled = false,
     enableReasoning,
     isModelLoading,
     model,
@@ -70,6 +72,7 @@ export function ComposerToolbar({
     skillMode,
     status,
 }: {
+    disabled?: boolean
     enableReasoning: boolean
     isModelLoading: boolean
     model: ChatModel
@@ -92,7 +95,7 @@ export function ComposerToolbar({
     const availableModels = modelGroups.flatMap(group => group.models)
     const selectedModel = availableModels.find(item => item.id === model) ?? null
     const modelPlaceholderText = isModelLoading ? '加载模型中...' : availableModels.length > 0 ? '选择模型' : '暂无可用模型'
-    const modelSelectDisabled = isModelLoading || availableModels.length === 0
+    const modelSelectDisabled = disabled || isModelLoading || availableModels.length === 0
 
     const modelTriggerButton = (
         <Button
@@ -118,6 +121,7 @@ export function ComposerToolbar({
                     variant="outline"
                     size="icon-lg"
                     aria-label="插入命令触发符"
+                    disabled={disabled}
                     onClick={() => onInsertTrigger('/')}
                     className="rounded-xl border-border/80 bg-background text-base shadow-xs hover:bg-muted/60 hidden md:block"
                 >
@@ -129,6 +133,7 @@ export function ComposerToolbar({
                     variant="outline"
                     size="icon-lg"
                     aria-label="插入资源引用触发符"
+                    disabled={disabled}
                     onClick={() => onInsertTrigger('@')}
                     className="rounded-xl border-border/80 bg-background text-base shadow-xs hover:bg-muted/60 hidden md:flex"
                 >
@@ -175,6 +180,7 @@ export function ComposerToolbar({
                     size="lg"
                     pressed={enableReasoning}
                     onPressedChange={onEnableReasoningChange}
+                    disabled={disabled}
                     aria-label="切换深度思考"
                     className="rounded-xl border-border/80 bg-background shadow-xs data-[state=on]:border-[var(--composer-focus-border)]
                      data-[state=on]:bg-[var(--composer-focus-soft)] data-[state=on]:text-[color-mix(in_oklch,var(--composer-focus)_66%,black)] hidden md:flex"
@@ -189,7 +195,7 @@ export function ComposerToolbar({
                     size="lg"
                     value={skillMode}
                     onValueChange={value => {
-                        if (value) {
+                        if (value && !disabled) {
                             onSkillModeChange(value as ChatSkillMode)
                         }
                     }}
@@ -199,6 +205,7 @@ export function ComposerToolbar({
                         <ToggleGroupItem
                             key={mode}
                             value={mode}
+                            disabled={disabled}
                             aria-label={`切换到${skillModeLabels[mode]}：${skillModeDescriptions[mode]}`}
                             title={skillModeDescriptions[mode]}
                             className="min-w-16 border-0 px-3 data-[state=on]:bg-[var(--composer-mode-bg)] data-[state=on]:text-foreground"
@@ -213,7 +220,7 @@ export function ComposerToolbar({
                 type="submit"
                 size="icon-lg"
                 aria-label={status === 'streaming' ? '停止生成' : '发送消息'}
-                disabled={sendDisabled}
+                disabled={disabled || sendDisabled}
                 onClick={event => {
                     event.preventDefault()
 
@@ -223,7 +230,10 @@ export function ComposerToolbar({
                         void onSubmit()
                     }
                 }}
-                className="size-8 md:size-12 rounded-full bg-[var(--composer-focus)] text-white shadow-lg shadow-blue-500/20 hover:bg-[color-mix(in_oklch,var(--composer-focus)_88%,black)]"
+                className={cn(
+                    'size-8 rounded-full bg-[var(--composer-focus)] text-white shadow-lg shadow-blue-500/20 hover:bg-[color-mix(in_oklch,var(--composer-focus)_88%,black)] md:size-12',
+                    (disabled || sendDisabled) && 'bg-muted text-muted-foreground shadow-none hover:bg-muted'
+                )}
             >
                 {status === 'streaming' ? (
                     <Square className="size-4 fill-current" strokeWidth={2.4} />

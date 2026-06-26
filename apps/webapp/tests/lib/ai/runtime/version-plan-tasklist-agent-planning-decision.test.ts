@@ -10,9 +10,11 @@ import {
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 import {
     applyVersionPlanTasklistGraphAction,
+    buildPlanningDecisionMessages,
     generateTasklistStrategy,
     parseVersionPlanTasklistPlanningDecisionAction,
     parseVersionPlanTasklistPlanningDecisionText,
+    parseVersionPlanTasklistStrategy,
     validateVersionPlanTasklistGraphAction,
     type VersionPlanTasklistAgentAction,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
@@ -199,6 +201,93 @@ describe('runtime/version-plan-tasklist-agent planning decision schema', () => {
 
         expect(result.success).toBe(false)
     })
+
+    it('planning decision prompt 明确要求 proceed_with_manual_review_items 输出非空 reviewItems', () => {
+        const messages = buildPlanningDecisionMessages(createPlanningPromptState(createReadinessCheckedState()), '生成 tasklist')
+        const systemPrompt = String(messages[0]?.content ?? '')
+
+        expect(systemPrompt).toContain('proceed_with_manual_review_items')
+        expect(systemPrompt).toContain('必须输出 reviewItems')
+        expect(systemPrompt).toContain('"reviewItems": [')
+        expect(systemPrompt).toContain('"type": "proceed_with_manual_review_items"')
+    })
+})
+
+describe('runtime/version-plan-tasklist-agent tasklist strategy schema', () => {
+    it('接受固定枚举结构并保留可选 notes', () => {
+        const result = parseVersionPlanTasklistStrategy({
+            granularity: 'medium',
+            grouping: 'by_phase',
+            notes: '  先实现核心 Runtime。  ',
+            priorityFocus: ['core_runtime', 'tests'],
+            stepCountRange: '5-8',
+        })
+
+        expect(result).toEqual({
+            strategy: {
+                granularity: 'medium',
+                grouping: 'by_phase',
+                notes: '先实现核心 Runtime。',
+                priorityFocus: ['core_runtime', 'tests'],
+                stepCountRange: '5-8',
+            },
+            success: true,
+        })
+    })
+
+    it('拒绝旧版自由文本策略结构', () => {
+        const result = parseVersionPlanTasklistStrategy({
+            expectedStepRange: [3, 5],
+            granularity: 'medium',
+            grouping: ['按阶段'],
+            priority: ['Runtime'],
+            reason: '旧版策略。',
+        })
+
+        expect(result.success).toBe(false)
+    })
+
+    it('拒绝重复 priorityFocus 和额外字段', () => {
+        expect(
+            parseVersionPlanTasklistStrategy({
+                granularity: 'medium',
+                grouping: 'by_phase',
+                priorityFocus: ['tests', 'tests'],
+                stepCountRange: '3-5',
+            }).success
+        ).toBe(false)
+
+        expect(
+            parseVersionPlanTasklistStrategy({
+                granularity: 'medium',
+                grouping: 'by_phase',
+                priorityFocus: ['tests'],
+                reason: '不属于 v0.3.0 strategy 契约。',
+                stepCountRange: '3-5',
+            }).success
+        ).toBe(false)
+    })
+
+    it('拒绝空 priorityFocus 和超长 notes', () => {
+        expect(
+            parseVersionPlanTasklistStrategy({
+                granularity: 'medium',
+                grouping: 'by_phase',
+                priorityFocus: [],
+                stepCountRange: '3-5',
+            }).success
+        ).toBe(false)
+
+        expect(
+            parseVersionPlanTasklistStrategy({
+                granularity: 'medium',
+                grouping: 'by_phase',
+                notes: 'a'.repeat(501),
+                priorityFocus: ['tests'],
+                stepCountRange: '3-5',
+            }).success
+        ).toBe(false)
+    })
 })
 
 describe('runtime/version-plan-tasklist-agent planning decision state machine', () => {
@@ -273,11 +362,11 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
         const strategyDecidedState = applyAction(planningDecidedState, {
             type: 'decide_tasklist_strategy',
             strategy: {
-                expectedStepRange: [3, 5],
                 granularity: 'medium',
-                grouping: ['Runtime', 'Tests'],
-                priority: ['先接状态机', '再补测试'],
-                reason: '中等粒度适合当前版本。',
+                grouping: 'by_phase',
+                notes: '先接状态机，再补测试。',
+                priorityFocus: ['state_model', 'tests'],
+                stepCountRange: '3-5',
             },
             reason: '进入 tasklist 拆分策略判断。',
         })
@@ -315,11 +404,11 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
 
     it('optional_context_read 后可单独生成 strategy', async () => {
         const strategy = {
-            expectedStepRange: [4, 6],
             granularity: 'medium',
-            grouping: ['Runtime', 'Tests'],
-            priority: ['先处理 Runtime 边界', '再补测试'],
-            reason: '补充上下文读取后可以进入中等粒度拆分。',
+            grouping: 'by_phase',
+            notes: '补充上下文读取后先处理 Runtime 边界，再补测试。',
+            priorityFocus: ['core_runtime', 'tests'],
+            stepCountRange: '5-8',
         }
         const model = {
             invoke: vi.fn().mockResolvedValue(new AIMessage({ content: JSON.stringify(strategy) })),
@@ -327,8 +416,9 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
 
         const result = await generateTasklistStrategy(model, createPlanningPromptState(createOptionalContextReadState()), '生成 tasklist')
 
-        expect(result.expectedStepRange).toEqual([4, 6])
-        expect(result.grouping).toEqual(['Runtime', 'Tests'])
+        expect(result.stepCountRange).toBe('5-8')
+        expect(result.grouping).toBe('by_phase')
+        expect(result.priorityFocus).toEqual(['core_runtime', 'tests'])
         expect(model.invoke).toHaveBeenCalledTimes(1)
     })
 
@@ -374,7 +464,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
         expect(guardResult.success).toBe(false)
     })
 
-    it('超过 maxSteps = 12 后 fail closed', () => {
+    it('超过 maxSteps = 20 后 fail closed', () => {
         const state = {
             ...createPlanReadState(),
             execution: {
@@ -382,7 +472,8 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
                 counters: {
                     draftRevisions: 0,
                     optionalContextReads: 0,
-                    steps: 12,
+                    steps: 20,
+                    strategyRegenerations: 0,
                 },
             },
         }
@@ -391,7 +482,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             reason: '超过 step 上限后不允许继续。',
         })
 
-        expect(state.execution.limits.maxSteps).toBe(12)
+        expect(state.execution.limits.maxSteps).toBe(20)
         expect(guardResult.success).toBe(false)
     })
 })

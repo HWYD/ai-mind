@@ -14,7 +14,10 @@ vi.mock('@/lib/ai/mcp/adapters', () => ({
 
 import type { ChatSession } from '@/lib/ai/runtime/types'
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
-import { runVersionPlanTasklistGraph } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/run-version-plan-tasklist-graph'
+import {
+    resumeVersionPlanTasklistGraph,
+    runVersionPlanTasklistGraph,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/run-version-plan-tasklist-graph'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const planUri = 'docs://versions/v0.2.0-controlled-agent-graph.md'
@@ -114,13 +117,20 @@ const validTasklist = `
 
 const warningTasklist = validTasklist.replace(/## Test Plan[\s\S]*?## 工程验证/, '## 工程验证')
 const fixableWarningTasklist = validTasklist.replace(/## 执行纪律[\s\S]*?## Step 1/, '## Step 1')
+const blockedTasklist = `
+# Broken Tasklist
+
+## Goals
+
+- 缺少步骤、checklist 和验证内容。
+`
 
 const tasklistStrategy = {
-    expectedStepRange: [3, 5],
     granularity: 'medium',
-    grouping: ['Graph State', 'Runner', 'Tests'],
-    priority: ['先搭 graph runner', '再接 orchestrator', '最后补 parity 测试'],
-    reason: '版本目标清晰，适合中等粒度拆分。',
+    grouping: 'by_phase',
+    notes: '先搭 graph runner，再接 orchestrator，最后补 parity 测试。',
+    priorityFocus: ['state_model', 'core_runtime', 'tests'],
+    stepCountRange: '3-5',
 }
 
 const proceedPlanningOutput = JSON.stringify({
@@ -213,9 +223,12 @@ function mockResources(versionPlanContent = readyVersionPlanContent) {
     })
 }
 
+let runGraphRunnerSequence = 0
+
 async function runGraphRunnerWithEnv(env: Record<string, string | undefined>, ...responses: string[]) {
     const model = createModel(...responses)
     const writtenChunks: ChatStreamChunk[] = []
+    const runId = `run-graph-runner-test-${++runGraphRunnerSequence}`
     const result = await runVersionPlanTasklistGraph({
         context: {},
         conversationId: 'conversation-graph-runner-test',
@@ -223,10 +236,59 @@ async function runGraphRunnerWithEnv(env: Record<string, string | undefined>, ..
             drafting: { model, timeoutMs: 300_000 },
             planning: { model, timeoutMs: 90_000 },
         },
-        runId: 'run-graph-runner-test',
-        runtimeConfig: getTasklistAgentRuntimeConfig(env, 'development'),
+        runId,
+        runtimeConfig: getTasklistAgentRuntimeConfig(
+            {
+                AI_MIND_GRAPH_CHECKPOINT: 'memory',
+                ...env,
+            },
+            'development'
+        ),
         userGoal: '基于这个版本方案生成 tasklist 草稿',
         versionPlanReference,
+        writeChunk: chunk => writtenChunks.push(chunk),
+    })
+
+    return {
+        model,
+        result,
+        runId,
+        writtenChunks,
+    }
+}
+
+async function runGraphRunner(...responses: string[]) {
+    return runGraphRunnerWithEnv({}, ...responses)
+}
+
+async function resumeGraphRunnerWithEnv(
+    env: Record<string, string | undefined>,
+    options: {
+        decision: unknown
+        runId: string
+        threadId: string
+    },
+    ...responses: string[]
+) {
+    const model = createModel(...responses)
+    const writtenChunks: ChatStreamChunk[] = []
+    const result = await resumeVersionPlanTasklistGraph({
+        context: {},
+        decision: options.decision,
+        models: {
+            drafting: { model, timeoutMs: 300_000 },
+            planning: { model, timeoutMs: 90_000 },
+        },
+        runId: options.runId,
+        runtimeConfig: getTasklistAgentRuntimeConfig(
+            {
+                AI_MIND_GRAPH_CHECKPOINT: 'memory',
+                ...env,
+            },
+            'development'
+        ),
+        threadId: options.threadId,
+        userGoal: '基于这个版本方案生成 tasklist 草稿',
         writeChunk: chunk => writtenChunks.push(chunk),
     })
 
@@ -237,8 +299,15 @@ async function runGraphRunnerWithEnv(env: Record<string, string | undefined>, ..
     }
 }
 
-async function runGraphRunner(...responses: string[]) {
-    return runGraphRunnerWithEnv({}, ...responses)
+async function resumeGraphRunner(
+    options: {
+        decision: unknown
+        runId: string
+        threadId: string
+    },
+    ...responses: string[]
+) {
+    return resumeGraphRunnerWithEnv({}, options, ...responses)
 }
 
 describe('runtime/version-plan-tasklist-agent graph runner', () => {
@@ -247,17 +316,16 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         mockResources()
     })
 
-    it('ready plan 可生成 v1、校验并 final，且 tasklist 正文只通过 artifact 输出', async () => {
+    it('ready plan 初次执行会停在 Strategy Review，且不会提前生成 draft / artifact', async () => {
         const { model, result, writtenChunks } = await runGraphRunner(proceedPlanningOutput, validTasklist)
 
-        expect(result.graphState.execution.status).toBe('final')
-        expect(result.graphState.graph.checkpointMode).toBe('off')
-        expect(result.graphState.output?.status).toBe('final')
-        expect(result.graphState.tasklist.draft?.version).toBe(1)
-        expect(result.graphState.tasklist.draft?.validationV1?.status).toBe('pass')
-        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final')
-        expect(model.invoke).toHaveBeenCalledTimes(2)
-        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
+        expect(result.graphState.execution.status).toBe('strategy_decided')
+        expect(result.graphState.graph.checkpointMode).toBe('memory')
+        expect(result.graphState.output).toBeUndefined()
+        expect(result.graphState.tasklist.draft).toBeUndefined()
+        expect(result.graphState.planning.strategy?.granularity).toBe('medium')
+        expect(model.invoke).toHaveBeenCalledTimes(1)
+        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(false)
         expect(writtenChunks.some(chunk => chunk.type.startsWith('agent-graph-'))).toBe(false)
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('## Step 1：Graph State'))).toBe(false)
     })
@@ -274,33 +342,34 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
                 planning: { model: planningModel, timeoutMs: 90_000 },
             },
             runId: 'run-model-routing-test',
-            runtimeConfig: getTasklistAgentRuntimeConfig({}, 'development'),
+            runtimeConfig: getTasklistAgentRuntimeConfig(
+                {
+                    AI_MIND_GRAPH_CHECKPOINT: 'memory',
+                },
+                'development'
+            ),
             userGoal: '基于这个版本方案生成 tasklist 草稿',
             versionPlanReference,
             writeChunk: vi.fn(),
         })
 
         expect(planningModel.invoke).toHaveBeenCalledTimes(1)
-        expect(draftingModel.invoke).toHaveBeenCalledTimes(1)
+        expect(draftingModel.invoke).not.toHaveBeenCalled()
     })
 
-    it('checkpoint 关闭时仍可完成 graph runner 且不改变 final artifact', async () => {
-        const { result, writtenChunks } = await runGraphRunnerWithEnv(
-            {
-                AI_MIND_GRAPH_CHECKPOINT: 'off',
-            },
-            proceedPlanningOutput,
-            validTasklist
-        )
-
-        expect(result.graphState.execution.status).toBe('final')
-        expect(result.graphState.graph.checkpointMode).toBe('off')
-        expect(result.graphState.threadId).toBe('tasklist-agent:conversation-graph-runner-test:run-graph-runner-test')
-        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
-        expect(writtenChunks.some(chunk => chunk.type === 'artifact-delta' && chunk.delta.includes('## Step 1：Graph State'))).toBe(true)
+    it('checkpoint 关闭时遇到 Strategy Review 会 fail closed', async () => {
+        await expect(
+            runGraphRunnerWithEnv(
+                {
+                    AI_MIND_GRAPH_CHECKPOINT: 'off',
+                },
+                proceedPlanningOutput,
+                validTasklist
+            )
+        ).rejects.toThrow('No checkpointer set')
     })
 
-    it('development memory checkpoint 可完成 graph runner 且不改变 final artifact', async () => {
+    it('development memory checkpoint 可在 Strategy Review 暂停', async () => {
         const { result, writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_CHECKPOINT: 'memory',
@@ -309,16 +378,104 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             validTasklist
         )
 
-        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('strategy_decided')
         expect(result.graphState.graph.checkpointMode).toBe('memory')
-        expect(result.graphState.threadId).toBe('tasklist-agent:conversation-graph-runner-test:run-graph-runner-test')
-        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
-        expect(writtenChunks.some(chunk => chunk.type === 'artifact-delta' && chunk.delta.includes('## Step 1：Graph State'))).toBe(true)
+        expect(result.graphState.threadId).toBe(`tasklist-agent:conversation-graph-runner-test:${result.graphState.execution.runId}`)
+        expect(result.graphState.tasklist.draft).toBeUndefined()
+        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(false)
         expect(writtenChunks.some(chunk => chunk.type.startsWith('agent-graph-'))).toBe(false)
     })
 
+    it('runner 返回明确 interrupted 结果和官方 LangGraph interrupt id', async () => {
+        const { result, runId } = await runGraphRunner(proceedPlanningOutput, validTasklist)
+
+        expect(result.status).toBe('interrupted')
+
+        if (result.status !== 'interrupted') {
+            throw new Error('Expected interrupted graph result.')
+        }
+
+        expect(result.interrupt.langgraphInterruptId).toMatch(/^[a-f0-9]+$/)
+        expect(result.interrupt.payload).toMatchObject({
+            kind: 'strategy_review',
+            nodeName: 'reviewTasklistStrategy',
+            runId,
+            threadId: result.graphState.threadId,
+        })
+    })
+
+    it('resume runner 使用同一 threadId 继续执行，不重建 initial graph state', async () => {
+        const initial = await runGraphRunner(proceedPlanningOutput)
+
+        expect(initial.result.status).toBe('interrupted')
+
+        const resumed = await resumeGraphRunner(
+            {
+                decision: { type: 'approve' },
+                runId: initial.runId,
+                threadId: initial.result.graphState.threadId,
+            },
+            validTasklist
+        )
+
+        expect(resumed.result.status).toBe('completed')
+
+        if (resumed.result.status !== 'completed') {
+            throw new Error('Expected completed graph result.')
+        }
+
+        expect(resumed.result.resultStatus).toBe('final')
+        expect(resumed.result.graphState.tasklist.draft?.version).toBe(1)
+        expect(resumed.model.invoke).toHaveBeenCalledTimes(1)
+        expect(resourceMocks.readDocsResource).toHaveBeenCalledTimes(1)
+    })
+
+    it('strategy resume 后可进入 revision interrupt，再 resume 到 v3 blocked', async () => {
+        const initial = await runGraphRunner(proceedPlanningOutput)
+        const revisionPause = await resumeGraphRunner(
+            {
+                decision: { type: 'approve' },
+                runId: initial.runId,
+                threadId: initial.result.graphState.threadId,
+            },
+            fixableWarningTasklist
+        )
+
+        expect(revisionPause.result.status).toBe('interrupted')
+
+        if (revisionPause.result.status !== 'interrupted') {
+            throw new Error('Expected revision interrupt graph result.')
+        }
+
+        expect(revisionPause.result.interrupt.payload).toMatchObject({
+            kind: 'tasklist_revision_review',
+            nodeName: 'reviewTasklistRevision',
+        })
+
+        const completed = await resumeGraphRunner(
+            {
+                decision: { type: 'approve' },
+                runId: initial.runId,
+                threadId: initial.result.graphState.threadId,
+            },
+            fixableWarningTasklist,
+            blockedTasklist
+        )
+
+        expect(completed.result.status).toBe('completed')
+
+        if (completed.result.status !== 'completed') {
+            throw new Error('Expected completed graph result.')
+        }
+
+        expect(completed.result.resultStatus).toBe('blocked')
+        expect(completed.result.graphState.execution.counters.draftRevisions).toBe(2)
+        expect(completed.result.graphState.tasklist.draft?.version).toBe(3)
+        expect(completed.result.graphState.planning.revisionEffect?.finalDecision).toBe('blocked')
+    })
+
     it('debug view 开启时发送脱敏 graph debug summary，关闭时不发送', async () => {
-        const { result, writtenChunks } = await runGraphRunnerWithEnv(
+        const { result, runId, writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_DEBUG_VIEW: 'on',
             },
@@ -329,23 +486,23 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
 
         expect(debugSummaryChunk).toMatchObject({
             agentName: 'version-plan-to-tasklist-agent',
-            runId: 'run-graph-runner-test',
+            runId,
             summary: {
-                checkpointMode: 'off',
-                currentNode: 'emitFinalArtifact',
+                checkpointMode: 'memory',
+                currentNode: 'decideTasklistStrategy',
                 decision: {
                     type: 'proceed_to_tasklist_strategy',
                 },
                 manualReviewItemCount: 0,
-                runId: 'run-graph-runner-test',
+                runId,
                 runtimeMode: 'graph',
-                threadId: 'tasklist-agent:conversation-graph-runner-test:run-graph-runner-test',
-                validationV1: {
-                    score: 100,
-                    status: 'pass',
+                strategy: {
+                    expectedStepRange: [3, 5],
+                    granularity: 'medium',
                 },
+                threadId: `tasklist-agent:conversation-graph-runner-test:${runId}`,
             },
-            threadId: 'tasklist-agent:conversation-graph-runner-test:run-graph-runner-test',
+            threadId: `tasklist-agent:conversation-graph-runner-test:${runId}`,
             type: 'agent-graph-debug-summary',
         })
         expect(debugSummaryChunk?.summary.visitedNodes).toEqual(result.graphState.graph.visitedNodes)
@@ -369,21 +526,30 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         const graphNodeStarts = writtenChunks.filter(chunk => chunk.type === 'agent-graph-node-start')
         const graphNodeEnds = writtenChunks.filter(chunk => chunk.type === 'agent-graph-node-end')
 
-        expect(graphNodeStarts).toHaveLength(result.graphState.graph.visitedNodes.length)
-        expect(graphNodeEnds).toHaveLength(result.graphState.graph.visitedNodes.length)
+        expect(graphNodeStarts).toHaveLength(result.graphState.graph.visitedNodes.length + 1)
+        expect(graphNodeEnds).toHaveLength(result.graphState.graph.visitedNodes.length + 1)
         expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-route' && chunk.routeLabel === 'proceed_to_tasklist_strategy')).toBe(
             true
         )
-        expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-route' && chunk.routeLabel === 'no_auto_revision')).toBe(true)
+        expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-route' && chunk.routeLabel === 'strategy_decided')).toBe(true)
         expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-state-patch' && chunk.patchSummary.includes('version plan'))).toBe(
             true
         )
         expect(writtenChunks.some(chunk => chunk.type === 'agent-graph-node-end' && chunk.nodeId === 'planningDecision')).toBe(true)
-        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(true)
+        expect(
+            writtenChunks.some(
+                chunk =>
+                    chunk.type === 'agent-graph-node-end' &&
+                    chunk.nodeId === 'reviewTasklistStrategy' &&
+                    chunk.status === 'skipped' &&
+                    chunk.tags?.includes('status: interrupted')
+            )
+        ).toBe(true)
+        expect(writtenChunks.some(chunk => chunk.type === 'artifact-start')).toBe(false)
         expect(JSON.stringify(writtenChunks.filter(chunk => chunk.type === 'agent-graph-state-patch'))).not.toContain('tasklistDraft')
     })
 
-    it('warning 路径会把关键 graph 节点标记为 warning severity', async () => {
+    it('Strategy Review interrupt 不会被标记为 failed node', async () => {
         const { writtenChunks } = await runGraphRunnerWithEnv(
             {
                 AI_MIND_GRAPH_EVENTS: 'on',
@@ -392,14 +558,20 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             warningTasklist
         )
 
-        const warningNodeIds = writtenChunks
-            .filter(
-                (chunk): chunk is Extract<ChatStreamChunk, { type: 'agent-graph-node-end' }> =>
-                    chunk.type === 'agent-graph-node-end' && chunk.severity === 'warning'
+        expect(
+            writtenChunks.some(
+                chunk =>
+                    chunk.type === 'agent-graph-node-end' &&
+                    chunk.nodeId === 'reviewTasklistStrategy' &&
+                    chunk.status === 'skipped' &&
+                    chunk.severity === 'info'
             )
-            .map(chunk => chunk.nodeId)
-
-        expect(warningNodeIds).toEqual(expect.arrayContaining(['validateTasklistV1', 'decideWarningDisposition', 'evaluateRevisionEffect']))
+        ).toBe(true)
+        expect(
+            writtenChunks.some(
+                chunk => chunk.type === 'agent-graph-node-end' && chunk.nodeId === 'reviewTasklistStrategy' && chunk.status === 'failed'
+            )
+        ).toBe(false)
     })
 
     it('needs_review 可继续并输出人工复核点', async () => {
@@ -407,12 +579,12 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
 
         const { result, writtenChunks } = await runGraphRunner(manualReviewPlanningOutput, validTasklist)
 
-        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('strategy_decided')
         expect(result.graphState.planning.readiness?.status).toBe('needs_review')
         expect(result.graphState.planning.decision?.type).toBe('proceed_with_manual_review_items')
         expect(result.graphState.planning.manualReviewItems.some(item => item.title === 'Interface Changes 较弱')).toBe(true)
-        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
-        expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('Interface Changes 较弱'))).toBe(true)
+        expect(result.graphState.planning.revisionEffect).toBeUndefined()
+        expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('Interface Changes 较弱'))).toBe(false)
     })
 
     it('ask_clarification 进入 stopped，不生成 draft', async () => {
@@ -434,22 +606,22 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
         expect(writtenChunks.some(chunk => chunk.type === 'text-delta' && chunk.delta.includes('当前输入不是 version plan'))).toBe(true)
     })
 
-    it('optional context 成功后继续生成 strategy 和 tasklist', async () => {
+    it('optional context 成功后生成 strategy 并停在 Strategy Review', async () => {
         const { model, result, writtenChunks } = await runGraphRunner(
             readOptionalContextPlanningOutput,
             JSON.stringify(tasklistStrategy),
             validTasklist
         )
 
-        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('strategy_decided')
         expect(result.graphState.planning.optionalContext?.status).toBe('completed')
         expect(result.graphState.planning.strategy?.granularity).toBe('medium')
-        expect(result.graphState.tasklist.draft?.version).toBe(1)
-        expect(model.invoke).toHaveBeenCalledTimes(3)
+        expect(result.graphState.tasklist.draft).toBeUndefined()
+        expect(model.invoke).toHaveBeenCalledTimes(2)
         expect(writtenChunks.some(chunk => chunk.type === 'resource-end' && chunk.uri === optionalContextUri)).toBe(true)
     })
 
-    it('optional context 失败后降级继续并输出人工复核点', async () => {
+    it('optional context 失败后降级生成 strategy 并停在 Strategy Review', async () => {
         resourceMocks.readDocsResource.mockImplementation(async ({ uri }: { uri: string }) => {
             if (uri === planUri) {
                 return {
@@ -472,32 +644,30 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
             validTasklist
         )
 
-        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('strategy_decided')
         expect(result.graphState.planning.optionalContext?.status).toBe('failed')
         expect(result.graphState.planning.manualReviewItems.some(item => item.title === '补充上下文读取失败')).toBe(true)
-        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
+        expect(result.graphState.planning.revisionEffect).toBeUndefined()
         expect(writtenChunks.some(chunk => chunk.type === 'error' && chunk.scope === 'resource')).toBe(true)
     })
 
-    it('只有人工复核 warning 时不触发 v2，直接完成 revision effect', async () => {
+    it('Strategy Review 前不会提前进入 manual-only warning validation', async () => {
         const { result } = await runGraphRunner(proceedPlanningOutput, warningTasklist)
 
-        expect(result.graphState.execution.status).toBe('final')
+        expect(result.graphState.execution.status).toBe('strategy_decided')
         expect(result.graphState.execution.counters.draftRevisions).toBe(0)
-        expect(result.graphState.tasklist.draft?.version).toBe(1)
-        expect(result.graphState.planning.revisionEffect?.finalDecision).toBe('final_with_manual_review_items')
+        expect(result.graphState.tasklist.draft).toBeUndefined()
+        expect(result.graphState.planning.revisionEffect).toBeUndefined()
     })
 
-    it('fixNow 时最多生成 v2、再次校验且不生成 v3', async () => {
+    it('Strategy Review 前不会提前进入 fixNow revision flow', async () => {
         const { model, result, writtenChunks } = await runGraphRunner(proceedPlanningOutput, fixableWarningTasklist, validTasklist)
 
-        expect(result.graphState.execution.status).toBe('final')
-        expect(result.graphState.execution.counters.draftRevisions).toBe(1)
-        expect(result.graphState.tasklist.draft?.version).toBe(2)
-        expect(result.graphState.tasklist.draft?.validationV1?.status).toBe('warning')
-        expect(result.graphState.tasklist.draft?.validationV2?.status).toBe('pass')
-        expect(model.invoke).toHaveBeenCalledTimes(3)
-        expect(writtenChunks.filter(chunk => chunk.type === 'tool-end' && chunk.toolName === 'validate_tasklist_structure')).toHaveLength(2)
+        expect(result.graphState.execution.status).toBe('strategy_decided')
+        expect(result.graphState.execution.counters.draftRevisions).toBe(0)
+        expect(result.graphState.tasklist.draft).toBeUndefined()
+        expect(model.invoke).toHaveBeenCalledTimes(1)
+        expect(writtenChunks.filter(chunk => chunk.type === 'tool-end' && chunk.toolName === 'validate_tasklist_structure')).toHaveLength(0)
     })
 
     it('version plan 读取失败时不调用模型、不生成 draft，并输出失败摘要', async () => {

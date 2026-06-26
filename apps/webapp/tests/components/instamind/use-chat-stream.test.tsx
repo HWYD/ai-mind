@@ -28,6 +28,8 @@ function createNdjsonResponse(chunks: ChatStreamChunk[], status = 200) {
 }
 
 afterEach(() => {
+    window.localStorage.clear()
+    vi.unstubAllGlobals()
     cleanup()
 })
 
@@ -391,5 +393,325 @@ describe('useChatStream', () => {
             error: 'artifact writer failed',
             status: 'failed',
         })
+    })
+
+    it('agent-interrupt 后保留 paused assistant message 并暴露 pendingInterrupt', async () => {
+        const streamChunks: ChatStreamChunk[] = [
+            { type: 'start', messageId: 'assistant-hitl' },
+            {
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-hitl',
+                interruptId: 'interrupt-strategy',
+                interruptKind: 'strategy_review',
+                payload: {
+                    allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                    data: {
+                        planUri: 'docs://versions/v0.3.0.md',
+                        reviewRound: 1,
+                        strategy: {
+                            granularity: 'medium',
+                            grouping: 'by_phase',
+                            priorityFocus: ['core_runtime'],
+                            stepCountRange: '5-8',
+                        },
+                    },
+                    kind: 'strategy_review',
+                    nodeName: 'reviewTasklistStrategy',
+                    runId: 'run-hitl',
+                    threadId: 'tasklist-agent:c1:run-hitl',
+                },
+                runId: 'run-hitl',
+                threadId: 'tasklist-agent:c1:run-hitl',
+                type: 'agent-interrupt',
+            },
+            { type: 'finish' },
+        ]
+
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.id === 'assistant-hitl')
+
+        expect(assistantMessage?.status).toBe('paused')
+        expect(result.current.pendingInterrupt?.part).toMatchObject({
+            interruptId: 'interrupt-strategy',
+            runId: 'run-hitl',
+            status: 'pending',
+        })
+        expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
+    })
+
+    it('pending interrupt 时锁定普通 send、regenerate 和 delete turn', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            createNdjsonResponse([
+                { type: 'start', messageId: 'assistant-hitl' },
+                {
+                    agentName: 'version-plan-to-tasklist-agent',
+                    assistantMessageId: 'assistant-hitl',
+                    interruptId: 'interrupt-strategy',
+                    interruptKind: 'strategy_review',
+                    payload: {
+                        allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                        data: {
+                            planUri: 'docs://versions/v0.3.0.md',
+                            reviewRound: 1,
+                            strategy: {
+                                granularity: 'medium',
+                                grouping: 'by_phase',
+                                priorityFocus: ['core_runtime'],
+                                stepCountRange: '5-8',
+                            },
+                        },
+                        kind: 'strategy_review',
+                        nodeName: 'reviewTasklistStrategy',
+                        runId: 'run-lock',
+                        threadId: 'tasklist-agent:c1:run-lock',
+                    },
+                    runId: 'run-lock',
+                    threadId: 'tasklist-agent:c1:run-lock',
+                    type: 'agent-interrupt',
+                },
+                { type: 'finish' },
+            ])
+        )
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+        await waitFor(() => {
+            expect(result.current.pendingInterrupt?.part.runId).toBe('run-lock')
+        })
+
+        const userMessageId = result.current.messages.find(message => message.role === 'user')?.id
+
+        await act(async () => {
+            expect(await result.current.sendMessage('普通追问')).toBe(false)
+            expect(await result.current.regenerateLastTurn()).toBe(false)
+            expect(result.current.deleteUserTurn(userMessageId ?? 'missing-user-message')).toBe(false)
+        })
+
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+
+    it('页面初始化不会恢复 pending HITL，并会清理旧的 pendingAgentRunId', async () => {
+        window.localStorage.setItem('ai-mind:pending-agent-run-id', 'run-restore')
+        const fetchMock = vi.fn()
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await waitFor(() => {
+            expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
+        })
+
+        expect(fetchMock).not.toHaveBeenCalled()
+        expect(result.current.pendingInterrupt).toBeNull()
+        expect(result.current.messages).toHaveLength(0)
+    })
+
+    it('resumeAgentRun 通过 resume API 继续写入原 assistant message', async () => {
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url.includes('/resume')) {
+                return Promise.resolve(
+                    createNdjsonResponse([
+                        {
+                            agentName: 'version-plan-to-tasklist-agent',
+                            assistantMessageId: 'assistant-resume',
+                            interruptId: 'interrupt-strategy',
+                            runId: 'run-resume',
+                            threadId: 'tasklist-agent:c1:run-resume',
+                            type: 'agent-resume',
+                        },
+                        {
+                            type: 'artifact-start',
+                            artifactId: 'artifact-resume',
+                            artifactKind: 'tasklist',
+                            artifactType: 'text',
+                            format: 'markdown',
+                            title: 'Tasklist',
+                        },
+                        {
+                            type: 'artifact-delta',
+                            artifactId: 'artifact-resume',
+                            delta: '# Resumed\n',
+                        },
+                        { type: 'finish' },
+                    ])
+                )
+            }
+
+            return Promise.resolve(
+                createNdjsonResponse([
+                    { type: 'start', messageId: 'assistant-resume' },
+                    {
+                        agentName: 'version-plan-to-tasklist-agent',
+                        assistantMessageId: 'assistant-resume',
+                        interruptId: 'interrupt-strategy',
+                        interruptKind: 'strategy_review',
+                        payload: {
+                            allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                            data: {
+                                planUri: 'docs://versions/v0.3.0.md',
+                                reviewRound: 1,
+                                strategy: {
+                                    granularity: 'medium',
+                                    grouping: 'by_phase',
+                                    priorityFocus: ['core_runtime'],
+                                    stepCountRange: '5-8',
+                                },
+                            },
+                            kind: 'strategy_review',
+                            nodeName: 'reviewTasklistStrategy',
+                            runId: 'run-resume',
+                            threadId: 'tasklist-agent:c1:run-resume',
+                        },
+                        runId: 'run-resume',
+                        threadId: 'tasklist-agent:c1:run-resume',
+                        type: 'agent-interrupt',
+                    },
+                    { type: 'finish' },
+                ])
+            )
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+        await waitFor(() => {
+            expect(result.current.pendingInterrupt?.part.runId).toBe('run-resume')
+        })
+
+        await act(async () => {
+            await result.current.resumeAgentRun({ type: 'approve' })
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const resumeRequest = fetchMock.mock.calls.find(call => String(call[0]).includes('/resume'))
+        const assistantMessages = result.current.messages.filter(message => message.role === 'assistant')
+        const assistantMessage = assistantMessages[0]
+
+        expect(resumeRequest?.[0]).toBe('/api/agent-runs/run-resume/resume')
+        expect(JSON.parse(String((resumeRequest?.[1] as RequestInit | undefined)?.body))).toEqual({
+            decision: { type: 'approve' },
+            interruptId: 'interrupt-strategy',
+        })
+        expect(assistantMessages).toHaveLength(1)
+        expect(assistantMessage?.id).toBe('assistant-resume')
+        expect(assistantMessage?.status).toBe('completed')
+        expect(assistantMessage?.artifacts?.[0]).toMatchObject({
+            artifactId: 'artifact-resume',
+            content: '# Resumed\n',
+        })
+        expect(result.current.pendingInterrupt).toBeNull()
+        expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
+    })
+
+    it('reject resume 会结束当前 AgentRun，并解除 pending interrupt', async () => {
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url.includes('/resume')) {
+                return Promise.resolve(
+                    createNdjsonResponse([
+                        {
+                            agentName: 'version-plan-to-tasklist-agent',
+                            assistantMessageId: 'assistant-reject',
+                            interruptId: 'interrupt-strategy',
+                            runId: 'run-reject',
+                            threadId: 'tasklist-agent:c1:run-reject',
+                            type: 'agent-resume',
+                        },
+                        {
+                            partId: 'part-reject-summary',
+                            type: 'text-start',
+                        },
+                        {
+                            delta: '已终止本轮 tasklist 生成。当前策略不会继续执行。',
+                            partId: 'part-reject-summary',
+                            type: 'text-delta',
+                        },
+                        { partId: 'part-reject-summary', type: 'text-end' },
+                        { type: 'finish' },
+                    ])
+                )
+            }
+
+            return Promise.resolve(
+                createNdjsonResponse([
+                    { type: 'start', messageId: 'assistant-reject' },
+                    {
+                        agentName: 'version-plan-to-tasklist-agent',
+                        assistantMessageId: 'assistant-reject',
+                        interruptId: 'interrupt-strategy',
+                        interruptKind: 'strategy_review',
+                        payload: {
+                            allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                            data: {
+                                planUri: 'docs://versions/v0.3.0.md',
+                                reviewRound: 1,
+                                strategy: {
+                                    granularity: 'medium',
+                                    grouping: 'by_phase',
+                                    priorityFocus: ['core_runtime'],
+                                    stepCountRange: '5-8',
+                                },
+                            },
+                            kind: 'strategy_review',
+                            nodeName: 'reviewTasklistStrategy',
+                            runId: 'run-reject',
+                            threadId: 'tasklist-agent:c1:run-reject',
+                        },
+                        runId: 'run-reject',
+                        threadId: 'tasklist-agent:c1:run-reject',
+                        type: 'agent-interrupt',
+                    },
+                    { type: 'finish' },
+                ])
+            )
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+        await waitFor(() => {
+            expect(result.current.pendingInterrupt?.part.runId).toBe('run-reject')
+        })
+
+        await act(async () => {
+            await result.current.resumeAgentRun({ type: 'reject' })
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.id === 'assistant-reject')
+
+        expect(assistantMessage?.status).toBe('completed')
+        expect(assistantMessage?.parts.some(part => part.type === 'text' && part.text.includes('已终止本轮 tasklist 生成。'))).toBe(true)
+        expect(result.current.pendingInterrupt).toBeNull()
+        expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
     })
 })

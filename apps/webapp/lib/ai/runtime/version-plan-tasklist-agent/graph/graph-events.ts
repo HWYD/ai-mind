@@ -1,4 +1,5 @@
 import type { AgentStepSeverity, AgentStepStatus } from '@ai-mind/stream-core/protocol'
+import { isGraphInterrupt } from '@langchain/langgraph'
 
 import { createId } from '@/lib/ai/create-id'
 
@@ -67,10 +68,15 @@ const GRAPH_NODE_TITLES: Record<VersionPlanTasklistGraphNodeId, string> = {
     planningDecision: '规划决策',
     readOptionalContext: '读取补充上下文',
     readVersionPlan: '读取版本方案',
+    regenerateTasklistStrategy: '重新生成任务清单策略',
+    reviewTasklistRevision: '审核任务清单修订',
+    reviewTasklistStrategy: '审核任务清单策略',
     reviseTasklistV2: '修正 v2 草稿',
+    reviseTasklistV3: '修正 v3 草稿',
     stopWithBoundaryMessage: '输出边界停止提示',
     validateTasklistV1: '校验 v1 草稿',
     validateTasklistV2: '校验 v2 草稿',
+    validateTasklistV3: '校验 v3 草稿',
 }
 
 // 将内部 nodeId 映射成用户可读的中文标题，后续 Trace UI 不需要认识每个内部 id。
@@ -258,6 +264,8 @@ function getGraphNodeResultDisplay(
             return createCompletedGraphNodeResult(getValidationSeverity(nextState.tasklist.draft?.validationV1?.status))
         case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV2:
             return createCompletedGraphNodeResult(getValidationSeverity(nextState.tasklist.draft?.validationV2?.status))
+        case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV3:
+            return createCompletedGraphNodeResult(getValidationSeverity(nextState.tasklist.draft?.validationV3?.status))
         case VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.decideWarningDisposition: {
             const warningDisposition = nextState.planning.warningDisposition
             const hasWarnings = (warningDisposition?.fixNow.length ?? 0) > 0 || (warningDisposition?.manualReviewItems.length ?? 0) > 0
@@ -332,6 +340,21 @@ export function withGraphNodeEvents(
 
             return update
         } catch (error) {
+            if (isGraphInterrupt(error)) {
+                emitGraphNodeEnd(runtime.writeChunk, {
+                    ...eventBase,
+                    durationMs: Date.now() - startedAt,
+                    nodeId,
+                    partId: nodePartId,
+                    severity: 'info',
+                    status: 'skipped',
+                    summary: 'Graph 已暂停，等待人工审核后 resume。',
+                    tags: ['status: interrupted'],
+                })
+
+                throw error
+            }
+
             emitGraphNodeEnd(runtime.writeChunk, {
                 ...eventBase,
                 durationMs: Date.now() - startedAt,

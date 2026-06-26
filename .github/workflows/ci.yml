@@ -23,6 +23,25 @@ jobs:
     strategy:
       fail-fast: false
 
+    services:
+      postgres:
+        image: postgres:16-bookworm
+        env:
+          POSTGRES_DB: ai_mind
+          POSTGRES_PASSWORD: ai_mind
+          POSTGRES_USER: ai_mind
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ai_mind -d ai_mind"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DATABASE_URL: postgresql://ai_mind:ai_mind@127.0.0.1:5432/ai_mind
+      AI_MIND_AGENT_RUN_SESSION_SECRET: ci-agent-run-session-secret-at-least-32-chars
+
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +56,19 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @ai-mind/database db:generate
+      - name: Apply Prisma migrations
+        run: pnpm --filter @ai-mind/database db:migrate:deploy
+      - name: Set up LangGraph checkpoint tables
+        run: pnpm --dir apps/webapp db:checkpoint:setup
+
+      # database
+      - name: database typecheck
+        run: pnpm --filter @ai-mind/database typecheck
+      - name: database test
+        run: pnpm --filter @ai-mind/database test
 
       # stream-core
       - name: stream-core typecheck

@@ -29,6 +29,8 @@ export function hasVisibleContent(part: MindMessagePart) {
         case 'prompt':
         case 'agent-step':
             return true
+        case 'agent-interrupt':
+            return false
         default:
             return false
     }

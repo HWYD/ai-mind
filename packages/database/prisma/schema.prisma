@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum AgentRunStatus {
+  running
+  paused
+  resuming
+  completed
+  rejected
+  failed
+  cancelled
+  version_mismatch
+}
+
+enum AgentRunResultStatus {
+  final
+  final_with_manual_review_items
+  blocked
+  rejected
+}
+
+enum AgentInterruptStatus {
+  pending
+  decided
+  rejected
+  invalidated
+}
+
+enum AgentInterruptKind {
+  strategy_review
+  tasklist_revision_review
+}
+
+model AgentRun {
+  id                 String                @id @default(uuid()) @db.Uuid
+  conversationId     String                @map("conversation_id")
+  assistantMessageId String                @map("assistant_message_id")
+  ownerSessionHash   String                @map("owner_session_hash") @db.VarChar(64)
+  agentType          String                @map("agent_type")
+  agentVersion       String                @map("agent_version")
+  graphVersion       String                @map("graph_version")
+  threadId           String                @unique @map("thread_id")
+  status             AgentRunStatus
+  resultStatus       AgentRunResultStatus? @map("result_status")
+  userGoalSummary    String                @map("user_goal_summary") @db.VarChar(500)
+  versionPlanUri     String                @map("version_plan_uri")
+  modelId            String                @map("model_id")
+  reasoningEnabled   Boolean               @map("reasoning_enabled")
+  startedAt          DateTime              @default(now()) @map("started_at") @db.Timestamptz(6)
+  pausedAt           DateTime?             @map("paused_at") @db.Timestamptz(6)
+  resumedAt          DateTime?             @map("resumed_at") @db.Timestamptz(6)
+  completedAt        DateTime?             @map("completed_at") @db.Timestamptz(6)
+  failedAt           DateTime?             @map("failed_at") @db.Timestamptz(6)
+  cancelledAt        DateTime?             @map("cancelled_at") @db.Timestamptz(6)
+  expiresAt          DateTime?             @map("expires_at") @db.Timestamptz(6)
+  failureCode        String?               @map("failure_code")
+  failureMessage     String?               @map("failure_message") @db.VarChar(1000)
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  interrupts         AgentInterrupt[]
+
+  @@index([conversationId])
+  @@index([assistantMessageId])
+  @@index([ownerSessionHash])
+  @@index([status])
+  @@map("agent_runs")
+}
+
+model AgentInterrupt {
+  id                   String               @id @default(uuid()) @db.Uuid
+  runId                String               @map("run_id") @db.Uuid
+  threadId             String               @map("thread_id")
+  langgraphInterruptId String               @map("langgraph_interrupt_id")
+  sequence             Int
+  nodeName             String               @map("node_name")
+  interruptKind        AgentInterruptKind   @map("interrupt_kind")
+  status               AgentInterruptStatus
+  payloadJson          Json                 @map("payload_json")
+  allowedDecisionsJson Json                 @map("allowed_decisions_json")
+  decisionJson         Json?                @map("decision_json")
+  decidedBy            String?              @map("decided_by")
+  decidedAt            DateTime?            @map("decided_at") @db.Timestamptz(6)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  run                  AgentRun             @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, langgraphInterruptId])
+  @@unique([runId, sequence])
+  @@index([runId, status])
+  @@index([threadId])
+  @@map("agent_interrupts")
+}

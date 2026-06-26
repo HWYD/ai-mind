@@ -185,6 +185,50 @@ describe('AgentTracePanel', () => {
         expect(container.querySelector('svg.text-rose-500')).toBeTruthy()
     })
 
+    it('展示 HITL paused 节点和人工审核路由标签', () => {
+        const { container } = render(
+            <AgentTracePanel
+                part={createGraphAgentStepPart({
+                    graph: {
+                        nodes: [
+                            {
+                                nodeId: 'reviewTasklistStrategy',
+                                partId: 'graph-review-strategy',
+                                patchSummaries: ['等待用户确认策略。'],
+                                status: 'paused',
+                                stepIndex: 3,
+                                summary: '等待用户确认策略。',
+                                title: '确认任务清单生成策略',
+                            },
+                        ],
+                        routes: [
+                            {
+                                fromNodeId: 'reviewTasklistStrategy',
+                                routeLabel: 'strategy_approved',
+                                toNodeId: 'draftTasklistV1',
+                            },
+                        ],
+                        runtime: 'LangGraph',
+                    },
+                    status: 'paused',
+                })}
+            />
+        )
+
+        expect(screen.getByText('等待人工审核')).toBeTruthy()
+        expect(screen.getByText('确认任务清单生成策略')).toBeTruthy()
+        expect(screen.getByText('确认策略')).toBeTruthy()
+        expect(container.querySelector('svg.text-sky-500')).toBeTruthy()
+        expect(
+            Array.from(container.querySelectorAll('div')).some(
+                element =>
+                    typeof element.className === 'string' &&
+                    element.className.includes('border-sky-200') &&
+                    element.textContent?.includes('确认任务清单生成策略')
+            )
+        ).toBe(true)
+    })
+
     it('graph debug summary 存在时展示折叠 Debug 分组', () => {
         render(
             <AgentTracePanel
@@ -205,6 +249,7 @@ describe('AgentTracePanel', () => {
                             manualReviewItemCount: 2,
                             maxDraftRevisions: 1,
                             maxOptionalContextReads: 1,
+                            maxStrategyRegenerations: 1,
                             maxSteps: 12,
                             optionalContext: {
                                 status: 'completed',
@@ -223,6 +268,7 @@ describe('AgentTracePanel', () => {
                                 expectedStepRange: [3, 5],
                                 granularity: 'medium',
                             },
+                            strategyRegenerations: 1,
                             threadId: 'tasklist-agent:conversation-1:run-trace-test',
                             validationV1: {
                                 score: 80,
@@ -230,6 +276,10 @@ describe('AgentTracePanel', () => {
                             },
                             validationV2: {
                                 score: 96,
+                                status: 'pass',
+                            },
+                            validationV3: {
+                                score: 98,
                                 status: 'pass',
                             },
                             visitedNodes: ['readVersionPlan', 'planningDecision', 'emitFinalArtifact'],
@@ -262,6 +312,8 @@ describe('AgentTracePanel', () => {
         expect(screen.getByText('decideWarningDisposition → 无需自动修正 → evaluateRevisionEffect')).toBeTruthy()
         expect(screen.getByText('继续生成任务清单')).toBeTruthy()
         expect(screen.getByText('中等粒度')).toBeTruthy()
+        expect(screen.getByText('validationV3.status')).toBeTruthy()
+        expect(screen.getByText('strategyRegenerations / maxStrategyRegenerations')).toBeTruthy()
         expect(screen.getByText('8 / 12')).toBeTruthy()
         expect(screen.getByText('memory')).toBeTruthy()
     })

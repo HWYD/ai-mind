@@ -33,6 +33,10 @@ function createPromptState(state: VersionPlanTasklistGraphStateAnnotationState) 
     }
 }
 
+function getLatestTasklistValidationResult(draft: VersionPlanTasklistGraphStateAnnotationState['tasklist']['draft']) {
+    return draft?.validationV3 ?? draft?.validationV2 ?? draft?.validationV1
+}
+
 export function runPlanReadinessStep(options: {
     state: VersionPlanTasklistGraphStateAnnotationState
     writeChunk: WriteChunk
@@ -84,9 +88,39 @@ export async function runTasklistStrategyStep(
         }))
 
     return applyVersionPlanTasklistGraphAction(options.state, {
-        reason: strategy.reason,
+        reason: strategy.notes ?? '任务清单拆分策略已通过受控 schema 校验。',
         strategy,
         type: 'decide_tasklist_strategy',
+    })
+}
+
+export async function runRegenerateTasklistStrategyStep(
+    options: TasklistAgentStepOperationOptions
+): Promise<VersionPlanTasklistGraphStatePatch> {
+    const strategyReviewDecision = options.state.human.strategyReview?.decision
+
+    if (strategyReviewDecision?.type !== 'respond') {
+        throw new Error('Missing strategy review feedback for regeneration.')
+    }
+
+    const strategy = await runTasklistAgentModelStep({
+        operation: signal =>
+            generateTasklistStrategy(
+                options.model,
+                createPromptState(options.state),
+                options.userGoal,
+                signal,
+                strategyReviewDecision.feedback
+            ),
+        signal: options.context.signal,
+        stage: options.modelStage,
+        timeoutMs: options.modelTimeoutMs,
+    })
+
+    return applyVersionPlanTasklistGraphAction(options.state, {
+        reason: '根据 Strategy Review feedback 重新生成任务清单拆分策略。',
+        strategy,
+        type: 'regenerate_tasklist_strategy',
     })
 }
 
@@ -146,7 +180,7 @@ export function runRevisionEffectStep(options: {
 }): VersionPlanTasklistGraphStatePatch {
     const draft = options.state.tasklist.draft
     const validationBefore = draft?.validationV1
-    const validationAfter = draft?.validationV2 ?? validationBefore
+    const validationAfter = getLatestTasklistValidationResult(draft)
 
     if (!validationBefore || !validationAfter) {
         throw new Error('Missing tasklist validation result.')
@@ -167,8 +201,9 @@ export function runRevisionEffectStep(options: {
 
 export async function runReviseTasklistStep(options: TasklistAgentStepOperationOptions): Promise<VersionPlanTasklistGraphStatePatch> {
     const draft = options.state.tasklist.draft
-    const validationResult = draft?.validationV1
+    const validationResult = getLatestTasklistValidationResult(draft)
     const warningDisposition = options.state.planning.warningDisposition
+    const tasklistRevisionDecision = options.state.human.tasklistRevisionReview?.decision
 
     if (!draft || !validationResult || !warningDisposition) {
         throw new Error('Missing draft, validation result, or warning disposition.')
@@ -176,13 +211,21 @@ export async function runReviseTasklistStep(options: TasklistAgentStepOperationO
 
     const revisionValidationResult = createValidationResultForRevision(validationResult, warningDisposition.fixNow)
     const revisedDraftText = await runTasklistAgentModelStep({
-        operation: signal => reviseTasklistDraft(options.model, createPromptState(options.state), draft, revisionValidationResult, signal),
+        operation: signal =>
+            reviseTasklistDraft(
+                options.model,
+                createPromptState(options.state),
+                draft,
+                revisionValidationResult,
+                signal,
+                tasklistRevisionDecision?.type === 'respond' ? tasklistRevisionDecision.feedback : undefined
+            ),
         signal: options.context.signal,
         stage: options.modelStage,
         timeoutMs: options.modelTimeoutMs,
     })
     const update = applyVersionPlanTasklistGraphAction(options.state, {
-        reason: '根据结构校验 findings 自动修正一次任务清单草稿。',
+        reason: '根据结构校验 findings 生成下一版受控任务清单草稿。',
         type: 'revise_tasklist',
     })
     const revisedDraft = update.tasklist?.draft

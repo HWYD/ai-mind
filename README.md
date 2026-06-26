@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.2.4：Tasklist Agent 继续沿 LangGraph 路线收口，生产路径以 GraphState 作为内部运行态事实源；本版不新增 HITL、Resume 或持久化能力。
+> v0.3.0：Tasklist Agent 引入 HITL Checkpoint Resume MVP，支持 Strategy 必审、修订前条件式人工授权、PostgreSQL AgentRun 与 LangGraph durable checkpoint resume。
 
 ## 项目解决的问题
 
@@ -178,7 +178,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.2.4`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.0`。
 
 已经验证：
 
@@ -207,6 +207,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Containerized production deployment 与 GitHub Actions 交付链路。
 - Tasklist Agent Graph Runtime 单路线。
 - Tasklist Agent GraphState 单事实源收口。
+- Tasklist Agent HITL Checkpoint Resume MVP。
 
 当前非目标：
 
@@ -231,23 +232,23 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 5. [Releases](./docs/releases)：版本发布说明。
 6. [Tasklists](./docs/tasklists)：公开任务清单。
 
-## 当前版本：v0.2.4
+## 当前版本：v0.3.0
 
-这版的主线是 Tasklist Agent Graph 单状态模型收口：在 v0.2.3 已经删除 legacy runner 和 runtime switch 后，让生产 graph nodes 直接以 GraphState 作为内部运行态事实源。
+这版的主线是 Tasklist Agent HITL Checkpoint Resume MVP：在 v0.2.4 GraphState 单事实源基础上，让受控 `/tasklist + @docs://versions/*.md` 能在业务审核点暂停，并在用户决策后基于 durable checkpoint 从同一 thread 恢复。
 
-- `/tasklist + @docs://versions/*.md` 仍固定进入 LangGraph `StateGraph`。
-- 初始 GraphState 直接由 `runId`、显式 `versionPlanReference` 和 runtime config 创建。
-- Graph nodes 不再依赖 `toVersionPlanTasklistAgentState()` 执行业务逻辑。
-- Graph nodes 不再依赖 `createGraphStateUpdateFromAgentState()` 返回 patch。
-- 旧 `VersionPlanTasklistAgentState` 类型和旧状态机 API 已移除。
-- 领域状态机继续保留 guard 规则，并只提供 GraphState patch apply 语义。
-- GraphState reducer 合并分区 patch，route 成功路径基于显式业务字段判断。
-- graph tests 直接断言 GraphState、node patch 和显式 route 字段。
-- stream chunk、tasklist artifact、AgentTracePanel 和 Graph Debug Summary 保持兼容。
+- Strategy Review 必停，支持 `approve / edit / reject / respond`。
+- Tasklist Revision Review 只在 `warningDisposition.fixNow.length > 0` 时触发。
+- 最多两轮受控修订，第二轮自动执行，不再请求 HITL。
+- 新增 Prisma / PostgreSQL `AgentRun` 与 `AgentInterrupt` 业务状态。
+- 接入 LangGraph Postgres checkpointer，支持跨 HTTP 请求 resume。
+- resume 后继续追加到原 assistant message。
+- pending HITL 时普通 Composer 锁定，人工反馈只走审核卡。
+- 刷新后不恢复 pending HITL，用户需要重新发起 `/tasklist`。
+- 普通聊天、Skill、Tool Calling 和 MCP 不受 HITL 影响。
 
-v0.2.4 不实现 HITL、LangGraph `interrupt()`、Resume API、Run History、AgentRun 数据库存储、新 Agent 类型或自由 tool calling。
+v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停、跨版本 checkpoint resume、多 Agent 编排或自动写 docs 文件。
 
-详细设计见 [v0.2.4 版本说明](./docs/versions/v0.2.4-tasklist-agent-graph-single-state-model.md)。
+详细设计见 [v0.3.0 版本说明](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
 
 ## 当前能力
 
@@ -319,11 +320,13 @@ v0.2.4 不实现 HITL、LangGraph `interrupt()`、Resume API、Run History、Age
 - LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
 - LangGraph `StateGraph` 只替换编排层。
 - v0.2.4 后生产路径以 GraphState 作为内部运行态事实源。
+- v0.3.0 后 Strategy Review 必停，Tasklist Revision Review 只在 `fixNow` 非空时触发。
+- v0.3.0 使用 AgentRun / AgentInterrupt 记录业务状态，使用 LangGraph Postgres checkpoint 负责 graph resume。
 - GraphState 按 `input / source / planning / tasklist / execution / output / graph` 分区保存本轮运行态。
 - 一次 Planning Decision，只允许 5 类白名单 action。
 - `read_optional_context` 最多读取一个白名单上下文。
 - `TasklistStrategy` 影响 draft 的 Step 数量、拆分粒度、分组和优先级。
-- `tasklistDraft v1 -> v2` 最多自动修正一次。
+- `tasklistDraft` 最多两轮受控修订，第一次修订前可由 HITL 授权。
 - `WarningDisposition` 区分自动修正和人工复核点。
 - `RevisionEffectResult` 评估 v1 -> v2 修正效果。
 - `PlanningDecisionAction` conditional edge。
@@ -331,7 +334,8 @@ v0.2.4 不实现 HITL、LangGraph `interrupt()`、Resume API、Run History、Age
 - `validate_tasklist_structure` 作为结构质量门。
 - Graph Runtime 复用受控领域 step operation 和状态机 guard。
 - Graph node / route / state patch summary 通过受控 stream chunk 展示。
-- memory checkpoint 由显式配置控制，可用于展示和调试，但不表示持久化、Resume 或产品级恢复能力。
+- Postgres checkpoint 由显式配置控制，用于 v0.3.0 Tasklist Agent resume；业务状态仍由 AgentRun 表记录。
+- 页面刷新后不恢复 pending HITL，用户需要重新发起 `/tasklist`。
 - Debug Summary 只展示脱敏白名单字段。
 - `AgentTracePanel` 展示 readiness、decision、strategy、warning disposition、revision effect、graph timeline 和折叠 Debug 摘要。
 - `AgentTextArtifactPanel` 展示最终 tasklist Markdown 正文。
@@ -360,7 +364,7 @@ v0.2.4 不实现 HITL、LangGraph `interrupt()`、Resume API、Run History、Age
 - `apps/webapp/lib/ai/rate-limit/`
     - IP / session 轻量限流配置和单进程 Memory Store。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/`
-    - 受控单 Agent，负责从版本方案生成 tasklist 草稿；当前只保留 Graph Runtime、共享 step operation、GraphState 和 graph-only runtime config。
+    - 受控单 Agent，负责从版本方案生成 tasklist 草稿；当前保留 Graph Runtime、共享 step operation、GraphState、HITL review nodes 和 AgentRun resume 协调。
 - `apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/graph/`
     - LangGraph `StateGraph`、graph nodes、route、GraphState、graph events 和 Debug Summary。
 - `apps/webapp/components/chat/message-list/parts/agent-trace-panel.tsx`
@@ -408,6 +412,7 @@ v0.2.4 不实现 HITL、LangGraph `interrupt()`、Resume API、Run History、Age
 5. `v0.2.0` 只把这条受控链路迁移到 LangGraph `StateGraph`，不扩大 Agent 权限。
 6. `v0.2.1` 只改变模型来源和 Provider 治理，不改变 Agent 权限、资源白名单或工具边界。
 7. `v0.2.3` 和 `v0.2.4` 只做 Graph Runtime 与 GraphState 收口，不新增 Agent 能力。
+8. `v0.3.0` 只为 Tasklist Agent 增加 HITL Checkpoint Resume，不扩展成通用审批或多 Agent 平台。
 
 因此：
 
@@ -577,6 +582,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                             |
 | v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                             |
 | v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                   |
+| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                 |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -606,11 +612,12 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Containerized production deployment
 - [x] Tasklist Agent Graph Runtime 单路线
 - [x] Tasklist Agent GraphState 单事实源收口
+- [x] Tasklist Agent HITL Checkpoint Resume MVP
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化
-- [ ] tasklist 草稿保存与人工确认流
-- [ ] 持久化与数据层
+- [ ] tasklist 最终草稿保存
+- [ ] 更完整持久化与数据层
 
 ## Design Notes / 设计说明
 

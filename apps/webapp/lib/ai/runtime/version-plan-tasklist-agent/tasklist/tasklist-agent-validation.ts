@@ -85,6 +85,7 @@ export async function runValidateTasklistStep(options: {
         ...draft,
         validationV1: draft.version === 1 ? parsedResult.data : draft.validationV1,
         validationV2: draft.version === 2 ? parsedResult.data : draft.validationV2,
+        validationV3: draft.version === 3 ? parsedResult.data : draft.validationV3,
     }
 
     return {

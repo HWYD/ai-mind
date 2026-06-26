@@ -111,6 +111,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
 })
 
 export function ChatMessageList({
+    actionsDisabled = false,
     messages,
     status,
     enableReasoning,
@@ -119,6 +120,7 @@ export function ChatMessageList({
     onSelectFollowUpQuestion,
     onSelectSuggestion,
 }: {
+    actionsDisabled?: boolean
     enableReasoning: boolean
     messages: MindMessage[]
     status: ChatListStatus
@@ -188,7 +190,7 @@ export function ChatMessageList({
         onSelectFollowUpQuestionRef.current(question)
     }, [])
 
-    const isBusy = status === 'submitted' || status === 'streaming'
+    const isBusy = actionsDisabled || status === 'submitted' || status === 'streaming'
 
     return (
         <div className="flex min-h-0 flex-col gap-5 px-1 py-2">
@@ -203,6 +205,7 @@ export function ChatMessageList({
                 const showFollowUpSuggestions =
                     isLatestAssistantMessage &&
                     isAssistantReplyCompleted &&
+                    !actionsDisabled &&
                     status === 'ready' &&
                     getMessageTextContent(message).trim().length > 0
 

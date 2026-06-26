@@ -3,6 +3,7 @@ import { Annotation } from '@langchain/langgraph'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 import type { TasklistAgentRuntimeConfig } from '../config/agent-runtime-config'
+import type { StrategyReviewDecision, TasklistRevisionReviewDecision } from '../contract/hitl-review-schema'
 import type {
     VersionPlanTasklistAgentStatus,
     VersionPlanTasklistIntermediateArtifacts,
@@ -62,10 +63,22 @@ export interface VersionPlanTasklistGraphExecutionState {
         draftRevisions: number
         optionalContextReads: number
         steps: number
+        strategyRegenerations: number
     }
     limits: typeof VERSION_PLAN_TASKLIST_AGENT_LIMITS
     runId: string
     status: VersionPlanTasklistAgentStatus
+}
+
+export interface VersionPlanTasklistGraphHumanState {
+    strategyReview?: {
+        decision: StrategyReviewDecision
+        reviewRound: 1 | 2
+    }
+    tasklistRevisionReview?: {
+        decision: TasklistRevisionReviewDecision
+        reviewRound: 1
+    }
 }
 
 export type VersionPlanTasklistGraphRuntimeStateUpdate = Partial<Omit<VersionPlanTasklistGraphRuntimeState, 'runtimeMode'>> & {
@@ -75,6 +88,7 @@ export type VersionPlanTasklistGraphRuntimeStateUpdate = Partial<Omit<VersionPla
 export interface VersionPlanTasklistGraphState {
     execution: VersionPlanTasklistGraphExecutionState
     graph: VersionPlanTasklistGraphRuntimeState
+    human: VersionPlanTasklistGraphHumanState
     input: VersionPlanTasklistGraphInput
     output?: VersionPlanTasklistGraphOutput
     planning: VersionPlanTasklistGraphPlanningState
@@ -141,12 +155,14 @@ export function createInitialVersionPlanTasklistGraphState(options: {
                 draftRevisions: 0,
                 optionalContextReads: 0,
                 steps: 0,
+                strategyRegenerations: 0,
             },
             limits: VERSION_PLAN_TASKLIST_AGENT_LIMITS,
             runId: options.runId,
             status: 'idle',
         },
         graph: createInitialVersionPlanTasklistGraphRuntimeState(options.runtimeConfig.graphCheckpointMode),
+        human: {},
         input: {
             planUri: options.versionPlanReference.uri,
             userGoal: options.userGoal,
@@ -211,6 +227,7 @@ export function applyVersionPlanTasklistGraphStateUpdate(
     return {
         execution: update.execution ? reduceVersionPlanTasklistGraphExecutionState(state.execution, update.execution) : state.execution,
         graph: update.graph ? reduceVersionPlanTasklistGraphRuntimeState(state.graph, update.graph) : state.graph,
+        human: update.human ? mergeGraphValue(state.human, update.human) : state.human,
         input: update.input ?? state.input,
         output: update.output ?? state.output,
         planning: update.planning ? mergeGraphValue(state.planning, update.planning) : state.planning,
@@ -233,6 +250,9 @@ export const VersionPlanTasklistGraphStateAnnotation = Annotation.Root({
     graph: Annotation<VersionPlanTasklistGraphRuntimeState, VersionPlanTasklistGraphRuntimeStateUpdate>({
         default: createInitialVersionPlanTasklistGraphRuntimeState,
         reducer: reduceVersionPlanTasklistGraphRuntimeState,
+    }),
+    human: Annotation<VersionPlanTasklistGraphHumanState, Partial<VersionPlanTasklistGraphHumanState>>({
+        reducer: mergeGraphValue,
     }),
     input: Annotation<VersionPlanTasklistGraphInput, VersionPlanTasklistGraphInput>({
         reducer: replaceGraphValue,
@@ -262,6 +282,7 @@ export interface VersionPlanTasklistGraphExecutionStatePatch extends Partial<Omi
 export interface VersionPlanTasklistGraphStatePatch {
     execution?: VersionPlanTasklistGraphExecutionStatePatch
     graph?: VersionPlanTasklistGraphRuntimeStateUpdate
+    human?: Partial<VersionPlanTasklistGraphHumanState>
     input?: VersionPlanTasklistGraphInput
     output?: VersionPlanTasklistGraphOutput
     planning?: Partial<VersionPlanTasklistGraphPlanningState>

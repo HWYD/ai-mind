@@ -3,6 +3,7 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
 import {
+    createAgentInterruptPart,
     createAgentTextArtifact,
     createAssistantPlaceholder,
     createPromptPart,
@@ -18,13 +19,17 @@ import {
     appendAgentTextArtifactDelta,
     appendPart,
     appendTextualPartDelta,
+    ensureAssistantMessage,
     pruneTransientMessages,
+    updateAgentInterruptPartStatus,
     updateAgentTextArtifact,
+    updateMessageStatus,
     updatePromptPart,
     updateResourcePart,
     updateToolPart,
     upsertAgentGraphDebugSummaryPart,
     upsertAgentGraphNodePart,
+    upsertAgentInterruptPart,
 } from './message-operations'
 
 /** 当前流正在写入的 assistant message 与文本 part 指针。 */
@@ -114,6 +119,10 @@ function appendActivePartMessages(state: StreamMessageState, part: MindMessagePa
 
 function appendActivePart(state: StreamMessageState, part: MindMessagePart): StreamMessageReducerResult {
     return applyMessages(state, appendActivePartMessages(state, part))
+}
+
+function findMessage(messages: MindMessage[], messageId: string | null) {
+    return messageId ? messages.find(message => message.id === messageId) : undefined
 }
 
 /** 局部 part 错误只更新卡片；顶层错误返回 fatalError 交给 hook 收口。 */
@@ -212,6 +221,35 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                 reasoningPartId: null,
                 textPartId: null,
             })
+        case 'agent-interrupt':
+            return applyMessagesAndActiveStream(
+                state,
+                upsertAgentInterruptPart(state.messages, chunk.assistantMessageId, createAgentInterruptPart(chunk)),
+                {
+                    messageId: chunk.assistantMessageId,
+                    reasoningPartId: null,
+                    textPartId: null,
+                }
+            )
+        case 'agent-resume':
+            return applyMessagesAndActiveStream(
+                state,
+                updateMessageStatus(
+                    updateAgentInterruptPartStatus(
+                        ensureAssistantMessage(state.messages, chunk.assistantMessageId),
+                        chunk.assistantMessageId,
+                        chunk.interruptId,
+                        'decided'
+                    ),
+                    chunk.assistantMessageId,
+                    'resuming'
+                ),
+                {
+                    messageId: chunk.assistantMessageId,
+                    reasoningPartId: null,
+                    textPartId: null,
+                }
+            )
         case 'skill-selected':
             return appendActivePart(state, createSkillPart(chunk.skillId, chunk.name, chunk.description))
         case 'agent-graph-node-start':
@@ -382,8 +420,15 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                     uri: chunk.uri,
                 }))
             )
-        case 'finish':
-            return applyMessagesAndActiveStream(state, pruneTransientMessages(state.messages), createInitialActiveStreamState())
+        case 'finish': {
+            const activeMessage = findMessage(state.messages, state.activeStream.messageId)
+            const messages =
+                activeMessage?.status === 'paused' || !state.activeStream.messageId
+                    ? state.messages
+                    : updateMessageStatus(state.messages, state.activeStream.messageId, 'completed')
+
+            return applyMessagesAndActiveStream(state, pruneTransientMessages(messages), createInitialActiveStreamState())
+        }
         case 'error':
             return handleStreamPartError(state, chunk)
     }

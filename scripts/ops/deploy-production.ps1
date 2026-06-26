@@ -35,8 +35,25 @@ cat .release.env
 echo 'Pulling production images...'
 docker compose --env-file .release.env -f compose.production.yml pull
 
-echo 'Recreating containers...'
-docker compose --env-file .release.env -f compose.production.yml up -d --force-recreate
+echo 'Starting local PostgreSQL...'
+docker compose --env-file .release.env -f compose.production.yml up -d postgres
+
+echo 'Waiting for postgres to become healthy...'
+if ! timeout 120 bash -c 'until docker compose --env-file .release.env -f compose.production.yml ps | grep -Eq "postgres.+healthy"; do echo "waiting postgres..."; sleep 3; done'; then
+  echo 'postgres did not become healthy in 120 seconds.'
+  docker compose --env-file .release.env -f compose.production.yml logs --tail=120 postgres
+  exit 1
+fi
+
+echo 'Running database setup...'
+if ! docker compose --env-file .release.env -f compose.production.yml run --rm --no-deps --entrypoint pnpm webapp --dir /app db:setup:deploy; then
+  echo 'database setup failed.'
+  docker compose --env-file .release.env -f compose.production.yml logs --tail=120 postgres
+  exit 1
+fi
+
+echo 'Recreating application containers...'
+docker compose --env-file .release.env -f compose.production.yml up -d --force-recreate project-assistant-service webapp
 
 echo 'Container status:'
 docker compose --env-file .release.env -f compose.production.yml ps

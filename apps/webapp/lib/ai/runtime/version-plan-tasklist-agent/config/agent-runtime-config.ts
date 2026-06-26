@@ -1,6 +1,6 @@
 export type GraphEventsMode = 'off' | 'on'
 
-export type GraphCheckpointMode = 'memory' | 'off'
+export type GraphCheckpointMode = 'memory' | 'off' | 'postgres'
 
 export type GraphDebugViewMode = 'off' | 'on'
 
@@ -19,8 +19,15 @@ export function getTasklistAgentRuntimeConfig(
     const graphEventsEnabled = env.AI_MIND_GRAPH_EVENTS?.trim() === 'on'
     const graphDebugViewEnabled = env.AI_MIND_GRAPH_DEBUG_VIEW?.trim() === 'on'
 
-    // memory checkpoint 仅作为展示和调试能力开关，由显式 env 控制。
-    const graphCheckpointMode: GraphCheckpointMode = env.AI_MIND_GRAPH_CHECKPOINT?.trim() === 'memory' ? 'memory' : 'off'
+    const checkpointMode = env.AI_MIND_GRAPH_CHECKPOINT?.trim()
+    const graphCheckpointMode: GraphCheckpointMode =
+        checkpointMode === 'memory' || checkpointMode === 'postgres'
+            ? checkpointMode
+            : checkpointMode === undefined || checkpointMode === ''
+              ? nodeEnv === 'production'
+                  ? 'postgres'
+                  : 'memory'
+              : 'off'
 
     return {
         graphCheckpointMode,

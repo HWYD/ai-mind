@@ -1,17 +1,50 @@
-import { writeStreamErrorChunk } from '@ai-mind/stream-core'
+import { StreamLifecycle, writeStaticTextPart, writeStreamErrorChunk } from '@ai-mind/stream-core'
 import { type ChunkWriter, createNdjsonChunkWriter } from '@ai-mind/stream-core/web'
 
+import type { AgentRunService } from '@/lib/ai/agent-runs'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
-import { logChatCancellation } from '@/lib/ai/runtime/stream-errors'
-import type { ResolvedChatExecutionContext, StreamResult } from '@/lib/ai/runtime/types'
+import { logChatCancellation, normalizeKnownRuntimeError } from '@/lib/ai/runtime/stream-errors'
+import type { ChatExecutionContext, ResolvedChatExecutionContext, StreamResult, WriteChunk } from '@/lib/ai/runtime/types'
+import type { PreparedVersionPlanTasklistAgentResume } from '@/lib/ai/runtime/version-plan-tasklist-agent'
+import { resumeVersionPlanTasklistAgentRun } from '@/lib/ai/runtime/version-plan-tasklist-agent'
+import type { TasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
+import { VERSION_PLAN_TASKLIST_AGENT_NAME } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/types'
+import type { TasklistAgentModelSet } from '@/lib/ai/runtime/version-plan-tasklist-agent/model/tasklist-agent-model-set'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 export type { ChatExecutionContext, ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
 
 const STREAM_HEARTBEAT_INTERVAL_MS = 15_000
 
-async function createChatStreamResult(request: ChatRequest, context: ResolvedChatExecutionContext): Promise<StreamResult> {
+interface StreamExecutorOptions {
+    isClosed: () => boolean
+    writeChunk: WriteChunk
+}
+
+interface ResumeAgentRunStreamInput {
+    agentRunService?: AgentRunService
+    decision: unknown
+    interruptId: string
+    models: TasklistAgentModelSet
+    preparedResume?: PreparedVersionPlanTasklistAgentResume
+    runId: string
+    runtimeConfig: TasklistAgentRuntimeConfig
+    userGoal: string
+}
+
+interface RejectAgentRunStreamInput {
+    assistantMessageId: string
+    interruptId: string
+    runId: string
+    summary: string
+    threadId: string
+}
+
+async function createNdjsonStreamResult(
+    context: ChatExecutionContext,
+    execute: (options: StreamExecutorOptions) => Promise<void>
+): Promise<StreamResult> {
     let closed = false
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     let writerRef: ChunkWriter | null = null
@@ -51,14 +84,10 @@ async function createChatStreamResult(request: ChatRequest, context: ResolvedCha
 
             const run = async () => {
                 try {
-                    const orchestrator = new ChatOrchestrator({
-                        context,
+                    await execute({
                         isClosed,
-                        request,
                         writeChunk: writer.writeChunk,
                     })
-
-                    await orchestrator.run()
                 } catch (streamError) {
                     if (isAbortError(streamError) || context.signal?.aborted || isClosed()) {
                         if (context.signal?.aborted || isAbortError(streamError)) {
@@ -77,12 +106,14 @@ async function createChatStreamResult(request: ChatRequest, context: ResolvedCha
                         return
                     }
 
+                    const knownRuntimeError = normalizeKnownRuntimeError(streamError)
+
                     // 兜底收口：任何未在主链内被消费的异常都按 runtime 错误统一下发。
                     writeStreamErrorChunk(writer.writeChunk, {
                         scope: 'runtime',
-                        errorCode: 'MODEL_STREAM_FAILED',
-                        retryable: true,
-                        message: 'Model streaming failed.',
+                        errorCode: knownRuntimeError?.code ?? 'MODEL_STREAM_FAILED',
+                        retryable: knownRuntimeError?.retryable ?? true,
+                        message: knownRuntimeError?.message ?? 'Model streaming failed.',
                         stage: 'runtime',
                     })
                 } finally {
@@ -135,8 +166,89 @@ async function createChatStreamResult(request: ChatRequest, context: ResolvedCha
     }
 }
 
+async function createChatStreamResult(request: ChatRequest, context: ResolvedChatExecutionContext): Promise<StreamResult> {
+    return createNdjsonStreamResult(context, async ({ isClosed, writeChunk }) => {
+        const orchestrator = new ChatOrchestrator({
+            context,
+            isClosed,
+            request,
+            writeChunk,
+        })
+
+        await orchestrator.run()
+    })
+}
+
+async function createResumeAgentRunStreamResult(
+    input: ResumeAgentRunStreamInput,
+    context: ResolvedChatExecutionContext
+): Promise<StreamResult> {
+    return createNdjsonStreamResult(context, async ({ isClosed, writeChunk }) => {
+        const lifecycle = new StreamLifecycle({
+            context,
+            isClosed,
+            writeChunk,
+        })
+
+        if (!context.sessionId) {
+            throw new Error('Tasklist Agent resume requires an owned chat session.')
+        }
+
+        await resumeVersionPlanTasklistAgentRun({
+            agentRunService: input.agentRunService,
+            context,
+            decision: input.decision,
+            interruptId: input.interruptId,
+            models: input.models,
+            preparedResume: input.preparedResume,
+            runId: input.runId,
+            runtimeConfig: input.runtimeConfig,
+            sessionId: context.sessionId,
+            userGoal: input.userGoal,
+            writeChunk,
+        })
+
+        lifecycle.emitFinishIfOpen()
+    })
+}
+
+async function createRejectAgentRunStreamResult(input: RejectAgentRunStreamInput, context: ChatExecutionContext): Promise<StreamResult> {
+    return createNdjsonStreamResult(context, async ({ isClosed, writeChunk }) => {
+        const lifecycle = new StreamLifecycle({
+            context,
+            isClosed,
+            writeChunk,
+        })
+
+        writeChunk({
+            agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
+            assistantMessageId: input.assistantMessageId,
+            interruptId: input.interruptId,
+            runId: input.runId,
+            threadId: input.threadId,
+            type: 'agent-resume',
+        })
+        writeStaticTextPart(writeChunk, input.summary)
+        lifecycle.emitFinishIfOpen()
+    })
+}
+
 export function createChatService() {
     return {
+        async rejectAgentRun(input: RejectAgentRunStreamInput, context: ChatExecutionContext) {
+            const streamResult = await createRejectAgentRunStreamResult(input, context)
+
+            return new Response(streamResult.body, {
+                headers: streamResult.headers,
+            })
+        },
+        async resumeAgentRun(input: ResumeAgentRunStreamInput, context: ResolvedChatExecutionContext) {
+            const streamResult = await createResumeAgentRunStreamResult(input, context)
+
+            return new Response(streamResult.body, {
+                headers: streamResult.headers,
+            })
+        },
         async streamChat(request: ChatRequest, context: ResolvedChatExecutionContext) {
             const streamResult = await createChatStreamResult(request, context)
 

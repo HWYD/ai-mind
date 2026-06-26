@@ -16,6 +16,7 @@ const ignores = [
     'eslint.config.js',
     'commitlint.config.js',
     '**/.next/**',
+    '**/generated/prisma/**',
     '**/out/**',
     '**/build/**',
     '**/next-env.d.ts',

@@ -24,6 +24,11 @@ $files = @(
     Local = "project-assistant-service.production.env"
     Remote = "env/project-assistant-service.production.env"
     Mode = "600"
+  },
+  @{
+    Local = "postgres.production.env"
+    Remote = "env/postgres.production.env"
+    Mode = "600"
   }
 )
 

@@ -4,6 +4,7 @@ import { createId } from '@/lib/ai/create-id'
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
     AgentGraphNodeEntry,
+    AgentInterruptPart,
     AgentStepPart,
     AgentTextArtifactViewModel,
     MindMessage,
@@ -127,6 +128,19 @@ export function createAgentGraphStepPart(node: AgentGraphNodeEntry, runId: strin
     }
 }
 
+export function createAgentInterruptPart(chunk: Extract<ChatStreamChunk, { type: 'agent-interrupt' }>): AgentInterruptPart {
+    return {
+        id: `agent-interrupt:${chunk.runId}`,
+        type: 'agent-interrupt',
+        interruptId: chunk.interruptId,
+        interruptKind: chunk.interruptKind as AgentInterruptPart['interruptKind'],
+        payload: chunk.payload as AgentInterruptPart['payload'],
+        runId: chunk.runId,
+        status: 'pending',
+        threadId: chunk.threadId,
+    }
+}
+
 export function createAgentTextArtifact(chunk: Extract<ChatStreamChunk, { type: 'artifact-start' }>): AgentTextArtifactViewModel {
     return {
         artifactId: chunk.artifactId,
@@ -157,5 +171,6 @@ export function createAssistantPlaceholder(messageId: string): MindMessage {
         role: 'assistant',
         parts: [],
         createdAt: new Date().toISOString(),
+        status: 'streaming',
     }
 }

@@ -1,8 +1,14 @@
 import { writeStaticTextPart } from '@ai-mind/stream-core'
+import { END } from '@langchain/langgraph'
 
 import { readOptionalContextForTasklistAgent } from '../../resources/optional-context-reader'
 import { readVersionPlanForTasklistAgent } from '../../resources/version-plan-reader'
-import { runPlanningDecisionStep, runPlanReadinessStep, runTasklistStrategyStep } from '../../steps/tasklist-agent-steps'
+import {
+    runPlanningDecisionStep,
+    runPlanReadinessStep,
+    runRegenerateTasklistStrategyStep,
+    runTasklistStrategyStep,
+} from '../../steps/tasklist-agent-steps'
 import { buildControlledPlannerOutputFailureAnswer } from '../../stream/tasklist-agent-output'
 import { getNextStepIndex } from '../../stream/tasklist-agent-step-index'
 import { getRouteAfterPlanningDecision } from '../edges/route-after-planning-decision'
@@ -240,6 +246,69 @@ export function createDecideTasklistStrategyNode(runtime: VersionPlanTasklistGra
                         summary: output.textSummary,
                     }),
                     ...createGraphRouteRuntimeUpdate(route),
+                },
+                output,
+            }
+        }
+    }
+}
+
+export function createRegenerateTasklistStrategyNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
+    return async function regenerateTasklistStrategyNode(
+        state: VersionPlanTasklistGraphStateAnnotationState
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        try {
+            const update = await runRegenerateTasklistStrategyStep({
+                context: runtime.context,
+                model: runtime.models.planning.model,
+                modelStage: 'tasklist-strategy',
+                modelTimeoutMs: runtime.models.planning.timeoutMs,
+                state,
+                userGoal: runtime.userGoal,
+                writeChunk: runtime.writeChunk,
+            })
+
+            return {
+                ...update,
+                graph: {
+                    ...createGraphNodeRuntimeUpdate({
+                        nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.regenerateTasklistStrategy,
+                        summary: `任务清单策略已重新生成：${update.planning?.strategy?.granularity ?? 'unknown'}。`,
+                    }),
+                    ...createGraphRouteRuntimeUpdate({
+                        fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.regenerateTasklistStrategy,
+                        label: 'strategy_regenerated',
+                        reason: '任务清单拆分策略已重新生成，进入第二次 Strategy Review。',
+                        toNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviewTasklistStrategy,
+                    }),
+                },
+            }
+        } catch (error) {
+            const failureAnswer = buildControlledPlannerOutputFailureAnswer(error)
+
+            if (!failureAnswer) {
+                throw error
+            }
+
+            writeStaticTextPart(runtime.writeChunk, failureAnswer)
+
+            const output = {
+                status: 'stopped' as const,
+                textSummary: '任务清单拆分策略重新生成失败，本轮已安全停止。',
+            }
+
+            return {
+                graph: {
+                    ...createGraphNodeRuntimeUpdate({
+                        nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.regenerateTasklistStrategy,
+                        summary: output.textSummary,
+                    }),
+                    ...createGraphRouteRuntimeUpdate({
+                        fromNodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.regenerateTasklistStrategy,
+                        label: 'controlled_output_failed',
+                        reason: output.textSummary,
+                        toNodeId: END,
+                    }),
                 },
                 output,
             }

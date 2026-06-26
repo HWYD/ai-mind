@@ -9,10 +9,15 @@ export const VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS = {
     planningDecision: 'planningDecision',
     readOptionalContext: 'readOptionalContext',
     readVersionPlan: 'readVersionPlan',
+    regenerateTasklistStrategy: 'regenerateTasklistStrategy',
+    reviewTasklistRevision: 'reviewTasklistRevision',
+    reviewTasklistStrategy: 'reviewTasklistStrategy',
     reviseTasklistV2: 'reviseTasklistV2',
+    reviseTasklistV3: 'reviseTasklistV3',
     stopWithBoundaryMessage: 'stopWithBoundaryMessage',
     validateTasklistV1: 'validateTasklistV1',
     validateTasklistV2: 'validateTasklistV2',
+    validateTasklistV3: 'validateTasklistV3',
 } as const
 
 export type VersionPlanTasklistGraphNodeId =

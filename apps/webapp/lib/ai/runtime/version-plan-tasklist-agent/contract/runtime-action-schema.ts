@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { strategyReviewDecisionSchema, tasklistRevisionReviewDecisionSchema } from './hitl-review-schema'
 import {
     versionPlanTasklistManualReviewItemSchema,
     versionPlanTasklistPlanningDecisionActionSchema,
@@ -29,6 +30,18 @@ const planningDecisionActionSchema = z.object({
 
 const decideTasklistStrategyActionSchema = z.object({
     type: z.literal('decide_tasklist_strategy'),
+    strategy: versionPlanTasklistStrategySchema,
+    reason: runtimeActionReasonSchema,
+})
+
+const applyStrategyReviewDecisionActionSchema = z.object({
+    type: z.literal('apply_strategy_review_decision'),
+    decision: strategyReviewDecisionSchema,
+    reason: runtimeActionReasonSchema,
+})
+
+const regenerateTasklistStrategyActionSchema = z.object({
+    type: z.literal('regenerate_tasklist_strategy'),
     strategy: versionPlanTasklistStrategySchema,
     reason: runtimeActionReasonSchema,
 })
@@ -72,6 +85,12 @@ const decideWarningDispositionActionSchema = z.object({
     reason: runtimeActionReasonSchema,
 })
 
+const applyTasklistRevisionReviewDecisionActionSchema = z.object({
+    type: z.literal('apply_tasklist_revision_review_decision'),
+    decision: tasklistRevisionReviewDecisionSchema,
+    reason: runtimeActionReasonSchema,
+})
+
 export const versionPlanTasklistRevisionEffectResultSchema = z
     .object({
         improved: z.boolean(),
@@ -94,9 +113,12 @@ export const versionPlanTasklistAgentActionSchema = z.discriminatedUnion('type',
     checkPlanReadinessActionSchema,
     planningDecisionActionSchema,
     decideTasklistStrategyActionSchema,
+    applyStrategyReviewDecisionActionSchema,
+    regenerateTasklistStrategyActionSchema,
     draftTasklistActionSchema,
     callToolActionSchema,
     decideWarningDispositionActionSchema,
+    applyTasklistRevisionReviewDecisionActionSchema,
     evaluateRevisionEffectActionSchema,
     reviseTasklistActionSchema,
     finalAnswerActionSchema,

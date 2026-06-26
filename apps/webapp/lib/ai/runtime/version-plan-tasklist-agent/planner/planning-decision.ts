@@ -45,10 +45,10 @@ const PLANNING_DECISION_SYSTEM_PROMPT = `
   "decision": { "type": "...", "...": "..." },
   "strategy": {
     "granularity": "coarse | medium | detailed",
-    "expectedStepRange": [3, 7],
-    "grouping": ["..."],
-    "priority": ["..."],
-    "reason": "..."
+    "stepCountRange": "3-5 | 5-8 | 8-12",
+    "grouping": "by_phase | by_module | by_risk | by_test_flow",
+    "priorityFocus": ["core_runtime | state_model | frontend_ui | tests | docs | deployment | compatibility"],
+    "notes": "可选补充说明"
   }
 }
 
@@ -57,10 +57,10 @@ proceed 示例：
   "decision": { "type": "proceed_to_tasklist_strategy", "reason": "版本方案信息完整，可以继续生成 tasklist。" },
   "strategy": {
     "granularity": "medium",
-    "expectedStepRange": [3, 6],
-    "grouping": ["Runtime", "Validation", "Docs"],
-    "priority": ["先保护主链路", "再补结构校验", "最后收口文档"],
-    "reason": "版本目标清晰，适合按运行时、验证和文档分组拆分。"
+    "stepCountRange": "5-8",
+    "grouping": "by_phase",
+    "priorityFocus": ["core_runtime", "tests", "docs"],
+    "notes": "先保护主链路，再补结构校验，最后收口文档。"
   }
 }
 
@@ -71,6 +71,33 @@ ask 示例：
 
 最终提醒：只输出一个 JSON 对象；不要输出 Markdown 代码围栏、解释文字或额外字段。
 `.trim()
+
+const PLANNING_DECISION_MANUAL_REVIEW_GUIDANCE = `
+补充要求：
+- 如果 decision.type 是 proceed_with_manual_review_items，必须输出 reviewItems，且必须是非空数组。
+- 不要把 proceed_with_manual_review_items 写成只有 type 和 reason、却缺少 reviewItems 的不完整 JSON。
+
+proceed_with_manual_review_items 合法示例：
+{
+  "decision": {
+    "type": "proceed_with_manual_review_items",
+    "reason": "版本方案可以继续，但有轻度不确定点需要人工复核。",
+    "reviewItems": [
+      {
+        "title": "Test Plan 较粗",
+        "detail": "测试计划还不够具体，生成 tasklist 后请人工确认验收顺序。",
+        "severity": "warning"
+      }
+    ]
+  },
+  "strategy": {
+    "granularity": "medium",
+    "stepCountRange": "5-8",
+    "grouping": "by_phase",
+    "priorityFocus": ["core_runtime", "tests", "docs"],
+    "notes": "先保护主链路，再补结构校验，最后收口文档。"
+  }
+}`.trim()
 
 const MAX_OPTIONAL_CONTEXT_PROMPT_CHARS = 12_000
 
@@ -86,19 +113,19 @@ const TASKLIST_STRATEGY_SYSTEM_PROMPT = `
 输出 JSON 形状：
 {
   "granularity": "coarse | medium | detailed",
-  "expectedStepRange": [3, 7],
-  "grouping": ["..."],
-  "priority": ["..."],
-  "reason": "..."
+  "stepCountRange": "3-5 | 5-8 | 8-12",
+  "grouping": "by_phase | by_module | by_risk | by_test_flow",
+  "priorityFocus": ["core_runtime | state_model | frontend_ui | tests | docs | deployment | compatibility"],
+  "notes": "可选补充说明"
 }
 
 合法示例：
 {
   "granularity": "medium",
-  "expectedStepRange": [3, 6],
-  "grouping": ["Runtime", "Validation", "Docs"],
-  "priority": ["先保护主链路", "再补结构校验", "最后收口文档"],
-  "reason": "版本目标清晰，适合按运行时、验证和文档分组拆分。"
+  "stepCountRange": "5-8",
+  "grouping": "by_phase",
+  "priorityFocus": ["core_runtime", "tests", "docs"],
+  "notes": "先保护主链路，再补结构校验，最后收口文档。"
 }
 
 最终提醒：只输出一个 JSON 对象；不要输出 Markdown 代码围栏、解释文字或额外字段。
@@ -179,7 +206,7 @@ function getModelResponseText(response: unknown) {
 
 export function buildPlanningDecisionMessages(state: PlanningPromptState, userGoal: string) {
     return [
-        new SystemMessage(PLANNING_DECISION_SYSTEM_PROMPT),
+        new SystemMessage(`${PLANNING_DECISION_SYSTEM_PROMPT}\n\n${PLANNING_DECISION_MANUAL_REVIEW_GUIDANCE}`),
         new HumanMessage(
             [
                 `用户目标：${userGoal || '基于版本方案生成 tasklist 草稿'}`,
@@ -202,7 +229,7 @@ export function buildPlanningDecisionMessages(state: PlanningPromptState, userGo
     ]
 }
 
-export function buildTasklistStrategyMessages(state: PlanningPromptState, userGoal: string) {
+export function buildTasklistStrategyMessages(state: PlanningPromptState, userGoal: string, strategyFeedback?: string) {
     return [
         new SystemMessage(TASKLIST_STRATEGY_SYSTEM_PROMPT),
         new HumanMessage(
@@ -220,6 +247,7 @@ export function buildTasklistStrategyMessages(state: PlanningPromptState, userGo
                 JSON.stringify(state.artifacts.planning.decision ?? null, null, 2),
                 '',
                 formatOptionalContextForPrompt(state),
+                strategyFeedback ? ['', 'StrategyReviewFeedback：', strategyFeedback].join('\n') : '',
             ].join('\n')
         ),
     ]
@@ -246,9 +274,10 @@ export async function generateTasklistStrategy(
     model: ChatSession['baseModel'],
     state: PlanningPromptState,
     userGoal: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    strategyFeedback?: string
 ): Promise<TasklistStrategy> {
-    const response = await model.invoke(buildTasklistStrategyMessages(state, userGoal), { signal })
+    const response = await model.invoke(buildTasklistStrategyMessages(state, userGoal, strategyFeedback), { signal })
     const responseText = stripJsonFence(getModelResponseText(response))
     let responseJson: unknown
 

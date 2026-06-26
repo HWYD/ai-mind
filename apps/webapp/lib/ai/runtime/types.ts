@@ -9,6 +9,7 @@ import type { ChatToolDefinition } from '@/lib/ai/tools'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 export interface ChatExecutionContext {
+    sessionId?: string
     setCookie?: string | null
     signal?: AbortSignal
 }

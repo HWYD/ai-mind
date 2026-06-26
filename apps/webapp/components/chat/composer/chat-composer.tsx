@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { hasComposerSemanticInput, resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { type ChatModel, type ChatModelGroup } from '@/lib/ai/models'
 import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import { cn } from '@/lib/utils'
 
 import type { ComposerDisplaySegment, ComposerPayload } from './composer-types'
 import { ComposerEditor } from './editor/composer-editor'
@@ -20,6 +21,7 @@ const footerTextBySkillMode: Record<ChatSkillMode, string> = {
 }
 
 export function ChatComposer({
+    disabled = false,
     enableReasoning,
     hasAvailableModels,
     isModelLoading,
@@ -31,9 +33,11 @@ export function ChatComposer({
     onSkillModeChange,
     onStop,
     onSubmit,
+    placeholder,
     skillMode,
     status,
 }: {
+    disabled?: boolean
     enableReasoning: boolean
     hasAvailableModels: boolean
     isModelLoading: boolean
@@ -45,6 +49,7 @@ export function ChatComposer({
     onSkillModeChange: (mode: ChatSkillMode) => void
     onStop: () => void
     onSubmit: (value: string, composer?: ComposerPayload, displaySegments?: ComposerDisplaySegment[]) => Promise<boolean> | boolean
+    placeholder?: string
     skillMode: ChatSkillMode
     status: ChatStatus
 }) {
@@ -52,20 +57,26 @@ export function ChatComposer({
     const [input, setInput] = useState('')
     const [composerDraft, setComposerDraft] = useState<ComposerPayload | undefined>()
     const canSubmit = Boolean(input.trim() || hasComposerSemanticInput(composerDraft))
-    const sendDisabled = status === 'submitted' || (status !== 'streaming' && (!canSubmit || !hasAvailableModels || isModelLoading))
-    const footerText =
-        status === 'streaming'
-            ? '正在生成回答，可点击右侧按钮停止。'
-            : modelError
-              ? modelError
-              : isModelLoading
-                ? '正在加载可用模型...'
-                : !hasAvailableModels
-                  ? '当前没有可用模型，暂时无法发送消息。'
-                  : footerTextBySkillMode[skillMode]
+    const sendDisabled =
+        disabled || status === 'submitted' || (status !== 'streaming' && (!canSubmit || !hasAvailableModels || isModelLoading))
+    const footerText = disabled
+        ? '请先处理上方人工审核，普通输入已锁定。'
+        : status === 'streaming'
+          ? '正在生成回答，可点击右侧按钮停止。'
+          : modelError
+            ? modelError
+            : isModelLoading
+              ? '正在加载可用模型...'
+              : !hasAvailableModels
+                ? '当前没有可用模型，暂时无法发送消息。'
+                : footerTextBySkillMode[skillMode]
 
     const handleSubmit = useCallback(
         async (value = input) => {
+            if (disabled) {
+                return
+            }
+
             if (status === 'streaming') {
                 onStop()
                 return
@@ -91,11 +102,11 @@ export function ChatComposer({
                 editor?.commands.clearContent()
             }
         },
-        [editor, input, onStop, onSubmit, status]
+        [disabled, editor, input, onStop, onSubmit, status]
     )
 
     function handleInsertTrigger(trigger: '@' | '/') {
-        if (!editor) {
+        if (!editor || disabled) {
             return
         }
 
@@ -119,10 +130,18 @@ export function ChatComposer({
             }}
             className="mt-auto"
         >
-            <Card className="rounded-3xl border-border/70 bg-card py-0 shadow-xl shadow-black/[0.06] transition-all focus-within:border-[var(--composer-focus)] focus-within:shadow-[0_18px_55px_rgba(37,99,235,0.12)]">
+            <Card
+                className={cn(
+                    'rounded-3xl border-border/70 bg-card py-0 shadow-xl shadow-black/[0.06] transition-all focus-within:border-[var(--composer-focus)] focus-within:shadow-[0_18px_55px_rgba(37,99,235,0.12)]',
+                    disabled &&
+                        'border-border/70 bg-muted/40 shadow-none ring-border focus-within:border-border/70 focus-within:shadow-none'
+                )}
+            >
                 <CardContent className="space-y-4 px-5 py-4">
                     <ComposerEditor
                         value={input}
+                        disabled={disabled}
+                        placeholder={placeholder}
                         status={status}
                         onChange={setInput}
                         onComposerChange={setComposerDraft}
@@ -137,6 +156,7 @@ export function ChatComposer({
                         model={model}
                         isModelLoading={isModelLoading}
                         enableReasoning={enableReasoning}
+                        disabled={disabled}
                         sendDisabled={sendDisabled}
                         onInsertTrigger={handleInsertTrigger}
                         onSkillModeChange={onSkillModeChange}

@@ -16,6 +16,12 @@ import {
     type VersionPlanTasklistGraphStatePatch,
 } from '../graph-state'
 
+function getLatestTasklistValidationResult(state: VersionPlanTasklistGraphStateAnnotationState) {
+    const draft = state.tasklist.draft
+
+    return draft?.validationV3 ?? draft?.validationV2 ?? draft?.validationV1
+}
+
 export function createDraftTasklistV1Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return async function draftTasklistV1Node(
         state: VersionPlanTasklistGraphStateAnnotationState
@@ -63,10 +69,10 @@ export function createValidateTasklistV1Node(runtime: VersionPlanTasklistGraphNo
 
 export function createDecideWarningDispositionNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return function decideWarningDispositionNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
-        const validationResult = state.tasklist.draft?.validationV1
+        const validationResult = getLatestTasklistValidationResult(state)
 
         if (!validationResult) {
-            throw new Error('Missing v1 validation result.')
+            throw new Error('Missing latest tasklist validation result.')
         }
 
         const result = runWarningDispositionStep({
@@ -107,7 +113,7 @@ export function createReviseTasklistV2Node(runtime: VersionPlanTasklistGraphNode
             ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV2,
-                summary: `已执行自动修正 ${update.execution?.counters.draftRevisions ?? state.execution.counters.draftRevisions} 次。`,
+                summary: `已生成受控修订草稿 v${update.tasklist?.draft?.version ?? 2}。`,
             }),
         }
     }
@@ -134,6 +140,51 @@ export function createValidateTasklistV2Node(runtime: VersionPlanTasklistGraphNo
     }
 }
 
+export function createReviseTasklistV3Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
+    return async function reviseTasklistV3Node(
+        state: VersionPlanTasklistGraphStateAnnotationState
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const update = await runReviseTasklistStep({
+            context: runtime.context,
+            model: runtime.models.drafting.model,
+            modelStage: 'tasklist-revision',
+            modelTimeoutMs: runtime.models.drafting.timeoutMs,
+            state,
+            userGoal: runtime.userGoal,
+            writeChunk: runtime.writeChunk,
+        })
+
+        return {
+            ...update,
+            graph: createGraphNodeRuntimeUpdate({
+                nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.reviseTasklistV3,
+                summary: `已生成第二轮受控修订草稿 v${update.tasklist?.draft?.version ?? 3}。`,
+            }),
+        }
+    }
+}
+
+export function createValidateTasklistV3Node(runtime: VersionPlanTasklistGraphNodeRuntime) {
+    return async function validateTasklistV3Node(
+        state: VersionPlanTasklistGraphStateAnnotationState
+    ): Promise<VersionPlanTasklistGraphStatePatch> {
+        const result = await runValidateTasklistStep({
+            context: runtime.context,
+            state,
+            title: '最终校验任务清单结构 v3',
+            writeChunk: runtime.writeChunk,
+        })
+
+        return {
+            ...result.update,
+            graph: createGraphNodeRuntimeUpdate({
+                nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.validateTasklistV3,
+                summary: `v3 结构校验：${result.result.status}，评分 ${result.result.score}。`,
+            }),
+        }
+    }
+}
+
 export function createEvaluateRevisionEffectNode(runtime: VersionPlanTasklistGraphNodeRuntime) {
     return function evaluateRevisionEffectNode(state: VersionPlanTasklistGraphStateAnnotationState): VersionPlanTasklistGraphStatePatch {
         const update = runRevisionEffectStep({
@@ -145,7 +196,7 @@ export function createEvaluateRevisionEffectNode(runtime: VersionPlanTasklistGra
             ...update,
             graph: createGraphNodeRuntimeUpdate({
                 nodeId: VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.evaluateRevisionEffect,
-                summary: `修正效果结论：${update.planning?.revisionEffect?.finalDecision ?? 'unknown'}。`,
+                summary: `修订效果结论：${update.planning?.revisionEffect?.finalDecision ?? 'unknown'}。`,
             }),
         }
     }

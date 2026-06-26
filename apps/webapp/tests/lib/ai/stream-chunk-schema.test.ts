@@ -94,6 +94,21 @@ describe('chatStreamChunkSchema graph chunks', () => {
         expect(
             chatStreamChunkSchema.safeParse({
                 agentName: 'version-plan-to-tasklist-agent',
+                durationMs: 5,
+                nodeId: 'reviewTasklistStrategy',
+                partId: 'graph-node-paused',
+                runId: 'run-1',
+                severity: 'info',
+                status: 'paused',
+                summary: 'Graph paused for human review.',
+                tags: ['status: interrupted'],
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-graph-node-end',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
                 fromNodeId: 'readVersionPlan',
                 partId: 'graph-route',
                 reason: '读取成功。',
@@ -121,7 +136,7 @@ describe('chatStreamChunkSchema graph chunks', () => {
                 partId: 'graph-debug-summary',
                 runId: 'run-1',
                 summary: {
-                    checkpointMode: 'memory',
+                    checkpointMode: 'postgres',
                     currentNode: 'emitFinalArtifact',
                     decision: {
                         type: 'proceed_to_tasklist_strategy',
@@ -249,6 +264,154 @@ describe('chatStreamChunkSchema graph chunks', () => {
                 },
                 threadId: 'tasklist-agent:conversation-1:run-1',
                 type: 'agent-graph-debug-summary',
+            }).success
+        ).toBe(false)
+    })
+})
+
+describe('chatStreamChunkSchema HITL chunks', () => {
+    const strategyPayload = {
+        allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+        data: {
+            planUri: 'docs://versions/v0.3.0.md',
+            reviewRound: 1,
+            strategy: {
+                granularity: 'medium',
+                grouping: 'by_phase',
+                priorityFocus: ['core_runtime', 'tests'],
+                stepCountRange: '5-8',
+            },
+            targetVersion: 'v0.3.0',
+        },
+        kind: 'strategy_review',
+        nodeName: 'reviewTasklistStrategy',
+        runId: 'run-1',
+        threadId: 'tasklist-agent:conversation-1:run-1',
+    }
+
+    const revisionPayload = {
+        allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+        data: {
+            fixNow: ['Add missing verification section.'],
+            markdown: '# v0.3.0 Tasklist\n\n## Step 1\n- [ ] Implement HITL',
+            reviewRound: 1,
+            revision: 1,
+            validation: {
+                blockingIssues: [
+                    {
+                        code: 'missing_verification',
+                        message: 'Verification is missing.',
+                        suggestion: 'Add verification checklist.',
+                    },
+                ],
+                score: 82,
+                status: 'warning',
+                weakSections: [
+                    {
+                        autoFixable: true,
+                        code: 'step_missing_verification',
+                        issue: 'Step lacks verification.',
+                        section: 'Step 1',
+                        suggestion: 'Add targeted tests.',
+                    },
+                ],
+            },
+        },
+        kind: 'tasklist_revision_review',
+        nodeName: 'reviewTasklistRevision',
+        runId: 'run-1',
+        threadId: 'tasklist-agent:conversation-1:run-1',
+    }
+
+    it('accepts strategy interrupt, revision interrupt and resume chunks', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-1',
+                interruptKind: 'strategy_review',
+                payload: strategyPayload,
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-interrupt',
+            }).success
+        ).toBe(true)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-2',
+                interruptKind: 'tasklist_revision_review',
+                payload: revisionPayload,
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-interrupt',
+            }).success
+        ).toBe(true)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-1',
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-resume',
+            }).success
+        ).toBe(true)
+    })
+
+    it('rejects mismatched interrupt kind, leaked state and extra checkpoint fields', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-1',
+                interruptKind: 'tasklist_revision_review',
+                payload: strategyPayload,
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-interrupt',
+            }).success
+        ).toBe(false)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                checkpoint: {
+                    raw: 'checkpoint should not be streamed',
+                },
+                interruptId: 'interrupt-1',
+                interruptKind: 'strategy_review',
+                payload: strategyPayload,
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-interrupt',
+            }).success
+        ).toBe(false)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                agentName: 'version-plan-to-tasklist-agent',
+                assistantMessageId: 'assistant-1',
+                interruptId: 'interrupt-1',
+                interruptKind: 'strategy_review',
+                payload: {
+                    ...strategyPayload,
+                    data: {
+                        ...strategyPayload.data,
+                        graphState: {
+                            artifacts: {
+                                tasklistDraft: '# Full draft should not be leaked here',
+                            },
+                        },
+                    },
+                },
+                runId: 'run-1',
+                threadId: 'tasklist-agent:conversation-1:run-1',
+                type: 'agent-interrupt',
             }).success
         ).toBe(false)
     })

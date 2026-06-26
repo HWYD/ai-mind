@@ -55,6 +55,7 @@ export async function POST(request: NextRequest) {
         }
 
         return await chatService.streamChat(payload, {
+            sessionId,
             signal: request.signal,
             resolvedModelSelection,
             setCookie,

@@ -15,6 +15,7 @@ const agentTraceStatusLabels: Record<string, string> = {
     fail: '失败',
     failed: '失败',
     needs_review: '需复核',
+    paused: '等待人工审核',
     pass: '通过',
     ready: '已就绪',
     running: '执行中',
@@ -42,6 +43,8 @@ export function getAgentStatusLabel(status: AgentStepPart['status']) {
             return '已完成'
         case 'failed':
             return '失败'
+        case 'paused':
+            return '等待人工审核'
         case 'skipped':
             return '已跳过'
         default:

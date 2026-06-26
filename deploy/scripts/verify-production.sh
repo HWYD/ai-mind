@@ -53,7 +53,8 @@ MAX_WAIT_SECONDS=180
 ELAPSED=0
 while [ "$ELAPSED" -lt "$MAX_WAIT_SECONDS" ]; do
     PS_OUTPUT="$(compose ps 2>/dev/null || true)"
-    if printf '%s\n' "$PS_OUTPUT" | grep -Eq 'project-assistant-service.+healthy' \
+    if printf '%s\n' "$PS_OUTPUT" | grep -Eq 'postgres.+healthy' \
+        && printf '%s\n' "$PS_OUTPUT" | grep -Eq 'project-assistant-service.+healthy' \
         && printf '%s\n' "$PS_OUTPUT" | grep -Eq 'webapp.+healthy'; then
         break
     fi
@@ -63,8 +64,13 @@ while [ "$ELAPSED" -lt "$MAX_WAIT_SECONDS" ]; do
 done
 
 PS_OUTPUT="$(compose ps 2>/dev/null || true)"
+check "postgres healthy" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'postgres.+healthy' && echo ok || echo fail)"
 check "project-assistant-service healthy" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'project-assistant-service.+healthy' && echo ok || echo fail)"
 check "webapp healthy" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'webapp.+healthy' && echo ok || echo fail)"
+
+POSTGRES_PORT_OUTPUT="$(compose port postgres 5432 2>/dev/null || true)"
+check "postgres 没有宿主机 5432 端口映射" "$( [ -z "$POSTGRES_PORT_OUTPUT" ] && echo ok || echo fail )"
+check "postgres 仅在容器内 expose 5432/tcp" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'postgres.+5432/tcp' && echo ok || echo fail)"
 
 WEBAPP_BIND="$(compose port webapp 3000 2>/dev/null | head -1 || true)"
 check "webapp 只绑定 127.0.0.1:3000->3000" "$(printf '%s\n' "$WEBAPP_BIND" | grep -Eq '^127\.0\.0\.1:3000$' && echo ok || echo fail)"

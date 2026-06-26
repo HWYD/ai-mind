@@ -1,6 +1,6 @@
 {
     "name": "ai-mind",
-    "version": "0.2.4",
+    "version": "0.3.0",
     "packageManager": "pnpm@10.18.3",
     "main": "index.js",
     "scripts": {
@@ -10,6 +10,11 @@
         "build": "pnpm --dir apps/webapp build",
         "build:pas": "pnpm --dir apps/project-assistant-service build",
         "build:watch": "pnpm --filter @ai-mind/* build:watch",
+        "db:generate": "pnpm --filter @ai-mind/database db:generate",
+        "db:validate": "pnpm --filter @ai-mind/database db:validate",
+        "db:migrate:deploy": "pnpm --filter @ai-mind/database db:migrate:deploy",
+        "db:checkpoint:setup": "pnpm --dir apps/webapp db:checkpoint:setup",
+        "db:setup:deploy": "pnpm db:migrate:deploy && pnpm db:checkpoint:setup",
         "start": "pnpm --dir apps/webapp start",
         "typecheck": "pnpm --dir apps/webapp typecheck",
         "typecheck:pas": "pnpm --dir apps/project-assistant-service typecheck",

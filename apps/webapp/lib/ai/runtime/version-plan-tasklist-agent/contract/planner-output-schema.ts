@@ -1,11 +1,7 @@
 import { z } from 'zod'
 
-import {
-    type PlanningDecisionAction,
-    type PlanningDecisionOutput,
-    type TasklistStrategy,
-    VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS,
-} from './types'
+import { type TasklistStrategy, tasklistStrategySchema } from './tasklist-strategy-schema'
+import { type PlanningDecisionAction, type PlanningDecisionOutput, VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS } from './types'
 
 const PLANNING_DECISION_LIMITS = {
     maxMessageChars: 800,
@@ -17,8 +13,6 @@ const PLANNING_DECISION_LIMITS = {
 } as const
 
 const planningDecisionReasonSchema = z.string().trim().min(1).max(PLANNING_DECISION_LIMITS.maxReasonChars)
-const strategyTextSchema = z.string().trim().min(1).max(120)
-
 export const versionPlanTasklistManualReviewItemSchema = z
     .object({
         title: z.string().trim().min(1).max(PLANNING_DECISION_LIMITS.maxReviewItemTitleChars),
@@ -75,17 +69,7 @@ export const versionPlanTasklistPlanningDecisionActionSchema = z.discriminatedUn
     stopWithBoundaryMessageActionSchema,
 ])
 
-export const versionPlanTasklistStrategySchema = z
-    .object({
-        granularity: z.enum(['coarse', 'medium', 'detailed']),
-        expectedStepRange: z
-            .tuple([z.number().int().min(1).max(20), z.number().int().min(1).max(30)])
-            .refine(([min, max]) => min <= max, 'expectedStepRange 最小值不能大于最大值。'),
-        grouping: z.array(strategyTextSchema).min(1).max(8),
-        priority: z.array(strategyTextSchema).min(1).max(8),
-        reason: planningDecisionReasonSchema,
-    })
-    .strict()
+export const versionPlanTasklistStrategySchema = tasklistStrategySchema
 
 export const versionPlanTasklistPlanningDecisionOutputSchema = z
     .object({

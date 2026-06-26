@@ -4,6 +4,7 @@ import type {
     AgentGraphNodeEntry,
     AgentGraphRouteEntry,
     AgentGraphTrace,
+    AgentInterruptPart,
     AgentStepPart,
     AgentTextArtifactViewModel,
     MindMessage,
@@ -32,7 +33,8 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
                 part.type === 'tool' ||
                 part.type === 'resource' ||
                 part.type === 'skill' ||
-                part.type === 'prompt'
+                part.type === 'prompt' ||
+                part.type === 'agent-interrupt'
             ) {
                 return true
             }
@@ -40,6 +42,27 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
             return part.text.trim().length > 0
         })
     })
+}
+
+export function ensureAssistantMessage(messages: MindMessage[], messageId: string): MindMessage[] {
+    if (messages.some(message => message.id === messageId)) {
+        return messages
+    }
+
+    return [
+        ...messages,
+        {
+            id: messageId,
+            role: 'assistant',
+            parts: [],
+            createdAt: new Date().toISOString(),
+            status: 'resuming',
+        },
+    ]
+}
+
+export function updateMessageStatus(messages: MindMessage[], messageId: string, status: MindMessage['status']): MindMessage[] {
+    return messages.map(message => (message.id === messageId ? { ...message, status } : message))
 }
 
 export function appendAgentTextArtifact(messages: MindMessage[], messageId: string, artifact: AgentTextArtifactViewModel): MindMessage[] {
@@ -62,6 +85,45 @@ export function appendAgentTextArtifact(messages: MindMessage[], messageId: stri
             ...message,
             artifacts: existingArtifacts.map(existingArtifact =>
                 existingArtifact.artifactId === artifact.artifactId ? { ...existingArtifact, ...artifact } : existingArtifact
+            ),
+        }
+    })
+}
+
+export function upsertAgentInterruptPart(messages: MindMessage[], messageId: string, interruptPart: AgentInterruptPart): MindMessage[] {
+    return ensureAssistantMessage(messages, messageId).map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: [...message.parts.filter(part => part.type !== 'agent-interrupt'), interruptPart],
+            status: 'paused',
+        }
+    })
+}
+
+export function updateAgentInterruptPartStatus(
+    messages: MindMessage[],
+    messageId: string,
+    interruptId: string,
+    status: AgentInterruptPart['status']
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part =>
+                part.type === 'agent-interrupt' && part.interruptId === interruptId
+                    ? {
+                          ...part,
+                          status,
+                      }
+                    : part
             ),
         }
     })
@@ -267,6 +329,10 @@ function getAgentStepPartStatus(graph: AgentGraphTrace): AgentStepPart['status']
 
     if (graph.nodes.some(node => node.status === 'failed')) {
         return 'failed'
+    }
+
+    if (graph.nodes.some(node => node.status === 'paused')) {
+        return 'paused'
     }
 
     if (graph.nodes.length > 0 && graph.nodes.every(node => node.status === 'skipped')) {

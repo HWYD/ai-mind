@@ -1,12 +1,19 @@
 import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
+
+import type { StrategyReviewDecision, TasklistRevisionReviewDecision } from './hitl-review-schema'
+import type { TasklistStrategy } from './tasklist-strategy-schema'
+
 export const VERSION_PLAN_TASKLIST_AGENT_NAME = 'version-plan-to-tasklist-agent'
+export const VERSION_PLAN_TASKLIST_AGENT_VERSION = 'v0.3.0'
+export const VERSION_PLAN_TASKLIST_GRAPH_VERSION = 'v0.3.0'
 
 // 受控单 Agent 的预算上限集中放在这里，runner 只读取这些值，不在流程里散落 magic number。
 export const VERSION_PLAN_TASKLIST_AGENT_LIMITS = {
-    maxDraftRevisions: 1,
+    maxDraftRevisions: 2,
     maxOptionalContextReads: 1,
-    maxSteps: 12,
+    maxSteps: 20,
+    maxStrategyRegenerations: 1,
 } as const
 
 export const VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS = [
@@ -54,15 +61,6 @@ export type PlanningDecisionAction =
           reason: string
           type: 'stop_with_boundary_message'
       }
-
-// TasklistStrategy 是模型可参与的“拆分策略”，必须影响后续草稿粒度、分组和优先级。
-export interface TasklistStrategy {
-    expectedStepRange: [number, number]
-    granularity: 'coarse' | 'detailed' | 'medium'
-    grouping: string[]
-    priority: string[]
-    reason: string
-}
 
 export interface PlanningDecisionOutput {
     decision: PlanningDecisionAction
@@ -112,7 +110,8 @@ export interface VersionPlanTasklistDraftArtifact {
     updatedAtStep?: number
     validationV1?: TasklistValidationResult
     validationV2?: TasklistValidationResult
-    version: 1 | 2
+    validationV3?: TasklistValidationResult
+    version: 1 | 2 | 3
 }
 
 export interface VersionPlanTasklistPlanningArtifacts {
@@ -175,6 +174,18 @@ export type VersionPlanTasklistAgentAction =
           type: 'decide_tasklist_strategy'
       }
     | {
+          // Strategy Review resume 后将用户决策写入 GraphState；不调用模型。
+          decision: StrategyReviewDecision
+          reason: string
+          type: 'apply_strategy_review_decision'
+      }
+    | {
+          // strategy respond 最多触发一次重新生成，重新生成后还要再次审核。
+          reason: string
+          strategy: TasklistStrategy
+          type: 'regenerate_tasklist_strategy'
+      }
+    | {
           // 基于已读取的 version plan 生成任务清单草稿，不能从裸目标直接生成。
           goal: string
           planUri: string
@@ -196,13 +207,19 @@ export type VersionPlanTasklistAgentAction =
           type: 'decide_warning_disposition'
       }
     | {
-          // 规则评估 v1 -> v2 的修正效果；不允许触发 v3。
+          // Tasklist Revision Review resume 后将用户决策写入 GraphState；edit 会直接形成修订版本。
+          decision: TasklistRevisionReviewDecision
+          reason: string
+          type: 'apply_tasklist_revision_review_decision'
+      }
+    | {
+          // 规则评估 v1 -> latest 的修正效果；不再触发新的修订。
           effect: RevisionEffectResult
           reason: string
           type: 'evaluate_revision_effect'
       }
     | {
-          // 只允许在 v1 结构校验后自动修正一次，生成 v2。
+          // 只允许在受控预算内推进到下一版 tasklist，最多生成 v3。
           reason: string
           type: 'revise_tasklist'
       }
@@ -220,12 +237,16 @@ export type VersionPlanTasklistAgentAction =
 // - planning_decided：已经完成一次有限规划决策，并决定继续。
 // - optional_context_read：已经读取最多一个白名单补充上下文。
 // - strategy_decided：已经进入任务清单拆分策略判断之后。
+// - strategy_reviewed：用户已经 approve/edit strategy，可以继续生成 draft。
+// - strategy_feedback_received：用户通过 respond 要求重新生成 strategy。
 // - drafted_v1：已经生成任务清单草稿 v1。
 // - validated_v1：已经校验过 v1。
-// - revised_v2：根据校验结果自动修正了一次，生成 v2。
-// - validated_v2：已经校验过 v2。
-// - revision_effect_evaluated：已经评估 v1 -> v2 或 v1-only 的修正效果。
-// - stopped：澄清问题或边界提示已经结束本轮 Agent。
+// - warning_disposition_decided：已经根据最新 validation 决定 fixNow / manual review。
+// - tasklist_revision_reviewed：用户已经授权模型修订，或补充了修订反馈。
+// - revised_v2 / revised_v3：已经生成对应修订版本。
+// - validated_v2 / validated_v3：已经校验过对应修订版本。
+// - revision_effect_evaluated：已经评估 v1 -> latest 的修正效果。
+// - stopped：澄清问题、人工拒绝或边界提示已经结束本轮 Agent。
 // - final：最终回答已输出。
 export type VersionPlanTasklistAgentStatus =
     | 'drafted_v1'
@@ -237,7 +258,21 @@ export type VersionPlanTasklistAgentStatus =
     | 'readiness_checked'
     | 'revision_effect_evaluated'
     | 'revised_v2'
+    | 'revised_v3'
     | 'stopped'
     | 'strategy_decided'
+    | 'strategy_feedback_received'
+    | 'strategy_reviewed'
+    | 'tasklist_revision_reviewed'
     | 'validated_v1'
     | 'validated_v2'
+    | 'validated_v3'
+    | 'warning_disposition_decided'
+
+export type {
+    TasklistStrategy,
+    TasklistStrategyGranularity,
+    TasklistStrategyGrouping,
+    TasklistStrategyPriorityFocus,
+    TasklistStrategyStepCountRange,
+} from './tasklist-strategy-schema'

@@ -1,4 +1,4 @@
-﻿import { AIMessage, ToolMessage } from '@langchain/core/messages'
+import { AIMessage, ToolMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -19,7 +19,7 @@ const runtimeMocks = vi.hoisted(() => {
         streamAssistantParts: vi.fn(),
         streamPlanningResponse: vi.fn(),
         stripMessageText: vi.fn(),
-        runVersionPlanTasklistGraph: vi.fn(),
+        startVersionPlanTasklistAgentRun: vi.fn(),
         writeStaticTextPart: vi.fn(),
         writeToolValidationErrors: vi.fn(),
     }
@@ -63,9 +63,14 @@ vi.mock('@/lib/ai/runtime/tool-runtime', () => ({
     writeToolValidationErrors: runtimeMocks.writeToolValidationErrors,
 }))
 
-vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent/graph/run-version-plan-tasklist-graph', () => ({
-    runVersionPlanTasklistGraph: runtimeMocks.runVersionPlanTasklistGraph,
-}))
+vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/lib/ai/runtime/version-plan-tasklist-agent')>()
+
+    return {
+        ...actual,
+        startVersionPlanTasklistAgentRun: runtimeMocks.startVersionPlanTasklistAgentRun,
+    }
+})
 
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
 
@@ -214,6 +219,7 @@ function createExecutionContext(): ResolvedChatExecutionContext {
             providerModel: 'qwen3:8b',
             routeType: 'chat',
         },
+        sessionId: 'test-session',
     }
 }
 
@@ -239,7 +245,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.formatToolInput.mockReturnValue('1+1')
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(false)
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(true)
-        runtimeMocks.runVersionPlanTasklistGraph.mockResolvedValue({
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue({
             graphState: {},
             state: {},
         })
@@ -341,7 +347,7 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
@@ -366,7 +372,7 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
         expect(runtimeMocks.executeComposerContextInvocation).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
@@ -389,7 +395,7 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runVersionPlanTasklistGraph).not.toHaveBeenCalled()
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
@@ -643,10 +649,12 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledWith(
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).toHaveBeenCalledWith(
             expect.objectContaining({
+                assistantMessageId: expect.any(String),
                 context: createExecutionContext(),
                 conversationId: request.conversationId,
+                modelId: 'ollama/qwen3-8b',
                 models: expect.objectContaining({
                     drafting: expect.objectContaining({
                         model: expect.any(Object),
@@ -657,11 +665,14 @@ describe('runtime/chat-orchestrator', () => {
                         timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.planning.stepTimeoutMs,
                     }),
                 }),
+                reasoningEnabled: true,
+                runId: expect.any(String),
                 runtimeConfig: expect.objectContaining({
-                    graphCheckpointMode: 'off',
+                    graphCheckpointMode: 'memory',
                     graphDebugViewEnabled: false,
                     graphEventsEnabled: false,
                 }),
+                sessionId: 'test-session',
                 userGoal: '基于这个版本方案生成 tasklist 草稿',
                 writeChunk: expect.any(Function),
             })
@@ -688,10 +699,12 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledWith(
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).toHaveBeenCalledWith(
             expect.objectContaining({
+                assistantMessageId: expect.any(String),
                 context: createExecutionContext(),
                 conversationId: request.conversationId,
+                modelId: 'ollama/qwen3-8b',
                 models: expect.objectContaining({
                     drafting: expect.objectContaining({
                         model: expect.any(Object),
@@ -702,11 +715,14 @@ describe('runtime/chat-orchestrator', () => {
                         timeoutMs: TASKLIST_AGENT_MODEL_POLICIES.planning.stepTimeoutMs,
                     }),
                 }),
+                reasoningEnabled: true,
+                runId: expect.any(String),
                 runtimeConfig: expect.objectContaining({
-                    graphCheckpointMode: 'off',
+                    graphCheckpointMode: 'memory',
                     graphDebugViewEnabled: false,
                     graphEventsEnabled: false,
                 }),
+                sessionId: 'test-session',
                 userGoal: '基于这个版本方案生成 tasklist 草稿',
                 writeChunk: expect.any(Function),
             })
@@ -717,7 +733,7 @@ describe('runtime/chat-orchestrator', () => {
     })
 
     it('Graph Runtime 失败时直接返回 runtime error', async () => {
-        runtimeMocks.runVersionPlanTasklistGraph.mockRejectedValueOnce(new Error('graph failed'))
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockRejectedValueOnce(new Error('graph failed'))
 
         const request = createTasklistRequest()
         const session = createSession()
@@ -732,7 +748,133 @@ describe('runtime/chat-orchestrator', () => {
 
         await orchestrator.run()
 
-        expect(runtimeMocks.runVersionPlanTasklistGraph).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).toHaveBeenCalledTimes(1)
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('Tasklist AgentRun 数据层未就绪时不误报为模型响应失败', async () => {
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockRejectedValueOnce(
+            new Error('DATABASE_URL is required to use the Prisma data layer.')
+        )
+
+        const request = createTasklistRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{
+            type: string
+            scope?: string
+            errorCode?: string
+            message?: string
+            retryable?: boolean
+        }> = []
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'error',
+                scope: 'runtime',
+                errorCode: 'RUNTIME_INVARIANT_FAILED',
+                message: expect.stringContaining('Tasklist Agent'),
+                retryable: false,
+            })
+        )
+        expect(writtenChunks).not.toContainEqual(
+            expect.objectContaining({
+                errorCode: 'MODEL_STREAM_FAILED',
+            })
+        )
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('Tasklist Agent 缺少 session secret 时不误报为模型响应失败', async () => {
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockRejectedValueOnce(
+            new Error('AI_MIND_AGENT_RUN_SESSION_SECRET must contain at least 32 characters.')
+        )
+
+        const request = createTasklistRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{
+            type: string
+            scope?: string
+            errorCode?: string
+            message?: string
+            retryable?: boolean
+        }> = []
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'error',
+                scope: 'runtime',
+                errorCode: 'RUNTIME_INVARIANT_FAILED',
+                message: expect.stringContaining('AI_MIND_AGENT_RUN_SESSION_SECRET'),
+                retryable: false,
+            })
+        )
+        expect(writtenChunks).not.toContainEqual(
+            expect.objectContaining({
+                errorCode: 'MODEL_STREAM_FAILED',
+            })
+        )
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('Tasklist Agent durable checkpoint 未初始化时不误报为模型响应失败', async () => {
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockRejectedValueOnce(
+            new Error('relation "langgraph_checkpoint.checkpoints" does not exist')
+        )
+
+        const request = createTasklistRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{
+            type: string
+            scope?: string
+            errorCode?: string
+            message?: string
+            retryable?: boolean
+        }> = []
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'error',
+                scope: 'runtime',
+                errorCode: 'RUNTIME_INVARIANT_FAILED',
+                message: expect.stringContaining('db:checkpoint:setup'),
+                retryable: false,
+            })
+        )
+        expect(writtenChunks).not.toContainEqual(
+            expect.objectContaining({
+                errorCode: 'MODEL_STREAM_FAILED',
+            })
+        )
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
         expectSingleTerminalChunk(writtenChunks)
     })
