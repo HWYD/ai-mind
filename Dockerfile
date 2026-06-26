@@ -41,9 +41,12 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/webapp/package.json apps/webapp/package.json
 COPY apps/project-assistant-service/package.json apps/project-assistant-service/package.json
 COPY packages/database/package.json packages/database/package.json
+COPY packages/database/prisma.config.ts packages/database/prisma.config.ts
+COPY packages/database/prisma packages/database/prisma
 COPY packages/stream-core/package.json packages/stream-core/package.json
 
-RUN pnpm install --prod --frozen-lockfile --ignore-scripts
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts \
+    && pnpm --filter @ai-mind/database db:generate
 
 FROM base AS webapp-runner
 
