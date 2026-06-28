@@ -90,6 +90,8 @@ Level C / D 必须使用完整 spec。
 
 Level A 不走完整流程。Level B 默认使用 mini spec；只有发现边界不清、影响面扩大或可能升级为 Level C 时，才选择性使用 clarify / checklist / analyze。
 
+v0.3.2 开始，AI Mind 将官方 Spec Kit CLI 与 Codex skills 作为双轨 pilot。CLI、skills 和人工等价三种路径的职责见 [Spec Kit Tooling](./spec-kit-tooling.md)。
+
 ## Spec Drift
 
 Spec drift 指实现和规格资产发生偏离。

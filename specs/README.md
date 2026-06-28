@@ -117,6 +117,17 @@ specs/<version-topic>/
 - AI Mind 为什么要引入 constitution / specs / ADR / workflow / PR checklist
 - 后续复杂版本该如何按治理流程推进
 
+### 032 Spec Kit CLI + Codex Skills Pilot
+
+目录：[032-spec-kit-cli-codex-skills-pilot](./032-spec-kit-cli-codex-skills-pilot)
+
+回答的问题：
+
+- AI Mind 为什么采用官方 Spec Kit CLI + Codex skills 双轨
+- CLI、skills 和人工等价路径分别负责什么
+- v0.3.2 pilot 为什么暂不把 tooling 接入 CI 强制门
+- 后续是否值得把双轨升级为团队默认必装、必跑流程
+
 ## 后续新增规格时的约定
 
 - 用版本号前缀保持排序稳定，例如 `032-...`

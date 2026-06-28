@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.1：Spec Kit Governance Baseline，沉淀 constitution、spec、ADR、AI coding workflow 和 PR checklist；最新业务运行时能力仍以 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP 为 baseline。
+> v0.3.2：Spec Kit CLI + Codex Skills Dual-track Pilot，验证官方 CLI、Codex skills 和人工等价流程如何在 AI Mind 中协同；最新业务运行时能力仍以 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP 为 baseline。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.1`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.2`。
 
 已经验证：
 
@@ -210,6 +210,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Tasklist Agent GraphState 单事实源收口。
 - Tasklist Agent HITL Checkpoint Resume MVP。
 - Spec Kit Governance Baseline。
+- Spec Kit CLI + Codex Skills Dual-track Pilot。
 
 当前非目标：
 
@@ -244,11 +245,11 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.1
+## 当前版本：v0.3.2
 
-这版的主线是 Spec Kit Governance Baseline：把 v0.3.0 后已经验证过的工程纪律沉淀为 constitution、specs、ADR、AI coding workflow 和 PR checklist。
+这版的主线是 Spec Kit CLI + Codex Skills Dual-track Pilot：在 v0.3.1 已经建立的治理基线上，进一步验证官方 Spec Kit CLI、Codex skills 和人工等价流程如何在 AI Mind 中协同工作。
 
-v0.3.1 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、数据库 schema、PostgresSaver、stream 协议、API route 或前端 reducer。
+v0.3.2 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、数据库 schema、PostgresSaver、stream 协议、API route 或前端 reducer。
 
 最新业务运行时 baseline 仍是 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP：
 
@@ -264,7 +265,7 @@ v0.3.1 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、�
 
 v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停、跨版本 checkpoint resume、多 Agent 编排或自动写 docs 文件。
 
-详细设计见 [v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
+详细设计见 [v0.3.2 双轨 pilot 说明](./docs/versions/v0.3.2-spec-kit-cli-codex-skills-dual-track-pilot.md)、[v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
 
 ## 当前能力
 
@@ -600,6 +601,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                   |
 | v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                 |
 | v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                 |
+| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                     |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -631,6 +633,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Tasklist Agent GraphState 单事实源收口
 - [x] Tasklist Agent HITL Checkpoint Resume MVP
 - [x] Spec Kit Governance Baseline
+- [x] Spec Kit CLI + Codex Skills Dual-track Pilot
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

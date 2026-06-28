@@ -1,0 +1,4 @@
+display_name: Spec Kit Analyze
+short_description: Analyze AI Mind spec consistency before implementation.
+default_prompt: Use this skill to analyze consistency across AI Mind spec, plan, tasks, acceptance, and decisions.
+

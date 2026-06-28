@@ -99,6 +99,7 @@
 - Level A 不需要执行 Spec Kit command / skill。
 - Level B 仅在 mini spec 存在明显歧义时，选择性做 clarify 或人工澄清。
 - Level C / D 需要把这三个质量闸门作为实现前检查，但不要把它们扩展成所有小任务必跑的仪式。
+- v0.3.2 起采用 Spec Kit CLI + Codex skills 双轨 pilot：官方 CLI 需要用户本地安装和授权；仓库内已提供 `.agents/skills/speckit-clarify`、`.agents/skills/speckit-checklist`、`.agents/skills/speckit-analyze` 作为项目内 pilot skills。双轨规则见 `docs/architecture/spec-kit-tooling.md`。
 
 不要把历史 fixture、mock 数据或旧版本文档中的版本号批量改成当前版本。详细规则见 `.agents/rules/version/artifacts.md`。
 

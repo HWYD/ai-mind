@@ -106,6 +106,8 @@ Spec Kit clarify / checklist / analyze 是复杂变更的质量闸门，不是�
 
 如果本地没有 Spec Kit CLI、Codex skills、slash command 或自动化脚本，不阻塞实现；但不能跳过质量判断，需要用人工方式回答同样的问题并写明结论。
 
+v0.3.2 开始，AI Mind 采用 Spec Kit CLI + Codex skills 双轨 pilot。双轨职责和失败回退见 [Spec Kit Tooling](./spec-kit-tooling.md)。
+
 ## Codex Execution Rule
 
 在修改 AI Mind 代码前，必须先阅读：

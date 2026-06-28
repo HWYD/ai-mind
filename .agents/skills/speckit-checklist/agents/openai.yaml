@@ -1,0 +1,4 @@
+display_name: Spec Kit Checklist
+short_description: Check AI Mind Level C/D spec quality before tasking.
+default_prompt: Use this skill to build a quality checklist for an AI Mind Level C or Level D spec.
+
