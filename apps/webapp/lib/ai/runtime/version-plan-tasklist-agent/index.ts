@@ -72,3 +72,9 @@ export {
 export { createTasklistAgentModelSet } from './model/tasklist-agent-model-set'
 export { readVersionPlanForTasklistAgent } from './resources/version-plan-reader'
 export { getTasklistAgentRuntimeConfig } from './config/agent-runtime-config'
+export {
+    createNoopTasklistLangSmithObserver,
+    createTasklistLangSmithObserver,
+    type TasklistLangSmithObserver,
+    type TasklistLangSmithTraceClient,
+} from './observability'

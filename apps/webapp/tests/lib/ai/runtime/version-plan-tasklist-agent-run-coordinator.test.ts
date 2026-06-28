@@ -14,9 +14,11 @@ vi.mock('@/lib/ai/mcp/adapters', () => ({
 import type { AgentRunPublicDto } from '@/lib/ai/agent-runs/contracts'
 import type { ChatSession } from '@/lib/ai/runtime/types'
 import {
+    createNoopTasklistLangSmithObserver,
     resumeVersionPlanTasklistAgentRun,
     startVersionPlanTasklistAgentRun,
-} from '@/lib/ai/runtime/version-plan-tasklist-agent/agent-run-coordinator'
+    type TasklistLangSmithObserver,
+} from '@/lib/ai/runtime/version-plan-tasklist-agent'
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
@@ -276,8 +278,10 @@ function createStartOptions(agentRunService: ReturnType<typeof createFakeAgentRu
             agentRunService,
             assistantMessageId: 'assistant-coordinator-test',
             context: {},
+            langSmithObserver: createNoopTasklistLangSmithObserver(),
             conversationId: 'conversation-coordinator-test',
             modelId: 'ollama/qwen3-8b',
+            modelProvider: 'ollama',
             models,
             reasoningEnabled: false,
             runtimeConfig: createRuntimeConfig(),
@@ -287,6 +291,36 @@ function createStartOptions(agentRunService: ReturnType<typeof createFakeAgentRu
             writeChunk: (chunk: unknown) => writtenChunks.push(chunk),
         },
         writtenChunks,
+    }
+}
+
+function createFakeLangSmithObserver(): TasklistLangSmithObserver {
+    return {
+        observeHumanDecision: vi.fn(async () => {}),
+        observeInitialRun: vi.fn(async () => {}),
+        observeInterrupt: vi.fn(async () => {}),
+        observeResult: vi.fn(async () => {}),
+        observeResume: vi.fn(async () => {}),
+    }
+}
+
+function createThrowingLangSmithObserver(): TasklistLangSmithObserver {
+    return {
+        async observeHumanDecision() {
+            throw new Error('LangSmith unavailable')
+        },
+        async observeInitialRun() {
+            throw new Error('LangSmith unavailable')
+        },
+        async observeInterrupt() {
+            throw new Error('LangSmith unavailable')
+        },
+        async observeResult() {
+            throw new Error('LangSmith unavailable')
+        },
+        async observeResume() {
+            throw new Error('LangSmith unavailable')
+        },
     }
 }
 
@@ -306,6 +340,7 @@ function createResumeOptions(
             context: {},
             decision,
             interruptId: 'interrupt-test',
+            langSmithObserver: createNoopTasklistLangSmithObserver(),
             models,
             runId,
             runtimeConfig: createRuntimeConfig(),
@@ -364,6 +399,42 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(agentRunService.markFailed).not.toHaveBeenCalled()
     })
 
+    it('initial run 记录 LangSmith initial 与 interrupt metadata', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const langSmithObserver = createFakeLangSmithObserver()
+        const { options } = createStartOptions(agentRunService, proceedPlanningOutput)
+        const result = await startVersionPlanTasklistAgentRun({
+            ...options,
+            langSmithObserver,
+        })
+        const createRunInput = agentRunService.createRun.mock.calls[0]?.[1]
+
+        expect(result.graphResult.status).toBe('interrupted')
+        expect(langSmithObserver.observeInitialRun).toHaveBeenCalledWith({
+            agentType: 'version-plan-to-tasklist-agent',
+            agentVersion: 'v0.3.0',
+            assistantMessageId: 'assistant-coordinator-test',
+            graphVersion: 'v0.3.0',
+            modelId: 'ollama/qwen3-8b',
+            provider: 'ollama',
+            reasoningEnabled: false,
+            runId: createRunInput.id,
+            threadId: createRunInput.threadId,
+            versionPlanUri: planUri,
+        })
+        expect(langSmithObserver.observeInterrupt).toHaveBeenCalledWith({
+            assistantMessageId: 'assistant-coordinator-test',
+            metadata: expect.objectContaining({
+                interruptId: expect.any(String),
+                interruptKind: 'strategy_review',
+                reviewRound: 1,
+                strategyRegenerations: 0,
+            }),
+            runId: createRunInput.id,
+            threadId: createRunInput.threadId,
+        })
+    })
+
     it('resume 到 final 时把 AgentRun 标记为 completed', async () => {
         const agentRunService = createFakeAgentRunService()
         const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
@@ -387,6 +458,51 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
             runId,
             type: 'agent-resume',
         })
+    })
+
+    it('resume 记录 human decision、resume 与 final result metadata', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
+        const runId = started.run!.runId
+        const langSmithObserver = createFakeLangSmithObserver()
+        const { options } = createResumeOptions(agentRunService, runId, { type: 'approve' }, validTasklist)
+        const resumed = await resumeVersionPlanTasklistAgentRun({
+            ...options,
+            langSmithObserver,
+        })
+
+        expect(resumed.graphResult.status).toBe('completed')
+        expect(langSmithObserver.observeHumanDecision).toHaveBeenCalledWith({
+            assistantMessageId: 'assistant-coordinator-test',
+            metadata: {
+                decisionType: 'approve',
+                interruptId: expect.any(String),
+                interruptKind: 'strategy_review',
+            },
+            runId,
+            threadId: `tasklist-agent:conversation-coordinator-test:${runId}`,
+        })
+        expect(langSmithObserver.observeResume).toHaveBeenCalledWith({
+            assistantMessageId: 'assistant-coordinator-test',
+            metadata: {
+                decisionType: 'approve',
+                interruptId: expect.any(String),
+                interruptKind: 'strategy_review',
+            },
+            runId,
+            threadId: `tasklist-agent:conversation-coordinator-test:${runId}`,
+        })
+        expect(langSmithObserver.observeResult).toHaveBeenCalledWith(
+            expect.objectContaining({
+                artifactGenerated: true,
+                assistantMessageId: 'assistant-coordinator-test',
+                resultStatus: 'final',
+                runId,
+                runStatus: 'completed',
+                stage: 'resume',
+                threadId: `tasklist-agent:conversation-coordinator-test:${runId}`,
+            })
+        )
     })
 
     it('resume 后遇到 revision HITL 时再次持久化 pending interrupt，下一次 resume 可完成 blocked', async () => {
@@ -415,6 +531,43 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(agentRunService.markCompleted).toHaveBeenCalledWith(runId, 'blocked')
     })
 
+    it('blocked result 记录 LangSmith result metadata 且不标记 artifactGenerated', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
+        const runId = started.run!.runId
+
+        await resumeVersionPlanTasklistAgentRun(
+            createResumeOptions(agentRunService, runId, { type: 'approve' }, fixableWarningTasklist).options
+        )
+
+        const langSmithObserver = createFakeLangSmithObserver()
+        const completed = await resumeVersionPlanTasklistAgentRun({
+            ...createResumeOptions(agentRunService, runId, { type: 'approve' }, fixableWarningTasklist, blockedTasklist).options,
+            langSmithObserver,
+        })
+
+        expect(completed.graphResult.status).toBe('completed')
+        expect(langSmithObserver.observeHumanDecision).toHaveBeenCalledWith({
+            assistantMessageId: 'assistant-coordinator-test',
+            metadata: {
+                decisionType: 'approve',
+                interruptId: expect.any(String),
+                interruptKind: 'tasklist_revision_review',
+            },
+            runId,
+            threadId: `tasklist-agent:conversation-coordinator-test:${runId}`,
+        })
+        expect(langSmithObserver.observeResult).toHaveBeenCalledWith(
+            expect.objectContaining({
+                artifactGenerated: false,
+                resultStatus: 'blocked',
+                runId,
+                runStatus: 'completed',
+                stage: 'resume',
+            })
+        )
+    })
+
     it('HITL reject 时把 AgentRun 标记为 rejected', async () => {
         const agentRunService = createFakeAgentRunService()
         const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
@@ -426,6 +579,38 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(rejected.graphResult.status).toBe('rejected')
         expect(agentRunService.markRejected).toHaveBeenCalledWith(runId)
         expect(agentRunService.markCompleted).not.toHaveBeenCalled()
+    })
+
+    it('HITL reject 记录 LangSmith rejected result metadata', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
+        const runId = started.run!.runId
+        const langSmithObserver = createFakeLangSmithObserver()
+        const rejected = await resumeVersionPlanTasklistAgentRun({
+            ...createResumeOptions(agentRunService, runId, { reason: '不接受当前策略。', type: 'reject' }).options,
+            langSmithObserver,
+        })
+
+        expect(rejected.graphResult.status).toBe('rejected')
+        expect(langSmithObserver.observeHumanDecision).toHaveBeenCalledWith({
+            assistantMessageId: 'assistant-coordinator-test',
+            metadata: {
+                decisionType: 'reject',
+                interruptId: expect.any(String),
+                interruptKind: 'strategy_review',
+            },
+            runId,
+            threadId: `tasklist-agent:conversation-coordinator-test:${runId}`,
+        })
+        expect(langSmithObserver.observeResult).toHaveBeenCalledWith(
+            expect.objectContaining({
+                artifactGenerated: false,
+                resultStatus: 'rejected',
+                runId,
+                runStatus: 'rejected',
+                stage: 'resume',
+            })
+        )
     })
 
     it('graph run 抛错时标记 AgentRun failed 并继续向上抛出错误', async () => {
@@ -446,5 +631,55 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
             'TASKLIST_AGENT_RUN_FAILED',
             expect.stringContaining('No checkpointer set')
         )
+    })
+
+    it('initial run failed 记录 LangSmith failed result metadata', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const langSmithObserver = createFakeLangSmithObserver()
+        const { options } = createStartOptions(agentRunService, proceedPlanningOutput)
+
+        await expect(
+            startVersionPlanTasklistAgentRun({
+                ...options,
+                langSmithObserver,
+                runtimeConfig: createRuntimeConfig('off'),
+            })
+        ).rejects.toThrow('No checkpointer set')
+
+        const runId = agentRunService.createRun.mock.calls[0]?.[1].id
+
+        expect(langSmithObserver.observeResult).toHaveBeenCalledWith(
+            expect.objectContaining({
+                artifactGenerated: false,
+                assistantMessageId: 'assistant-coordinator-test',
+                durationMs: expect.any(Number),
+                failureCode: 'TASKLIST_AGENT_RUN_FAILED',
+                failureMessage: expect.stringContaining('No checkpointer set'),
+                runId,
+                runStatus: 'failed',
+                stage: 'initial',
+                threadId: `tasklist-agent:conversation-coordinator-test:${runId}`,
+            })
+        )
+    })
+
+    it('resume 时 LangSmith observer failure soft fail，不影响 AgentRun status 和 stream', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
+        const runId = started.run!.runId
+        const { options, writtenChunks } = createResumeOptions(agentRunService, runId, { type: 'approve' }, validTasklist)
+        const resumed = await resumeVersionPlanTasklistAgentRun({
+            ...options,
+            langSmithObserver: createThrowingLangSmithObserver(),
+        })
+
+        expect(resumed.graphResult.status).toBe('completed')
+        expect(agentRunService.markCompleted).toHaveBeenCalledWith(runId, 'final')
+        expect(agentRunService.markFailed).not.toHaveBeenCalled()
+        expect(writtenChunks[0]).toMatchObject({
+            assistantMessageId: 'assistant-coordinator-test',
+            runId,
+            type: 'agent-resume',
+        })
     })
 })

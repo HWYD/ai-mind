@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.3：Spec Kit Full Skills Default Entry，引入 official Spec Kit full skills 作为 Level C / D 默认入口；最新业务运行时能力仍以 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP 为 baseline。
+> v0.3.4：Tasklist Agent LangSmith Observability Integration，在 v0.3.0 HITL checkpoint resume baseline 上为 `/tasklist + @docs://versions/*.md` 增加可选 LangSmith lifecycle tracing。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.3`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.4`。
 
 已经验证：
 
@@ -209,6 +209,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Tasklist Agent Graph Runtime 单路线。
 - Tasklist Agent GraphState 单事实源收口。
 - Tasklist Agent HITL Checkpoint Resume MVP。
+- Tasklist Agent LangSmith lifecycle observability。
 - Spec Kit Governance Baseline。
 - Spec Kit CLI + Codex Skills Dual-track Pilot。
 - Spec Kit Full Skills Default Entry。
@@ -246,23 +247,23 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.3
+## 当前版本：v0.3.4
 
-这版的主线是 Spec Kit Full Skills Default Entry：在 v0.3.2 已验证 CLI + Codex skills 双轨可行的基础上，把 official Spec Kit full skills 引入仓库，并作为 Level C / D 复杂变更的默认入口。
+这版的主线是 Tasklist Agent LangSmith Observability Integration：在 v0.3.0 已落地的 HITL checkpoint resume baseline 上，为 `/tasklist + @docs://versions/*.md` 增加可选 LangSmith lifecycle tracing。
 
-v0.3.3 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、数据库 schema、PostgresSaver、stream 协议、API route 或前端 reducer。
+v0.3.4 不修改 Tasklist Graph 拓扑、HITL decision contract、Prisma schema、PostgresSaver checkpoint schema、stream 协议或前端 reducer。它只在 Tasklist Agent coordinator / runner 边界记录脱敏 metadata，让 initial run、HITL interrupt、human decision、resume、final / blocked / rejected / failed 等状态能在 LangSmith 中被关联排查。
 
-本版完成的治理收口包括：
+本版完成的观测收口包括：
 
-- `.agents/skills/speckit-*` 命名空间收口为 official Spec Kit full skills。
-- official baseline 固定到 `github/spec-kit@v0.11.9` / `specify-cli 0.11.9`。
-- v0.3.2 lightweight pilot skills 不再 shadow official `speckit-*`。
-- AI Mind 项目约束迁移到 constitution、ADR、architecture docs、template overrides 和 AGENTS。
-- `speckit-converge` 进入 Level C / D 收口检查。
-- `speckit-taskstoissues` 暂时保持 optional，不进入默认主流程。
-- Level A / B 仍保持轻量，不强制 full skills。
+- 新增 Tasklist Agent 专用 LangSmith config resolver、metadata allowlist 和 observer adapter。
+- 采用官方 LangSmith env：`LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT`，不新增 `AI_MIND_LANGSMITH_ENABLED` 双开关。
+- enabled 条件为 `LANGSMITH_TRACING=true` 且 `LANGSMITH_API_KEY` 非空；关闭、缺少 Key 或 LangSmith 上报失败时，Tasklist Agent 主流程保持不受影响。
+- initial run metadata 记录 `runId`、`threadId`、`assistantMessageId`、`agentVersion`、`graphVersion`、`versionPlanUri`、`modelId`、`provider`、`reasoningEnabled` 和运行环境。
+- HITL metadata 只记录 interrupt / decision 类型、review round、strategy regeneration 次数、draft revision 和 validation 计数，不上传完整用户反馈或 tasklist markdown。
+- result metadata 记录 run status、result status、artifact 是否生成、耗时和脱敏 failure 信息。
+- LangSmith 只作为外部观测层，不是 AgentRun / AgentInterrupt / checkpoint / stream 的业务事实源。
 
-最新业务运行时 baseline 仍是 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP：
+当前业务运行时 baseline 仍是 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP：
 
 - Strategy Review 必停，支持 `approve / edit / reject / respond`。
 - Tasklist Revision Review 只在 `warningDisposition.fixNow.length > 0` 时触发。
@@ -276,7 +277,7 @@ v0.3.3 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、�
 
 v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停、跨版本 checkpoint resume、多 Agent 编排或自动写 docs 文件。
 
-详细设计见 [v0.3.3 full skills 默认入口说明](./docs/versions/v0.3.3-spec-kit-full-skills-default-entry.md)、[v0.3.2 双轨 pilot 说明](./docs/versions/v0.3.2-spec-kit-cli-codex-skills-dual-track-pilot.md)、[v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
+详细设计见 [v0.3.4 LangSmith 观测说明](./docs/versions/v0.3.4-tasklist-agent-langsmith-observability.md)、[v0.3.3 full skills 默认入口说明](./docs/versions/v0.3.3-spec-kit-full-skills-default-entry.md)、[v0.3.2 双轨 pilot 说明](./docs/versions/v0.3.2-spec-kit-cli-codex-skills-dual-track-pilot.md)、[v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
 
 ## 当前能力
 
@@ -614,6 +615,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                 |
 | v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                     |
 | v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                          |
+| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail        |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -647,6 +649,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Spec Kit Governance Baseline
 - [x] Spec Kit CLI + Codex Skills Dual-track Pilot
 - [x] Spec Kit Full Skills Default Entry
+- [x] Tasklist Agent LangSmith Observability
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

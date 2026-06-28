@@ -14,6 +14,14 @@ import {
     type RunVersionPlanTasklistGraphResult,
 } from './graph/run-version-plan-tasklist-graph'
 import type { TasklistAgentModelSet } from './model/tasklist-agent-model-set'
+import {
+    buildTasklistLangSmithHitlMetadata,
+    buildTasklistLangSmithHitlMetadataFromInterruptPayload,
+    createInitialTasklistLangSmithRunInput,
+    createTasklistLangSmithObserver,
+    extractTasklistLangSmithDecisionType,
+    type TasklistLangSmithObserver,
+} from './observability'
 
 export interface StartVersionPlanTasklistAgentRunOptions {
     assistantMessageId: string
@@ -21,6 +29,7 @@ export interface StartVersionPlanTasklistAgentRunOptions {
     conversationId: string
     models: TasklistAgentModelSet
     modelId: string
+    modelProvider?: string
     reasoningEnabled: boolean
     runId?: string
     runtimeConfig: TasklistAgentRuntimeConfig
@@ -29,6 +38,7 @@ export interface StartVersionPlanTasklistAgentRunOptions {
     versionPlanReference: ChatComposerReference
     writeChunk: WriteChunk
     agentRunService?: AgentRunCoordinatorService
+    langSmithObserver?: TasklistLangSmithObserver
 }
 
 export interface ResumeVersionPlanTasklistAgentRunOptions {
@@ -43,6 +53,7 @@ export interface ResumeVersionPlanTasklistAgentRunOptions {
     userGoal: string
     writeChunk: WriteChunk
     agentRunService?: AgentRunCoordinatorService
+    langSmithObserver?: TasklistLangSmithObserver
 }
 
 export interface VersionPlanTasklistAgentRunCoordinatorResult {
@@ -88,14 +99,25 @@ interface AgentRunCoordinatorService {
     markRejected(runId: string): Promise<unknown>
 }
 
+async function observeTasklistLangSmith(action: () => Promise<void>) {
+    try {
+        await action()
+    } catch {
+        // LangSmith 只是外部观测层；observer 实现异常不得影响 AgentRun / checkpoint / stream 主流程。
+    }
+}
+
 async function persistGraphResult(options: {
     agentRunService: AgentRunCoordinatorService
     assistantMessageId: string
+    durationMs: number
     graphResult: RunVersionPlanTasklistGraphResult
+    langSmithObserver: TasklistLangSmithObserver
     runId: string
+    stage: 'initial' | 'resume'
     writeChunk: WriteChunk
 }) {
-    const { agentRunService, graphResult, runId, writeChunk } = options
+    const { agentRunService, graphResult, langSmithObserver, runId, writeChunk } = options
 
     switch (graphResult.status) {
         case 'interrupted': {
@@ -114,16 +136,64 @@ async function persistGraphResult(options: {
                 threadId: interrupt.threadId,
                 type: 'agent-interrupt',
             })
+            await observeTasklistLangSmith(() =>
+                langSmithObserver.observeInterrupt({
+                    assistantMessageId: options.assistantMessageId,
+                    metadata: buildTasklistLangSmithHitlMetadataFromInterruptPayload({
+                        interruptId: interrupt.interruptId,
+                        payload: graphResult.interrupt.payload,
+                    }),
+                    runId,
+                    threadId: interrupt.threadId,
+                })
+            )
             break
         }
         case 'completed':
             await agentRunService.markCompleted(runId, graphResult.resultStatus)
+            await observeTasklistLangSmith(() =>
+                langSmithObserver.observeResult({
+                    artifactGenerated: graphResult.resultStatus !== 'blocked',
+                    assistantMessageId: options.assistantMessageId,
+                    durationMs: options.durationMs,
+                    resultStatus: graphResult.resultStatus,
+                    runId,
+                    runStatus: 'completed',
+                    stage: options.stage,
+                    threadId: graphResult.graphState.threadId,
+                })
+            )
             break
         case 'rejected':
             await agentRunService.markRejected(runId)
+            await observeTasklistLangSmith(() =>
+                langSmithObserver.observeResult({
+                    artifactGenerated: false,
+                    assistantMessageId: options.assistantMessageId,
+                    durationMs: options.durationMs,
+                    resultStatus: 'rejected',
+                    runId,
+                    runStatus: 'rejected',
+                    stage: options.stage,
+                    threadId: graphResult.graphState.threadId,
+                })
+            )
             break
         case 'failed':
             await agentRunService.markFailed(runId, graphResult.failureCode, graphResult.failureMessage)
+            await observeTasklistLangSmith(() =>
+                langSmithObserver.observeResult({
+                    artifactGenerated: false,
+                    assistantMessageId: options.assistantMessageId,
+                    durationMs: options.durationMs,
+                    failureCode: graphResult.failureCode,
+                    failureMessage: graphResult.failureMessage,
+                    runId,
+                    runStatus: 'failed',
+                    stage: options.stage,
+                    threadId: graphResult.graphState.threadId,
+                })
+            )
             break
     }
 }
@@ -132,6 +202,7 @@ export async function startVersionPlanTasklistAgentRun(
     options: StartVersionPlanTasklistAgentRunOptions
 ): Promise<VersionPlanTasklistAgentRunCoordinatorResult> {
     const agentRunService = options.agentRunService ?? new AgentRunService()
+    const langSmithObserver = options.langSmithObserver ?? createTasklistLangSmithObserver()
     const runId = options.runId ?? createId()
     const threadId = buildVersionPlanTasklistGraphThreadId({
         conversationId: options.conversationId,
@@ -148,6 +219,20 @@ export async function startVersionPlanTasklistAgentRun(
         userGoalSummary: options.userGoal,
         versionPlanUri: options.versionPlanReference.uri,
     })
+    await observeTasklistLangSmith(() =>
+        langSmithObserver.observeInitialRun(
+            createInitialTasklistLangSmithRunInput({
+                assistantMessageId: options.assistantMessageId,
+                modelId: options.modelId,
+                provider: options.modelProvider,
+                reasoningEnabled: options.reasoningEnabled,
+                runId,
+                threadId,
+                versionPlanUri: options.versionPlanReference.uri,
+            })
+        )
+    )
+    const startedAt = Date.now()
 
     try {
         const graphResult = await runInitialVersionPlanTasklistGraph({
@@ -166,8 +251,11 @@ export async function startVersionPlanTasklistAgentRun(
         await persistGraphResult({
             agentRunService,
             assistantMessageId: options.assistantMessageId,
+            durationMs: Date.now() - startedAt,
             graphResult,
+            langSmithObserver,
             runId,
+            stage: 'initial',
             writeChunk: options.writeChunk,
         })
 
@@ -181,6 +269,19 @@ export async function startVersionPlanTasklistAgentRun(
             'TASKLIST_AGENT_RUN_FAILED',
             error instanceof Error ? error.message : 'Tasklist Agent run failed.'
         )
+        await observeTasklistLangSmith(() =>
+            langSmithObserver.observeResult({
+                artifactGenerated: false,
+                assistantMessageId: options.assistantMessageId,
+                durationMs: Date.now() - startedAt,
+                failureCode: 'TASKLIST_AGENT_RUN_FAILED',
+                failureMessage: error instanceof Error ? error.message : 'Tasklist Agent run failed.',
+                runId,
+                runStatus: 'failed',
+                stage: 'initial',
+                threadId,
+            })
+        )
         throw error
     }
 }
@@ -189,6 +290,7 @@ export async function resumeVersionPlanTasklistAgentRun(
     options: ResumeVersionPlanTasklistAgentRunOptions
 ): Promise<VersionPlanTasklistAgentRunCoordinatorResult> {
     const agentRunService = options.agentRunService ?? new AgentRunService()
+    const langSmithObserver = options.langSmithObserver ?? createTasklistLangSmithObserver()
     const resume =
         options.preparedResume ??
         (await agentRunService.beginResume({
@@ -197,8 +299,23 @@ export async function resumeVersionPlanTasklistAgentRun(
             runId: options.runId,
             sessionId: options.sessionId,
         }))
+    const decisionType = extractTasklistLangSmithDecisionType(resume.decision)
+    const hitlMetadata = buildTasklistLangSmithHitlMetadata({
+        decisionType,
+        interruptId: resume.interrupt.interruptId,
+        interruptKind: resume.interrupt.interruptKind,
+    })
+    const startedAt = Date.now()
 
     try {
+        await observeTasklistLangSmith(() =>
+            langSmithObserver.observeHumanDecision({
+                assistantMessageId: resume.run.assistantMessageId,
+                metadata: hitlMetadata,
+                runId: options.runId,
+                threadId: resume.threadId,
+            })
+        )
         options.writeChunk({
             agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
             assistantMessageId: resume.run.assistantMessageId,
@@ -207,6 +324,14 @@ export async function resumeVersionPlanTasklistAgentRun(
             threadId: resume.threadId,
             type: 'agent-resume',
         })
+        await observeTasklistLangSmith(() =>
+            langSmithObserver.observeResume({
+                assistantMessageId: resume.run.assistantMessageId,
+                metadata: hitlMetadata,
+                runId: options.runId,
+                threadId: resume.threadId,
+            })
+        )
 
         const graphResult = await resumeVersionPlanTasklistGraph({
             context: options.context,
@@ -222,8 +347,11 @@ export async function resumeVersionPlanTasklistAgentRun(
         await persistGraphResult({
             agentRunService,
             assistantMessageId: resume.run.assistantMessageId,
+            durationMs: Date.now() - startedAt,
             graphResult,
+            langSmithObserver,
             runId: options.runId,
+            stage: 'resume',
             writeChunk: options.writeChunk,
         })
 
@@ -236,6 +364,19 @@ export async function resumeVersionPlanTasklistAgentRun(
             options.runId,
             'TASKLIST_AGENT_RESUME_FAILED',
             error instanceof Error ? error.message : 'Tasklist Agent resume failed.'
+        )
+        await observeTasklistLangSmith(() =>
+            langSmithObserver.observeResult({
+                artifactGenerated: false,
+                assistantMessageId: resume.run.assistantMessageId,
+                durationMs: Date.now() - startedAt,
+                failureCode: 'TASKLIST_AGENT_RESUME_FAILED',
+                failureMessage: error instanceof Error ? error.message : 'Tasklist Agent resume failed.',
+                runId: options.runId,
+                runStatus: 'failed',
+                stage: 'resume',
+                threadId: resume.threadId,
+            })
         )
         throw error
     }

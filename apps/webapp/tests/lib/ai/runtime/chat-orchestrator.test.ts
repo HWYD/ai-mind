@@ -333,7 +333,7 @@ describe('runtime/chat-orchestrator', () => {
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('Tasklist Graph Runtime 不影响普通问答主链路', async () => {
+    it('Tasklist Graph Runtime / LangSmith observer 不影响普通问答主链路', async () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
         const writtenChunks: Array<{ type: string; scope?: string }> = []

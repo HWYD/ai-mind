@@ -448,6 +448,7 @@ export class ChatOrchestrator {
             context: this.context,
             conversationId: this.request.conversationId,
             modelId: this.context.resolvedModelSelection.modelId,
+            modelProvider: this.context.resolvedModelSelection.provider,
             models,
             reasoningEnabled: this.shouldEmitReasoning(),
             runId: skeletonResult.runId,

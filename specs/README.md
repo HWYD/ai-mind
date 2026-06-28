@@ -140,6 +140,18 @@ specs/<version-topic>/
 - `converge` 如何进入版本收口检查
 - 为什么 `taskstoissues` 暂时只是 optional
 
+### 034 Tasklist Agent LangSmith Observability Integration
+
+目录：[034-tasklist-agent-langsmith-observability](./034-tasklist-agent-langsmith-observability)
+
+回答的问题：
+
+- v0.3.4 为什么只为 Tasklist Agent 接入 LangSmith observability
+- LangSmith tracing 如何覆盖 initial run、HITL interrupt、human decision、resume 和 result
+- 为什么使用官方 LangSmith env 而不新增 AI Mind 双开关
+- 哪些 metadata 允许上传，哪些 runtime / prompt / user content 必须禁止上传
+- 为什么本版本不修改 Graph topology、HITL contract、Prisma schema、stream protocol 或 frontend reducer
+
 ## 后续新增规格时的约定
 
 - 用版本号前缀保持排序稳定，例如 `032-...`
