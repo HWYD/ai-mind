@@ -9,10 +9,12 @@
 第一次了解项目时，建议按下面顺序阅读：
 
 1. 先看根 [README](../README.md)，了解项目定位、当前状态和 Roadmap。
-2. 再看 [Architecture](./architecture)，理解长期架构边界和核心分层。
-3. 如果想了解某个版本为什么这样设计，看 [Versions](./versions)。
-4. 如果只想快速了解每个版本交付了什么，看 [Releases](./releases)。
-5. 如果想看公开版任务拆分和验收范围，看 [Tasklists](./tasklists)。
+2. 如果要让 Codex 或其他 AI coding agent 改代码，先看 [Constitution](../.specify/memory/constitution.md) 和 [AI Coding Workflow](./architecture/ai-coding-workflow.md)。
+3. 再看 [Architecture](./architecture)，理解长期架构边界和核心分层。
+4. 如果想了解某个版本为什么这样设计，看 [Versions](./versions)。
+5. 如果只想快速了解每个版本交付了什么，看 [Releases](./releases)。
+6. 如果想看公开版任务拆分和验收范围，看 [Tasklists](./tasklists)。
+7. 如果要检查长期架构决策，看 [ADR](./adr)。
 
 ## 目录说明
 
@@ -21,6 +23,14 @@
 [Architecture](./architecture) 存放跨版本长期成立的架构说明。
 
 这里关注的是稳定边界，例如 runtime boundary、stream-core、capability / skill surface、controlled agent runtime 等内容。
+
+### ADR
+
+[ADR](./adr) 记录长期架构决策，例如 GraphState 单事实源、AgentRun 与 checkpoint 职责分离、stream-core 向后兼容等。
+
+### Specs
+
+[Specs](../specs) 存放面向 AI coding agent 的版本级规格，包含 spec、plan、tasks、acceptance 和 decisions。
 
 ### Versions
 
@@ -46,4 +56,6 @@
 - 根 `README.md` 负责当前状态和版本路线。
 - 版本细节放在 `versions / releases / tasklists` 中。
 - 长期架构边界放在 `architecture` 中。
+- 长期架构决策放在 `adr` 中。
+- AI coding 执行规格放在根目录 `specs` 中。
 - 文档内容以真实实现和已完成验证为准，不把计划项写成已完成能力。

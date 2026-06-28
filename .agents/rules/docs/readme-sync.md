@@ -27,13 +27,13 @@ README 的第一目标读者包括：
 
 ## 更新时机
 
-每次版本功能基本完成，并完成内部版本资产收口后，都必须检查根 `README.md` 是否需要同步。
+每次版本功能基本完成，并完成 specs、ADR、architecture docs 和公开版本资产收口后，都必须检查根 `README.md` 是否需要同步。
 
 推荐顺序：
 
 1. 完成功能实现与最小验证。
-2. 同步内部版本资产：plan、tasklist、runtime note、release note、blog material。
-3. 同步公开 `docs/`。
+2. 同步 `specs/`、ADR、architecture docs。
+3. 同步公开 `docs/versions`、`docs/releases`、`docs/tasklists`。
 4. 更新根 `README.md`。
 5. 做公开化和重复模块检查。
 
@@ -142,7 +142,7 @@ README 应保留核心设计说明，至少覆盖：
 - 本版本主线。
 - 已经完成的核心能力。
 - 当前仍然明确不做的边界。
-- package version 与内部当前版本配置。
+- package version；如果本地维护内部当前版本配置，也需要同步。
 
 要求：
 
@@ -159,12 +159,12 @@ README 应保留核心设计说明，至少覆盖：
 - 根 `package.json`
 - `apps/*/package.json`
 - `packages/*/package.json`
-- `private-folder/agent-config/project-agent-config.yaml` 的 `current_version`
+- `private-folder/agent-config/project-agent-config.yaml` 的 `current_version`（如果本地维护该配置）
 
 同步规则：
 
 - 文档、release、runtime note、README 中使用 `vX.Y.Z`。
-- `project-agent-config.yaml` 的 `current_version` 使用 `vX.Y.Z`。
+- 如果本地维护 `project-agent-config.yaml`，其 `current_version` 使用 `vX.Y.Z`。
 - `package.json` 的 `version` 使用不带 `v` 的 `X.Y.Z`。
 - 未进入正式版本收口时，不提前 bump package version。
 - 历史文档、历史 fixture、mock 样例数据和明确描述旧版本能力的代码注释，不因为当前版本收口而批量改写。
@@ -329,6 +329,6 @@ README 应保留问答式设计说明，面向技术读者和技术面试官。
 - 是否没有 HelpKnow.ai、个人简历、用户数、Star 数等与项目无关或不可验证信息。
 - Roadmap 是否没有把计划项写成完成项。
 - 当前状态是否与最新 release / docs / 代码实现一致。
-- package versions 和 `project-agent-config.yaml` current_version 是否与当前版本一致。
+- package versions 是否与当前版本一致；如果本地维护 `project-agent-config.yaml`，其 current_version 是否同步。
 - 示例问题是否能被当前实现稳定触发。
 - docs / release / README 中的当前版本、能力边界和验证命令是否一致。

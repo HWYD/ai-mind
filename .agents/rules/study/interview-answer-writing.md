@@ -8,7 +8,7 @@
 
 - 默认只更新 `study-2026-04-26-ai-mind-interview-answer-key.md`。
 - 不默认修改 `study-2026-04-26-ai-mind-interview-question-bank.md`，除非用户明确要求新增题目、调整题目或同步题库结构。
-- 如果新增新版本题目，先基于最新 plan、tasklist、release、README、docs 和真实代码实现判断，不凭空编造。
+- 如果新增新版本题目，先基于最新 specs、ADR、architecture docs、release、README、docs 和真实代码实现判断；只有用户明确要求回看草稿时才参考 `private-folder/`。
 
 ## 答案结构
 

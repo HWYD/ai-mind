@@ -4,6 +4,8 @@
 
 - `.agents/rules/blog/writing.md`
 - `.agents/rules/blog/review-checklist.md`
+- 当前版本对应的 `specs/`
+- 相关 `docs/adr/`、`docs/architecture/`、`docs/versions/`、`docs/releases/`
 
 ## 一、写作目标
 
@@ -12,7 +14,7 @@
 整体风格要求：
 
 - 参考技术博客网站“稀土掘金”常见文章风格：标题明确、开头抓人、结构清楚、强调问题背景、方案设计、关键实现、经验总结。
-- 参考项目目录 `private-folder/blogs` 下以往博客的写法，保持“版本演进记录 + 架构思路拆解 + 关键代码说明 + 工程经验总结”的表达方式。
+- 如用户明确要求，可参考 `private-folder/blogs` 下的历史博客风格；不要把 `private-folder/` 草稿内容当作当前实现事实源。
 - 文风自然、专业、有个人思考，避免空话、套话、营销腔。
 - 不要写成产品宣传稿，要写成真实的工程实践总结。
 

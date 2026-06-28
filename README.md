@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.0：Tasklist Agent 引入 HITL Checkpoint Resume MVP，支持 Strategy 必审、修订前条件式人工授权、PostgreSQL AgentRun 与 LangGraph durable checkpoint resume。
+> v0.3.1：Spec Kit Governance Baseline，沉淀 constitution、spec、ADR、AI coding workflow 和 PR checklist；最新业务运行时能力仍以 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP 为 baseline。
 
 ## 项目解决的问题
 
@@ -50,6 +50,7 @@ AI Mind 的定位仍然更小：它是一个 AI Native Runtime Skeleton，用来
 - 想快速了解项目定位：阅读“项目解决的问题”和“项目定位与边界”。
 - 想理解架构：阅读“架构总览”和“核心设计”。
 - 想了解版本演进：阅读“版本演进”和 [docs/versions](./docs/versions)。
+- 想参与开发或让 Codex 改代码：阅读“开发治理入口”。
 - 想运行项目：阅读“开发”和“常用验证”。
 - 想了解持续输出：阅读“系列博客”。
 
@@ -178,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.0`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.1`。
 
 已经验证：
 
@@ -208,6 +209,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Tasklist Agent Graph Runtime 单路线。
 - Tasklist Agent GraphState 单事实源收口。
 - Tasklist Agent HITL Checkpoint Resume MVP。
+- Spec Kit Governance Baseline。
 
 当前非目标：
 
@@ -232,9 +234,23 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 5. [Releases](./docs/releases)：版本发布说明。
 6. [Tasklists](./docs/tasklists)：公开任务清单。
 
-## 当前版本：v0.3.0
+### 开发治理入口
 
-这版的主线是 Tasklist Agent HITL Checkpoint Resume MVP：在 v0.2.4 GraphState 单事实源基础上，让受控 `/tasklist + @docs://versions/*.md` 能在业务审核点暂停，并在用户决策后基于 durable checkpoint 从同一 thread 恢复。
+后续版本开发和 AI coding 执行优先阅读：
+
+- [Constitution](./.specify/memory/constitution.md)：AI Mind 长期工程原则。
+- [AI Coding Workflow](./docs/architecture/ai-coding-workflow.md)：Change Level、Codex 执行规则和 release closing checklist。
+- [Spec-driven Development](./docs/architecture/spec-driven-development.md)：spec / plan / tasks / acceptance / decisions 的使用方式。
+- [ADR](./docs/adr)：长期架构决策。
+- [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
+
+## 当前版本：v0.3.1
+
+这版的主线是 Spec Kit Governance Baseline：把 v0.3.0 后已经验证过的工程纪律沉淀为 constitution、specs、ADR、AI coding workflow 和 PR checklist。
+
+v0.3.1 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、数据库 schema、PostgresSaver、stream 协议、API route 或前端 reducer。
+
+最新业务运行时 baseline 仍是 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP：
 
 - Strategy Review 必停，支持 `approve / edit / reject / respond`。
 - Tasklist Revision Review 只在 `warningDisposition.fixNow.length > 0` 时触发。
@@ -248,7 +264,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停、跨版本 checkpoint resume、多 Agent 编排或自动写 docs 文件。
 
-详细设计见 [v0.3.0 版本说明](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
+详细设计见 [v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
 
 ## 当前能力
 
@@ -583,6 +599,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                             |
 | v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                   |
 | v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                 |
+| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                 |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -613,6 +630,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Tasklist Agent Graph Runtime 单路线
 - [x] Tasklist Agent GraphState 单事实源收口
 - [x] Tasklist Agent HITL Checkpoint Resume MVP
+- [x] Spec Kit Governance Baseline
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

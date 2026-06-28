@@ -1,6 +1,6 @@
 # 受控 Agent Runtime
 
-## Summary
+## 摘要
 
 AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 
@@ -10,7 +10,9 @@ AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 
 `v0.1.1` 在这条路径上加入 `Controlled Planner Lite`：Agent 可以在 Runtime 白名单 action 中做一次有限决策，但仍然不能自由读取资源、自由调用工具、写入文件或循环规划。
 
-`v0.2.0` 将这条受控路径的编排层迁移到 LangGraph `StateGraph`。Graph runner 只表达节点、条件边和状态摘要，不扩大 Agent 权限；legacy runner 仍可通过服务端配置回退。
+`v0.2.0` 将这条受控路径的编排层迁移到 LangGraph `StateGraph`。`v0.2.3` 后 `/tasklist + @docs://versions/*.md` 固定走 Graph Runtime，不再保留 legacy runner 或 runtime switch。
+
+`v0.2.4` 后，Tasklist Agent 内部运行态以 GraphState 作为事实源。`v0.3.0` 在这条受控 graph 上新增 Strategy Review、Tasklist Revision Review、AgentRun 业务状态和 LangGraph Postgres checkpoint resume。
 
 ## Agent 的边界
 
@@ -40,10 +42,14 @@ read_resource
   -> planning_decision
   -> optional read_optional_context
   -> decide_tasklist_strategy
+  -> strategy_review interrupt
   -> draft_tasklist v1
   -> validate_tasklist_structure
   -> decide_warning_disposition
+  -> optional tasklist_revision_review interrupt
   -> optional revise_tasklist v2
+  -> optional validate_tasklist_structure
+  -> optional revise_tasklist v3
   -> optional validate_tasklist_structure
   -> evaluate_revision_effect
   -> final_answer
@@ -63,16 +69,13 @@ Runtime 负责：
 - 执行结构质量门。
 - 输出最终回答。
 
-`v0.2.0` 后，Runtime 可以在请求开始前选择：
+`v0.2.3` 后，Tasklist Agent 固定使用 LangGraph `StateGraph` runner。
 
-- `legacy`：使用原受控 runner。
-- `graph`：使用 LangGraph `StateGraph` runner。
+这个固定路线只影响 tasklist Agent，不影响普通问答、docs summary、Tool Calling、Reader Skill 或 Utility Skill。项目不提供前端 runtime switch，也不做运行中 fallback。
 
-这个选择只影响 tasklist Agent，不影响普通问答、docs summary、Tool Calling、Reader Skill 或 Utility Skill。本版不提供前端 runtime switch，也不做运行中 fallback。
+## GraphState
 
-## Agent State
-
-`AgentState` 只保存本轮执行状态。
+GraphState 是 Tasklist Agent 内部运行态事实源。
 
 当前保存的信息包括：
 
@@ -84,19 +87,24 @@ Runtime 负责：
 - optional context 读取摘要。
 - `tasklistDraft v1`。
 - `tasklistDraft v2`。
+- `tasklistDraft v3`。
 - 结构校验结果。
 - `WarningDisposition`。
 - `RevisionEffectResult`。
 - 自动修正次数。
+- HITL review decision。
+- graph route / patch summary。
 
 当前不做：
 
-- 持久化 AgentState。
+- 重新引入旧 AgentState adapter。
+- 双状态模型。
+- 在 GraphState 中保存数据库 client、request、writer、raw Error、raw checkpoint、API Key、session cookie、AgentRun 数据库整行或 AgentInterrupt 数据库整行。
 - Agent Trace 数据库。
 - 跨轮记忆。
 - 自动写文件。
 
-GraphState 只包裹 graph runner 需要的运行时信息，例如当前节点、已访问节点、最近 route、threadId、checkpointMode 和脱敏 patch summary。`AgentState` 仍然是业务事实源。
+Graph nodes 直接读取 GraphState 分区并返回 GraphState patch。业务 run 状态由 `AgentRun` / `AgentInterrupt` 管理，LangGraph checkpoint 状态由 PostgresSaver 管理，二者不能混成同一层。
 
 ## Tool Boundary
 
@@ -152,7 +160,7 @@ Agent 执行过程通过流式 step 事件展示：
 - 修正是否有效。
 - 最终是否输出结果。
 
-面板只展示摘要，不展示完整 action JSON、prompt、AgentState、GraphState、resource 原文、tool raw output 或 draft diff。项目不直接透传 LangGraph 原始 debug stream。
+面板只展示摘要，不展示完整 action JSON、prompt、完整 GraphState、raw checkpoint、resource 原文、tool raw output 或 draft diff。项目不直接透传 LangGraph 原始 debug stream。
 
 ## Agent Text Artifact
 
@@ -171,23 +179,26 @@ Runtime 会在 `final_answer` 阶段输出通用 text artifact：
 - 过程归 `AgentTracePanel`，产物归 `AgentTextArtifactPanel`。
 - Artifact 只是最终交付展示，不提供持久化、编辑、下载或 diff。
 
-## Checkpoint 与 Debug
+## Checkpoint、Resume 与 Debug
 
-`v0.2.0` 支持 development-only memory checkpoint：
+`v0.2.0` 支持 development-only memory checkpoint，用于验证 LangGraph checkpointer 接入方式。
 
-- 只在 graph runtime 下生效。
-- 只在非 production 环境中生效。
-- 默认关闭。
+`v0.3.0` 后，Tasklist Agent 在受控 HITL 路径中接入 LangGraph PostgresSaver durable checkpoint：
 
-它用于验证 LangGraph checkpointer 接入方式，不是产品级 resume / replay 能力。
+- PostgreSQL durable checkpoint 只服务 `/tasklist + @docs://versions/*.md` 的 resume。
+- `AgentRun` / `AgentInterrupt` 记录业务状态。
+- PostgresSaver 记录 LangGraph checkpoint。
+- Prisma schema 不管理 checkpoint tables。
+- resume 使用同一个 `threadId`。
+- duplicate resume 和 version mismatch 都 fail closed。
 
 Debug Summary 也默认关闭，只在服务端开启后输出白名单字段，例如 runId、threadId、当前节点、最近 route、readiness status、validation status / score 和 step limits。
 
 当前仍然不做：
 
-- production checkpoint。
-- resume。
-- replay。
+- pending HITL refresh recovery。
+- Run History。
+- replay / Time Travel。
 - state edit。
 - history list。
 - 完整 GraphState 调试台。

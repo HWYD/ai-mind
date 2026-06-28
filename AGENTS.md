@@ -23,28 +23,31 @@
 涉及版本实现、架构边界或阶段验收时，按下面顺序判断事实：
 
 1. 用户明确指定的版本、Step、文件或验收要求
-2. 对应版本的 `private-folder/tasklists/`
-3. 对应版本的 `private-folder/plans/`
-4. 当前代码、测试与运行脚本
-5. `private-folder/runtime/`、`private-folder/releases/`、`private-folder/architecture/`
-6. `README.md` 与 `docs/`
+2. 当前代码、测试与运行脚本
+3. `.specify/memory/constitution.md`
+4. 当前 feature / version 对应的 `specs/`
+5. `docs/adr/` 与 `docs/architecture/`
+6. `README.md`、`docs/versions/`、`docs/releases/`、`docs/tasklists/`
+7. `private-folder/` 仅在用户明确要求、或需要回看草稿 / 历史过程 / 个人内部材料时读取
 
 说明：
 
-- `docs/` 是公开展示文档，不是默认开发事实源。
-- `private-folder/plans/archive/` 默认视为历史材料，除非任务明确要求回看演进过程。
-- `project-agent-config.yaml` 的 `current_version` 表示最近收口版本，不等于当前一定正在开发的版本。
-- tasklist 的 `[x]` 是开发记录，不单独构成完成证据；仍要看实现、测试和实际 diff。
+- `specs/` 是 Level C / Level D 变更的正式 AI coding 工作区，承接 spec / plan / tasks / acceptance / decisions。
+- `docs/adr/` 和 `docs/architecture/` 是长期架构约束区，不只是展示文档。
+- `docs/versions/`、`docs/releases/`、`docs/tasklists/` 是公开展示区，不是默认开发任务源。
+- `private-folder/` 是草稿、历史、个人内部材料和博客 / 面试素材区，不是默认开发事实源。
+- 如果本地维护 `project-agent-config.yaml`，其中的 `current_version` 表示最近收口版本，不等于当前一定正在开发的版本。
+- tasklist 的 `[x]` 是开发记录，不单独构成完成证据；仍要看 spec、实现、测试和实际 diff。
 
 ## 开始大改前先读什么
 
 如果任务涉及版本规划、架构调整、运行时改动或能力扩展，先读：
 
+- `.specify/memory/constitution.md`
+- 当前版本或能力对应的 `specs/`
 - `README.md`
-- 对应版本的 `private-folder/plans/` 和 `private-folder/tasklists/`
-- 如果改动涉及运行时，读 `private-folder/runtime/`
-- 如果是已完成版本的延续工作，读 `private-folder/releases/`
-- 如果是跨版本长期结构问题，读 `private-folder/architecture/`
+- 如果是架构决策或跨边界改动，读 `docs/adr/` 和 `docs/architecture/ai-coding-workflow.md`
+- 如果用户明确要求回看草稿、历史过程、博客素材或个人内部材料，再读 `private-folder/`
 
 原则：
 
@@ -70,7 +73,11 @@
 
 - `apps/webapp/`：前端、API route、Provider Runtime、模型选择、流式展示。
 - `packages/stream-core/`：流式协议、错误码、构建与兼容性。
-- `private-folder/`：plan、tasklist、runtime note、release note、版本资产收口。
+- `specs/`：正式 AI coding 规格工作区，保存复杂版本的 spec / plan / tasks / acceptance / decisions。
+- `.specify/`：Spec Kit 风格项目治理记忆，当前保存 constitution。
+- `docs/adr/` 与 `docs/architecture/`：长期架构决策和当前架构事实。
+- `docs/versions/`、`docs/releases/`、`docs/tasklists/`：公开展示文档。
+- `private-folder/`：草稿、历史、个人内部材料、博客素材和面试素材；默认不作为正式开发事实源。
 - `private-folder/study/`：面试材料与答题卡约束。
 - `docs/`：公开文档同步与公开化清理。
 
@@ -80,13 +87,20 @@
 
 版本级任务按下面流程推进：
 
-1. 阅读对应版本的 plan 和 tasklist，确认目标、非目标、当前 Step 与验收边界。
-2. 只实现当前 Step 所需的最小改动，并验证普通问答、状态洁净及相关旧链路不退化。
-3. 改动影响版本定位、能力边界或对外理解时，同步对应版本资产。
-4. 版本功能和内部资产收口后，检查根 `README.md` 是否仍与真实实现一致。
-5. 正式版本收口时同步 package version 与 `project-agent-config.yaml` 的 `current_version`。
+1. 阅读 constitution 和对应版本 `specs/`，确认目标、非目标、当前 task 与验收边界。
+2. 对 Level C / Level D 变更，把 Spec Kit clarify / checklist / analyze 纳入正式流程；Codex skills 可用 `$speckit-clarify`、`$speckit-checklist`、`$speckit-analyze`，支持 slash command 的 agent 可用 `/speckit.*`，如果本地没有对应 tooling，则做人工等价澄清、质量清单和一致性分析，并在 PR 或交付说明中记录。
+3. 只实现当前 Step 所需的最小改动，并验证普通问答、状态洁净及相关旧链路不退化。
+4. 改动影响版本定位、能力边界、协议、数据库、GraphState、API 或对外理解时，同步 specs、ADR、architecture docs 和公开 docs。
+5. 版本功能和规格资产收口后，检查根 `README.md` 是否仍与真实实现一致。
+6. 正式版本收口时同步 package version；如果本地维护 `project-agent-config.yaml`，同时同步其中的 `current_version`。
 
-不要把历史 fixture、mock 数据或旧版本文档中的版本号批量改成当前版本。详细规则见 `private-folder/AGENTS.md` 和 `.agents/rules/version/artifacts.md`。
+说明：
+
+- Level A 不需要执行 Spec Kit command / skill。
+- Level B 仅在 mini spec 存在明显歧义时，选择性做 clarify 或人工澄清。
+- Level C / D 需要把这三个质量闸门作为实现前检查，但不要把它们扩展成所有小任务必跑的仪式。
+
+不要把历史 fixture、mock 数据或旧版本文档中的版本号批量改成当前版本。详细规则见 `.agents/rules/version/artifacts.md`。
 
 ## 代码修改
 
@@ -101,7 +115,7 @@
 - 交付前检查新增的 `toXxx`、`resolveXxx`、`buildXxx` 是否具有业务语义、边界价值、类型收窄或真实复用；否则优先内联。
 - 注释默认使用中文，简洁解释决策、边界和原因，不复述代码行为。
 - 除非任务需要，不修改无关文件。
-- 默认保持向后兼容；如果当前版本 plan 明确允许破坏性变更，以 plan 为准，并同步更新调用方、测试与文档。
+- 默认保持向后兼容；如果当前版本 spec 明确允许破坏性变更，以 spec 为准，并同步更新调用方、测试与文档。
 
 ## TypeScript 类型组织
 

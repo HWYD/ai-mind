@@ -245,10 +245,12 @@
 写博客前优先参考：
 
 - `README.md`
-- 最新版本的 `private-folder/plans/`
-- 相关 `private-folder/runtime/`
-- 相关 `private-folder/releases/`
+- 最新版本的 `specs/`
+- 相关 `docs/adr/`
+- 相关 `docs/architecture/`
+- 相关 `docs/versions/` 和 `docs/releases/`
 - 相关历史博客
+- `private-folder/` 草稿素材仅在用户明确要求或需要回看历史推演时参考
 
 博客应该能和这些文档互相印证，而不是各说各话。
 
