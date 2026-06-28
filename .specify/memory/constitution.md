@@ -1,8 +1,8 @@
 # AI Mind Constitution
 
 状态：Active
-版本：v0.3.1
-最后更新：2026-06-27
+版本：v0.3.3
+最后更新：2026-06-28
 
 这份 Constitution 是 AI Mind 的长期治理基线，适用于版本规划、Codex 执行、代码 review、release 收口和后续 Agent / Runtime 扩展。
 
@@ -110,3 +110,15 @@ AI Mind 优先选择可读、局部、可验证的实现，不为了“看起来
 - security boundary
 
 如果实现偏离 spec，要么修实现，要么在同一版本范围内同步修 spec 资产。不要留下两套互相竞争的事实。
+
+## 10. Official Spec Kit Skills Are Tooling Entry, Not Source of Truth
+
+AI Mind 可以使用 official Spec Kit full skills 降低复杂版本开发成本，但 `speckit-*` skills 只是开发工具入口，不是项目事实源。
+
+- `.agents/skills/speckit-*` 命名空间保留给 official Spec Kit full skills。
+- official skills 必须保持 generated / vendored baseline，不直接写入 AI Mind 私有规则。
+- AI Mind 项目约束应沉淀到 constitution、`specs/`、ADR、architecture docs、template overrides 和 AGENTS，而不是魔改 official skills。
+- v0.3.2 的 lightweight pilot `speckit-*` skills 不得长期 shadow official skills；有价值规则迁移后应退出 `speckit-*` 命名空间。
+- Level C / D 变更默认使用 official full skills 或人工等价流程；Level A / B 不强制完整 tooling。
+- `speckit-converge` 进入 Level C / D 收口检查；`speckit-taskstoissues` 暂时为 optional。
+- CLI、skills、slash command 或网络不可用时，必须保留人工等价 clarify / checklist / analyze / converge。

@@ -88,7 +88,7 @@
 版本级任务按下面流程推进：
 
 1. 阅读 constitution 和对应版本 `specs/`，确认目标、非目标、当前 task 与验收边界。
-2. 对 Level C / Level D 变更，把 Spec Kit clarify / checklist / analyze 纳入正式流程；Codex skills 可用 `$speckit-clarify`、`$speckit-checklist`、`$speckit-analyze`，支持 slash command 的 agent 可用 `/speckit.*`，如果本地没有对应 tooling，则做人工等价澄清、质量清单和一致性分析，并在 PR 或交付说明中记录。
+2. 对 Level C / Level D 变更，默认使用 official Spec Kit full skills 或人工等价流程；Codex skills 可用 `$speckit-*`，支持 slash command 的 agent 可用 `/speckit.*`，如果本地没有对应 tooling，则做人工等价 specify / clarify / plan / checklist / tasks / analyze / converge，并在 PR 或交付说明中记录。
 3. 只实现当前 Step 所需的最小改动，并验证普通问答、状态洁净及相关旧链路不退化。
 4. 改动影响版本定位、能力边界、协议、数据库、GraphState、API 或对外理解时，同步 specs、ADR、architecture docs 和公开 docs。
 5. 版本功能和规格资产收口后，检查根 `README.md` 是否仍与真实实现一致。
@@ -98,8 +98,9 @@
 
 - Level A 不需要执行 Spec Kit command / skill。
 - Level B 仅在 mini spec 存在明显歧义时，选择性做 clarify 或人工澄清。
-- Level C / D 需要把这三个质量闸门作为实现前检查，但不要把它们扩展成所有小任务必跑的仪式。
-- v0.3.2 起采用 Spec Kit CLI + Codex skills 双轨 pilot：官方 CLI 需要用户本地安装和授权；仓库内已提供 `.agents/skills/speckit-clarify`、`.agents/skills/speckit-checklist`、`.agents/skills/speckit-analyze` 作为项目内 pilot skills。双轨规则见 `docs/architecture/spec-kit-tooling.md`。
+- Level C / D 需要把 full skills 或人工等价流程作为正式检查，但不要把它们扩展成所有小任务必跑的仪式。
+- v0.3.3 起 `.agents/skills/speckit-*` 命名空间保留给 official Spec Kit full skills；AI Mind 项目规则通过 constitution、specs、ADR、architecture docs、template overrides 和 AGENTS 适配，不再用本地 lightweight `speckit-*` shadow official skills。
+- `speckit-converge` 进入 Level C / D 收口检查；`speckit-taskstoissues` 暂时是 optional，不进入默认主流程。双轨规则见 `docs/architecture/spec-kit-tooling.md`。
 
 不要把历史 fixture、mock 数据或旧版本文档中的版本号批量改成当前版本。详细规则见 `.agents/rules/version/artifacts.md`。
 

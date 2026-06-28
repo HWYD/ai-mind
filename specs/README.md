@@ -128,6 +128,18 @@ specs/<version-topic>/
 - v0.3.2 pilot 为什么暂不把 tooling 接入 CI 强制门
 - 后续是否值得把双轨升级为团队默认必装、必跑流程
 
+### 033 Spec Kit Full Skills Default Entry
+
+目录：[033-spec-kit-full-skills-default-entry](./033-spec-kit-full-skills-default-entry)
+
+回答的问题：
+
+- 为什么 `speckit-*` 命名空间应收口为 official full skills
+- v0.3.2 lightweight pilot skills 的规则如何迁移
+- Level C / D 如何默认使用 official full skills
+- `converge` 如何进入版本收口检查
+- 为什么 `taskstoissues` 暂时只是 optional
+
 ## 后续新增规格时的约定
 
 - 用版本号前缀保持排序稳定，例如 `032-...`

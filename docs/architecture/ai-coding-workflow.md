@@ -8,6 +8,8 @@ AI Mind 使用 spec-anchored workflow 管理 Codex 和其他 AI coding agent 的
 
 修改代码前，先判断 Change Level。
 
+v0.3.3 起，official Spec Kit full skills 是 Level C / D 的默认执行入口。`speckit-*` 命名空间代表 official generated / vendored skills；AI Mind 项目约束通过 constitution、specs、ADR、architecture docs、template overrides 和 AGENTS 注入。
+
 ## Level A：Small Change
 
 适用范围：
@@ -60,7 +62,9 @@ AI Mind 使用 spec-anchored workflow 管理 Codex 和其他 AI coding agent 的
 
 - 必须完整 `spec.md / plan.md / tasks.md`。
 - 必须检查 `.specify/memory/constitution.md`。
-- 必须纳入 Spec Kit 质量闸门：clarify、checklist、analyze；Codex skills 可用 `$speckit-clarify` / `$speckit-checklist` / `$speckit-analyze`，其他 agent 可使用对应 slash command；如果本地没有 tooling，则执行人工等价检查并记录结论。
+- 默认使用 official Spec Kit full skills 执行 specify / clarify / plan / checklist / tasks / analyze。
+- 实现后执行 `speckit-converge` 或人工等价收口检查。
+- 如果本地没有 CLI、skills 或 slash command，则执行人工等价检查并记录结论。
 - 必须更新相关 docs / contracts。
 - 必须执行 targeted tests、typecheck、`git diff --check`。
 - 必须确认 public DTO 不泄露 raw GraphState / checkpoint / error / API Key / session。
@@ -79,34 +83,40 @@ AI Mind 使用 spec-anchored workflow 管理 Codex 和其他 AI coding agent 的
 要求：
 
 - 必须完整 Spec Kit 风格流程。
-- 必须执行或人工等价执行 clarify、checklist、analyze，并把结果进入 PR / review 记录。
+- 默认使用 official Spec Kit full skills，并把 clarify、checklist、analyze、converge 结果进入 PR / review 记录。
+- 如果 tooling 不可用，必须执行人工等价流程并记录结论。
 - 必须新增或更新 ADR。
 - 必须更新 architecture docs。
 - 必须进行完整版本验收 review。
 - 必须最终人工 review 后再收口版本。
 
-## Spec Kit 质量闸门
+## Spec Kit Full Skills
 
-Spec Kit clarify / checklist / analyze 是复杂变更的质量闸门，不是所有任务都必须跑的固定仪式。
+Spec Kit full skills 是复杂变更的默认执行入口，不是所有任务都必须跑的固定仪式。
 
-在 Codex skills 集成中，推荐使用 `$speckit-clarify`、`$speckit-checklist`、`$speckit-analyze`。在支持 slash command 的 agent 中，可使用 `/speckit.clarify`、`/speckit.checklist`、`/speckit.analyze`。如果仓库尚未安装 Spec Kit tooling，则执行人工等价检查。
+在 Codex skills 集成中，`$speckit-*` 表示 official generated / vendored skills。支持 slash command 的 agent 可以使用对应 `/speckit.*` 命令。如果仓库或当前环境没有 Spec Kit tooling，则执行人工等价检查。
 
 推荐位置：
 
-1. clarify：在 `spec.md` 初稿之后、`plan.md` 之前使用，用来消除目标、用户行为、Non-goals、边界和验收口径中的歧义。
-2. checklist：在 `acceptance.md` 初稿之后、`tasks.md` 定稿之前使用，用来生成贴合本次变更的需求质量检查清单，而不是套用巨大的通用清单。
-3. analyze：在 `tasks.md` 定稿之后、实现之前使用，用来检查 spec / plan / tasks / acceptance / decisions 是否一致，是否存在遗漏、冲突或 spec drift 风险。
+1. specify：版本启动时创建或定位正式 `specs/<version-topic>/`。
+2. clarify：在 `spec.md` 初稿之后、`plan.md` 之前使用，用来消除目标、用户行为、Non-goals、边界和验收口径中的歧义。
+3. plan：形成真实实施路径、职责边界、兼容性和验证策略。
+4. checklist：在 `acceptance.md` 初稿之后、`tasks.md` 定稿之前使用，用来检查需求是否完整、可验收、没有把 Non-goals 写成隐性任务。
+5. tasks：把实现拆成有顺序、有暂停点、可验证的任务。
+6. analyze：在 `tasks.md` 定稿之后、实现之前使用，用来检查 spec / plan / tasks / acceptance / decisions 是否一致，是否存在遗漏、冲突或 spec drift 风险。
+7. implement：只实现当前 task，不提前实现后续 task。
+8. converge：实现后检查 spec / plan / tasks / docs / ADR / diff 是否收口。
 
 按 Change Level 使用：
 
 - Level A：不需要。
 - Level B：不强制；只有 mini spec 仍有明显歧义，或执行中发现影响面可能升级时才使用 clarify 或人工澄清。
-- Level C：纳入正式流程；至少逐项评估 clarify / checklist / analyze 是否已执行，无法运行命令时做人工等价检查。
-- Level D：必须执行或人工等价执行，并在 PR、ADR review 或最终交付说明中记录结果。
+- Level C：默认使用 official full skills；无法运行命令时做人工等价检查。
+- Level D：official full skills + ADR + architecture docs + 人工 review；无法运行命令时做人工等价检查。
 
 如果本地没有 Spec Kit CLI、Codex skills、slash command 或自动化脚本，不阻塞实现；但不能跳过质量判断，需要用人工方式回答同样的问题并写明结论。
 
-v0.3.2 开始，AI Mind 采用 Spec Kit CLI + Codex skills 双轨 pilot。双轨职责和失败回退见 [Spec Kit Tooling](./spec-kit-tooling.md)。
+`speckit-taskstoissues` 暂时是 optional，不进入 AI Mind 默认主流程。双轨职责、official baseline 和失败回退见 [Spec Kit Tooling](./spec-kit-tooling.md)。
 
 ## Codex Execution Rule
 
@@ -123,7 +133,8 @@ v0.3.2 开始，AI Mind 采用 Spec Kit CLI + Codex skills 双轨 pilot。双轨
 
 执行要求：
 
-- Level C / D 先完成 clarify / checklist / analyze 或人工等价检查，再进入实现。
+- Level C / D 默认使用 official full skills；如果 tooling 不可用，则先完成人工等价 specify / clarify / plan / checklist / tasks / analyze，再进入实现。
+- Level C / D 实现后执行 converge 或人工等价收口检查。
 - 只实现当前 task。
 - 不提前实现后续 task。
 - 不修改 Non-goals 范围。

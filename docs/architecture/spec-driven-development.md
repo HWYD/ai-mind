@@ -87,10 +87,13 @@ Level C / D 必须使用完整 spec。
 6. 写 `tasks.md`，把实现拆成有顺序、有暂停点、可验证的任务。
 7. 对 Level C / D 执行 Spec Kit analyze gate（Codex skills 为 `$speckit-analyze`）或人工等价一致性分析，确认 spec / plan / tasks / acceptance / decisions 没有冲突或遗漏。
 8. 进入实现，并只实现当前 task。
+9. 实现后执行 `speckit-converge` 或人工等价收口检查。
 
 Level A 不走完整流程。Level B 默认使用 mini spec；只有发现边界不清、影响面扩大或可能升级为 Level C 时，才选择性使用 clarify / checklist / analyze。
 
-v0.3.2 开始，AI Mind 将官方 Spec Kit CLI 与 Codex skills 作为双轨 pilot。CLI、skills 和人工等价三种路径的职责见 [Spec Kit Tooling](./spec-kit-tooling.md)。
+v0.3.3 起，AI Mind 将 official Spec Kit full skills 作为 Level C / D 的默认入口。`speckit-*` 命名空间代表 official generated / vendored skills；AI Mind 项目约束通过 constitution、specs、ADR、architecture docs、template overrides 和 AGENTS 提供。CLI、skills 和人工等价三种路径的职责见 [Spec Kit Tooling](./spec-kit-tooling.md)。
+
+实现后，Level C / D 还需要执行 `speckit-converge` 或人工等价收口，确认 spec、plan、tasks、acceptance、decisions、ADR、docs 和实际 diff 没有 drift。
 
 ## Spec Drift
 

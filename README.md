@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.2：Spec Kit CLI + Codex Skills Dual-track Pilot，验证官方 CLI、Codex skills 和人工等价流程如何在 AI Mind 中协同；最新业务运行时能力仍以 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP 为 baseline。
+> v0.3.3：Spec Kit Full Skills Default Entry，引入 official Spec Kit full skills 作为 Level C / D 默认入口；最新业务运行时能力仍以 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP 为 baseline。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.2`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.3`。
 
 已经验证：
 
@@ -211,6 +211,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Tasklist Agent HITL Checkpoint Resume MVP。
 - Spec Kit Governance Baseline。
 - Spec Kit CLI + Codex Skills Dual-track Pilot。
+- Spec Kit Full Skills Default Entry。
 
 当前非目标：
 
@@ -245,11 +246,21 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.2
+## 当前版本：v0.3.3
 
-这版的主线是 Spec Kit CLI + Codex Skills Dual-track Pilot：在 v0.3.1 已经建立的治理基线上，进一步验证官方 Spec Kit CLI、Codex skills 和人工等价流程如何在 AI Mind 中协同工作。
+这版的主线是 Spec Kit Full Skills Default Entry：在 v0.3.2 已验证 CLI + Codex skills 双轨可行的基础上，把 official Spec Kit full skills 引入仓库，并作为 Level C / D 复杂变更的默认入口。
 
-v0.3.2 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、数据库 schema、PostgresSaver、stream 协议、API route 或前端 reducer。
+v0.3.3 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、数据库 schema、PostgresSaver、stream 协议、API route 或前端 reducer。
+
+本版完成的治理收口包括：
+
+- `.agents/skills/speckit-*` 命名空间收口为 official Spec Kit full skills。
+- official baseline 固定到 `github/spec-kit@v0.11.9` / `specify-cli 0.11.9`。
+- v0.3.2 lightweight pilot skills 不再 shadow official `speckit-*`。
+- AI Mind 项目约束迁移到 constitution、ADR、architecture docs、template overrides 和 AGENTS。
+- `speckit-converge` 进入 Level C / D 收口检查。
+- `speckit-taskstoissues` 暂时保持 optional，不进入默认主流程。
+- Level A / B 仍保持轻量，不强制 full skills。
 
 最新业务运行时 baseline 仍是 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP：
 
@@ -265,7 +276,7 @@ v0.3.2 不新增业务功能，不修改 Tasklist Agent Graph、HITL 流程、�
 
 v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停、跨版本 checkpoint resume、多 Agent 编排或自动写 docs 文件。
 
-详细设计见 [v0.3.2 双轨 pilot 说明](./docs/versions/v0.3.2-spec-kit-cli-codex-skills-dual-track-pilot.md)、[v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
+详细设计见 [v0.3.3 full skills 默认入口说明](./docs/versions/v0.3.3-spec-kit-full-skills-default-entry.md)、[v0.3.2 双轨 pilot 说明](./docs/versions/v0.3.2-spec-kit-cli-codex-skills-dual-track-pilot.md)、[v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
 
 ## 当前能力
 
@@ -602,6 +613,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                 |
 | v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                 |
 | v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                     |
+| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                          |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -634,6 +646,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Tasklist Agent HITL Checkpoint Resume MVP
 - [x] Spec Kit Governance Baseline
 - [x] Spec Kit CLI + Codex Skills Dual-track Pilot
+- [x] Spec Kit Full Skills Default Entry
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

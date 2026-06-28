@@ -89,6 +89,9 @@ private-folder/*
 
 .codex/tmp/
 
+# spec-kit local state
+.specify/feature.json
+
 # test
 # **.test.ts
 
