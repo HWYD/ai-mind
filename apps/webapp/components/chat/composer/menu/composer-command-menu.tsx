@@ -1,6 +1,6 @@
 'use client'
 
-import { FileText, ListChecks, ShieldCheck } from 'lucide-react'
+import { FileText, GitBranchPlus, ListChecks, ShieldCheck } from 'lucide-react'
 import { forwardRef, useCallback, useImperativeHandle, useState } from 'react'
 
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ export interface ComposerCommandMenuRef {
 
 const commandIconByName: Record<ComposerCommandName, typeof FileText> = {
     check: ShieldCheck,
+    'delivery-chain': GitBranchPlus,
     summary: FileText,
     tasklist: ListChecks,
 }
@@ -99,7 +100,8 @@ export const ComposerCommandMenu = forwardRef<
                                     'inline-flex size-9 shrink-0 items-center justify-center rounded-xl sm:size-10',
                                     item.name === 'summary' && 'bg-violet-50 text-violet-600',
                                     item.name === 'tasklist' && 'bg-blue-50 text-blue-600',
-                                    item.name === 'check' && 'bg-emerald-50 text-emerald-600'
+                                    item.name === 'check' && 'bg-emerald-50 text-emerald-600',
+                                    item.name === 'delivery-chain' && 'bg-amber-50 text-amber-600'
                                 )}
                             >
                                 <Icon className="size-4 sm:size-5" strokeWidth={2.2} />

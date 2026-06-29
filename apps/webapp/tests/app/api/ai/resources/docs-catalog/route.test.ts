@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { GET } from '@/app/api/ai/resources/docs-catalog/route'
 
 describe('GET /api/ai/resources/docs-catalog', () => {
-    it('returns only demo version-plan resources from the public manifest', async () => {
+    it('returns demo version-plan and scenario requirement resources from the public manifest', async () => {
         const response = await GET()
         const body = await response.json()
 
@@ -46,12 +46,33 @@ describe('GET /api/ai/resources/docs-catalog', () => {
                     group: 'version-plan',
                     uri: 'demo://version-plans/test-over-scoped-runtime-change.md',
                 }),
+                expect.objectContaining({
+                    badgeLabel: '示例',
+                    description: '体验需求到 Plan、Task、Review 报告的完整链路',
+                    fileName: 'request-limit-banner/requirement.md',
+                    group: 'scenario',
+                    uri: 'demo://scenarios/request-limit-banner/requirement.md',
+                }),
+                expect.objectContaining({
+                    badgeLabel: '示例',
+                    description: '体验 observability safe mode 的方案与评审链路',
+                    fileName: 'langsmith-safe-mode/requirement.md',
+                    group: 'scenario',
+                    uri: 'demo://scenarios/langsmith-safe-mode/requirement.md',
+                }),
+                expect.objectContaining({
+                    badgeLabel: '示例',
+                    description: '体验 demo 资源边界约束下的交付链路规划',
+                    fileName: 'delivery-chain-resource-boundary/requirement.md',
+                    group: 'scenario',
+                    uri: 'demo://scenarios/delivery-chain-resource-boundary/requirement.md',
+                }),
             ])
         )
 
         for (const resource of body.data.resources as Array<{ badgeLabel: string; fileName: string; group: string; uri: string }>) {
-            expect(resource.group).toBe('version-plan')
-            expect(resource.uri.startsWith('demo://version-plans/')).toBe(true)
+            expect(['scenario', 'version-plan']).toContain(resource.group)
+            expect(resource.uri.startsWith('demo://')).toBe(true)
             expect(resource.uri.includes('docs://')).toBe(false)
             expect(['示例', '测试']).toContain(resource.badgeLabel)
         }

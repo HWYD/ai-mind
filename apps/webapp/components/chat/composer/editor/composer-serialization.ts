@@ -75,7 +75,7 @@ function extractComposerMetadata(content: JSONContent) {
             const name = getStringAttribute(node.attrs, 'name')
             const label = getStringAttribute(node.attrs, 'label')
 
-            if (name === 'check' || name === 'summary' || name === 'tasklist') {
+            if (name === 'check' || name === 'delivery-chain' || name === 'summary' || name === 'tasklist') {
                 command = { name, label: label || name }
             }
 
@@ -151,7 +151,7 @@ function buildDisplaySegmentsFromInlineContent(content: JSONContent[] | undefine
             const name = getStringAttribute(node.attrs, 'name')
             const label = getStringAttribute(node.attrs, 'label')
 
-            if (name === 'check' || name === 'summary' || name === 'tasklist') {
+            if (name === 'check' || name === 'delivery-chain' || name === 'summary' || name === 'tasklist') {
                 segments.push({ type: 'command', command: { name, label: label || name } })
             }
 

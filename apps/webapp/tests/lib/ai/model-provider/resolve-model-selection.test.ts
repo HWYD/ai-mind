@@ -57,6 +57,21 @@ describe('resolveModelSelection', () => {
         )
     })
 
+    it('delivery-chain routeType 复用 chat capability 解析模型', () => {
+        testState.catalog = [createCatalogItem()]
+
+        const selection = resolveModelSelection({
+            routeType: 'delivery-chain',
+        })
+
+        expect(selection).toEqual(
+            expect.objectContaining({
+                modelId: 'ollama/qwen3-8b',
+                routeType: 'delivery-chain',
+            })
+        )
+    })
+
     it('非法 modelId 会 fail closed', () => {
         testState.catalog = [createCatalogItem()]
 

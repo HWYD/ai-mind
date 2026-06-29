@@ -1,4 +1,4 @@
-import { Calculator, CalendarDays, FileSearch, Layers3, ListChecks, type LucideIcon, Network, ShieldCheck } from 'lucide-react'
+import { Calculator, CalendarDays, FileSearch, GitBranchPlus, ListChecks, type LucideIcon, Network, ShieldCheck } from 'lucide-react'
 
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 
@@ -25,6 +25,14 @@ const tasklistDemoReference = {
     type: 'resource',
     label: 'v034-langsmith-observability.md',
     uri: 'demo://version-plans/v034-langsmith-observability.md',
+    source: 'local',
+} as const
+
+const deliveryChainScenarioReference = {
+    id: 'demo:scenario:request-limit-banner/requirement.md',
+    type: 'resource',
+    label: 'request-limit-banner/requirement.md',
+    uri: 'demo://scenarios/request-limit-banner/requirement.md',
     source: 'local',
 } as const
 
@@ -70,6 +78,24 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
         label: 'Tasklist Agent Demo',
         description: '快速填入 public demo 的 Tasklist Agent 示例入口。',
         text: '基于这个 demo 版本方案生成 tasklist 草稿',
+    },
+    {
+        composer: {
+            plainText: '基于这个 demo scenario 生成交付计划报告',
+            command: { name: 'delivery-chain', label: '生成交付计划' },
+            references: [deliveryChainScenarioReference],
+        },
+        displaySegments: [
+            { type: 'command', command: { name: 'delivery-chain', label: '生成交付计划' } },
+            { type: 'text', text: ' ' },
+            { type: 'resource', reference: deliveryChainScenarioReference },
+            { type: 'text', text: ' 基于这个 demo scenario 生成交付计划报告' },
+        ],
+        icon: GitBranchPlus,
+        tag: 'Agent',
+        label: 'Delivery Chain Demo',
+        description: '快速填入 public demo 的交付计划示例入口。',
+        text: '基于这个 demo scenario 生成交付计划报告',
     },
     {
         composer: {

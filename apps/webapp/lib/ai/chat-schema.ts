@@ -19,7 +19,7 @@ export const messageInputSchema = z.object({
 })
 
 export const composerCommandSchema = z.object({
-    name: z.enum(['check', 'summary', 'tasklist']),
+    name: z.enum(['check', 'delivery-chain', 'summary', 'tasklist']),
     label: z.string().min(1),
 })
 

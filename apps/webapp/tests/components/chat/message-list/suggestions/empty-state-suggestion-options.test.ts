@@ -17,4 +17,19 @@ describe('emptyStateSuggestions', () => {
         expect(JSON.stringify(tasklistDemo)).not.toContain('v035')
         expect(JSON.stringify(tasklistDemo)).not.toContain('v036')
     })
+
+    it('includes the Delivery Chain demo quick access entry with the request-limit-banner scenario', () => {
+        const deliveryChainDemo = emptyStateSuggestions.find(suggestion => suggestion.label === 'Delivery Chain Demo')
+
+        expect(deliveryChainDemo).toBeTruthy()
+        expect(deliveryChainDemo?.composer?.command?.name).toBe('delivery-chain')
+        expect(deliveryChainDemo?.composer?.command?.label).toBe('生成交付计划')
+        expect(deliveryChainDemo?.text).toBe('基于这个 demo scenario 生成交付计划报告')
+        expect(deliveryChainDemo?.composer?.references).toEqual([
+            expect.objectContaining({
+                label: 'request-limit-banner/requirement.md',
+                uri: 'demo://scenarios/request-limit-banner/requirement.md',
+            }),
+        ])
+    })
 })

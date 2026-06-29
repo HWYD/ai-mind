@@ -1,11 +1,14 @@
-import type { ComposerResourceOption, DocsResourceCatalogItem, DocsResourceCatalogResponse } from '../composer-types'
+import type { ComposerCommandName, ComposerResourceOption, DocsResourceCatalogItem, DocsResourceCatalogResponse } from '../composer-types'
 
 const API_SUCCESS_CODE = 0
+type PublicDemoCatalogItem = DocsResourceCatalogItem & {
+    group: 'scenario' | 'version-plan'
+}
 
 let cachedDocsResourceOptions: ComposerResourceOption[] | null = null
 let docsResourceOptionsRequest: Promise<ComposerResourceOption[]> | null = null
 
-function isDocsResourceCatalogItem(value: unknown): value is DocsResourceCatalogItem {
+function isDocsResourceCatalogItem(value: unknown): value is PublicDemoCatalogItem {
     if (!value || typeof value !== 'object') {
         return false
     }
@@ -16,7 +19,7 @@ function isDocsResourceCatalogItem(value: unknown): value is DocsResourceCatalog
         (record.badgeLabel === undefined || record.badgeLabel === '示例' || record.badgeLabel === '测试') &&
         typeof record.description === 'string' &&
         typeof record.fileName === 'string' &&
-        record.group === 'version-plan' &&
+        (record.group === 'scenario' || record.group === 'version-plan') &&
         typeof record.label === 'string' &&
         typeof record.uri === 'string'
     )
@@ -41,7 +44,8 @@ async function getDocsResourceOptions() {
 
             const options = payload.data.resources.filter(isDocsResourceCatalogItem).map<ComposerResourceOption>(resource => ({
                 badgeLabel: resource.badgeLabel,
-                id: `demo:version-plan:${resource.fileName}`,
+                group: resource.group,
+                id: `demo:${resource.group}:${resource.fileName}`,
                 type: 'resource',
                 label: resource.label,
                 uri: resource.uri,
@@ -63,17 +67,21 @@ async function getDocsResourceOptions() {
     return docsResourceOptionsRequest
 }
 
-export async function getFilteredComposerResources(query: string) {
+export async function getFilteredComposerResources(query: string, commandName?: ComposerCommandName) {
     const docsResourceOptions = await getDocsResourceOptions()
+    const visibleResources =
+        commandName === 'delivery-chain'
+            ? docsResourceOptions.filter(resource => resource.group === 'scenario')
+            : docsResourceOptions.filter(resource => resource.group === 'version-plan')
     const normalizedQuery = query.trim().toLowerCase()
 
     if (!normalizedQuery) {
-        return docsResourceOptions
+        return visibleResources
     }
 
-    return docsResourceOptions.filter(resource => {
+    return visibleResources.filter(resource => {
         const searchableText =
-            `${resource.label} ${resource.uri} ${resource.source} ${resource.serverId ?? ''} ${resource.description} ${resource.badgeLabel ?? ''}`.toLowerCase()
+            `${resource.label} ${resource.uri} ${resource.group} ${resource.source} ${resource.serverId ?? ''} ${resource.description} ${resource.badgeLabel ?? ''}`.toLowerCase()
 
         return searchableText.includes(normalizedQuery)
     })

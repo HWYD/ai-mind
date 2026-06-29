@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.5：Agent Demo Workspace Resource Boundary，将 public demo 的 Agent 可读资源收口到 `examples/agent-demo/`，并让 `/tasklist` 迁移到 `@demo://version-plans/*.md`。
+> v0.3.6：Controlled Delivery Chain MVP，在 `@demo://` public demo 边界内新增 `/delivery-chain`，把需求输入转成受控的 Plan、Task、Review 报告。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.5`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.6`。
 
 已经验证：
 
@@ -247,29 +247,39 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.5
+## 当前版本：v0.3.6
 
-这版的主线是 Agent Demo Workspace Resource Boundary：把 public demo 的 Agent 可读资源收口到 `examples/agent-demo/`，新增 `@demo://` scheme，并让 `/tasklist` 从 `@docs://versions/*.md` 迁移到 `@demo://version-plans/*.md`。
+这版的主线是 Controlled Delivery Chain MVP：在 v0.3.5 已完成的 `@demo://` public demo 资源边界内，新增显式 `/delivery-chain` 入口，把一个需求输入转成受控的 Plan、Task、Review 和最终交付报告。
 
-v0.3.5 不修改 Tasklist Graph 拓扑、HITL decision contract、Prisma schema、PostgresSaver checkpoint schema、stream 协议或前端 reducer。它的重点是给公开 demo 建立一条更严格、更可测试的资源边界，而不是扩展 Agent 权限。
+v0.3.6 的边界非常明确：
 
-本版完成的边界收口包括：
+- 对外只新增一个 public command：`/delivery-chain`
+- 支持两种输入：`/delivery-chain + @demo://scenarios/*/requirement.md` 和 `/delivery-chain <inline requirement>`
+- 内部固定执行 `PlanStage -> TaskStage -> ReviewStage -> Delivery Chain Report`
+- 继续只读取 `@demo://` demo resource，不读取真实 `docs/`、`specs/`、`apps/`、`packages/` 或绝对路径
 
-- 新增 `examples/agent-demo/` demo workspace，包含精简版 version-plans、scenarios、rubrics、governance 和 `demo-manifest.json`。
-- 新增 `@demo://` resolver，严格映射到 `examples/agent-demo/`，执行 path normalize、root boundary check、extension allowlist 和 file size limit。
-- `@docs://` 不再作为 public Agent resource；旧 scheme 在 public demo 中 fail closed，并提示用户改用 `@demo://version-plans/*.md`。
-- `/tasklist` public demo 入口迁移到 `@demo://version-plans/*.md`，字段名 `versionPlanUri` 保持不变。
-- `@` resource picker 和快速访问只面向 demo version-plans，不再展示真实 `docs/versions/`。
-- 小屏移动端对 textarea、模型选择器和 slash/resource popup 做了密度优化，但不改 reducer 和主交互结构。
+本版显式不做：
 
-当前业务运行时 baseline 仍然是 v0.3.4 的 Tasklist Agent Graph + HITL + LangSmith observability 语义：
+- 不暴露 `/plan`、`/task`、`/review`
+- 不实现 `@artifact://`
+- 不做 artifact persistence
+- 不做 nested HITL
+- 不修改 Tasklist Agent Graph topology、HITL decision contract、checkpoint resume、stream 协议、frontend reducer、Prisma schema 或 PostgresSaver schema
 
-- Graph Runtime 继续是 `/tasklist` 的唯一执行路径。
-- HITL checkpoint resume、AgentRun / AgentInterrupt、LangSmith metadata 语义保持不变。
-- public demo 不再读取真实 `docs/`、`specs/`、`apps/`、`packages/` 或绝对路径资源。
-- 公开 Agent 文件资源只来自 `examples/agent-demo/`。
+本版完成的 public demo 演进包括：
 
-详细设计见 [v0.3.5 demo resource boundary 说明](./docs/versions/v0.3.5-agent-demo-workspace-resource-boundary.md)、[v0.3.4 LangSmith 观测说明](./docs/versions/v0.3.4-tasklist-agent-langsmith-observability.md)、[v0.3.3 full skills 默认入口说明](./docs/versions/v0.3.3-spec-kit-full-skills-default-entry.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
+- 新增 `/delivery-chain` 受控 workflow 入口
+- 复用 `examples/agent-demo/scenarios/`、`rubrics/`、`governance/` 作为 Delivery Chain demo corpus
+- `@` picker 在 `/delivery-chain` 场景下只展示 `scenarios/*/requirement.md`
+- 快速访问新增 Delivery Chain demo 示例
+- Delivery Chain Report 使用现有文本输出能力承载，不引入新的 stream chunk 或持久化 artifact
+
+当前 runtime baseline 同时保留两条受控路径：
+
+- `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
+- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：固定 stage 的 Delivery Chain MVP
+
+详细设计见 [v0.3.6 Controlled Delivery Chain MVP](./docs/versions/v0.3.6-controlled-delivery-chain-mvp.md)、[v0.3.5 demo resource boundary 说明](./docs/versions/v0.3.5-agent-demo-workspace-resource-boundary.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0010](./docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)。
 
 ## 当前能力
 
@@ -326,7 +336,7 @@ v0.3.5 不修改 Tasklist Graph 拓扑、HITL decision contract、Prisma schema�
 ### Composer V1
 
 - Tiptap 增强输入框。
-- `/summary`、`/tasklist`、`/check` inline command chip。
+- `/summary`、`/tasklist`、`/check`、`/delivery-chain` inline command chip。
 - `@demo://...` 与 `@project://latest-context` inline resource chip。
 - Enter 发送、Shift + Enter 换行、中文 IME 防误发。
 - `plainText + composer.command + composer.references` 兼容提交。
@@ -337,6 +347,10 @@ v0.3.5 不修改 Tasklist Graph 拓扑、HITL decision contract、Prisma schema�
 
 - `Version Plan to Tasklist Agent`
 - 入口：`/tasklist + @demo://version-plans/*.md`
+- `Controlled Delivery Chain MVP`
+- 入口：`/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`
+- 内部固定执行 `PlanStage -> TaskStage -> ReviewStage`
+- Delivery Chain Report 只作为本轮非持久化文本输出，不写代码、不读真实仓库
 - v0.2.3 后 `/tasklist + @demo://version-plans/*.md` 固定走 Graph Runtime。
 - LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
 - LangGraph `StateGraph` 只替换编排层。
@@ -543,6 +557,8 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 - `现在广州天气怎么样？`
 - 选择 `/summary`，引用 `@demo://README.md`，输入：`帮我总结这个 demo workspace 的边界设计`
 - 选择 `/tasklist`，引用 `@demo://version-plans/v034-langsmith-observability.md`，输入：`基于这个版本方案生成 tasklist 草稿`
+- 选择 `/delivery-chain`，引用 `@demo://scenarios/request-limit-banner/requirement.md`，输入：`基于这个 demo scenario 生成交付计划报告`
+- 输入：`/delivery-chain 帮我规划一个登录表单，支持手机号、密码、错误提示和加载状态`
 - 选择 `@project://latest-context`，输入：`帮我概括当前项目上下文`
 
 其中 `/tasklist` 只有配合 `@demo://version-plans/*.md` 才进入受控 Agent；`/check` 当前主要作为任务意图 hint，不等同于立即执行 remote Tool。
@@ -609,6 +625,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                                  |
 | v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                |
 | v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans |
+| v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                   |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

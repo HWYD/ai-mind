@@ -13,6 +13,7 @@ import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from '
 import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
 import { buildSystemMessages, createChatSession } from './chat-session'
 import { executeComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
+import { startDeliveryChainRun } from './delivery-chain'
 import { PromptRuntimeError, resolvePromptContextInvocation } from './prompt-context'
 import { logSkillRuntime, normalizeKnownRuntimeError, throwIfAborted, writeStreamErrorChunk } from './stream-errors'
 import { executeToolCall, formatToolInput, normalizeAndValidateToolCalls, writeToolValidationErrors } from './tool-runtime'
@@ -477,6 +478,15 @@ export class ChatOrchestrator {
         return true
     }
 
+    private async runDeliveryChainEntryStage(session: ChatSession) {
+        return startDeliveryChainRun({
+            context: this.context,
+            model: session.baseModel,
+            request: this.request,
+            writeChunk: this.writeChunk,
+        })
+    }
+
     async run() {
         const lifecycle = new StreamLifecycle({
             context: this.context,
@@ -513,11 +523,17 @@ export class ChatOrchestrator {
 
             // 主链路优先级从“最具体”到“最通用”：
             // - 受控 Agent：/tasklist + version plan，完整接管本轮。
+            // - 受控 workflow：/delivery-chain + scenario 或 inline requirement。
             // - Composer Context：/summary、@resource 等普通结构化输入。
             // - Capability Context：runtime 主动消费的固定 capability 场景。
             // - Tool Calling：模型自行决定是否调用已绑定工具。
             // - Direct Answer：没有工具或无需工具时直接回答。
             if (await this.runVersionPlanTasklistAgentEntryStage(session)) {
+                lifecycle.emitFinishIfOpen()
+                return
+            }
+
+            if (await this.runDeliveryChainEntryStage(session)) {
                 lifecycle.emitFinishIfOpen()
                 return
             }

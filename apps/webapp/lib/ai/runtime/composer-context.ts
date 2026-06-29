@@ -151,6 +151,8 @@ function extractTextFromContentParts(contentParts: Array<unknown> | undefined) {
 function createCommandHintMessage(command: ChatComposerCommand, userGoal: string) {
     const commandInstructions: Record<ChatComposerCommand['name'], string> = {
         check: '用户选择了“检查文档一致性”。请围绕一致性检查来组织回答，但不要声称已经调用远程工具或完成真实比对。',
+        'delivery-chain':
+            '用户选择了“交付链路”。如果本轮没有被受控 Delivery Chain runtime 接管，请提醒用户需要引用 @demo://scenarios/*/requirement.md 或直接补充需求。',
         summary: '用户选择了“总结文档”。如果本轮没有可用文档上下文，请说明需要引用文档或提供内容后才能总结。',
         tasklist: '用户选择了“生成任务清单”。请把回答组织成 tasklist 草稿；如果缺少版本目标，请先给出可继续细化的通用草稿。',
     }

@@ -1,5 +1,9 @@
 # Specs Workspace
 
+## Current Planning Spec
+
+- [036: Controlled Delivery Chain MVP](./036-controlled-delivery-chain-mvp)
+
 `specs/` 是 AI Mind 的正式 AI coding 规格工作区。
 
 这里不是对外展示区，也不是历史草稿堆放区，而是给 Codex / AI coding agent / reviewer / 开发者在做复杂版本时读取和落地的“真实工作规格区”。

@@ -4,11 +4,16 @@ import type { ModelRouteType } from './types'
 
 /**
  * 解析普通请求的 routeType。
+ * - Composer command 是 `/delivery-chain` 时，显式视作 delivery-chain。
  * - Composer command 是 `/tasklist` 且引用 `demo://version-plans/*.md` 时，视作 tasklist。
  * - 其余请求仍走普通 chat。
  */
 export function resolveRouteType(request: ChatRequest): ModelRouteType {
     const command = request.composer?.command?.name
+
+    if (command === 'delivery-chain') {
+        return 'delivery-chain'
+    }
 
     if (command !== 'tasklist') {
         return 'chat'

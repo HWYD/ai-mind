@@ -1,6 +1,6 @@
 import type { MindRole, ReasoningPart, TextPart } from './message'
 
-export type ChatComposerCommandName = 'check' | 'summary' | 'tasklist'
+export type ChatComposerCommandName = 'check' | 'delivery-chain' | 'summary' | 'tasklist'
 
 export interface ChatComposerCommand {
     label: string

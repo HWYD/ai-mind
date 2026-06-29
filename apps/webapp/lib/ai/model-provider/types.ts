@@ -5,7 +5,7 @@ export const aiMindLlmProviders = ['ollama', 'deepseek', 'qwen'] as const
 
 export type AiMindLlmProvider = (typeof aiMindLlmProviders)[number]
 
-export type ModelRouteType = 'chat' | 'tasklist'
+export type ModelRouteType = 'chat' | 'delivery-chain' | 'tasklist'
 
 export type ModelRuntimeEnvironment = 'development' | 'production'
 

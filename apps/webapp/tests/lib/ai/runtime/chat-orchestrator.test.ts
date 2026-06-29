@@ -16,6 +16,7 @@ const runtimeMocks = vi.hoisted(() => {
         normalizeAndValidateToolCalls: vi.fn(),
         resolveComposerContextInvocation: vi.fn(),
         shouldBypassAuthoritativeAnswer: vi.fn(),
+        startDeliveryChainRun: vi.fn(),
         streamAssistantParts: vi.fn(),
         streamPlanningResponse: vi.fn(),
         stripMessageText: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock('@/lib/ai/runtime/chat-session', () => ({
 vi.mock('@/lib/ai/runtime/composer-context', () => ({
     executeComposerContextInvocation: runtimeMocks.executeComposerContextInvocation,
     resolveComposerContextInvocation: runtimeMocks.resolveComposerContextInvocation,
+}))
+
+vi.mock('@/lib/ai/runtime/delivery-chain', () => ({
+    startDeliveryChainRun: runtimeMocks.startDeliveryChainRun,
 }))
 
 vi.mock('@ai-mind/stream-core', async importOriginal => {
@@ -149,6 +154,31 @@ function createSummaryDocsRequest() {
     }
 }
 
+function createDeliveryChainRequest() {
+    return {
+        ...createRequest(),
+        composer: {
+            command: {
+                label: '生成交付计划',
+                name: 'delivery-chain' as const,
+            },
+            plainText: '帮我规划一个登录表单，支持手机号和错误提示',
+        },
+        messages: [
+            {
+                role: 'user' as const,
+                parts: [
+                    {
+                        type: 'text' as const,
+                        format: 'markdown' as const,
+                        text: '帮我规划一个登录表单，支持手机号和错误提示',
+                    },
+                ],
+            },
+        ],
+    }
+}
+
 function createCheckRequest() {
     return {
         ...createRequest(),
@@ -245,6 +275,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.formatToolInput.mockReturnValue('1+1')
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(false)
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(true)
+        runtimeMocks.startDeliveryChainRun.mockResolvedValue(false)
         runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue({
             graphState: {},
             state: {},
@@ -348,8 +379,40 @@ describe('runtime/chat-orchestrator', () => {
         await orchestrator.run()
 
         expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
+        expect(runtimeMocks.startDeliveryChainRun).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('/delivery-chain 命中受控 workflow 后会短路普通链路', async () => {
+        const request = createDeliveryChainRequest()
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.startDeliveryChainRun.mockResolvedValue(true)
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request,
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.startDeliveryChainRun).toHaveBeenCalledWith(
+            expect.objectContaining({
+                context: createExecutionContext(),
+                model: session.baseModel,
+                request,
+                writeChunk: expect.any(Function),
+            })
+        )
+        expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
+        expect(runtimeMocks.executeComposerContextInvocation).not.toHaveBeenCalled()
+        expect(session.baseModel.stream).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })

@@ -43,6 +43,22 @@ describe('resolveRouteType', () => {
         ).toBe('chat')
     })
 
+    it('delivery-chain 命令显式解析为 delivery-chain', () => {
+        expect(
+            resolveRouteType(
+                createRequest({
+                    composer: {
+                        command: {
+                            label: '生成交付计划',
+                            name: 'delivery-chain',
+                        },
+                        plainText: '帮我规划一个登录表单',
+                    },
+                })
+            )
+        ).toBe('delivery-chain')
+    })
+
     it('tasklist + demo version-plans reference 解析为 tasklist', () => {
         expect(
             resolveRouteType(

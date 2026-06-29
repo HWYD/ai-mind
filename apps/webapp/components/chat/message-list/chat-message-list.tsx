@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type { MindMessage, ReasoningPart } from '@/lib/ai/types/message'
 
 import { AssistantMessage } from './messages/assistant-message'
@@ -28,6 +29,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     isLatestAssistantMessage,
     isThinking,
     message,
+    requestComposer,
     onCopy,
     onDeleteUserTurn,
     onFeedbackChange,
@@ -43,6 +45,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     isLatestAssistantMessage: boolean
     isThinking: boolean
     message: MindMessage
+    requestComposer?: ChatComposerPayload
     onCopy: (message: MindMessage) => void
     onDeleteUserTurn: (userMessageId: string) => boolean
     onFeedbackChange: (messageId: string, feedback: 'up' | 'down') => void
@@ -92,6 +95,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     return (
         <AssistantMessage
             message={message}
+            requestComposer={requestComposer}
             combinedReasoning={combinedReasoning}
             contentParts={contentParts}
             feedbackState={feedbackState}
@@ -191,15 +195,29 @@ export function ChatMessageList({
     }, [])
 
     const isBusy = actionsDisabled || status === 'submitted' || status === 'streaming'
+    const messageEntries = useMemo(
+        () =>
+            messages.map((message, messageIndex) => ({
+                message,
+                requestComposer:
+                    message.role === 'assistant'
+                        ? [...messages.slice(0, messageIndex)]
+                              .reverse()
+                              .find((candidate): candidate is MindMessage & { composer?: ChatComposerPayload } => candidate.role === 'user')
+                              ?.composer
+                        : undefined,
+            })),
+        [messages]
+    )
 
     return (
         <div className="flex min-h-0 flex-col gap-5 px-1 py-2">
             {messages.length === 0 ? <EmptyStateSuggestions disabled={isBusy} onSelectSuggestion={onSelectSuggestion} /> : null}
 
-            {messages.map((message, messageIndex) => {
+            {messageEntries.map(({ message, requestComposer }, messageIndex) => {
                 const isCopied = copiedMessageId === message.id
                 const feedbackState = assistantFeedback[message.id] ?? null
-                const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messages.length - 1
+                const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messageEntries.length - 1
                 const isAssistantReplyCompleted = !isLatestAssistantMessage || !isBusy
                 const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted
                 const showFollowUpSuggestions =
@@ -214,6 +232,7 @@ export function ChatMessageList({
                         key={message.id}
                         enableReasoning={enableReasoning}
                         message={message}
+                        requestComposer={requestComposer}
                         isCopied={isCopied}
                         isDeleteDisabled={message.role === 'user' && isBusy}
                         isLatestAssistantMessage={isLatestAssistantMessage}

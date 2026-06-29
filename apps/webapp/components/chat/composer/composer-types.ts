@@ -18,13 +18,14 @@ export type DemoResourceBadgeLabel = '示例' | '测试'
 export interface ComposerResourceOption extends ComposerReference {
     badgeLabel?: DemoResourceBadgeLabel
     description: string
+    group: 'scenario' | 'version-plan'
 }
 
 export interface DocsResourceCatalogItem {
     badgeLabel?: DemoResourceBadgeLabel
     description: string
     fileName: string
-    group: 'architecture' | 'readme' | 'version-plan'
+    group: 'architecture' | 'readme' | 'scenario' | 'version-plan'
     label: string
     uri: string
     version?: string

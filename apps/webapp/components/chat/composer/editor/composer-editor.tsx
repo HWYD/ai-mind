@@ -250,7 +250,7 @@ function createResourceReferenceExtension() {
                     char: '@',
                     allowedPrefixes: null,
                     allow: isResourceReferenceTriggerAllowed,
-                    items: ({ query }) => getFilteredComposerResources(query),
+                    items: ({ query }) => getFilteredComposerResources(query, serializeComposerPayload(this.editor).command?.name),
                     command: ({ editor, range, props }: { editor: Editor; range: Range; props: ResourceSuggestionItem }) => {
                         replaceSuggestionWithSingleChip(
                             editor,
