@@ -61,7 +61,7 @@ Resource capability 表示可读取上下文。
 
 示例：
 
-- 通过 `docs://...` 读取受控 docs 文档。
+- 通过 `demo://...` 读取受控 demo 文档。
 - remote mock context：`project://latest-context`。
 
 Resource 执行是读取操作。它的结果可以显示为 Resource part，也可以注入最终回答上下文。Resource 不进入模型 tool binding。
@@ -102,7 +102,7 @@ Skill metadata 描述一个 Skill 是什么，以及它可以消费哪些能力�
 它覆盖：
 
 - 通过 local MCP Tool 查询天气。
-- 通过 local MCP Resource 读取 `docs/**/*.md` 文档。
+- 通过 local MCP Resource 读取 `examples/agent-demo/**/*.md` 白名单文档。
 - 通过 local MCP Prompt 总结本地文件。
 - 通过 remote MCP Resource 获取项目上下文。
 - 通过 remote MCP Prompt 生成 tasklist 草稿。
@@ -144,9 +144,9 @@ Resource / Prompt 不会被放进 `bindTools()`。如果需要消费 Resource / 
 Local MCP 当前提供受控的本地能力：
 
 - 来自 `weather-server` 的天气 Tool。
-- 来自 `project-docs-server` 的 docs Resource 和 local Prompt。
+- 来自 `project-docs-server` 的 demo Resource 和 local Prompt。
 
-本地文件访问仍然受严格边界保护。当前只允许 `docs://...` 读取 `docs/**/*.md`，MCP 不意味着可以任意访问文件系统。
+本地文件访问仍然受严格边界保护。当前 public demo 只允许 `demo://...` 读取 `examples/agent-demo/` 下的白名单资源，MCP 不意味着可以任意访问文件系统。
 
 ## Remote MCP Boundary
 
@@ -175,7 +175,7 @@ Agent 可以消费 Resource、Tool 和 Runtime 中的中间状态，但它不等
 - Tool Runtime 执行具体工具。
 - Agent Runtime 编排一个受控多步任务。
 
-`Version Plan to Tasklist Agent` 只在 `/tasklist + @docs://versions/*.md` 下启动。它会读取用户显式引用的版本方案，生成 tasklist 草稿，调用 `validate_tasklist_structure` 做结构校验，并在必要时最多修正一次。
+`Version Plan to Tasklist Agent` 只在 `/tasklist + @demo://version-plans/*.md` 下启动。它会读取用户显式引用的 demo 版本方案，生成 tasklist 草稿，调用 `validate_tasklist_structure` 做结构校验，并在必要时最多修正一次。
 
 `v0.1.1` 后，这个 Agent 增加一次 `Controlled Planner Lite` 决策。模型可以在 Runtime 白名单 action 中选择下一步，例如继续生成、读取一个白名单 optional context、提出澄清问题或边界停止。
 

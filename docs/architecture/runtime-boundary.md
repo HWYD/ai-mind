@@ -67,7 +67,7 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - `authoritative-answer`：判断确定性工具结果是否可以绕过模型改写。
 - `capability-context`：为 `reader-skill` 消费固定 Resource / Prompt context。
 - `composer-context`：消费 Composer command 与 resource reference，生成本轮受控上下文。
-- `version-plan-tasklist-agent`：承接 `/tasklist + @docs://versions/*.md` 的受控单 Agent 路径。
+- `version-plan-tasklist-agent`：承接 `/tasklist + @demo://version-plans/*.md` 的受控单 Agent 路径。
 
 ## Controlled Agent Runtime
 
@@ -80,7 +80,7 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 当前代表路径：
 
 ```text
-/tasklist + @docs://versions/*.md
+/tasklist + @demo://version-plans/*.md
   -> read version plan
   -> evaluate readiness
   -> planning decision

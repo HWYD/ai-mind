@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.4：Tasklist Agent LangSmith Observability Integration，在 v0.3.0 HITL checkpoint resume baseline 上为 `/tasklist + @docs://versions/*.md` 增加可选 LangSmith lifecycle tracing。
+> v0.3.5：Agent Demo Workspace Resource Boundary，将 public demo 的 Agent 可读资源收口到 `examples/agent-demo/`，并让 `/tasklist` 迁移到 `@demo://version-plans/*.md`。
 
 ## 项目解决的问题
 
@@ -80,7 +80,7 @@ flowchart TD
     DEFINITION --> BINDING["本轮工具绑定与上下文调用<br/>Tool / Resource / Prompt"]
     BINDING --> SOURCES["内置能力 / 本地 MCP / 远程 MCP"]
 
-    RUNTIME -. 受控 Agent 入口 .-> AGENT["受控任务清单 Agent<br/>/tasklist + versions 文档"]
+    RUNTIME -. 受控 Agent 入口 .-> AGENT["受控任务清单 Agent<br/>/tasklist + version-plans 文档"]
     AGENT --> GRAPH["Graph Runtime<br/>LangGraph StateGraph"]
     AGENT --> SHARED["共享业务状态与边界<br/>Steps / Guards / Validation"]
 ```
@@ -90,7 +90,7 @@ flowchart TD
 - `ChatOrchestrator / ChatSession` 负责会话构建、执行路径选择、planning、工具执行、上下文注入、受控 Agent 入口和最终回答。
 - `Model Catalog` 在 API 边界把稳定 `modelId` 解析为受控模型选择；运行时再通过 `Provider Registry` 创建 Ollama、Qwen 或 DeepSeek 模型实例。
 - 能力体系通过 Skill 的 `capabilitySelectors`、Capability Catalog 和本轮绑定结果，分别承接 Tool 调用以及 Resource / Prompt 上下文调用；MCP 是外部能力来源，不直接进入主运行时编排。
-- 受控任务清单 Agent 只在 `/tasklist + @docs://versions/*.md` 入口启动。服务端固定进入 Graph Runtime，Graph nodes 复用同一套受控领域状态、Steps、Guards 和 Validation 规则。
+- 受控任务清单 Agent 只在 `/tasklist + @demo://version-plans/*.md` 入口启动。服务端固定进入 Graph Runtime，Graph nodes 复用同一套受控领域状态、Steps、Guards 和 Validation 规则；public demo 只读取 `examples/agent-demo/`。
 - `@ai-mind/stream-core` 统一定义 NDJSON chunk、生命周期、错误和 Artifact 协议；前端消费流并转换为消息、Agent Trace 和 Artifact 展示，后端不直接依赖 React 组件。
 - 图中的实线表示请求与响应主链路，虚线表示聊天运行时调用的受控模块，不表示模块之间按顺序串行执行。
 
@@ -138,7 +138,7 @@ flowchart TD
 Capability Model 用来统一描述 Tool / Resource / Prompt：
 
 - Tool：可执行动作，例如计算、天气查询、文档一致性检查。
-- Resource：可读取上下文，例如 `docs://...` 或 remote context。
+- Resource：可读取上下文，例如 `demo://...`、`project://latest-context` 或 remote context。
 - Prompt：可复用提示模板，例如本地文档摘要 prompt。
 
 它统一的是“能力描述层”，不是把所有能力强行塞进同一条执行链。Runtime 可以基于 capability 信息理解本轮可用能力、来源位置、local / remote 边界和执行方式。
@@ -156,15 +156,15 @@ Capability Model 用来统一描述 Tool / Resource / Prompt：
 
 `v0.1.0` 后，项目新增第一个受控单 Agent：`Version Plan to Tasklist Agent`。
 
-它只在 `/tasklist + @docs://versions/*.md` 下启动，负责读取用户显式引用的版本方案、生成 tasklist 草稿、调用 `validate_tasklist_structure` 做结构校验，并在必要时最多自动修正一次。
+它只在 `/tasklist + @demo://version-plans/*.md` 下启动，负责读取用户显式引用的 demo 版本方案、生成 tasklist 草稿、调用 `validate_tasklist_structure` 做结构校验，并在必要时最多自动修正一次。
 
 `v0.1.1` 在这条受控链路上增加“一次受控规划决策”：Runtime 先用规则判断 version plan readiness，再让模型在 5 类白名单 action 中做一次有限选择，并通过 `TasklistStrategy` 影响 tasklist draft。
 
-`v0.2.3` 后，这条链路只走 LangGraph `StateGraph`。Graph Runtime 是 `/tasklist + @docs://versions/*.md` 的唯一执行路径；Graph events、memory checkpoint 和脱敏 Graph Debug Summary 仍通过服务端配置独立控制。
+`v0.2.3` 后，这条链路只走 LangGraph `StateGraph`。Graph Runtime 是 `/tasklist + @demo://version-plans/*.md` 的唯一执行路径；Graph events、memory checkpoint 和脱敏 Graph Debug Summary 仍通过服务端配置独立控制。
 
 `v0.2.4` 继续把内部运行态收口为 GraphState 单一事实源。Graph nodes 直接读取 GraphState 分区并返回 GraphState patch，不再通过旧 AgentState 整包 adapter 往返转换；GraphState reducer 负责合并分区 patch，route 成功路径基于显式业务字段判断。
 
-这个 Agent 不是通用 Agent，也不自动扫描 docs 或写入文件。它的入口、步骤、工具、路由和停止条件都由 Runtime 控制。
+这个 Agent 不是通用 Agent，也不自动扫描 demo workspace 或写入文件。它的入口、步骤、工具、路由和停止条件都由 Runtime 控制。
 
 ### MCP Integration
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.4`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.5`。
 
 已经验证：
 
@@ -247,37 +247,29 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.4
+## 当前版本：v0.3.5
 
-这版的主线是 Tasklist Agent LangSmith Observability Integration：在 v0.3.0 已落地的 HITL checkpoint resume baseline 上，为 `/tasklist + @docs://versions/*.md` 增加可选 LangSmith lifecycle tracing。
+这版的主线是 Agent Demo Workspace Resource Boundary：把 public demo 的 Agent 可读资源收口到 `examples/agent-demo/`，新增 `@demo://` scheme，并让 `/tasklist` 从 `@docs://versions/*.md` 迁移到 `@demo://version-plans/*.md`。
 
-v0.3.4 不修改 Tasklist Graph 拓扑、HITL decision contract、Prisma schema、PostgresSaver checkpoint schema、stream 协议或前端 reducer。它只在 Tasklist Agent coordinator / runner 边界记录脱敏 metadata，让 initial run、HITL interrupt、human decision、resume、final / blocked / rejected / failed 等状态能在 LangSmith 中被关联排查。
+v0.3.5 不修改 Tasklist Graph 拓扑、HITL decision contract、Prisma schema、PostgresSaver checkpoint schema、stream 协议或前端 reducer。它的重点是给公开 demo 建立一条更严格、更可测试的资源边界，而不是扩展 Agent 权限。
 
-本版完成的观测收口包括：
+本版完成的边界收口包括：
 
-- 新增 Tasklist Agent 专用 LangSmith config resolver、metadata allowlist 和 observer adapter。
-- 采用官方 LangSmith env：`LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT`，不新增 `AI_MIND_LANGSMITH_ENABLED` 双开关。
-- enabled 条件为 `LANGSMITH_TRACING=true` 且 `LANGSMITH_API_KEY` 非空；关闭、缺少 Key 或 LangSmith 上报失败时，Tasklist Agent 主流程保持不受影响。
-- initial run metadata 记录 `runId`、`threadId`、`assistantMessageId`、`agentVersion`、`graphVersion`、`versionPlanUri`、`modelId`、`provider`、`reasoningEnabled` 和运行环境。
-- HITL metadata 只记录 interrupt / decision 类型、review round、strategy regeneration 次数、draft revision 和 validation 计数，不上传完整用户反馈或 tasklist markdown。
-- result metadata 记录 run status、result status、artifact 是否生成、耗时和脱敏 failure 信息。
-- LangSmith 只作为外部观测层，不是 AgentRun / AgentInterrupt / checkpoint / stream 的业务事实源。
+- 新增 `examples/agent-demo/` demo workspace，包含精简版 version-plans、scenarios、rubrics、governance 和 `demo-manifest.json`。
+- 新增 `@demo://` resolver，严格映射到 `examples/agent-demo/`，执行 path normalize、root boundary check、extension allowlist 和 file size limit。
+- `@docs://` 不再作为 public Agent resource；旧 scheme 在 public demo 中 fail closed，并提示用户改用 `@demo://version-plans/*.md`。
+- `/tasklist` public demo 入口迁移到 `@demo://version-plans/*.md`，字段名 `versionPlanUri` 保持不变。
+- `@` resource picker 和快速访问只面向 demo version-plans，不再展示真实 `docs/versions/`。
+- 小屏移动端对 textarea、模型选择器和 slash/resource popup 做了密度优化，但不改 reducer 和主交互结构。
 
-当前业务运行时 baseline 仍是 v0.3.0 Tasklist Agent HITL Checkpoint Resume MVP：
+当前业务运行时 baseline 仍然是 v0.3.4 的 Tasklist Agent Graph + HITL + LangSmith observability 语义：
 
-- Strategy Review 必停，支持 `approve / edit / reject / respond`。
-- Tasklist Revision Review 只在 `warningDisposition.fixNow.length > 0` 时触发。
-- 最多两轮受控修订，第二轮自动执行，不再请求 HITL。
-- 新增 Prisma / PostgreSQL `AgentRun` 与 `AgentInterrupt` 业务状态。
-- 接入 LangGraph Postgres checkpointer，支持跨 HTTP 请求 resume。
-- resume 后继续追加到原 assistant message。
-- pending HITL 时普通 Composer 锁定，人工反馈只走审核卡。
-- 刷新后不恢复 pending HITL，用户需要重新发起 `/tasklist`。
-- 普通聊天、Skill、Tool Calling 和 MCP 不受 HITL 影响。
+- Graph Runtime 继续是 `/tasklist` 的唯一执行路径。
+- HITL checkpoint resume、AgentRun / AgentInterrupt、LangSmith metadata 语义保持不变。
+- public demo 不再读取真实 `docs/`、`specs/`、`apps/`、`packages/` 或绝对路径资源。
+- 公开 Agent 文件资源只来自 `examples/agent-demo/`。
 
-v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停、跨版本 checkpoint resume、多 Agent 编排或自动写 docs 文件。
-
-详细设计见 [v0.3.4 LangSmith 观测说明](./docs/versions/v0.3.4-tasklist-agent-langsmith-observability.md)、[v0.3.3 full skills 默认入口说明](./docs/versions/v0.3.3-spec-kit-full-skills-default-entry.md)、[v0.3.2 双轨 pilot 说明](./docs/versions/v0.3.2-spec-kit-cli-codex-skills-dual-track-pilot.md)、[v0.3.1 治理基线说明](./docs/versions/v0.3.1-spec-kit-governance-baseline.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
+详细设计见 [v0.3.5 demo resource boundary 说明](./docs/versions/v0.3.5-agent-demo-workspace-resource-boundary.md)、[v0.3.4 LangSmith 观测说明](./docs/versions/v0.3.4-tasklist-agent-langsmith-observability.md)、[v0.3.3 full skills 默认入口说明](./docs/versions/v0.3.3-spec-kit-full-skills-default-entry.md) 和 [v0.3.0 运行时 baseline](./docs/versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md)。
 
 ## 当前能力
 
@@ -335,7 +327,7 @@ v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停�
 
 - Tiptap 增强输入框。
 - `/summary`、`/tasklist`、`/check` inline command chip。
-- `@docs://...` 与 `@project://latest-context` inline resource chip。
+- `@demo://...` 与 `@project://latest-context` inline resource chip。
 - Enter 发送、Shift + Enter 换行、中文 IME 防误发。
 - `plainText + composer.command + composer.references` 兼容提交。
 
@@ -344,8 +336,8 @@ v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停�
 ### Agent Runtime
 
 - `Version Plan to Tasklist Agent`
-- 入口：`/tasklist + @docs://versions/*.md`
-- v0.2.3 后 `/tasklist + @docs://versions/*.md` 固定走 Graph Runtime。
+- 入口：`/tasklist + @demo://version-plans/*.md`
+- v0.2.3 后 `/tasklist + @demo://version-plans/*.md` 固定走 Graph Runtime。
 - LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
 - LangGraph `StateGraph` 只替换编排层。
 - v0.2.4 后生产路径以 GraphState 作为内部运行态事实源。
@@ -368,7 +360,7 @@ v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停�
 - Debug Summary 只展示脱敏白名单字段。
 - `AgentTracePanel` 展示 readiness、decision、strategy、warning disposition、revision effect、graph timeline 和折叠 Debug 摘要。
 - `AgentTextArtifactPanel` 展示最终 tasklist Markdown 正文。
-- 不自动扫描 docs，不写入 docs 文件，不提供前端 runtime switch，不做运行中 fallback。
+- 不自动扫描 demo workspace，不写入文件，不提供前端 runtime switch，不做运行中 fallback。
 
 ### 工程化边界
 
@@ -435,7 +427,7 @@ v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停�
 这组受控 Agent 版本有几个重要原则：
 
 1. 第一个 Agent 先做受控单 Agent，不做通用 Agent。
-2. Agent 必须基于用户显式引用的 `docs://versions/*.md`，不自动扫描 docs。
+2. Agent 必须基于用户显式引用的 `demo://version-plans/*.md`，不自动扫描 demo workspace，也不读取真实项目目录。
 3. Agent 通过 text artifact 展示最终 tasklist 草稿，并用普通 text 输出校验摘要，但不自动写入文件。
 4. `v0.1.1` 只开放一次 action 选择，不开放资源权限、工具权限、写入权限和循环权限。
 5. `v0.2.0` 只把这条受控链路迁移到 LangGraph `StateGraph`，不扩大 Agent 权限。
@@ -445,7 +437,7 @@ v0.3.0 不实现通用审批、Run History、Trace replay、任意节点暂停�
 
 因此：
 
-- `/tasklist` 只有配合 `@docs://versions/*.md` 才进入 Agent。
+- `/tasklist` 只有配合 `@demo://version-plans/*.md` 才进入 Agent。
 - `validate_tasklist_structure` 只做结构校验，不判断内容质量是否完美。
 - `tasklistDraft` 只存在本轮 GraphState 内存中。
 - `PlanningDecisionAction` 必须通过 schema 和状态机约束。
@@ -549,11 +541,11 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 启动项目后，可以从下面几类问题开始验证当前能力：
 
 - `现在广州天气怎么样？`
-- 选择 `/summary`，引用 `@docs://README.md`，输入：`帮我总结这份项目文档`
-- 选择 `/tasklist`，引用 `@docs://versions/v0.2.0-controlled-agent-graph.md`，输入：`基于这个版本方案生成 tasklist 草稿`
+- 选择 `/summary`，引用 `@demo://README.md`，输入：`帮我总结这个 demo workspace 的边界设计`
+- 选择 `/tasklist`，引用 `@demo://version-plans/v034-langsmith-observability.md`，输入：`基于这个版本方案生成 tasklist 草稿`
 - 选择 `@project://latest-context`，输入：`帮我概括当前项目上下文`
 
-其中 `/tasklist` 只有配合 `@docs://versions/*.md` 才进入受控 Agent；`/check` 当前主要作为任务意图 hint，不等同于立即执行 remote Tool。
+其中 `/tasklist` 只有配合 `@demo://version-plans/*.md` 才进入受控 Agent；`/check` 当前主要作为任务意图 hint，不等同于立即执行 remote Tool。
 
 ## 常用验证
 
@@ -593,29 +585,30 @@ pnpm lint:packages:fix
 
 AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运行时问题。
 
-| Version | Theme                                              | Key Changes                                                                                                                        |
-| ------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| v0.0.4  | 本地聊天闭环                                       | 完成本地聊天、流式输出与 Streamdown 展示                                                                                           |
-| v0.0.5  | Tool Calling MVP                                   | 接入最小 Tool Calling 能力                                                                                                         |
-| v0.0.6  | Multi-Tool Runtime                                 | 支持多工具运行时与工具结果回传                                                                                                     |
-| v0.0.7  | Skill Runtime                                      | 引入第一层 Skill Runtime，完成 `utility-skill`                                                                                     |
-| v0.0.8  | Reader Skill                                       | 新增 `reader-skill`，支持文件读取与阅读类能力                                                                                      |
-| v0.0.9  | MCP Host MVP                                       | 接入本地 stdio MCP，验证 MCP Tool / Resource                                                                                       |
-| v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                                                                |
-| v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                                                                 |
-| v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime                                      |
-| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                           |
-| v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                      |
-| v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary |
-| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                   |
-| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                             |
-| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                             |
-| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                   |
-| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                 |
-| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                 |
-| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                     |
-| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                          |
-| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail        |
+| Version | Theme                                              | Key Changes                                                                                                                                |
+| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| v0.0.4  | 本地聊天闭环                                       | 完成本地聊天、流式输出与 Streamdown 展示                                                                                                   |
+| v0.0.5  | Tool Calling MVP                                   | 接入最小 Tool Calling 能力                                                                                                                 |
+| v0.0.6  | Multi-Tool Runtime                                 | 支持多工具运行时与工具结果回传                                                                                                             |
+| v0.0.7  | Skill Runtime                                      | 引入第一层 Skill Runtime，完成 `utility-skill`                                                                                             |
+| v0.0.8  | Reader Skill                                       | 新增 `reader-skill`，支持文件读取与阅读类能力                                                                                              |
+| v0.0.9  | MCP Host MVP                                       | 接入本地 stdio MCP，验证 MCP Tool / Resource                                                                                               |
+| v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                                                                        |
+| v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                                                                         |
+| v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime                                              |
+| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                                   |
+| v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                              |
+| v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary         |
+| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                           |
+| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                                     |
+| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                                     |
+| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                           |
+| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                         |
+| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                         |
+| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                             |
+| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                                  |
+| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                |
+| v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

@@ -10,7 +10,7 @@ AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 
 `v0.1.1` 在这条路径上加入 `Controlled Planner Lite`：Agent 可以在 Runtime 白名单 action 中做一次有限决策，但仍然不能自由读取资源、自由调用工具、写入文件或循环规划。
 
-`v0.2.0` 将这条受控路径的编排层迁移到 LangGraph `StateGraph`。`v0.2.3` 后 `/tasklist + @docs://versions/*.md` 固定走 Graph Runtime，不再保留 legacy runner 或 runtime switch。
+`v0.2.0` 将这条受控路径的编排层迁移到 LangGraph `StateGraph`。`v0.2.3` 后 `/tasklist + @demo://version-plans/*.md` 固定走 Graph Runtime，不再保留 legacy runner 或 runtime switch。
 
 `v0.2.4` 后，Tasklist Agent 内部运行态以 GraphState 作为事实源。`v0.3.0` 在这条受控 graph 上新增 Strategy Review、Tasklist Revision Review、AgentRun 业务状态和 LangGraph Postgres checkpoint resume。
 
@@ -19,17 +19,17 @@ AI Mind 的 Agent Runtime 以“受控单 Agent”为起点。
 当前 Agent 必须满足明确入口：
 
 ```text
-/tasklist + @docs://versions/*.md
+/tasklist + @demo://version-plans/*.md
 ```
 
 这意味着：
 
 - 用户必须显式选择任务意图。
 - 用户必须显式引用版本方案。
-- Agent 不自动扫描 `docs/versions/`。
+- Agent 不自动扫描 `examples/agent-demo/version-plans/`。
 - Agent 不自动发现最新版本方案。
 - Agent 不读取历史 tasklist。
-- Agent 不写入 docs 文件。
+- Agent 不写入项目文件。
 
 ## Runtime-controlled Path
 
@@ -118,20 +118,20 @@ Agent 可以使用 Tool，但 Tool 暴露范围必须受控。
 
 ## Resource Boundary
 
-当前 Agent 只把用户显式引用的 `docs://versions/*.md` 作为必读事实来源。
+当前 public Tasklist Agent 只把用户显式引用的 `demo://version-plans/*.md` 作为必读事实来源。
 
 可选上下文读取也受限制，不等同于开放文件访问。
 
 `v0.1.1` 只允许在 draft 前最多补读一个白名单资源：
 
-- `docs://README.md`
-- `docs://architecture/runtime-boundary.md`
-- `docs://architecture/stream-core.md`
-- `docs://architecture/capability-skill-surface.md`
-- `docs://architecture/agent-runtime.md`
+- `demo://governance/delivery-boundaries.md`
+- `demo://governance/engineering-rules.md`
+- `demo://rubrics/plan-rubric.md`
+- `demo://rubrics/task-rubric.md`
+- `demo://rubrics/review-rubric.md`
 - `project://latest-context`
 
-本地 docs resource 仍然遵守 `docs://...` 边界，MCP 或 Agent 都不能绕过这一层去读取任意源码或配置文件。
+public demo resource 现在遵守 `demo://...` 边界，MCP 或 Agent 都不能绕过这一层去读取任意源码、配置文件或真实项目目录。
 
 ## Agent Trace
 
@@ -185,7 +185,7 @@ Runtime 会在 `final_answer` 阶段输出通用 text artifact：
 
 `v0.3.0` 后，Tasklist Agent 在受控 HITL 路径中接入 LangGraph PostgresSaver durable checkpoint：
 
-- PostgreSQL durable checkpoint 只服务 `/tasklist + @docs://versions/*.md` 的 resume。
+- PostgreSQL durable checkpoint 只服务 `/tasklist + @demo://version-plans/*.md` 的 resume。
 - `AgentRun` / `AgentInterrupt` 记录业务状态。
 - PostgresSaver 记录 LangGraph checkpoint。
 - Prisma schema 不管理 checkpoint tables。

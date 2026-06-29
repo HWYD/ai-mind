@@ -25,11 +25,11 @@ export function buildStoppedPlanningDecisionAnswer(
             '',
             decision.question,
             '',
-            '本轮 Agent 已结束。你补充这条信息后，可以重新发起 `/tasklist + @docs://versions/*.md` 请求。',
+            '本轮 Agent 已结束。你补充这条信息后，可以重新发起 `/tasklist + @demo://version-plans/*.md` 请求。',
         ].join('\n')
     }
 
-    return [decision.message, '', '本轮 Agent 已在边界内停止，没有生成任务清单草稿，也没有写入 docs 文件。'].join('\n')
+    return [decision.message, '', '本轮 Agent 已在边界内停止，没有生成任务清单草稿，也没有写入任何项目文件。'].join('\n')
 }
 
 export function buildControlledPlannerOutputFailureAnswer(error: unknown) {
@@ -44,7 +44,7 @@ export function buildControlledPlannerOutputFailureAnswer(error: unknown) {
         '',
         `原因：${error.message}`,
         '',
-        '本轮没有生成任务清单草稿，也没有写入 docs 文件。请重试，或切换到更稳定的模型。',
+        '本轮没有生成任务清单草稿，也没有写入任何项目文件。请重试，或切换到更稳定的模型。',
     ].join('\n')
 }
 
@@ -68,7 +68,7 @@ function buildFinalAnswerSummary(state: VersionPlanTasklistGraphStateAnnotationS
             ? `- 结构校验仍存在剩余问题：${revisionEffect.remainingIssues.join('、')}，请人工确认是否接受当前草稿。`
             : null,
         revisionEffect.finalDecision === 'blocked' ? '- 当前任务清单草稿仍未通过结构校验，不建议直接采用。' : null,
-        '- 本轮没有写入 docs 文件；如需落盘，请人工复制确认后的任务清单。',
+        '- 本轮没有写入任何项目文件；如需落盘，请人工复制确认后的任务清单。',
     ].filter(Boolean)
 
     return [

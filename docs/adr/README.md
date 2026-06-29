@@ -35,3 +35,4 @@ ADR 不是 tasklist。它解释为什么做出这个决定、带来什么取舍�
 - [0006: Spec Kit CLI and Codex Skills Dual-track](./0006-spec-kit-cli-and-codex-skills-dual-track.md)
 - [0007: Official Spec Kit Full Skills Default Entry](./0007-official-spec-kit-full-skills-default-entry.md)
 - [0008: LangSmith Observability Boundary](./0008-langsmith-observability-boundary.md)
+- [0009: Public Agent Demo Resource Boundary](./0009-public-agent-demo-resource-boundary.md)

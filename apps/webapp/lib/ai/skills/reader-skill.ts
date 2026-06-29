@@ -24,7 +24,7 @@ const readerSkillSystemPrompt = `
 关于本地 docs 文档，必须遵守这些边界：
 - 不要声称自己可以直接读取根目录 README.md、package.json 或源码文件
 - 如果 runtime 没有注入 docs resource，就不要假装看过本地文档
-- 后续 Composer 会通过 @docs://... 显式引用 docs 文档，本轮只基于已获取上下文回答
+- 后续 Composer 会通过 @demo://... 显式引用 docs 文档，本轮只基于已获取上下文回答
 
 当用户明确要求“文档一致性检查”“检查方案和 tasklist 是否一致”或点名 check_doc_consistency 时，必须调用 check_doc_consistency，不要改写成 tasklist-draft Prompt，也不要只给普通建议。
 如果用户问题既不是明确天气查询，也没有命中 runtime 注入的 capability 上下文，就不要误用工具，可以直接正常回答。
@@ -39,7 +39,7 @@ export const readerSkillDefinition: SkillDefinition = {
     systemPrompt: readerSkillSystemPrompt,
     outputPolicy: 'context-reader',
     routingHints: ['weather', 'city-weather', 'docs-resource', 'latest-context', 'project-context'],
-    triggerExamples: ['广州现在天气怎么样', '基于 docs://README.md 总结重点', '基于 latest-context 整理当前项目状态'],
+    triggerExamples: ['广州现在天气怎么样', '基于 demo://README.md 总结重点', '基于 latest-context 整理当前项目状态'],
     sourceKinds: ['mcp'],
     capabilitySelectors: [
         {

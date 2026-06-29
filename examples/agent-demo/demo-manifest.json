@@ -1,0 +1,25 @@
+{
+    "resourceRoot": "examples/agent-demo",
+    "publicSchemes": ["@demo://"],
+    "versionPlans": [
+        "version-plans/v020-controlled-agent-graph.md",
+        "version-plans/v030-hitl-checkpoint-resume.md",
+        "version-plans/v034-langsmith-observability.md",
+        "version-plans/test-missing-non-goals.md",
+        "version-plans/test-over-scoped-runtime-change.md"
+    ],
+    "scenarios": [
+        {
+            "id": "request-limit-banner",
+            "entry": "scenarios/request-limit-banner/requirement.md"
+        },
+        {
+            "id": "langsmith-safe-mode",
+            "entry": "scenarios/langsmith-safe-mode/requirement.md"
+        },
+        {
+            "id": "delivery-chain-resource-boundary",
+            "entry": "scenarios/delivery-chain-resource-boundary/requirement.md"
+        }
+    ]
+}

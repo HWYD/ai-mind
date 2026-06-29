@@ -22,7 +22,7 @@ import {
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-const planUri = 'docs://versions/v0.3.0-hitl-checkpoint-resume.md'
+const planUri = 'demo://version-plans/v0.3.0-hitl-checkpoint-resume.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,

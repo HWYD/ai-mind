@@ -8,11 +8,11 @@ import {
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 
 const versionPlanReference = {
-    id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+    id: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
     label: 'v0.2.0 Controlled Agent Graph',
     source: 'local',
     type: 'resource',
-    uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+    uri: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
 } as const
 
 function createGraphState(): VersionPlanTasklistGraphStateAnnotationState {
@@ -77,10 +77,10 @@ function createGraphState(): VersionPlanTasklistGraphStateAnnotationState {
                 contentPreview: 'Optional context preview must not enter debug summary.',
                 location: 'local' as const,
                 previewChars: 100,
-                resourceName: 'runtime-boundary.md',
+                resourceName: 'delivery-boundaries.md',
                 serverId: 'project-docs-server',
                 status: 'completed' as const,
-                uri: 'docs://architecture/runtime-boundary.md' as const,
+                uri: 'demo://governance/delivery-boundaries.md' as const,
             },
             readiness: {
                 missingFields: ['Interface Changes'],

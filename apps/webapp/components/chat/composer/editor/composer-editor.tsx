@@ -28,7 +28,7 @@ import {
 } from './composer-chip-nodes'
 import { getEditorPlainText, getPlainTextFromContent, serializeComposerPayload, textToTiptapContent } from './composer-serialization'
 
-const COMPOSER_PLACEHOLDER = '输入你的问题，或使用 / 命令，@ 引用资源...'
+const COMPOSER_PLACEHOLDER = '输入你的问题，或使用 / 命令、@ 引用资源...'
 
 type CommandSuggestionItem = ReturnType<typeof getFilteredComposerCommands>[number]
 type ResourceSuggestionItem = ComposerResourceOption
@@ -108,7 +108,6 @@ function createComposerSuggestionPopupOptions<T>(props: SuggestionProps<T>, cont
     }
 }
 
-// 触发字符前缀规则用于避免普通路径、URL 中的 / 被误识别成命令入口。
 function getCharacterBeforeTrigger(range: Range, state: EditorState) {
     if (range.from <= 1) {
         return ''
@@ -140,7 +139,6 @@ function isResourceReferenceTriggerAllowed({ range, state }: { range: Range; sta
 function replaceSuggestionWithSingleChip(editor: Editor, nodeName: string, range: Range, content: JSONContent) {
     const deletions: Array<{ from: number; to: number }> = []
 
-    // 同类型 chip 当前只允许一个；一次事务里删除旧 chip 并插入新 chip，避免 ProseMirror DOM selection 短暂越界。
     editor.state.doc.descendants((node, position) => {
         if (node.type.name === nodeName) {
             deletions.push({ from: position, to: position + node.nodeSize })
@@ -159,7 +157,6 @@ function replaceSuggestionWithSingleChip(editor: Editor, nodeName: string, range
     const to = transaction.mapping.map(range.to)
     const chipNode = editor.schema.nodeFromJSON(content)
 
-    // 先删除触发文本（例如 /xxx 或 @xxx），再把 chip 插回同一位置，最后补一个空格让用户能继续自然输入。
     transaction.delete(from, to)
     transaction.insert(from, chipNode)
     transaction.insertText(' ', from + chipNode.nodeSize)
@@ -181,7 +178,6 @@ function createSlashCommandExtension() {
                     allow: isSlashCommandTriggerAllowed,
                     items: ({ query }) => getFilteredComposerCommands(query),
                     command: ({ editor, range, props }: { editor: Editor; range: Range; props: CommandSuggestionItem }) => {
-                        // 命令 chip 只表达“本轮想做什么”，选择后不立即执行，真正消费留给后端 composer runtime。
                         replaceSuggestionWithSingleChip(
                             editor,
                             COMMAND_CHIP_NODE_NAME,
@@ -256,7 +252,6 @@ function createResourceReferenceExtension() {
                     allow: isResourceReferenceTriggerAllowed,
                     items: ({ query }) => getFilteredComposerResources(query),
                     command: ({ editor, range, props }: { editor: Editor; range: Range; props: ResourceSuggestionItem }) => {
-                        // 资源 chip 只在输入侧标记引用对象；真实读取资源留给后续 runtime，避免前端提前执行能力。
                         replaceSuggestionWithSingleChip(
                             editor,
                             RESOURCE_CHIP_NODE_NAME,
@@ -389,7 +384,7 @@ export function ComposerEditor({
         immediatelyRender: false,
         editorProps: {
             attributes: {
-                class: 'min-h-12 max-h-[180px] overflow-y-auto outline-none',
+                class: 'min-h-6 max-h-[180px] overflow-y-auto outline-none sm:min-h-12',
             },
             handleKeyDown: (view, event) => {
                 if (disabledRef.current) {
@@ -398,7 +393,6 @@ export function ComposerEditor({
                 }
 
                 if (isComposerSuggestionActive(view.state)) {
-                    // 菜单打开时 Enter 交给 Suggestion 菜单选择项，不能穿透成发送。
                     return false
                 }
 
@@ -461,8 +455,14 @@ export function ComposerEditor({
     }, [editor, onComposerChange, value])
 
     return (
-        <div className={cn('ai-composer-editor min-h-12 text-[15px] leading-6 text-foreground', disabled && 'opacity-60', className)}>
-            {editor ? <EditorContent editor={editor} /> : <div className="min-h-12 text-muted-foreground">{placeholder}</div>}
+        <div
+            className={cn(
+                'ai-composer-editor min-h-6 text-sm leading-6 text-foreground sm:min-h-12 sm:text-[15px]',
+                disabled && 'opacity-60',
+                className
+            )}
+        >
+            {editor ? <EditorContent editor={editor} /> : <div className="min-h-6 text-muted-foreground sm:min-h-12">{placeholder}</div>}
         </div>
     )
 }

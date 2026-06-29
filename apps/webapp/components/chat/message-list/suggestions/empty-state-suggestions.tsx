@@ -1,3 +1,5 @@
+'use client'
+
 import { Button } from '@/components/ui/button'
 
 import { type EmptyStateSuggestion, emptyStateSuggestions } from './empty-state-suggestion-options'
@@ -18,12 +20,12 @@ export function EmptyStateSuggestions({
                 </p>
             </div> */}
 
-            <div className="mt-0 md:mt-8 w-full rounded-3xl bg-muted/20 md:px-5 md:py-7">
+            <div className="mt-0 w-full rounded-3xl bg-muted/20 md:mt-8 md:px-5 md:py-7">
                 <p className="text-base font-medium text-foreground">试试这些能力</p>
                 <p className="mt-2 text-sm text-muted-foreground">
                     体验 AI Mind 的运行时能力：从普通问答、Tool 调用到 MCP 资源读取与受控 Agent 执行。
                 </p>
-                <div className="mt-8 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-2">
+                <div className="empty-state-suggestions-grid mt-8 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-2 max-sm:[&>:nth-child(n+4)]:hidden">
                     {emptyStateSuggestions.map(suggestion => {
                         const Icon = suggestion.icon
 
@@ -34,7 +36,7 @@ export function EmptyStateSuggestions({
                                 variant="outline"
                                 disabled={disabled}
                                 onClick={() => onSelectSuggestion(suggestion)}
-                                className="h-auto justify-start rounded-2xl border-border/70 bg-background/85 px-3.5 py-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-[var(--composer-focus-border)] hover:bg-[var(--composer-focus-soft)] hover:shadow-sm"
+                                className="h-auto w-full min-w-0 justify-start whitespace-normal rounded-2xl border-border/70 bg-background/85 px-3.5 py-3 text-left shadow-xs transition-all hover:-translate-y-0.5 hover:border-[var(--composer-focus-border)] hover:bg-[var(--composer-focus-soft)] hover:shadow-sm"
                             >
                                 <span className="flex min-w-0 items-start gap-3">
                                     <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-xl bg-[var(--composer-mode-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]">

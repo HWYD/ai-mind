@@ -12,7 +12,7 @@ describe('chatStreamChunkSchema artifact chunks', () => {
                 artifactType: 'text',
                 format: 'markdown',
                 metadata: {
-                    generatedFrom: 'docs://versions/v0.1.1.md',
+                    generatedFrom: 'demo://version-plans/v0.1.1.md',
                     revision: 2,
                     targetVersion: 'v0.1.1',
                     validated: true,
@@ -273,7 +273,7 @@ describe('chatStreamChunkSchema HITL chunks', () => {
     const strategyPayload = {
         allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
         data: {
-            planUri: 'docs://versions/v0.3.0.md',
+            planUri: 'demo://version-plans/v0.3.0.md',
             reviewRound: 1,
             strategy: {
                 granularity: 'medium',

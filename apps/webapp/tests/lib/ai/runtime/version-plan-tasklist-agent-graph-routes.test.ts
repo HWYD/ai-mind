@@ -37,7 +37,7 @@ import {
     type VersionPlanTasklistGraphStateAnnotationState,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 
-const planUri = 'docs://versions/v0.2.0-controlled-agent-graph.md'
+const planUri = 'demo://version-plans/v0.2.0-controlled-agent-graph.md'
 
 const versionPlanReference = {
     id: planUri,
@@ -129,7 +129,7 @@ describe('runtime/version-plan-tasklist-agent graph planning routes', () => {
         [
             {
                 reason: '需要补充上下文。',
-                resourceUri: 'docs://architecture/runtime-boundary.md',
+                resourceUri: 'demo://architecture/runtime-boundary.md',
                 type: 'read_optional_context',
             },
             VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS.readOptionalContext,

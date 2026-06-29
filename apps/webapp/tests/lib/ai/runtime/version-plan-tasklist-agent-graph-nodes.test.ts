@@ -1,4 +1,4 @@
-﻿import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
+import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { AIMessage } from '@langchain/core/messages'
 import { Command, END, MemorySaver } from '@langchain/langgraph'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -20,8 +20,8 @@ import { VERSION_PLAN_TASKLIST_GRAPH_NODE_IDS } from '@/lib/ai/runtime/version-p
 import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-const planUri = 'docs://versions/v0.2.0-controlled-agent-graph.md'
-const optionalContextUri = 'docs://architecture/runtime-boundary.md'
+const planUri = 'demo://version-plans/v0.2.0-controlled-agent-graph.md'
+const optionalContextUri = 'demo://governance/delivery-boundaries.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,
@@ -190,7 +190,7 @@ function mockSuccessfulResources() {
                 content: 'Runtime boundary context for tasklist strategy.',
                 contentPreview: 'Runtime boundary context for tasklist strategy.',
                 previewChars: 3000,
-                resourceName: 'architecture/runtime-boundary.md',
+                resourceName: 'governance/delivery-boundaries.md',
                 serverId: 'project-docs-server',
                 truncated: false,
                 uri: optionalContextUri,

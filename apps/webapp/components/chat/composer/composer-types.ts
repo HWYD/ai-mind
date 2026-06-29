@@ -13,12 +13,15 @@ export type ComposerCommand = ChatComposerCommand
 export type ComposerDisplaySegment = ChatComposerDisplaySegment
 export type ComposerReference = ChatComposerReference
 export type ComposerPayload = ChatComposerPayload
+export type DemoResourceBadgeLabel = '示例' | '测试'
 
 export interface ComposerResourceOption extends ComposerReference {
+    badgeLabel?: DemoResourceBadgeLabel
     description: string
 }
 
 export interface DocsResourceCatalogItem {
+    badgeLabel?: DemoResourceBadgeLabel
     description: string
     fileName: string
     group: 'architecture' | 'readme' | 'version-plan'

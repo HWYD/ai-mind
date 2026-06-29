@@ -5,7 +5,7 @@
 Tasklist Agent 是 AI Mind 的第一个受控 Agent。v0.3.0 后，它的稳定边界是：
 
 ```text
-/tasklist + @docs://versions/*.md
+/tasklist + @demo://version-plans/*.md
   -> LangGraph StateGraph
   -> GraphState runtime source of truth
   -> AgentRun business state
@@ -20,12 +20,12 @@ Tasklist Agent 是 AI Mind 的第一个受控 Agent。v0.3.0 后，它的稳定�
 Tasklist Agent 只在以下入口启动：
 
 ```text
-/tasklist + @docs://versions/*.md
+/tasklist + @demo://version-plans/*.md
 ```
 
 它不会：
 
-- 自动扫描 docs。
+- 自动扫描 demo workspace 或真实项目目录。
 - 自动写入文件。
 - 自由调用工具。
 - 接管普通聊天。

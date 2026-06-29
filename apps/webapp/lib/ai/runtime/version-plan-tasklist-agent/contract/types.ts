@@ -17,11 +17,11 @@ export const VERSION_PLAN_TASKLIST_AGENT_LIMITS = {
 } as const
 
 export const VERSION_PLAN_TASKLIST_OPTIONAL_CONTEXT_RESOURCE_URIS = [
-    'docs://README.md',
-    'docs://architecture/agent-runtime.md',
-    'docs://architecture/capability-skill-surface.md',
-    'docs://architecture/runtime-boundary.md',
-    'docs://architecture/stream-core.md',
+    'demo://governance/delivery-boundaries.md',
+    'demo://governance/engineering-rules.md',
+    'demo://rubrics/plan-rubric.md',
+    'demo://rubrics/task-rubric.md',
+    'demo://rubrics/review-rubric.md',
     'project://latest-context',
 ] as const
 

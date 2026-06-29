@@ -70,7 +70,7 @@ export const ComposerResourceMenu = forwardRef<
 
     if (items.length === 0) {
         return (
-            <div className="relative w-[min(80vw,400px)] rounded-2xl border border-border/80 bg-popover p-3 text-sm text-muted-foreground shadow-xl sm:w-[400px]">
+            <div className="relative w-[min(80vw,400px)] rounded-2xl border border-border/80 bg-popover p-3 text-xs text-muted-foreground shadow-xl sm:w-[400px] sm:text-sm">
                 没有匹配的资源
                 <div className="absolute bottom-[-6px] left-1/2 size-3 -translate-x-1/2 rotate-45 border-r border-b border-border/80 bg-popover" />
             </div>
@@ -92,26 +92,28 @@ export const ComposerResourceMenu = forwardRef<
                             onMouseDown={event => event.preventDefault()}
                             onClick={() => selectItem(index)}
                             className={cn(
-                                'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors',
+                                'flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors sm:gap-3 sm:px-3 sm:py-2.5',
                                 isSelected ? 'bg-[var(--composer-focus-soft)]' : 'hover:bg-muted/70'
                             )}
                         >
                             <span
                                 className={cn(
-                                    'inline-flex size-10 shrink-0 items-center justify-center rounded-xl',
+                                    'inline-flex size-9 shrink-0 items-center justify-center rounded-xl sm:size-10',
                                     item.source === 'remote' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
                                 )}
                             >
-                                <Icon className="size-5" strokeWidth={2.2} />
+                                <Icon className="size-4 sm:size-5" strokeWidth={2.2} />
                             </span>
                             <span className="min-w-0 flex-1">
                                 <span className="flex min-w-0 items-center gap-2">
-                                    <span className="truncate text-base font-semibold text-foreground">{item.label}</span>
-                                    <Badge variant="outline" className="shrink-0 rounded-full px-2 py-0 text-[11px]">
-                                        {item.source === 'remote' ? '远程' : '本地'}
+                                    <span className="truncate text-sm font-semibold text-foreground sm:text-base">{item.label}</span>
+                                    <Badge variant="outline" className="shrink-0 rounded-full px-2 py-0 text-[10px] sm:text-[11px]">
+                                        {item.source === 'remote' ? '远程' : (item.badgeLabel ?? '示例')}
                                     </Badge>
                                 </span>
-                                <span className="mt-0.5 block truncate text-sm text-muted-foreground">{item.description}</span>
+                                <span className="mt-0.5 block truncate text-[11px] text-muted-foreground sm:text-sm">
+                                    {item.description}
+                                </span>
                             </span>
                         </button>
                     )

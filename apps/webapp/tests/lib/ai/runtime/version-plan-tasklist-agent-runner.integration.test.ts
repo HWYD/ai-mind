@@ -26,7 +26,7 @@ import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const connectionString = process.env.DATABASE_URL?.trim()
 const describeWithDatabase = connectionString ? describe : describe.skip
-const planUri = 'docs://versions/v0.3.0-hitl-checkpoint-resume.md'
+const planUri = 'demo://version-plans/v0.3.0-hitl-checkpoint-resume.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,

@@ -8,7 +8,7 @@ const CLOUD_MODEL_IDS = [
 
 const TASKLIST_MODEL_IDS = ['qwen/qwen3.6-plus', 'deepseek/deepseek-v4-pro']
 const baseUrl = (process.env.AI_MIND_SMOKE_BASE_URL || 'http://localhost:3000').replace(/\/$/, '')
-const planUri = process.env.AI_MIND_SMOKE_PLAN_URI || 'docs://versions/v0.0.4-langchain-zod-streamdown.md'
+const planUri = process.env.AI_MIND_SMOKE_PLAN_URI || 'demo://version-plans/v034-langsmith-observability.md'
 const timeoutMs = Number(process.env.AI_MIND_SMOKE_TIMEOUT_MS || 180_000)
 const chatModelIds = process.env.AI_MIND_SMOKE_SKIP_CHAT === '1' ? [] : CLOUD_MODEL_IDS
 const tasklistModelIds = process.env.AI_MIND_SMOKE_TASKLIST_MODEL_IDS
@@ -142,7 +142,7 @@ async function runChatSmoke(modelId) {
 }
 
 async function runTasklistSmoke(modelId) {
-    const referenceLabel = planUri.replace('docs://', '')
+    const referenceLabel = planUri.replace(/^(docs|demo):\/\//, '')
     const userText = `/tasklist @${planUri}`
     const result = await requestChat({
         conversationId: `cloud-smoke-tasklist-${modelId.replaceAll('/', '-')}`,

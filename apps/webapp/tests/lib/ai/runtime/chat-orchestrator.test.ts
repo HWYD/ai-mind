@@ -1,4 +1,4 @@
-import { AIMessage, ToolMessage } from '@langchain/core/messages'
+﻿import { AIMessage, ToolMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -104,11 +104,11 @@ function createTasklistRequest() {
             plainText: '',
             references: [
                 {
-                    id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                    id: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
                     label: 'v0.2.0-controlled-agent-graph.md',
                     source: 'local' as const,
                     type: 'resource' as const,
-                    uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                    uri: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
                 },
             ],
         },
@@ -138,11 +138,11 @@ function createSummaryDocsRequest() {
             plainText: '',
             references: [
                 {
-                    id: 'docs://README.md',
+                    id: 'demo://README.md',
                     label: 'README.md',
                     source: 'local' as const,
                     type: 'resource' as const,
-                    uri: 'docs://README.md',
+                    uri: 'demo://README.md',
                 },
             ],
         },
@@ -160,11 +160,11 @@ function createCheckRequest() {
             plainText: '',
             references: [
                 {
-                    id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                    id: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
                     label: 'v0.2.0-controlled-agent-graph.md',
                     source: 'local' as const,
                     type: 'resource' as const,
-                    uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                    uri: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
                 },
             ],
         },
@@ -354,7 +354,7 @@ describe('runtime/chat-orchestrator', () => {
         expectSingleTerminalChunk(writtenChunks)
     })
 
-    it('Tasklist Graph Runtime 不影响 /summary @docs 普通 Composer Context 链路', async () => {
+    it('Tasklist Graph Runtime 不影响 /summary @demo 普通 Composer Context 链路', async () => {
         const request = createSummaryDocsRequest()
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)

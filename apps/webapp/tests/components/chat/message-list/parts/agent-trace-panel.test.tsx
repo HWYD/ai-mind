@@ -54,7 +54,7 @@ describe('AgentTracePanel', () => {
                 serverId: 'project-docs-server',
                 status: 'completed',
                 type: 'resource',
-                uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+                uri: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
             },
             {
                 id: 'validate-v1',
@@ -136,7 +136,7 @@ describe('AgentTracePanel', () => {
         expect(screen.getByText('readVersionPlan')).toBeTruthy()
         expect(screen.getByText('继续拆分策略')).toBeTruthy()
         expect(screen.getByText('decideTasklistStrategy')).toBeTruthy()
-        expect(screen.getByText('docs://versions/v0.2.0-controlled-agent-graph.md：已完成')).toBeTruthy()
+        expect(screen.getByText('demo://version-plans/v0.2.0-controlled-agent-graph.md：已完成')).toBeTruthy()
         expect(screen.getByText('validate_tasklist_structure：警告，评分 90')).toBeTruthy()
         expect(screen.getByText('评分：90')).toBeTruthy()
         expect(screen.getByText('自动修正：1')).toBeTruthy()

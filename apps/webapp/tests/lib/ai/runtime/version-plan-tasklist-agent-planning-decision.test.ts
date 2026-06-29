@@ -1,4 +1,4 @@
-﻿import { AIMessage } from '@langchain/core/messages'
+import { AIMessage } from '@langchain/core/messages'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatSession } from '@/lib/ai/runtime/types'
@@ -20,7 +20,7 @@ import {
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-const planUri = 'docs://versions/v0.1.1-controlled-planner-lite.md'
+const planUri = 'demo://version-plans/v0.1.1-controlled-planner-lite.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,
@@ -94,7 +94,7 @@ function createOptionalContextReadState() {
         type: 'planning_decision',
         decision: {
             type: 'read_optional_context',
-            resourceUri: 'docs://architecture/runtime-boundary.md',
+            resourceUri: 'demo://governance/delivery-boundaries.md',
             reason: '需要补读 Runtime 边界。',
         },
         reason: '记录 Planning Decision。',
@@ -102,7 +102,7 @@ function createOptionalContextReadState() {
 
     return applyAction(planningDecidedState, {
         type: 'read_resource',
-        resourceUri: 'docs://architecture/runtime-boundary.md',
+        resourceUri: 'demo://governance/delivery-boundaries.md',
         reason: '读取白名单补充上下文。',
     })
 }
@@ -116,7 +116,7 @@ describe('runtime/version-plan-tasklist-agent planning decision schema', () => {
             },
             {
                 type: 'read_optional_context',
-                resourceUri: 'docs://architecture/runtime-boundary.md',
+                resourceUri: 'demo://governance/delivery-boundaries.md',
                 reason: '需要补读 Runtime 边界。',
             },
             {
@@ -154,7 +154,7 @@ describe('runtime/version-plan-tasklist-agent planning decision schema', () => {
     it('非白名单 optional context resourceUri 会被拒绝', () => {
         const result = parseVersionPlanTasklistPlanningDecisionAction({
             type: 'read_optional_context',
-            resourceUri: 'docs://tasklists/v0.1.0.md',
+            resourceUri: 'demo://tasklists/v0.1.0.md',
             reason: '不能读 tasklist。',
         })
 
@@ -305,7 +305,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
     it('plan_read 不能直接读取 optional context', () => {
         const guardResult = validateVersionPlanTasklistGraphAction(createPlanReadState(), {
             type: 'read_resource',
-            resourceUri: 'docs://architecture/stream-core.md',
+            resourceUri: 'demo://scenarios/request-limit-banner/context.md',
             reason: '未经过 Planning Decision 不能补读上下文。',
         })
 
@@ -323,7 +323,7 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
         })
         const guardResult = validateVersionPlanTasklistGraphAction(planningDecidedState, {
             type: 'read_resource',
-            resourceUri: 'docs://architecture/runtime-boundary.md',
+            resourceUri: 'demo://governance/delivery-boundaries.md',
             reason: 'proceed 决策后不应再补读上下文。',
         })
 
@@ -335,14 +335,14 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             type: 'planning_decision',
             decision: {
                 type: 'read_optional_context',
-                resourceUri: 'docs://architecture/runtime-boundary.md',
+                resourceUri: 'demo://governance/delivery-boundaries.md',
                 reason: '需要补读 Runtime 边界。',
             },
             reason: '记录 Planning Decision。',
         })
         const guardResult = validateVersionPlanTasklistGraphAction(planningDecidedState, {
             type: 'read_resource',
-            resourceUri: 'docs://architecture/stream-core.md',
+            resourceUri: 'demo://governance/engineering-rules.md',
             reason: '不能改读另一个白名单资源。',
         })
 
@@ -381,19 +381,19 @@ describe('runtime/version-plan-tasklist-agent planning decision state machine', 
             type: 'planning_decision',
             decision: {
                 type: 'read_optional_context',
-                resourceUri: 'docs://architecture/runtime-boundary.md',
+                resourceUri: 'demo://governance/delivery-boundaries.md',
                 reason: '需要补读 Runtime 边界。',
             },
             reason: '记录 Planning Decision。',
         })
         const optionalContextReadState = applyAction(planningDecidedState, {
             type: 'read_resource',
-            resourceUri: 'docs://architecture/runtime-boundary.md',
+            resourceUri: 'demo://governance/delivery-boundaries.md',
             reason: '读取白名单补充上下文。',
         })
         const guardResult = validateVersionPlanTasklistGraphAction(optionalContextReadState, {
             type: 'read_resource',
-            resourceUri: 'docs://architecture/stream-core.md',
+            resourceUri: 'demo://governance/engineering-rules.md',
             reason: '尝试读取第二个补充上下文。',
         })
 

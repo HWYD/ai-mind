@@ -76,7 +76,7 @@ function getOptionalContextResourceMetadata(resourceUri: VersionPlanTasklistOpti
 
     return {
         location: 'local' as const,
-        resourceName: resourceUri.replace(/^docs:\/\//, ''),
+        resourceName: resourceUri.replace(/^demo:\/\//, ''),
         serverId: PROJECT_DOCS_SERVER_ID,
     }
 }

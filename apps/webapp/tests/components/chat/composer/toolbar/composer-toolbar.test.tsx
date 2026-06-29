@@ -1,4 +1,4 @@
-/** @vitest-environment jsdom */
+﻿/** @vitest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
@@ -42,7 +42,7 @@ describe('ComposerToolbar model selector', () => {
         })
     })
 
-    it('按线上模型 / 本地模型分组展示，并在切换模型时回调 onModelChange', async () => {
+    it('按线上模型和本地模型分组展示，并在切换模型时回调 onModelChange', async () => {
         const onModelChange = vi.fn()
 
         render(
@@ -142,5 +142,32 @@ describe('ComposerToolbar model selector', () => {
 
         expect((sendButton as HTMLButtonElement).disabled).toBe(true)
         expect(sendButton.className).toContain('bg-muted')
+    })
+
+    it('model selector keeps the compact mobile classes without changing desktop classes', () => {
+        render(
+            <ComposerToolbar
+                enableReasoning
+                isModelLoading={false}
+                model="qwen/qwen3.6-plus"
+                modelGroups={modelGroups}
+                onEnableReasoningChange={vi.fn()}
+                onInsertTrigger={vi.fn()}
+                onModelChange={vi.fn()}
+                onSkillModeChange={vi.fn()}
+                onStop={vi.fn()}
+                onSubmit={vi.fn()}
+                sendDisabled={false}
+                skillMode="auto"
+                status="ready"
+            />
+        )
+
+        const modelButton = screen.getByRole('button', { name: '选择模型' })
+
+        expect(modelButton.className).toContain('h-8.5')
+        expect(modelButton.className).toContain('text-xs')
+        expect(modelButton.className).toContain('sm:h-10')
+        expect(modelButton.className).toContain('sm:text-sm')
     })
 })

@@ -27,7 +27,7 @@ async function createRun(service = createService(), suffix = `${Date.now()}-${Ma
         reasoningEnabled: false,
         threadId,
         userGoalSummary: '  生成 v0.3.0 tasklist  ',
-        versionPlanUri: 'docs://versions/v0.3.0.md',
+        versionPlanUri: 'demo://version-plans/v0.3.0.md',
     })
     createdRunIds.push(run.runId)
 
@@ -42,7 +42,7 @@ function createStrategyInterruptPayload(runId: string, threadId: string): Strate
     return {
         allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
         data: {
-            planUri: 'docs://versions/v0.3.0.md',
+            planUri: 'demo://version-plans/v0.3.0.md',
             reviewRound: 1,
             strategy: {
                 granularity: 'medium',

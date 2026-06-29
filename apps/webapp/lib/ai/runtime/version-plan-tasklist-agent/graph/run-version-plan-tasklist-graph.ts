@@ -76,6 +76,7 @@ interface GraphStateSnapshotTask {
 
 interface GraphStateSnapshot {
     tasks?: GraphStateSnapshotTask[]
+    values?: unknown
 }
 
 interface InvokeCompiledTasklistGraphOptions {
@@ -97,6 +98,50 @@ interface CompiledTasklistGraph {
     invoke(input: unknown, config: { configurable: { thread_id: string } }): Promise<VersionPlanTasklistGraphStateAnnotationState>
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null
+}
+
+function hasExecutionState(value: unknown): value is VersionPlanTasklistGraphStateAnnotationState['execution'] {
+    return (
+        isRecord(value) &&
+        typeof value.agentName === 'string' &&
+        typeof value.runId === 'string' &&
+        isRecord(value.counters) &&
+        isRecord(value.limits) &&
+        typeof value.status === 'string'
+    )
+}
+
+function isGraphStateAnnotationState(value: unknown): value is VersionPlanTasklistGraphStateAnnotationState {
+    return (
+        isRecord(value) &&
+        typeof value.threadId === 'string' &&
+        hasExecutionState(value.execution) &&
+        isRecord(value.graph) &&
+        isRecord(value.human) &&
+        isRecord(value.input) &&
+        isRecord(value.planning) &&
+        isRecord(value.source) &&
+        isRecord(value.tasklist)
+    )
+}
+
+function resolveGraphState(
+    graphState: VersionPlanTasklistGraphStateAnnotationState,
+    snapshot: GraphStateSnapshot
+): VersionPlanTasklistGraphStateAnnotationState {
+    if (isGraphStateAnnotationState(graphState)) {
+        return graphState
+    }
+
+    if (isGraphStateAnnotationState(snapshot.values)) {
+        return snapshot.values
+    }
+
+    return graphState
+}
+
 function writeGraphReadFailureAnswer(writeChunk: WriteChunk, graphState: VersionPlanTasklistGraphStateAnnotationState) {
     if (graphState.output?.status !== 'failed') {
         return
@@ -109,7 +154,7 @@ function writeGraphReadFailureAnswer(writeChunk: WriteChunk, graphState: Version
             '',
             `错误信息：${graphState.output.errorMessage ?? '未知错误'}`,
             '',
-            '请确认引用的是可读取的 docs://versions/*.md 文件。本版不会自动扫描 versions 目录，也不会读取 docs/tasklists/*。',
+            '请确认引用的是可读取的 demo://version-plans/*.md 文件。本版不会自动扫描 demo version-plans 目录，也不会读取真实项目目录。',
         ].join('\n')
     )
 }
@@ -248,11 +293,12 @@ export async function runInitialVersionPlanTasklistGraph(
             thread_id: graphStateForRun.threadId,
         },
     })
+    const resolvedGraphState = resolveGraphState(graphState, snapshot)
 
-    writeGraphDebugSummary(options.writeChunk, graphState, options.runtimeConfig)
+    writeGraphDebugSummary(options.writeChunk, resolvedGraphState, options.runtimeConfig)
 
     return classifyGraphResult({
-        graphState,
+        graphState: resolvedGraphState,
         snapshot,
         writeChunk: options.writeChunk,
     })
@@ -274,11 +320,12 @@ export async function resumeVersionPlanTasklistGraph(
         config
     )
     const snapshot = await graph.getState(config)
+    const resolvedGraphState = resolveGraphState(graphState, snapshot)
 
-    writeGraphDebugSummary(options.writeChunk, graphState, options.runtimeConfig)
+    writeGraphDebugSummary(options.writeChunk, resolvedGraphState, options.runtimeConfig)
 
     return classifyGraphResult({
-        graphState,
+        graphState: resolvedGraphState,
         snapshot,
         writeChunk: options.writeChunk,
     })

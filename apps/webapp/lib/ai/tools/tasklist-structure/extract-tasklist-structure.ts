@@ -23,7 +23,7 @@ function nodeToText(node: MarkdownNode): string {
 
     const childrenText = (node.children ?? []).map(nodeToText).join('')
 
-    // link 节点的文本只包含锚文本；把 URL 一起纳入纯文本，才能精确识别 [方案](docs://...) 形式的来源方案。
+    // link 节点的文本只包含锚文本；把 URL 一起纳入纯文本，才能精确识别 [方案](demo://...) 形式的来源方案。
     if (node.type === 'link' && node.url) {
         return `${childrenText} ${node.url}`
     }

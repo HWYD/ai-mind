@@ -1,4 +1,4 @@
-﻿import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
+import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ChatSession } from '@/lib/ai/runtime/types'
@@ -16,11 +16,11 @@ import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/ver
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const versionPlanReference: ChatComposerReference = {
-    id: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+    id: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
     label: 'v0.2.0-controlled-agent-graph.md',
     source: 'local',
     type: 'resource',
-    uri: 'docs://versions/v0.2.0-controlled-agent-graph.md',
+    uri: 'demo://version-plans/v0.2.0-controlled-agent-graph.md',
 }
 
 function createGraphState() {

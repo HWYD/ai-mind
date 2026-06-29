@@ -120,7 +120,7 @@ describe('stream-message-reducer', () => {
                 payload: {
                     allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                     data: {
-                        planUri: 'docs://versions/v0.3.0.md',
+                        planUri: 'demo://version-plans/v0.3.0.md',
                         reviewRound: 1,
                         strategy: {
                             granularity: 'medium',
@@ -163,7 +163,7 @@ describe('stream-message-reducer', () => {
             payload: {
                 allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                 data: {
-                    planUri: 'docs://versions/v0.3.0.md',
+                    planUri: 'demo://version-plans/v0.3.0.md',
                     reviewRound: 1,
                     strategy: {
                         granularity: 'medium',
@@ -199,7 +199,7 @@ describe('stream-message-reducer', () => {
                 payload: {
                     allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                     data: {
-                        planUri: 'docs://versions/v0.3.0.md',
+                        planUri: 'demo://version-plans/v0.3.0.md',
                         reviewRound: 1,
                         strategy: {
                             granularity: 'medium',

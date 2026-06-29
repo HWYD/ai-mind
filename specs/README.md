@@ -152,6 +152,19 @@ specs/<version-topic>/
 - 哪些 metadata 允许上传，哪些 runtime / prompt / user content 必须禁止上传
 - 为什么本版本不修改 Graph topology、HITL contract、Prisma schema、stream protocol 或 frontend reducer
 
+### 035 Agent Demo Workspace Resource Boundary
+
+目录：[035-agent-demo-workspace-resource-boundary](./035-agent-demo-workspace-resource-boundary)
+
+回答的问题：
+
+- 为什么 public Agent demo resource root 收口到 `examples/agent-demo/`
+- 为什么 Tasklist Agent public demo 从 `@docs://` / `docs://versions` 迁移到 `@demo://version-plans`
+- `@demo://` resolver 需要拒绝哪些越界路径、scheme 和文件类型
+- 为什么 demo `version-plans/` 保持瘦 corpus，而不是完整版本历史归档
+- 为什么本版本不实现 `/plan`、`/task`、`/review`、`/delivery-chain` 或 artifact handoff
+- 为什么本版本不修改 Graph topology、HITL contract、stream protocol、frontend reducer、Prisma schema 或 PostgresSaver schema
+
 ## 后续新增规格时的约定
 
 - 用版本号前缀保持排序稳定，例如 `032-...`

@@ -15,9 +15,9 @@ import { serializeComposerDisplaySegments, serializeComposerPayload } from './ed
 import { ComposerToolbar } from './toolbar/composer-toolbar'
 
 const footerTextBySkillMode: Record<ChatSkillMode, string> = {
-    auto: '当前只保留本会话内的多轮上下文。',
-    utility: '实用模式适合计算、时间日期、文本转换和单位换算。',
-    reader: '读取模式当前支持天气与 remote MCP 上下文；docs 文档引用将在 Composer 中承接。',
+    auto: '当前会自动在本轮上下文内选择最合适的能力。',
+    utility: '实用模式更适合计算、时间日期、文本转换和单位换算。',
+    reader: '阅读模式优先消费 demo 文档与 remote context 等已注入上下文。',
 }
 
 export function ChatComposer({
@@ -137,7 +137,7 @@ export function ChatComposer({
                         'border-border/70 bg-muted/40 shadow-none ring-border focus-within:border-border/70 focus-within:shadow-none'
                 )}
             >
-                <CardContent className="space-y-4 px-5 py-4">
+                <CardContent className="space-y-3 px-3 pt-2 pb-1.5 sm:space-y-4 sm:px-5 sm:py-4">
                     <ComposerEditor
                         value={input}
                         disabled={disabled}
@@ -168,7 +168,7 @@ export function ChatComposer({
                 </CardContent>
             </Card>
 
-            <div className="hidden sm:block mt-2.5 text-center">
+            <div className="mt-2.5 hidden text-center sm:block">
                 <span className="text-xs text-muted-foreground">{footerText}</span>
             </div>
         </form>

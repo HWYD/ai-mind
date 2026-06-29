@@ -1,11 +1,14 @@
-﻿import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+import { describe, expect, it } from 'vitest'
 
 import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import { createInitialVersionPlanTasklistGraphState } from '@/lib/ai/runtime/version-plan-tasklist-agent/graph/graph-state'
 import { evaluatePlanReadiness, extractVersionPlan } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-const planUri = 'docs://versions/v0.1.1-controlled-planner-lite.md'
+const planUri = 'demo://version-plans/v0.1.1-controlled-planner-lite.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,
@@ -13,6 +16,10 @@ const versionPlanReference: ChatComposerReference = {
     source: 'local',
     type: 'resource',
     uri: planUri,
+}
+
+function readDemoVersionPlan(fileName: string) {
+    return readFileSync(resolve(process.cwd(), '..', '..', 'examples', 'agent-demo', 'version-plans', fileName), 'utf8')
 }
 
 const completePlan = `
@@ -76,6 +83,32 @@ describe('runtime/version-plan-tasklist-agent readiness', () => {
         expect(result.weakFields).toEqual([])
     })
 
+    it('正常 demo version plans 返回 ready', () => {
+        const demoPlans = [
+            { expectedVersion: 'v0.2.0', fileName: 'v020-controlled-agent-graph.md' },
+            { expectedVersion: 'v0.3.0', fileName: 'v030-hitl-checkpoint-resume.md' },
+            { expectedVersion: 'v0.3.4', fileName: 'v034-langsmith-observability.md' },
+        ] as const
+
+        for (const demoPlan of demoPlans) {
+            const content = readDemoVersionPlan(demoPlan.fileName)
+            const demoPlanUri = `demo://version-plans/${demoPlan.fileName}`
+            const extract = extractVersionPlan(content, {
+                planUri: demoPlanUri,
+                userGoal: '基于这个方案生成 tasklist',
+            })
+            const result = evaluatePlanReadiness(extract, {
+                planContent: content,
+                planUri: demoPlanUri,
+            })
+
+            expect(extract.targetVersion).toBe(demoPlan.expectedVersion)
+            expect(result.status, `${demoPlan.fileName}: ${JSON.stringify(result)}`).toBe('ready')
+            expect(result.missingFields, demoPlan.fileName).toEqual([])
+            expect(result.weakFields, demoPlan.fileName).toEqual([])
+        }
+    })
+
     it('缺少 Test Plan 但主体可拆分时返回 needs_review', () => {
         const planWithoutTestPlan = completePlan.replace(/## Test Plan[\s\S]*$/, '')
         const extract = extractVersionPlan(planWithoutTestPlan, {
@@ -134,13 +167,13 @@ describe('runtime/version-plan-tasklist-agent readiness', () => {
 
     it('空文档或极短文档返回 blocked', () => {
         const extract = extractVersionPlan('', {
-            planUri: 'docs://versions/empty.md',
+            planUri: 'demo://version-plans/empty.md',
             userGoal: '生成 tasklist',
         })
 
         const result = evaluatePlanReadiness(extract, {
             planContent: '',
-            planUri: 'docs://versions/empty.md',
+            planUri: 'demo://version-plans/empty.md',
         })
 
         expect(result.status).toBe('blocked')

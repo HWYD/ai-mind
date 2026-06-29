@@ -72,7 +72,7 @@ function getPrimaryComposerReference(request: ChatRequest) {
 }
 
 function isDocsResourceReference(reference: ChatComposerReference | undefined) {
-    return reference?.type === 'resource' && reference.source === 'local' && reference.uri.startsWith('docs://')
+    return reference?.type === 'resource' && reference.source === 'local'
 }
 
 function isLatestContextReference(reference: ChatComposerReference | undefined) {
@@ -173,7 +173,7 @@ function createDocsResourceContextMessage(options: {
 }) {
     return new HumanMessage(
         [
-            `以下是 Composer 引用的本地 docs resource：${options.uri}。`,
+            `以下是 Composer 引用的本地 demo resource：${options.uri}。`,
             `文档名称：${options.resourceName}`,
             options.command ? `Composer command：${options.command.label}（${options.command.name}）。` : '',
             `用户本轮输入：${options.userGoal || '未提供额外文字，仅引用了文档资源。'}`,
@@ -325,7 +325,7 @@ async function executeDocsSummaryInvocation(invocation: DocsSummaryInvocation, o
             serverId: PROJECT_DOCS_SERVER_ID,
             uri: invocation.reference.uri,
         })
-        return [new HumanMessage(`docs resource 读取失败：${toErrorMessage(error)}。请说明无法读取文档，不要编造摘要。`)]
+        return [new HumanMessage(`demo resource 读取失败：${toErrorMessage(error)}。请说明无法读取文档，不要编造摘要。`)]
     }
 }
 
@@ -381,7 +381,7 @@ async function executeDocsResourceInvocation(invocation: DocsResourceInvocation,
             serverId: PROJECT_DOCS_SERVER_ID,
             uri: invocation.reference.uri,
         })
-        return [new HumanMessage(`docs resource 读取失败：${toErrorMessage(error)}。请说明无法读取文档，不要编造文档内容。`)]
+        return [new HumanMessage(`demo resource 读取失败：${toErrorMessage(error)}。请说明无法读取文档，不要编造文档内容。`)]
     }
 }
 

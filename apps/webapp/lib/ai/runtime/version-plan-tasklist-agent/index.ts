@@ -2,9 +2,18 @@ import type { ChatComposerReference, ChatRequest } from '@/lib/ai/types/chat'
 
 import { createId } from '../../create-id'
 
-const VERSION_PLAN_RESOURCE_URI_PATTERN = /^docs:\/\/versions\/[^/\\]+\.md$/i
+const VERSION_PLAN_RESOURCE_URI_PATTERN = /^demo:\/\/version-plans\/[^/\\]+\.md$/i
+const LEGACY_VERSION_PLAN_RESOURCE_URI_PATTERN = /^(docs|demo):\/\/versions\/[^/\\]+\.md$/i
 
 export type VersionPlanTasklistAgentInvocation =
+    | {
+          kind: 'invalid-local-resource'
+          reference: ChatComposerReference
+      }
+    | {
+          kind: 'legacy-version-plan'
+          versionPlanReference: ChatComposerReference
+      }
     | {
           kind: 'missing-version-plan'
       }
@@ -18,17 +27,23 @@ export interface VersionPlanTasklistAgentSkeletonResult {
     versionPlanReference: ChatComposerReference
 }
 
+function isLocalResourceReference(reference: ChatComposerReference) {
+    return reference.type === 'resource' && reference.source === 'local'
+}
+
 function isVersionPlanReference(reference: ChatComposerReference) {
-    const fileName = reference.uri.slice('docs://versions/'.length)
+    const fileName = reference.uri.slice('demo://version-plans/'.length)
 
     return (
-        reference.type === 'resource' &&
-        reference.source === 'local' &&
+        isLocalResourceReference(reference) &&
         VERSION_PLAN_RESOURCE_URI_PATTERN.test(reference.uri) &&
         !!fileName &&
-        !fileName.startsWith('.') &&
-        !reference.uri.includes('..')
+        !fileName.startsWith('.')
     )
+}
+
+function isLegacyVersionPlanReference(reference: ChatComposerReference) {
+    return isLocalResourceReference(reference) && LEGACY_VERSION_PLAN_RESOURCE_URI_PATTERN.test(reference.uri)
 }
 
 export function resolveVersionPlanTasklistAgentInvocation(request: ChatRequest): VersionPlanTasklistAgentInvocation | null {
@@ -36,17 +51,36 @@ export function resolveVersionPlanTasklistAgentInvocation(request: ChatRequest):
         return null
     }
 
-    const versionPlanReference = request.composer.references?.find(isVersionPlanReference)
+    const references = request.composer.references ?? []
+    const versionPlanReference = references.find(isVersionPlanReference)
 
-    if (!versionPlanReference) {
+    if (versionPlanReference) {
         return {
-            kind: 'missing-version-plan',
+            kind: 'ready',
+            versionPlanReference,
+        }
+    }
+
+    const legacyVersionPlanReference = references.find(isLegacyVersionPlanReference)
+
+    if (legacyVersionPlanReference) {
+        return {
+            kind: 'legacy-version-plan',
+            versionPlanReference: legacyVersionPlanReference,
+        }
+    }
+
+    const invalidLocalReference = references.find(isLocalResourceReference)
+
+    if (invalidLocalReference) {
+        return {
+            kind: 'invalid-local-resource',
+            reference: invalidLocalReference,
         }
     }
 
     return {
-        kind: 'ready',
-        versionPlanReference,
+        kind: 'missing-version-plan',
     }
 }
 

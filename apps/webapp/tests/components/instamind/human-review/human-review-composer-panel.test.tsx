@@ -38,7 +38,7 @@ function createStrategyPendingInterrupt(reviewRound: 1 | 2 = 1): PendingAgentInt
             payload: {
                 allowedDecisions: reviewRound === 1 ? ['approve', 'edit', 'reject', 'respond'] : ['approve', 'edit', 'reject'],
                 data: {
-                    planUri: 'docs://versions/v0.3.0.md',
+                    planUri: 'demo://version-plans/v0.3.0.md',
                     reviewRound,
                     strategy: {
                         granularity: 'medium',

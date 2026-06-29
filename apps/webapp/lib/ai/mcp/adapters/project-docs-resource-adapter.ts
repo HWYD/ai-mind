@@ -16,7 +16,7 @@ export interface ProjectDocsResourceAdapterInput {
     uri?: string
 }
 
-const PROJECT_DOCS_RESOURCE_FALLBACK_NAME = 'docs-resource'
+const PROJECT_DOCS_RESOURCE_FALLBACK_NAME = 'demo-resource'
 type ReadResourceContent = Awaited<ReturnType<typeof mcpClientManager.readResource>>['result']['contents'][number]
 type TextResourceContent = ReadResourceContent & {
     _meta?: unknown
@@ -54,7 +54,7 @@ function resolveResourcePath(input: ProjectDocsResourceAdapterInput) {
     const rawPath = input.resourcePath ?? input.uri
 
     if (!rawPath) {
-        throw new MCPHostError('REQUEST_FAILED', 'docs resource 缺少 resourcePath 或 uri 参数。')
+        throw new MCPHostError('REQUEST_FAILED', 'demo resource 缺少 resourcePath 或 uri 参数。')
     }
 
     return assertSafeDocsResourcePath(rawPath)
@@ -70,7 +70,7 @@ export const projectDocsResourceAdapter: MCPResourceAdapter<ProjectDocsResourceA
         const textContent = extractTextContent(response.result)
 
         if (!textContent) {
-            throw new MCPHostError('REQUEST_FAILED', 'docs MCP Resource 没有返回可用文本内容。')
+            throw new MCPHostError('REQUEST_FAILED', 'demo MCP Resource 没有返回可用文本内容。')
         }
 
         const metadata = toMetadataRecord(textContent._meta)

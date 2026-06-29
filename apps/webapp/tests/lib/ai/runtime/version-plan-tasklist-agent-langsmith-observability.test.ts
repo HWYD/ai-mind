@@ -87,7 +87,7 @@ describe('runtime/version-plan-tasklist-agent LangSmith observability contract',
             sessionCookie: 'cookie-secret',
             threadId: 'thread-1',
             versionPlanContent: '# full version plan',
-            versionPlanUri: 'docs://versions/v0.3.4.md',
+            versionPlanUri: 'demo://version-plans/v0.3.4.md',
         } as Parameters<typeof buildTasklistLangSmithRunMetadata>[0] & Record<string, unknown>)
 
         expect(metadata).toEqual({
@@ -102,7 +102,7 @@ describe('runtime/version-plan-tasklist-agent LangSmith observability contract',
             reasoningEnabled: true,
             runId: 'run-1',
             threadId: 'thread-1',
-            versionPlanUri: 'docs://versions/v0.3.4.md',
+            versionPlanUri: 'demo://version-plans/v0.3.4.md',
         })
         expect(metadata).not.toHaveProperty('apiKey')
         expect(metadata).not.toHaveProperty('checkpoint')
@@ -272,7 +272,7 @@ describe('runtime/version-plan-tasklist-agent LangSmith observability contract',
                 reasoningEnabled: true,
                 runId: 'run-1',
                 threadId: 'thread-1',
-                versionPlanUri: 'docs://versions/v0.3.4.md',
+                versionPlanUri: 'demo://version-plans/v0.3.4.md',
             })
         )
 
@@ -303,7 +303,7 @@ describe('runtime/version-plan-tasklist-agent LangSmith observability contract',
                     reasoningEnabled: true,
                     runId: 'run-1',
                     threadId: 'thread-1',
-                    versionPlanUri: 'docs://versions/v0.3.4.md',
+                    versionPlanUri: 'demo://version-plans/v0.3.4.md',
                 })
             )
         ).resolves.toBeUndefined()
@@ -330,7 +330,7 @@ describe('runtime/version-plan-tasklist-agent LangSmith observability contract',
                 reasoningEnabled: true,
                 runId: 'run-1',
                 threadId: 'thread-1',
-                versionPlanUri: 'docs://versions/v0.3.4.md',
+                versionPlanUri: 'demo://version-plans/v0.3.4.md',
             })
         )
         await observer.observeHumanDecision({
@@ -364,7 +364,7 @@ describe('runtime/version-plan-tasklist-agent LangSmith observability contract',
             inputs: {
                 modelId: 'qwen/qwen3.6-flash',
                 reasoningEnabled: true,
-                versionPlanUri: 'docs://versions/v0.3.4.md',
+                versionPlanUri: 'demo://version-plans/v0.3.4.md',
             },
             project_name: 'ai-mind-test',
             trace_id: 'run-1',

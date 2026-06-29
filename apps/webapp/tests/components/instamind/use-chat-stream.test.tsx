@@ -223,7 +223,7 @@ describe('useChatStream', () => {
                 type: 'resource-start',
                 partId: 'resource-1',
                 resourceName: 'NOT_EXIST.md',
-                uri: 'docs://NOT_EXIST.md',
+                uri: 'demo://NOT_EXIST.md',
                 serverId: 'project-docs-server',
             },
             {
@@ -234,7 +234,7 @@ describe('useChatStream', () => {
                 message: '未找到文件',
                 partId: 'resource-1',
                 resourceName: 'NOT_EXIST.md',
-                uri: 'docs://NOT_EXIST.md',
+                uri: 'demo://NOT_EXIST.md',
                 serverId: 'project-docs-server',
             },
             { type: 'finish' },
@@ -406,7 +406,7 @@ describe('useChatStream', () => {
                 payload: {
                     allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                     data: {
-                        planUri: 'docs://versions/v0.3.0.md',
+                        planUri: 'demo://version-plans/v0.3.0.md',
                         reviewRound: 1,
                         strategy: {
                             granularity: 'medium',
@@ -461,7 +461,7 @@ describe('useChatStream', () => {
                     payload: {
                         allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                         data: {
-                            planUri: 'docs://versions/v0.3.0.md',
+                            planUri: 'demo://version-plans/v0.3.0.md',
                             reviewRound: 1,
                             strategy: {
                                 granularity: 'medium',
@@ -564,7 +564,7 @@ describe('useChatStream', () => {
                         payload: {
                             allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                             data: {
-                                planUri: 'docs://versions/v0.3.0.md',
+                                planUri: 'demo://version-plans/v0.3.0.md',
                                 reviewRound: 1,
                                 strategy: {
                                     granularity: 'medium',
@@ -666,7 +666,7 @@ describe('useChatStream', () => {
                         payload: {
                             allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
                             data: {
-                                planUri: 'docs://versions/v0.3.0.md',
+                                planUri: 'demo://version-plans/v0.3.0.md',
                                 reviewRound: 1,
                                 strategy: {
                                     granularity: 'medium',

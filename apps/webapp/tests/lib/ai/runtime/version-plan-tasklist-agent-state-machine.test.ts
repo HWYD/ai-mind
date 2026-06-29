@@ -17,7 +17,7 @@ import {
 import type { TasklistValidationResult } from '@/lib/ai/tools/tasklist-structure'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-const planUri = 'docs://versions/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md'
+const planUri = 'demo://version-plans/v0.3.0-tasklist-agent-hitl-checkpoint-resume-mvp.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,

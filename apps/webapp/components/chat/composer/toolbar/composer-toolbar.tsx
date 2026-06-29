@@ -27,9 +27,9 @@ const skillModeLabels: Record<ChatSkillMode, string> = {
 }
 
 const skillModeDescriptions: Record<ChatSkillMode, string> = {
-    auto: '根据问题自动选择合适技能',
-    utility: '优先使用计算、时间、文本处理、天气等工具能力',
-    reader: '优先读取项目文档、上下文资源并进行总结或检查',
+    auto: '根据问题自动选择合适能力',
+    utility: '优先使用计算、时间、文本处理与天气等工具能力',
+    reader: '优先消费 demo 文档、项目上下文和 MCP 读取能力',
 }
 
 function SlashTriggerIcon() {
@@ -103,19 +103,19 @@ export function ComposerToolbar({
             variant="outline"
             disabled={modelSelectDisabled}
             aria-label="选择模型"
-            className="h-10 min-w-[180px] justify-between rounded-xl border-border/80 bg-background px-3 shadow-xs"
+            className="h-8.5 min-w-[132px] justify-between rounded-xl border-border/80 bg-background px-2 text-xs shadow-xs sm:h-10 sm:min-w-[180px] sm:px-3 sm:text-sm"
         >
             <span className="flex min-w-0 items-center gap-2">
                 {selectedModel ? <ModelOptionIcon model={selectedModel} /> : null}
-                <span className="truncate text-sm font-normal">{selectedModel?.label ?? modelPlaceholderText}</span>
+                <span className="truncate font-normal">{selectedModel?.label ?? modelPlaceholderText}</span>
             </span>
             <ChevronDown className="size-4 shrink-0 text-muted-foreground" strokeWidth={2} />
         </Button>
     )
 
     return (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
                 <Button
                     type="button"
                     variant="outline"
@@ -123,7 +123,7 @@ export function ComposerToolbar({
                     aria-label="插入命令触发符"
                     disabled={disabled}
                     onClick={() => onInsertTrigger('/')}
-                    className="rounded-xl border-border/80 bg-background text-base shadow-xs hover:bg-muted/60 hidden md:block"
+                    className="hidden rounded-xl border-border/80 bg-background text-base shadow-xs hover:bg-muted/60 md:block"
                 >
                     <SlashTriggerIcon />
                 </Button>
@@ -135,7 +135,7 @@ export function ComposerToolbar({
                     aria-label="插入资源引用触发符"
                     disabled={disabled}
                     onClick={() => onInsertTrigger('@')}
-                    className="rounded-xl border-border/80 bg-background text-base shadow-xs hover:bg-muted/60 hidden md:flex"
+                    className="hidden rounded-xl border-border/80 bg-background text-base shadow-xs hover:bg-muted/60 md:flex"
                 >
                     <AtSign className="size-4" strokeWidth={2.3} />
                 </Button>
@@ -143,7 +143,11 @@ export function ComposerToolbar({
                 {isModelMenuReady ? (
                     <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>{modelTriggerButton}</DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" sideOffset={8} className="w-[340px] rounded-2xl border p-2 shadow-md ring-0">
+                        <DropdownMenuContent
+                            align="start"
+                            sideOffset={8}
+                            className="w-[320px] rounded-2xl border p-2 shadow-md ring-0 sm:w-[340px]"
+                        >
                             <DropdownMenuRadioGroup
                                 value={selectedModel?.id ?? ''}
                                 onValueChange={value => onModelChange(value as ChatModel)}
@@ -159,7 +163,7 @@ export function ComposerToolbar({
                                             <DropdownMenuRadioItem
                                                 key={groupModel.id}
                                                 value={groupModel.id}
-                                                className="min-h-12 rounded-xl py-3 pr-9 pl-3 text-[15px] data-[state=checked]:bg-accent/60 data-[state=checked]:ring-1 data-[state=checked]:ring-ring/15"
+                                                className="min-h-11 rounded-xl py-2.5 pr-9 pl-3 text-sm data-[state=checked]:bg-accent/60 data-[state=checked]:ring-1 data-[state=checked]:ring-ring/15 sm:min-h-12 sm:py-3 sm:text-[15px]"
                                             >
                                                 <ModelOptionIcon model={groupModel} />
                                                 <span className="truncate">{groupModel.label}</span>
@@ -171,7 +175,6 @@ export function ComposerToolbar({
                         </DropdownMenuContent>
                     </DropdownMenu>
                 ) : (
-                    // 服务端和客户端首帧先输出同一个静态按钮，等挂载完成后再交给 Radix 生成内部 id，避免 hydration mismatch。
                     modelTriggerButton
                 )}
 
@@ -182,8 +185,7 @@ export function ComposerToolbar({
                     onPressedChange={onEnableReasoningChange}
                     disabled={disabled}
                     aria-label="切换深度思考"
-                    className="rounded-xl border-border/80 bg-background shadow-xs data-[state=on]:border-[var(--composer-focus-border)]
-                     data-[state=on]:bg-[var(--composer-focus-soft)] data-[state=on]:text-[color-mix(in_oklch,var(--composer-focus)_66%,black)] hidden md:flex"
+                    className="hidden rounded-xl border-border/80 bg-background shadow-xs data-[state=on]:border-[var(--composer-focus-border)] data-[state=on]:bg-[var(--composer-focus-soft)] data-[state=on]:text-[color-mix(in_oklch,var(--composer-focus)_66%,black)] md:flex"
                 >
                     <Brain className="size-4" strokeWidth={2.1} />
                     <span>深度思考</span>
@@ -199,14 +201,14 @@ export function ComposerToolbar({
                             onSkillModeChange(value as ChatSkillMode)
                         }
                     }}
-                    className="overflow-hidden rounded-xl border border-border/80 bg-background shadow-xs hidden md:block"
+                    className="hidden overflow-hidden rounded-xl border border-border/80 bg-background shadow-xs md:block"
                 >
                     {(Object.keys(skillModeLabels) as ChatSkillMode[]).map(mode => (
                         <ToggleGroupItem
                             key={mode}
                             value={mode}
                             disabled={disabled}
-                            aria-label={`切换到${skillModeLabels[mode]}：${skillModeDescriptions[mode]}`}
+                            aria-label={`切换到 ${skillModeLabels[mode]}：${skillModeDescriptions[mode]}`}
                             title={skillModeDescriptions[mode]}
                             className="min-w-16 border-0 px-3 data-[state=on]:bg-[var(--composer-mode-bg)] data-[state=on]:text-foreground"
                         >
@@ -231,14 +233,14 @@ export function ComposerToolbar({
                     }
                 }}
                 className={cn(
-                    'size-8 rounded-full bg-[var(--composer-focus)] text-white shadow-lg shadow-blue-500/20 hover:bg-[color-mix(in_oklch,var(--composer-focus)_88%,black)] md:size-12',
+                    'size-8.5 rounded-full bg-[var(--composer-focus)] text-white shadow-lg shadow-blue-500/20 hover:bg-[color-mix(in_oklch,var(--composer-focus)_88%,black)] sm:size-11',
                     (disabled || sendDisabled) && 'bg-muted text-muted-foreground shadow-none hover:bg-muted'
                 )}
             >
                 {status === 'streaming' ? (
-                    <Square className="size-4 fill-current" strokeWidth={2.4} />
+                    <Square className="size-4 sm:size-5 fill-current" strokeWidth={2.4} />
                 ) : (
-                    <ArrowUp className="size-5" strokeWidth={2.4} />
+                    <ArrowUp className="size-4 sm:size-5" strokeWidth={2.4} />
                 )}
             </Button>
         </div>

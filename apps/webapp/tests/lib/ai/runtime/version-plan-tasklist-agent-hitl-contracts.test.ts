@@ -57,7 +57,7 @@ describe('runtime/version-plan-tasklist-agent strategy review contract', () => {
         const roundOne = strategyReviewInterruptPayloadSchema.parse({
             allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
             data: {
-                planUri: 'docs://versions/v0.3.0.md',
+                planUri: 'demo://version-plans/v0.3.0.md',
                 reviewRound: 1,
                 strategy,
                 targetVersion: 'v0.3.0',
@@ -70,7 +70,7 @@ describe('runtime/version-plan-tasklist-agent strategy review contract', () => {
         const roundTwo = strategyReviewInterruptPayloadSchema.parse({
             allowedDecisions: ['approve', 'edit', 'reject'],
             data: {
-                planUri: 'docs://versions/v0.3.0.md',
+                planUri: 'demo://version-plans/v0.3.0.md',
                 reviewRound: 2,
                 strategy,
                 targetVersion: 'v0.3.0',

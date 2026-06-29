@@ -93,12 +93,18 @@ html {
 }
 
 .ai-composer-editor .ProseMirror {
-    min-height: 48px;
+    min-height: 24px;
     max-height: 180px;
     overflow-y: auto;
     outline: none;
     white-space: pre-wrap;
     word-break: break-word;
+}
+
+@media (min-width: 640px) {
+    .ai-composer-editor .ProseMirror {
+        min-height: 48px;
+    }
 }
 
 .ai-composer-editor .ProseMirror p {

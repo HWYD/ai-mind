@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { resolveToolBindingForSkill } from '@/lib/ai/capabilities/tool-binding'
 import {
@@ -8,7 +8,7 @@ import {
 import { utilitySkillDefinition } from '@/lib/ai/skills/utility-skill'
 import { validateTasklistStructure, validateTasklistStructureWithDetail } from '@/lib/ai/tools/tasklist-structure'
 
-const planUri = 'docs://versions/v0.1.0-controlled-version-plan-to-tasklist-agent.md'
+const planUri = 'demo://version-plans/v0.1.0-controlled-version-plan-to-tasklist-agent.md'
 
 const validTasklist = `
 # v0.1.0 Controlled Agent Tasklist

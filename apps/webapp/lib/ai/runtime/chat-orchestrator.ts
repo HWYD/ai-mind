@@ -363,7 +363,7 @@ export class ChatOrchestrator {
 
     private async runComposerContextAnswerStage(session: ChatSession) {
         // Composer Context 处理用户在输入框里显式选择的 command / reference。
-        // 注意：/tasklist + docs://versions/*.md 会先被 Agent 分支接管，不会落到这里变成普通 docs summary。
+        // 注意：/tasklist + demo://version-plans/*.md 会先被 Agent 分支接管，不会落到这里变成普通 docs summary。
         const composerInvocation = resolveComposerContextInvocation(this.request)
 
         if (!composerInvocation) {
@@ -399,7 +399,7 @@ export class ChatOrchestrator {
         //
         // 入口必须同时满足：
         // - Composer command 是 /tasklist。
-        // - 用户显式引用 docs://versions/*.md。
+        // - 用户显式引用 demo://version-plans/*.md。
         //
         // 命中后会读取 version plan、生成 planExtract，并继续执行 draft -> validate -> maybe revise -> final。
         // 整条 Agent 链路完成后会短路普通 Composer Context、Capability Context 和 Tool Calling。
@@ -410,10 +410,25 @@ export class ChatOrchestrator {
         }
 
         if (agentInvocation.kind === 'missing-version-plan') {
-            // /tasklist 没有显式版本方案时 fail closed，不让模型根据裸目标自由生成 tasklist。
             writeStaticTextPart(
                 this.writeChunk,
-                '请先通过 @ 引用一个 `docs://versions/*.md` 版本方案，再生成 tasklist 草稿。本版不支持只根据目标直接生成 tasklist。'
+                '请先通过 @demo://version-plans/*.md 引用一个公开 demo 版本方案，再生成 tasklist 草稿。本版不支持只根据目标直接生成 tasklist。'
+            )
+            return true
+        }
+
+        if (agentInvocation.kind === 'legacy-version-plan') {
+            writeStaticTextPart(
+                this.writeChunk,
+                '该路径已弃用。请改用 @demo://version-plans/*.md，例如 /tasklist + @demo://version-plans/v034-langsmith-observability.md。'
+            )
+            return true
+        }
+
+        if (agentInvocation.kind === 'invalid-local-resource') {
+            writeStaticTextPart(
+                this.writeChunk,
+                '公开 Tasklist Agent 只接受 @demo://version-plans/*.md。请不要使用 @file://、绝对路径、../ 或其他本地目录资源。'
             )
             return true
         }

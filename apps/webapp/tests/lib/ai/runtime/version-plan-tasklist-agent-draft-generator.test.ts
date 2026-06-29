@@ -1,11 +1,11 @@
-﻿import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { getMessageContentText } from '@/lib/ai/runtime/message-content'
 import type { TasklistStrategy } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import { buildDraftTasklistMessages, buildReviseTasklistMessages } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
-const planUri = 'docs://versions/v0.1.1-controlled-planner-lite.md'
+const planUri = 'demo://version-plans/v0.1.1-controlled-planner-lite.md'
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,
