@@ -44,6 +44,11 @@ print_recent_logs() {
   compose logs --tail=120 "$service" || true
 }
 
+print_database_target() {
+  echo 'Database target used by webapp:'
+  compose run --rm --no-deps --entrypoint node webapp -e "const value=process.env.DATABASE_URL||'';if(!value){console.log('DATABASE_URL is not set');process.exit(0)}try{const url=new URL(value);console.log(url.username+'@'+url.hostname+':'+(url.port||'5432')+url.pathname)}catch{console.log('DATABASE_URL is set but could not be parsed')}" < /dev/null || true
+}
+
 echo 'Current release env:'
 cat .release.env
 
@@ -61,13 +66,20 @@ if ! timeout 120 bash -c 'until docker compose --env-file .release.env -f compos
 fi
 
 echo 'Running database setup...'
-# 远程脚本是通过 ssh "bash -s" 从 stdin 下发的，这里必须断开 compose run 的 stdin，
-# 否则它可能吃掉后续脚本内容，导致 DB setup 后的容器重建步骤根本没有继续执行。
-if ! compose run --rm --no-deps --entrypoint pnpm webapp --dir /app db:setup:deploy < /dev/null; then
+print_database_target
+# The remote script is sent through ssh "bash -s"; detach compose run from stdin
+# so the one-shot container cannot consume the remaining deployment script.
+docker rm -f ai-mind-db-setup >/dev/null 2>&1 || true
+if ! compose run --name ai-mind-db-setup --no-deps --entrypoint pnpm webapp --dir /app db:setup:deploy < /dev/null; then
   echo 'database setup failed.'
+  echo 'Recent logs for database setup container:'
+  docker logs ai-mind-db-setup || true
+  docker rm -f ai-mind-db-setup >/dev/null 2>&1 || true
   print_recent_logs postgres
+  echo 'Hint: if an existing PostgreSQL volume was initialized with another POSTGRES_USER, changing env files will not create the new database role.'
   exit 1
 fi
+docker rm -f ai-mind-db-setup >/dev/null 2>&1 || true
 echo 'Database setup completed.'
 
 echo 'Recreating application containers...'
