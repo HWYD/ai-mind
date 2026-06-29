@@ -89,6 +89,7 @@ COPY --from=workspace-builder --chown=node:node /app/packages/database/generated
 COPY --from=workspace-builder --chown=node:node /app/packages/stream-core/package.json /app/packages/stream-core/package.json
 COPY --from=workspace-builder --chown=node:node /app/packages/stream-core/build /app/packages/stream-core/build
 COPY --from=workspace-builder --chown=node:node /app/docs /app/docs
+COPY --from=workspace-builder --chown=node:node /app/examples/agent-demo /app/examples/agent-demo
 COPY --from=workspace-builder --chown=node:node /app/assets/local-prompt /app/assets/local-prompt
 
 USER node
