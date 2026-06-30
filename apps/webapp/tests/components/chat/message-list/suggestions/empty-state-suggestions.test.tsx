@@ -22,7 +22,7 @@ describe('EmptyStateSuggestions', () => {
         const suggestionButtons = screen.getAllByRole('button')
 
         expect(screen.queryByText('换一个？')).toBeNull()
-        expect(suggestionButtons).toHaveLength(6)
+        expect(suggestionButtons).toHaveLength(7)
         expect(suggestionButtons.at(-1)).toBeTruthy()
         expect(container.querySelector('.empty-state-suggestions-grid')).toBeTruthy()
     })
