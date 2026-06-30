@@ -27,6 +27,7 @@ export function hasVisibleContent(part: MindMessagePart) {
         case 'resource':
         case 'skill':
         case 'prompt':
+        case 'workflow-progress':
         case 'agent-step':
             return true
         case 'agent-interrupt':

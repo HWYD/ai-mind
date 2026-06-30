@@ -82,7 +82,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
         if (message.role === 'assistant' && isThinking) {
             return (
                 <article className="flex justify-start">
-                    <div className="inline-flex items-center py-2 text-sm font-medium text-muted-foreground">
+                    <div className="inline-flex items-center py-1 text-sm font-medium text-muted-foreground">
                         <ThinkingText />
                     </div>
                 </article>

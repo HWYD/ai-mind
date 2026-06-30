@@ -2,7 +2,7 @@
 
 ## Current Planning Spec
 
-- [036: Controlled Delivery Chain MVP](./036-controlled-delivery-chain-mvp)
+- [037: Delivery Chain Workflow Progress Presentation](./037-delivery-chain-workflow-progress-presentation)
 
 `specs/` 是 AI Mind 的正式 AI coding 规格工作区。
 
@@ -168,6 +168,33 @@ specs/<version-topic>/
 - 为什么 demo `version-plans/` 保持瘦 corpus，而不是完整版本历史归档
 - 为什么本版本不实现 `/plan`、`/task`、`/review`、`/delivery-chain` 或 artifact handoff
 - 为什么本版本不修改 Graph topology、HITL contract、stream protocol、frontend reducer、Prisma schema 或 PostgresSaver schema
+
+### 036 Controlled Delivery Chain MVP
+
+目录：[036-controlled-delivery-chain-mvp](./036-controlled-delivery-chain-mvp)
+
+回答的问题：
+
+- 为什么 `/delivery-chain` 是 v0.3.6 唯一 public command
+- 为什么 Delivery Chain 支持 scenario-backed input 和 inline requirement
+- `DeliveryChainGraph` 如何固定执行 load / plan / task / review / report
+- 为什么 v0.3.6 使用 LangGraph 但不接 PostgresSaver、checkpoint、interrupt 或 HITL
+- 为什么 TaskStage 不调用现有 Tasklist Agent HITL Graph
+- 为什么本版本不做 `@artifact://`、artifact handoff、多 Agent 或 chat persistence
+- 为什么内部 demo resources 需要 compact grouping，而不是展开成多个大 ResourcePanel
+
+### 037 Delivery Chain Workflow Progress Presentation
+
+目录：[037-delivery-chain-workflow-progress-presentation](./037-delivery-chain-workflow-progress-presentation)
+
+回答的问题：
+
+- 为什么 v0.3.7 优先解决 `/delivery-chain` 的执行过程可见性
+- 为什么新增通用 `workflow-progress-*` stream chunks，而不是复用 `agent-graph-*`
+- workflow progress 如何做到执行中逐步出现、完成后自动折叠
+- 为什么首版只绑定 `/delivery-chain`，不影响 `/tasklist`、普通 resource、tool、prompt 展示
+- 为什么 workflow progress 是 presentation-level trace，不是 DB / checkpoint / artifact / event store
+- Report section presentation 如何 fallback 到普通 Markdown
 
 ## 后续新增规格时的约定
 

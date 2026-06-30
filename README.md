@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.6：Controlled Delivery Chain MVP，在 `@demo://` public demo 边界内新增 `/delivery-chain`，把需求输入转成受控的 Plan、Task、Review 报告。
+> v0.3.7：Delivery Chain Workflow Progress Presentation，在 `/delivery-chain` 中新增通用 `workflow-progress-*` 过程展示，让固定阶段 workflow 在执行中可见、完成后可折叠复盘。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.6`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.7`。
 
 已经验证：
 
@@ -247,16 +247,18 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.6
+## 当前版本：v0.3.7
 
-这版的主线是 Controlled Delivery Chain MVP：在 v0.3.5 已完成的 `@demo://` public demo 资源边界内，新增显式 `/delivery-chain` 入口，把一个需求输入转成受控的 Plan、Task、Review 和最终交付报告。
+这版的主线是 Delivery Chain Workflow Progress Presentation：在 v0.3.6 已完成的 `DeliveryChainGraph` 之上，为 `/delivery-chain` 增加逐步出现的 workflow progress panel、完成后折叠摘要，以及更清晰的报告分段展示。
 
-v0.3.6 的边界非常明确：
+v0.3.7 的边界非常明确：
 
-- 对外只新增一个 public command：`/delivery-chain`
+- `/delivery-chain` 继续是唯一 Delivery Chain public command
 - 支持两种输入：`/delivery-chain + @demo://scenarios/*/requirement.md` 和 `/delivery-chain <inline requirement>`
-- 内部固定执行 `PlanStage -> TaskStage -> ReviewStage -> Delivery Chain Report`
+- 新增通用 `workflow-progress-start`、`workflow-progress-step`、`workflow-progress-end` 事件，但首版只给 `/delivery-chain` 消费
+- 过程步骤按实际执行顺序逐步出现，执行中默认展开，完成后折叠为“已处理 X”摘要
 - 继续只读取 `@demo://` demo resource，不读取真实 `docs/`、`specs/`、`apps/`、`packages/` 或绝对路径
+- 保持 compact resource grouping，不让内部 demo resources 回退成多个大 ResourcePanel
 
 本版显式不做：
 
@@ -264,22 +266,25 @@ v0.3.6 的边界非常明确：
 - 不实现 `@artifact://`
 - 不做 artifact persistence
 - 不做 nested HITL
+- 不复用 `/tasklist` 的 `agent-graph-*` 时间线 UI
+- 不把 workflow progress 升级成通用 tool/resource/prompt 日志回放
 - 不修改 Tasklist Agent Graph topology、HITL decision contract、checkpoint resume、stream 协议、frontend reducer、Prisma schema 或 PostgresSaver schema
 
 本版完成的 public demo 演进包括：
 
-- 新增 `/delivery-chain` 受控 workflow 入口
+- `/delivery-chain` 继续作为受控 workflow 入口
 - 复用 `examples/agent-demo/scenarios/`、`rubrics/`、`governance/` 作为 Delivery Chain demo corpus
 - `@` picker 在 `/delivery-chain` 场景下只展示 `scenarios/*/requirement.md`
 - 快速访问新增 Delivery Chain demo 示例
-- Delivery Chain Report 使用现有文本输出能力承载，不引入新的 stream chunk 或持久化 artifact
+- 执行过程通过 compact workflow progress panel 渐进展示
+- Delivery Chain Report 支持更清晰的 section presentation，并保留 Markdown fallback
 
 当前 runtime baseline 同时保留两条受控路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
-- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：固定 stage 的 Delivery Chain MVP
+- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：固定 stage 的 Delivery Chain workflow，并带 progress presentation
 
-详细设计见 [v0.3.6 Controlled Delivery Chain MVP](./docs/versions/v0.3.6-controlled-delivery-chain-mvp.md)、[v0.3.5 demo resource boundary 说明](./docs/versions/v0.3.5-agent-demo-workspace-resource-boundary.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0010](./docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)。
+详细设计见 [v0.3.7 Delivery Chain Workflow Progress Presentation](./docs/versions/v0.3.7-delivery-chain-workflow-progress-presentation.md)、[v0.3.6 Controlled Delivery Chain MVP](./docs/versions/v0.3.6-controlled-delivery-chain-mvp.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0010](./docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)。
 
 ## 当前能力
 
@@ -347,9 +352,10 @@ v0.3.6 的边界非常明确：
 
 - `Version Plan to Tasklist Agent`
 - 入口：`/tasklist + @demo://version-plans/*.md`
-- `Controlled Delivery Chain MVP`
+- `Delivery Chain Workflow Progress Presentation`
 - 入口：`/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`
-- 内部固定执行 `PlanStage -> TaskStage -> ReviewStage`
+- 内部固定执行 `loadDeliveryChainContext -> PlanStage -> TaskStage -> ReviewStage -> BuildReport`
+- 执行中通过 compact workflow progress panel 逐步展示阶段过程，完成后自动折叠摘要
 - Delivery Chain Report 只作为本轮非持久化文本输出，不写代码、不读真实仓库
 - v0.2.3 后 `/tasklist + @demo://version-plans/*.md` 固定走 Graph Runtime。
 - LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
@@ -626,6 +632,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                |
 | v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans |
 | v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                   |
+| v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板 |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

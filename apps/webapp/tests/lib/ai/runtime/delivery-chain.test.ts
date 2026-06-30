@@ -1,3 +1,4 @@
+import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { AIMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -100,6 +101,14 @@ function createScenarioGraphInput() {
         scenarioId: 'request-limit-banner',
         source: 'demo_scenario' as const,
     }
+}
+
+function getWrittenChunks(writeChunk: ReturnType<typeof vi.fn>) {
+    return writeChunk.mock.calls.map(([chunk]) => chunk as ChatStreamChunk)
+}
+
+function getWorkflowProgressChunks(writeChunk: ReturnType<typeof vi.fn>) {
+    return getWrittenChunks(writeChunk).filter(chunk => chunk.type.startsWith('workflow-progress'))
 }
 
 const DELIVERY_CHAIN_GRAPH_NODE_ORDER = [
@@ -211,6 +220,8 @@ describe('runtime/delivery-chain', () => {
     })
 
     it('空输入会 fail closed 并要求提供 scenario 或需求文本', async () => {
+        const writeChunk = vi.fn()
+
         const handled = await startDeliveryChainRun({
             context: {},
             model: { invoke: vi.fn() } as never,
@@ -235,10 +246,11 @@ describe('runtime/delivery-chain', () => {
                     },
                 ],
             }),
-            writeChunk: vi.fn(),
+            writeChunk,
         })
 
         expect(handled).toBe(true)
+        expect(getWorkflowProgressChunks(writeChunk)).toHaveLength(0)
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(
             expect.any(Function),
             expect.stringContaining('@demo://scenarios/*/requirement.md')
@@ -292,6 +304,43 @@ describe('runtime/delivery-chain', () => {
                 uri: 'demo://scenarios/request-limit-banner/requirement.md',
             })
         )
+        expect(getWorkflowProgressChunks(writeChunk)).toEqual([
+            expect.objectContaining({
+                type: 'workflow-progress-start',
+                workflowKind: 'delivery-chain',
+            }),
+            expect.objectContaining({ status: 'running', stepId: 'load', type: 'workflow-progress-step' }),
+            expect.objectContaining({ status: 'completed', stepId: 'load', type: 'workflow-progress-step' }),
+            expect.objectContaining({
+                details: ['调用模型：生成方案 (plan)'],
+                status: 'running',
+                stepId: 'plan',
+                type: 'workflow-progress-step',
+            }),
+            expect.objectContaining({ status: 'completed', stepId: 'plan', type: 'workflow-progress-step' }),
+            expect.objectContaining({
+                details: ['调用模型：拆解任务 (tasks)'],
+                status: 'running',
+                stepId: 'task',
+                type: 'workflow-progress-step',
+            }),
+            expect.objectContaining({ status: 'completed', stepId: 'task', type: 'workflow-progress-step' }),
+            expect.objectContaining({
+                details: ['调用模型：交付评审 (review)'],
+                status: 'running',
+                stepId: 'review',
+                type: 'workflow-progress-step',
+            }),
+            expect.objectContaining({ status: 'completed', stepId: 'review', type: 'workflow-progress-step' }),
+            expect.objectContaining({
+                details: ['汇总并生成最终报告'],
+                status: 'running',
+                stepId: 'report',
+                type: 'workflow-progress-step',
+            }),
+            expect.objectContaining({ status: 'completed', stepId: 'report', type: 'workflow-progress-step' }),
+            expect.objectContaining({ status: 'completed', type: 'workflow-progress-end' }),
+        ])
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(
             writeChunk,
             expect.stringContaining('# Delivery Chain Report / 交付计划报告')
@@ -363,11 +412,13 @@ describe('runtime/delivery-chain', () => {
                 })
             )
 
+        const writeChunk = vi.fn()
+
         const graphState = await runDeliveryChainGraph({
             context: {},
             input: createScenarioGraphInput(),
             model: { invoke } as never,
-            writeChunk: vi.fn(),
+            writeChunk,
         })
 
         expect(invoke).toHaveBeenCalledTimes(3)
@@ -378,6 +429,7 @@ describe('runtime/delivery-chain', () => {
         expect(graphState.reportMarkdown).toContain('TaskStage 调用失败')
         expect(graphState.reportMarkdown).toContain('## 任务拆解')
         expect(graphState.reportMarkdown).toContain('# Delivery Chain Report / 交付计划报告')
+        expect(new Set(writeChunk.mock.calls.map(([chunk]) => chunk.type))).toEqual(new Set(['resource-start', 'resource-end']))
     })
 
     it('短 inline requirement 会在报告里补默认假设', async () => {
@@ -410,6 +462,22 @@ describe('runtime/delivery-chain', () => {
             writeChunk,
         })
 
+        expect(
+            getWorkflowProgressChunks(writeChunk)
+                .filter(chunk => chunk.type === 'workflow-progress-step')
+                .map(chunk => `${chunk.stepId}:${chunk.status}`)
+        ).toEqual([
+            'load:running',
+            'load:completed',
+            'plan:running',
+            'plan:completed',
+            'task:running',
+            'task:completed',
+            'review:running',
+            'review:completed',
+            'report:running',
+            'report:completed',
+        ])
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('inline requirement 较短'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`blocked`'))
     })

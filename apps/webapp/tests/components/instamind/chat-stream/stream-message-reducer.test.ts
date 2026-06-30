@@ -98,6 +98,80 @@ describe('stream-message-reducer', () => {
         expect(result.state.activeStream.messageId).toBe('assistant-runtime-error')
     })
 
+    it('workflow progress chunks 会按 stepId 聚合并在结束后默认折叠', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-workflow-progress' },
+            {
+                type: 'workflow-progress-start',
+                partId: 'workflow-progress-part',
+                workflowId: 'delivery-chain-run-1',
+                workflowKind: 'delivery-chain',
+                title: '正在生成交付计划...',
+            },
+            {
+                type: 'workflow-progress-step',
+                partId: 'workflow-progress-part',
+                workflowId: 'delivery-chain-run-1',
+                stepId: 'load',
+                title: '读取上下文',
+                status: 'running',
+                summary: '开始读取上下文',
+                details: ['读取规则：plan-rubric.md、task-rubric.md、review-rubric.md'],
+            },
+            {
+                type: 'workflow-progress-step',
+                partId: 'workflow-progress-part',
+                workflowId: 'delivery-chain-run-1',
+                stepId: 'load',
+                title: '读取上下文',
+                status: 'completed',
+                summary: '已读取 demo 上下文 6 项',
+                durationMs: 1200,
+            },
+            {
+                type: 'workflow-progress-step',
+                partId: 'workflow-progress-part',
+                workflowId: 'delivery-chain-run-1',
+                stepId: 'plan',
+                title: '方案规划',
+                status: 'running',
+                summary: '开始方案规划',
+                details: ['调用模型：生成方案 (plan)'],
+            },
+            {
+                type: 'workflow-progress-end',
+                partId: 'workflow-progress-part',
+                workflowId: 'delivery-chain-run-1',
+                status: 'completed',
+                durationMs: 6250,
+            },
+        ])
+
+        const workflowPart = getAssistantMessage(state)?.parts.find(part => part.type === 'workflow-progress')
+
+        expect(workflowPart).toMatchObject({
+            type: 'workflow-progress',
+            workflowId: 'delivery-chain-run-1',
+            workflowKind: 'delivery-chain',
+            status: 'completed',
+            visibility: 'collapsed',
+            durationMs: 6250,
+            steps: [
+                {
+                    id: 'load',
+                    status: 'completed',
+                    summary: '已读取 demo 上下文 6 项',
+                    details: ['读取规则：plan-rubric.md、task-rubric.md、review-rubric.md'],
+                },
+                {
+                    id: 'plan',
+                    status: 'running',
+                    details: ['调用模型：生成方案 (plan)'],
+                },
+            ],
+        })
+    })
+
     it('finish 会清理空 assistant 占位并重置 active stream', () => {
         const state = reduceChunks([{ type: 'start', messageId: 'assistant-empty' }, { type: 'finish' }])
 

@@ -4,13 +4,24 @@ import { useMemo } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
-import type { MindMessage, MindMessagePart, PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
+import type {
+    MindMessage,
+    MindMessagePart,
+    PromptPart,
+    ResourcePart,
+    SkillPart,
+    ToolPart,
+    WorkflowProgressPart,
+} from '@/lib/ai/types/message'
 
 import { AgentTextArtifactPanel } from '../parts/agent-text-artifact-panel'
 import { AgentTracePanel } from '../parts/agent-trace-panel'
+import { canRenderDeliveryChainReport } from '../parts/delivery-chain-report-parser'
+import { DeliveryChainReportView } from '../parts/delivery-chain-report-view'
 import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
 import { ReasoningPanel } from '../parts/reasoning-panel'
 import { TextPartView } from '../parts/text-part'
+import { WorkflowProgressPanel } from '../parts/workflow-progress-panel'
 import {
     type AssistantFeedback,
     getCopiedButtonClassName,
@@ -236,25 +247,33 @@ export function AssistantMessage({
     const isRateLimitNotice = isRateLimitNoticeMessage(message)
     const showMessageActions = hasTextContent && isAssistantReplyCompleted && !isRateLimitNotice
     const showBuiltInFollowUpSuggestions = showFollowUpSuggestions && !isRateLimitNotice
+    const isDeliveryChainMessage = requestComposer?.command?.name === 'delivery-chain'
+    const deliveryChainWorkflowProgressPart = useMemo(
+        () =>
+            isDeliveryChainMessage
+                ? contentParts.find((part): part is WorkflowProgressPart => part.type === 'workflow-progress')
+                : undefined,
+        [contentParts, isDeliveryChainMessage]
+    )
     const deliveryChainEntryUris = useMemo(() => {
-        if (requestComposer?.command?.name !== 'delivery-chain') {
+        if (!isDeliveryChainMessage) {
             return new Set<string>()
         }
 
         return new Set((requestComposer.references ?? []).map(reference => normalizeResourceUri(reference.uri)))
-    }, [requestComposer])
+    }, [isDeliveryChainMessage, requestComposer])
     const deliveryChainEntryResources = useMemo(
         () =>
-            requestComposer?.command?.name === 'delivery-chain'
+            isDeliveryChainMessage
                 ? contentParts.filter(
                       (part): part is ResourcePart => part.type === 'resource' && deliveryChainEntryUris.has(normalizeResourceUri(part.uri))
                   )
                 : [],
-        [contentParts, deliveryChainEntryUris, requestComposer?.command?.name]
+        [contentParts, deliveryChainEntryUris, isDeliveryChainMessage]
     )
     const deliveryChainInternalResources = useMemo(
         () =>
-            requestComposer?.command?.name === 'delivery-chain'
+            isDeliveryChainMessage
                 ? contentParts.filter(
                       (part): part is ResourcePart =>
                           part.type === 'resource' &&
@@ -262,7 +281,7 @@ export function AssistantMessage({
                           getDeliveryChainResourceGroupKey(normalizeResourceUri(part.uri), deliveryChainEntryUris) !== 'other'
                   )
                 : [],
-        [contentParts, deliveryChainEntryUris, requestComposer?.command?.name]
+        [contentParts, deliveryChainEntryUris, isDeliveryChainMessage]
     )
     const firstDeliveryChainResource = useMemo(
         () =>
@@ -285,6 +304,10 @@ export function AssistantMessage({
                     }
 
                     if (part.type === 'text') {
+                        if (isDeliveryChainMessage && canRenderDeliveryChainReport(part.text)) {
+                            return <DeliveryChainReportView key={`${message.id}:text:${part.id ?? index}`} markdown={part.text} />
+                        }
+
                         return <TextPartView key={`${message.id}:text:${part.id ?? index}`} part={part} />
                     }
 
@@ -292,7 +315,22 @@ export function AssistantMessage({
                         return <ToolPanel key={`${message.id}:tool:${part.id ?? index}`} part={part} />
                     }
 
+                    if (part.type === 'workflow-progress') {
+                        return isDeliveryChainMessage ? (
+                            <WorkflowProgressPanel
+                                key={`${message.id}:workflow-progress:${part.workflowId}:${part.visibility}`}
+                                part={part}
+                            />
+                        ) : null
+                    }
+
                     if (part.type === 'resource') {
+                        if (isDeliveryChainMessage && deliveryChainWorkflowProgressPart) {
+                            if (deliveryChainEntryResources.includes(part) || deliveryChainInternalResources.includes(part)) {
+                                return null
+                            }
+                        }
+
                         if (part === firstDeliveryChainResource) {
                             return (
                                 <DeliveryChainContextSummaryPanel

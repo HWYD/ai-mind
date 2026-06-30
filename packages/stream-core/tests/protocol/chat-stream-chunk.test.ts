@@ -1,3 +1,5 @@
+import { describe, expect, it } from 'vitest'
+
 import type { ChatStreamChunk } from '../../src/protocol'
 
 describe('chat stream graph chunks', () => {
@@ -131,5 +133,58 @@ describe('chat stream HITL chunks', () => {
         ] satisfies ChatStreamChunk[]
 
         expect(chunks.map(chunk => chunk.type)).toEqual(['agent-interrupt', 'agent-resume'])
+    })
+})
+
+describe('chat stream workflow progress chunks', () => {
+    it('accepts workflow progress chunks in the protocol union', () => {
+        const chunks = [
+            {
+                partId: 'workflow-progress-1',
+                startedAt: 1_719_739_200_000,
+                title: '正在生成交付计划...',
+                type: 'workflow-progress-start',
+                workflowId: 'delivery-chain-run-1',
+                workflowKind: 'delivery-chain',
+            },
+            {
+                details: ['调用模型：生成方案 (plan)'],
+                partId: 'workflow-progress-1',
+                startedAt: 1_719_739_201_000,
+                status: 'running',
+                stepId: 'plan',
+                summary: '开始方案规划',
+                title: '方案规划',
+                type: 'workflow-progress-step',
+                workflowId: 'delivery-chain-run-1',
+            },
+            {
+                durationMs: 1_200,
+                endedAt: 1_719_739_202_200,
+                partId: 'workflow-progress-1',
+                status: 'completed',
+                stepId: 'plan',
+                summary: '已完成方案规划',
+                title: '方案规划',
+                type: 'workflow-progress-step',
+                workflowId: 'delivery-chain-run-1',
+            },
+            {
+                durationMs: 6_000,
+                endedAt: 1_719_739_206_000,
+                partId: 'workflow-progress-1',
+                status: 'completed',
+                summary: '已处理 6s',
+                type: 'workflow-progress-end',
+                workflowId: 'delivery-chain-run-1',
+            },
+        ] satisfies ChatStreamChunk[]
+
+        expect(chunks.map(chunk => chunk.type)).toEqual([
+            'workflow-progress-start',
+            'workflow-progress-step',
+            'workflow-progress-step',
+            'workflow-progress-end',
+        ])
     })
 })

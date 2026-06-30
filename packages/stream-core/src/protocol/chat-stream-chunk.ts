@@ -147,6 +147,45 @@ export interface AgentResumeChunk {
     threadId: string
 }
 
+export type WorkflowProgressStepStatus = 'completed' | 'failed' | 'running'
+export type WorkflowProgressRunStatus = 'completed' | 'failed' | 'running'
+
+export interface WorkflowProgressStartChunk {
+    type: 'workflow-progress-start'
+    partId: string
+    workflowId: string
+    workflowKind: string
+    title: string
+    summary?: string
+    startedAt?: number
+}
+
+export interface WorkflowProgressStepChunk {
+    type: 'workflow-progress-step'
+    partId: string
+    workflowId: string
+    stepId: string
+    title: string
+    status: WorkflowProgressStepStatus
+    summary?: string
+    details?: string[]
+    startedAt?: number
+    endedAt?: number
+    durationMs?: number
+    failureMessage?: string
+}
+
+export interface WorkflowProgressEndChunk {
+    type: 'workflow-progress-end'
+    partId: string
+    workflowId: string
+    status: Exclude<WorkflowProgressRunStatus, 'running'>
+    summary?: string
+    endedAt?: number
+    durationMs?: number
+    failureMessage?: string
+}
+
 export interface TextStartChunk {
     type: 'text-start'
     partId: string
@@ -350,6 +389,9 @@ export type ChatStreamChunk =
     | AgentGraphDebugSummaryChunk
     | AgentInterruptChunk
     | AgentResumeChunk
+    | WorkflowProgressStartChunk
+    | WorkflowProgressStepChunk
+    | WorkflowProgressEndChunk
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk

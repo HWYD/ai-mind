@@ -294,6 +294,45 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
             summary: agentGraphDebugSummarySchema,
         })
         .strict(),
+    z
+        .object({
+            type: z.literal('workflow-progress-start'),
+            partId: z.string().min(1),
+            workflowId: z.string().min(1),
+            workflowKind: z.string().min(1),
+            title: z.string().min(1),
+            summary: z.string().min(1).optional(),
+            startedAt: z.number().int().nonnegative().optional(),
+        })
+        .strict(),
+    z
+        .object({
+            type: z.literal('workflow-progress-step'),
+            partId: z.string().min(1),
+            workflowId: z.string().min(1),
+            stepId: z.string().min(1),
+            title: z.string().min(1),
+            status: z.enum(['running', 'completed', 'failed']),
+            summary: z.string().min(1).optional(),
+            details: z.array(z.string().min(1)).max(8).optional(),
+            startedAt: z.number().int().nonnegative().optional(),
+            endedAt: z.number().int().nonnegative().optional(),
+            durationMs: z.number().int().nonnegative().optional(),
+            failureMessage: z.string().min(1).optional(),
+        })
+        .strict(),
+    z
+        .object({
+            type: z.literal('workflow-progress-end'),
+            partId: z.string().min(1),
+            workflowId: z.string().min(1),
+            status: z.enum(['completed', 'failed']),
+            summary: z.string().min(1).optional(),
+            endedAt: z.number().int().nonnegative().optional(),
+            durationMs: z.number().int().nonnegative().optional(),
+            failureMessage: z.string().min(1).optional(),
+        })
+        .strict(),
     z.object({
         type: z.literal('text-start'),
         partId: z.string().min(1),

@@ -12,6 +12,7 @@ import {
     createSkillPart,
     createTextPart,
     createToolPart,
+    createWorkflowProgressPart,
 } from './message-factory'
 import {
     appendAgentGraphRoutePart,
@@ -19,6 +20,7 @@ import {
     appendAgentTextArtifactDelta,
     appendPart,
     appendTextualPartDelta,
+    applyWorkflowProgressStepChunk,
     ensureAssistantMessage,
     pruneTransientMessages,
     updateAgentInterruptPartStatus,
@@ -27,9 +29,11 @@ import {
     updatePromptPart,
     updateResourcePart,
     updateToolPart,
+    updateWorkflowProgressPart,
     upsertAgentGraphDebugSummaryPart,
     upsertAgentGraphNodePart,
     upsertAgentInterruptPart,
+    upsertWorkflowProgressPart,
 } from './message-operations'
 
 /** 当前流正在写入的 assistant message 与文本 part 指针。 */
@@ -319,6 +323,24 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
         case 'agent-graph-debug-summary':
             return updateActiveMessage(state, (messages, messageId) =>
                 upsertAgentGraphDebugSummaryPart(messages, messageId, chunk.summary, chunk.runId, chunk.agentName)
+            )
+        case 'workflow-progress-start':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertWorkflowProgressPart(messages, messageId, createWorkflowProgressPart(chunk))
+            )
+        case 'workflow-progress-step':
+            return updateActiveMessage(state, (messages, messageId) => applyWorkflowProgressStepChunk(messages, messageId, chunk))
+        case 'workflow-progress-end':
+            return updateActiveMessage(state, (messages, messageId) =>
+                updateWorkflowProgressPart(messages, messageId, chunk.workflowId, part => ({
+                    ...part,
+                    status: chunk.status,
+                    summary: chunk.summary ?? part.summary,
+                    endedAt: chunk.endedAt,
+                    durationMs: chunk.durationMs,
+                    failureMessage: chunk.failureMessage,
+                    visibility: 'collapsed',
+                }))
             )
         case 'text-start':
             return applyMessagesAndActiveStream(state, appendActivePartMessages(state, createTextPart('', chunk.partId)), {

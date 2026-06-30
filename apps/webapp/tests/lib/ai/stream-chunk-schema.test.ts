@@ -269,6 +269,85 @@ describe('chatStreamChunkSchema graph chunks', () => {
     })
 })
 
+describe('chatStreamChunkSchema workflow progress chunks', () => {
+    it('accepts safe workflow progress chunks', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'workflow-progress-start',
+                partId: 'workflow-progress-1',
+                workflowId: 'delivery-chain-run-1',
+                workflowKind: 'delivery-chain',
+                title: '正在生成交付计划...',
+                startedAt: 1_719_739_200_000,
+            }).success
+        ).toBe(true)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'workflow-progress-step',
+                partId: 'workflow-progress-1',
+                workflowId: 'delivery-chain-run-1',
+                stepId: 'plan',
+                title: '方案规划',
+                status: 'running',
+                summary: '开始方案规划',
+                details: ['调用模型：生成方案 (plan)'],
+                startedAt: 1_719_739_200_100,
+            }).success
+        ).toBe(true)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'workflow-progress-end',
+                partId: 'workflow-progress-1',
+                workflowId: 'delivery-chain-run-1',
+                status: 'completed',
+                summary: '已处理 6s',
+                durationMs: 6_000,
+                endedAt: 1_719_739_206_000,
+            }).success
+        ).toBe(true)
+    })
+
+    it('rejects workflow progress chunks with raw-like leaked fields', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'workflow-progress-step',
+                partId: 'workflow-progress-1',
+                workflowId: 'delivery-chain-run-1',
+                stepId: 'load',
+                title: '读取上下文',
+                status: 'failed',
+                details: ['读取文件：requirement.md'],
+                graphState: {
+                    visitedNodes: ['loadDeliveryChainContext'],
+                },
+            }).success
+        ).toBe(false)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'workflow-progress-step',
+                partId: 'workflow-progress-1',
+                workflowId: 'delivery-chain-run-1',
+                stepId: 'review',
+                title: '交付评审',
+                status: 'failed',
+                failureMessage: '',
+            }).success
+        ).toBe(false)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'workflow-progress-end',
+                partId: 'workflow-progress-1',
+                workflowId: 'delivery-chain-run-1',
+                status: 'running',
+            }).success
+        ).toBe(false)
+    })
+})
+
 describe('chatStreamChunkSchema HITL chunks', () => {
     const strategyPayload = {
         allowedDecisions: ['approve', 'edit', 'reject', 'respond'],

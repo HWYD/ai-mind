@@ -75,6 +75,36 @@ export interface PromptPart extends BasePart {
     error?: string
 }
 
+export type WorkflowProgressStepStatus = 'completed' | 'failed' | 'running'
+export type WorkflowProgressRunStatus = 'completed' | 'failed' | 'running'
+
+export interface WorkflowProgressStep {
+    id: string
+    title: string
+    status: WorkflowProgressStepStatus
+    summary?: string
+    details: string[]
+    startedAt?: number
+    endedAt?: number
+    durationMs?: number
+    failureMessage?: string
+}
+
+export interface WorkflowProgressPart extends BasePart {
+    type: 'workflow-progress'
+    workflowId: string
+    workflowKind: string
+    title: string
+    status: WorkflowProgressRunStatus
+    summary?: string
+    steps: WorkflowProgressStep[]
+    startedAt?: number
+    endedAt?: number
+    durationMs?: number
+    failureMessage?: string
+    visibility: 'collapsed' | 'expanded'
+}
+
 export type AgentStepStatus = 'completed' | 'failed' | 'paused' | 'running' | 'skipped'
 export type AgentStepSeverity = 'error' | 'info' | 'warning'
 
@@ -152,6 +182,7 @@ export type MindMessagePart =
     | ResourcePart
     | SkillPart
     | PromptPart
+    | WorkflowProgressPart
     | AgentStepPart
     | AgentInterruptPart
 

@@ -1,7 +1,7 @@
 # Agent Runtime Roadmap
 
 状态: Active
-日期: 2026-06-29
+日期: 2026-06-30
 
 ## Purpose
 
@@ -16,7 +16,6 @@
 - Public Agent demo resource root 已收口到 `examples/agent-demo/`。
 - Public Agent demo 文件资源只使用 `@demo://`。
 - Tasklist Agent public demo 入口是 `/tasklist + @demo://version-plans/*.md`。
-- `/delivery-chain` 已支持 demo scenario 和 inline requirement 两类输入。
 - `/delivery-chain` 已支持 demo scenario 和 inline requirement 两类输入。
 - v0.3.6 的内部推荐口径是 `DeliveryChainGraph`：使用 LangGraph `StateGraph` 表达固定顺序 workflow，并输出非持久化 Delivery Chain Report。
 - `@docs://`、`docs://versions/*.md` 不再作为 public Agent demo 输入。
@@ -61,20 +60,40 @@
 先把“需求 -> 方案 -> 任务 -> 评审”的交付链路跑起来。
 ```
 
-## v0.3.7: Delivery Chain Presentation and Trace
+## v0.3.7: Delivery Chain Workflow Progress Presentation
 
 目标:
 
-- 优化 Delivery Chain Report 展示。
-- 将 Plan / Task / Review 分段展示。
-- 增加 stage trace。
-- 优化 AgentTracePanel。
-- 优化 quick access 和 demo UX。
+- 为 `/delivery-chain` 新增通用 workflow progress stream channel：
+
+```text
+workflow-progress-start
+workflow-progress-step
+workflow-progress-end
+```
+
+- 执行中逐步展示 Delivery Chain workflow steps，而不是一次性展示完整 pending 列表。
+- 执行中默认展开，完成并开始输出报告时自动折叠为“已处理 X”摘要。
+- 新增通用 Workflow Progress component，但首版只绑定 `/delivery-chain`。
+- step detail 只展示安全、可读的过程摘要，不把普通 tool/resource/prompt 事件自动回放成日志面板。
+- 优化 Delivery Chain Report 分段展示，并保留 Markdown fallback。
+- 保持 `/tasklist` AgentTracePanel、普通 resource/tool/prompt 展示不受影响。
+
+明确不做:
+
+- 不复用 `agent-graph-*` 承载 Delivery Chain process UI。
+- 不做 Tasklist Agent 时间线样式。
+- 不新增 `@artifact://`。
+- 不做 artifact handoff / persistence。
+- 不做 checkpoint / interrupt / HITL / resume。
+- 不做 DB schema / Prisma / PostgresSaver schema 变更。
+- 不实现真正多 Agent。
+- 不做 Agent event store 或 LangSmith deep trace UI。
 
 价值:
 
 ```text
-让用户和 reviewer 看懂 Delivery Chain graph 是怎么一步步执行的。
+让用户和 reviewer 在报告生成前就能感知 Delivery Chain 做了什么、正在做什么，并在完成后保持界面整洁。
 ```
 
 ## v0.4.0: Session Artifact Handoff
@@ -177,8 +196,9 @@ DeliveryChainGraph
 
 - Roadmap 不是当前版本任务清单。
 - v0.3.6 不得实现 v0.3.7-v0.5.0 的能力。
+- v0.3.7 只允许 additive workflow progress stream / reducer / presentation 变更，不得升级为 persistence、artifact handoff、checkpoint、HITL 或多 Agent。
 - v0.3.6 的 LangGraph 使用范围仅限受控 sequential workflow，不包含 checkpointer、interrupt、resume 或 HITL。
 - `@artifact://` 必须等待 artifact handoff spec。
 - 真正多 Agent 必须等待 Agent Catalog / Runtime Contract。
 - Chat persistence 必须等待 DB schema spec。
-- 如果某个实现必须修改 stream protocol、frontend reducer、Prisma schema 或 PostgresSaver schema，必须提升或重开 spec，而不能塞进当前版本。
+- 除 v0.3.7 spec 明确允许的 additive `workflow-progress-*` stream / reducer 变更外，如果某个实现必须修改 stream protocol、frontend reducer、Prisma schema 或 PostgresSaver schema，必须提升或重开 spec，而不能塞进当前版本。

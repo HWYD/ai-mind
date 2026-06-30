@@ -52,6 +52,56 @@ export const DELIVERY_CHAIN_GRAPH_NODE_IDS = {
 } as const
 
 type DeliveryChainGraphNodeId = (typeof DELIVERY_CHAIN_GRAPH_NODE_IDS)[keyof typeof DELIVERY_CHAIN_GRAPH_NODE_IDS]
+type DeliveryChainWorkflowStepId = 'load' | 'plan' | 'report' | 'review' | 'task'
+
+interface DeliveryChainWorkflowStepDefinition {
+    details: string[]
+    runningSummary: string
+    stepId: DeliveryChainWorkflowStepId
+    title: string
+}
+
+interface DeliveryChainWorkflowProgressRuntime {
+    partId: string
+    startedAt: number
+    stepStartedAt: Partial<Record<DeliveryChainWorkflowStepId, number>>
+    workflowId: string
+}
+
+const DELIVERY_CHAIN_WORKFLOW_KIND = 'delivery-chain'
+const DELIVERY_CHAIN_INTERNAL_RESOURCE_COUNT = 5
+const DELIVERY_CHAIN_WORKFLOW_STEPS: Record<DeliveryChainGraphNodeId, DeliveryChainWorkflowStepDefinition> = {
+    buildDeliveryChainReport: {
+        details: ['汇总并生成最终报告'],
+        runningSummary: '开始生成交付计划报告',
+        stepId: 'report',
+        title: '生成交付计划报告',
+    },
+    loadDeliveryChainContext: {
+        details: ['包含需求、场景上下文、评审规则和治理规则'],
+        runningSummary: '开始读取上下文',
+        stepId: 'load',
+        title: '读取上下文',
+    },
+    runPlanStage: {
+        details: ['调用模型：生成方案 (plan)'],
+        runningSummary: '开始方案规划',
+        stepId: 'plan',
+        title: '方案规划',
+    },
+    runReviewStage: {
+        details: ['调用模型：交付评审 (review)'],
+        runningSummary: '开始交付评审',
+        stepId: 'review',
+        title: '交付评审',
+    },
+    runTaskStage: {
+        details: ['调用模型：拆解任务 (tasks)'],
+        runningSummary: '开始任务拆解',
+        stepId: 'task',
+        title: '任务拆解',
+    },
+}
 
 type DeliveryChainInvocation =
     | {
@@ -99,6 +149,7 @@ interface StartDeliveryChainRunOptions {
 interface DeliveryChainGraphRuntime {
     context: ChatExecutionContext
     model: BaseChatModel
+    workflowProgress?: DeliveryChainWorkflowProgressRuntime
     writeChunk: WriteChunk
 }
 
@@ -207,6 +258,169 @@ function createDeliveryChainGraphInput(
         scenarioId: invocation.scenarioId,
         source: 'demo_scenario',
     }
+}
+
+function createDeliveryChainWorkflowProgressRuntime(): DeliveryChainWorkflowProgressRuntime {
+    return {
+        partId: createId(),
+        startedAt: Date.now(),
+        stepStartedAt: {},
+        workflowId: `delivery-chain:${createId()}`,
+    }
+}
+
+function getWorkflowStepDefinition(nodeId: DeliveryChainGraphNodeId) {
+    return DELIVERY_CHAIN_WORKFLOW_STEPS[nodeId]
+}
+
+function buildWorkflowStepDetails(
+    nodeId: DeliveryChainGraphNodeId,
+    state: DeliveryChainGraphStateAnnotationState | { input: DeliveryChainInput; resources: DeliveryChainResourceBundle }
+) {
+    const definition = getWorkflowStepDefinition(nodeId)
+
+    if (nodeId !== DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext) {
+        return definition.details
+    }
+
+    const details = [...definition.details]
+
+    if (state.input.source === 'demo_scenario') {
+        details.push(`读取文件：${state.input.scenarioId}/requirement.md`)
+
+        if (state.resources.contextText) {
+            details.push('读取文件：context.md')
+        }
+    } else {
+        details.push('读取输入：inline requirement')
+    }
+
+    details.push('读取规则：plan-rubric.md、task-rubric.md、review-rubric.md')
+    details.push('读取治理：delivery-boundaries.md、engineering-rules.md')
+
+    return details
+}
+
+function buildWorkflowStepCompletedSummary(nodeId: DeliveryChainGraphNodeId, state: DeliveryChainGraphStateAnnotationState) {
+    switch (nodeId) {
+        case DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext: {
+            const resourceCount = DELIVERY_CHAIN_INTERNAL_RESOURCE_COUNT + (state.resources?.contextText ? 1 : 0)
+
+            return `已读取 demo 上下文 ${resourceCount} 项`
+        }
+        case DELIVERY_CHAIN_GRAPH_NODE_IDS.runPlanStage:
+            return '已完成方案规划'
+        case DELIVERY_CHAIN_GRAPH_NODE_IDS.runTaskStage:
+            return '已完成任务拆解'
+        case DELIVERY_CHAIN_GRAPH_NODE_IDS.runReviewStage:
+            return '已完成交付评审'
+        case DELIVERY_CHAIN_GRAPH_NODE_IDS.buildDeliveryChainReport:
+            return '已生成交付计划报告'
+    }
+}
+
+function buildWorkflowStepFailureMessage(nodeId: DeliveryChainGraphNodeId) {
+    const { title } = getWorkflowStepDefinition(nodeId)
+
+    if (nodeId === DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext) {
+        return `${title}未完成，当前交付计划已安全停止。`
+    }
+
+    return `${title}未完成，已使用安全保底内容继续。`
+}
+
+function emitWorkflowProgressStart(runtime: DeliveryChainGraphRuntime) {
+    if (!runtime.workflowProgress) {
+        return
+    }
+
+    runtime.writeChunk({
+        partId: runtime.workflowProgress.partId,
+        startedAt: runtime.workflowProgress.startedAt,
+        title: '正在生成交付计划...',
+        type: 'workflow-progress-start',
+        workflowId: runtime.workflowProgress.workflowId,
+        workflowKind: DELIVERY_CHAIN_WORKFLOW_KIND,
+    })
+}
+
+function emitWorkflowProgressStep(
+    runtime: DeliveryChainGraphRuntime,
+    nodeId: DeliveryChainGraphNodeId,
+    status: 'completed' | 'failed' | 'running',
+    overrides?: {
+        details?: string[]
+        failureMessage?: string
+        summary?: string
+    }
+) {
+    if (!runtime.workflowProgress) {
+        return
+    }
+
+    const definition = getWorkflowStepDefinition(nodeId)
+
+    if (status === 'running') {
+        const startedAt = Date.now()
+
+        runtime.workflowProgress.stepStartedAt[definition.stepId] = startedAt
+
+        runtime.writeChunk({
+            details: overrides?.details ?? definition.details,
+            partId: runtime.workflowProgress.partId,
+            startedAt,
+            status,
+            stepId: definition.stepId,
+            summary: overrides?.summary ?? definition.runningSummary,
+            title: definition.title,
+            type: 'workflow-progress-step',
+            workflowId: runtime.workflowProgress.workflowId,
+        })
+        return
+    }
+
+    const endedAt = Date.now()
+    const startedAt = runtime.workflowProgress.stepStartedAt[definition.stepId]
+    const durationMs = typeof startedAt === 'number' ? endedAt - startedAt : undefined
+
+    runtime.writeChunk({
+        details: overrides?.details ?? definition.details,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+        ...(startedAt !== undefined ? { startedAt } : {}),
+        endedAt,
+        ...(overrides?.failureMessage ? { failureMessage: overrides.failureMessage } : {}),
+        partId: runtime.workflowProgress.partId,
+        status,
+        stepId: definition.stepId,
+        ...(overrides?.summary ? { summary: overrides.summary } : {}),
+        title: definition.title,
+        type: 'workflow-progress-step',
+        workflowId: runtime.workflowProgress.workflowId,
+    })
+}
+
+function emitWorkflowProgressEnd(
+    runtime: DeliveryChainGraphRuntime,
+    status: 'completed' | 'failed',
+    summary?: string,
+    failureMessage?: string
+) {
+    if (!runtime.workflowProgress) {
+        return
+    }
+
+    const endedAt = Date.now()
+
+    runtime.writeChunk({
+        durationMs: endedAt - runtime.workflowProgress.startedAt,
+        endedAt,
+        ...(failureMessage ? { failureMessage } : {}),
+        partId: runtime.workflowProgress.partId,
+        status,
+        ...(summary ? { summary } : {}),
+        type: 'workflow-progress-end',
+        workflowId: runtime.workflowProgress.workflowId,
+    })
 }
 
 async function readDemoResource(options: {
@@ -592,20 +806,20 @@ function buildReport(options: {
             : '- 资源引用：无，仅使用用户输入文本。',
         '',
         '## 需求摘要',
-        options.resources.requirementText,
+        normalizeEmbeddedSectionMarkdown(options.resources.requirementText),
         '',
         '## 默认假设',
         ...assumptions.map(assumption => `- ${assumption}`),
         '',
         '## 实现方案',
-        options.planStage.markdown,
+        normalizeEmbeddedSectionMarkdown(options.planStage.markdown, '实现方案'),
         '',
         '## 任务拆解',
-        options.taskStage.markdown,
+        normalizeEmbeddedSectionMarkdown(options.taskStage.markdown, '任务拆解'),
         '',
         '## 交付评审',
         `- 评审状态：\`${options.reviewDisposition}\``,
-        options.reviewStage.markdown,
+        normalizeEmbeddedSectionMarkdown(options.reviewStage.markdown, '交付评审'),
         '',
         '## 风险',
         ...risks.map(risk => `- ${risk}`),
@@ -620,11 +834,23 @@ function buildReport(options: {
 
 async function runLoadDeliveryChainContextNode(state: DeliveryChainGraphStateAnnotationState, runtime: DeliveryChainGraphRuntime) {
     const nodeId = DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext
+    emitWorkflowProgressStep(runtime, nodeId, 'running')
 
     try {
         const resources = await loadDeliveryChainContext(state.input, {
             context: runtime.context,
             writeChunk: runtime.writeChunk,
+        })
+
+        emitWorkflowProgressStep(runtime, nodeId, 'completed', {
+            details: buildWorkflowStepDetails(nodeId, {
+                input: state.input,
+                resources,
+            }),
+            summary: buildWorkflowStepCompletedSummary(nodeId, {
+                ...state,
+                resources,
+            }),
         })
 
         return {
@@ -633,6 +859,11 @@ async function runLoadDeliveryChainContextNode(state: DeliveryChainGraphStateAnn
             warnings: resources.warnings,
         }
     } catch {
+        emitWorkflowProgressStep(runtime, nodeId, 'failed', {
+            failureMessage: buildWorkflowStepFailureMessage(nodeId),
+            summary: '读取上下文未完成',
+        })
+
         return {
             ...createGraphNodeUpdate(nodeId),
             failureMessage: '公开 demo 资源读取失败，当前无法继续生成交付计划报告。',
@@ -649,10 +880,16 @@ async function runPlanStageNode(state: DeliveryChainGraphStateAnnotationState, r
         return createGraphNodeUpdate(nodeId)
     }
 
+    emitWorkflowProgressStep(runtime, nodeId, 'running')
+
     try {
         const markdown =
             (await invokeStageMarkdown(runtime.model, buildPlanStageMessages(state.resources, state.warnings), runtime.context.signal)) ||
             createStageFallbackText('实现方案')
+
+        emitWorkflowProgressStep(runtime, nodeId, 'completed', {
+            summary: '已完成方案规划',
+        })
 
         return {
             ...createGraphNodeUpdate(nodeId),
@@ -664,6 +901,11 @@ async function runPlanStageNode(state: DeliveryChainGraphStateAnnotationState, r
         }
     } catch {
         const warning = createStageFailureWarning('PlanStage')
+
+        emitWorkflowProgressStep(runtime, nodeId, 'failed', {
+            failureMessage: buildWorkflowStepFailureMessage(nodeId),
+            summary: '方案规划未完成',
+        })
 
         return {
             ...createGraphNodeUpdate(nodeId),
@@ -680,10 +922,13 @@ async function runPlanStageNode(state: DeliveryChainGraphStateAnnotationState, r
 
 async function runTaskStageNode(state: DeliveryChainGraphStateAnnotationState, runtime: DeliveryChainGraphRuntime) {
     const nodeId = DELIVERY_CHAIN_GRAPH_NODE_IDS.runTaskStage
+    const shouldSkipTaskStage = state.status === 'failed' || !state.resources
 
-    if (state.status === 'failed' || !state.resources) {
+    if (shouldSkipTaskStage) {
         return createGraphNodeUpdate(nodeId)
     }
+
+    emitWorkflowProgressStep(runtime, nodeId, 'running')
 
     const planMarkdown = state.plan?.markdown ?? createStageFallbackText('实现方案')
 
@@ -695,6 +940,10 @@ async function runTaskStageNode(state: DeliveryChainGraphStateAnnotationState, r
                 runtime.context.signal
             )) || createStageFallbackText('任务拆解')
 
+        emitWorkflowProgressStep(runtime, nodeId, 'completed', {
+            summary: '已完成任务拆解',
+        })
+
         return {
             ...createGraphNodeUpdate(nodeId),
             task: {
@@ -705,6 +954,11 @@ async function runTaskStageNode(state: DeliveryChainGraphStateAnnotationState, r
         }
     } catch {
         const warning = createStageFailureWarning('TaskStage')
+
+        emitWorkflowProgressStep(runtime, nodeId, 'failed', {
+            failureMessage: buildWorkflowStepFailureMessage(nodeId),
+            summary: '任务拆解未完成',
+        })
 
         return {
             ...createGraphNodeUpdate(nodeId),
@@ -721,10 +975,13 @@ async function runTaskStageNode(state: DeliveryChainGraphStateAnnotationState, r
 
 async function runReviewStageNode(state: DeliveryChainGraphStateAnnotationState, runtime: DeliveryChainGraphRuntime) {
     const nodeId = DELIVERY_CHAIN_GRAPH_NODE_IDS.runReviewStage
+    const shouldSkipReviewStage = state.status === 'failed' || !state.resources
 
-    if (state.status === 'failed' || !state.resources) {
+    if (shouldSkipReviewStage) {
         return createGraphNodeUpdate(nodeId)
     }
+
+    emitWorkflowProgressStep(runtime, nodeId, 'running')
 
     const planMarkdown = state.plan?.markdown ?? createStageFallbackText('实现方案')
     const taskMarkdown = state.task?.markdown ?? createStageFallbackText('任务拆解')
@@ -738,6 +995,10 @@ async function runReviewStageNode(state: DeliveryChainGraphStateAnnotationState,
             )) || createReviewStageFallbackText()
         const reviewDisposition = extractReviewDisposition(markdown)
 
+        emitWorkflowProgressStep(runtime, nodeId, 'completed', {
+            summary: '已完成交付评审',
+        })
+
         return {
             ...createGraphNodeUpdate(nodeId),
             review: {
@@ -750,6 +1011,11 @@ async function runReviewStageNode(state: DeliveryChainGraphStateAnnotationState,
     } catch {
         const warning = createStageFailureWarning('ReviewStage')
         const markdown = createReviewStageFallbackText()
+
+        emitWorkflowProgressStep(runtime, nodeId, 'failed', {
+            failureMessage: buildWorkflowStepFailureMessage(nodeId),
+            summary: '交付评审未完成',
+        })
 
         return {
             ...createGraphNodeUpdate(nodeId),
@@ -765,10 +1031,16 @@ async function runReviewStageNode(state: DeliveryChainGraphStateAnnotationState,
     }
 }
 
-function buildDeliveryChainReportNode(state: DeliveryChainGraphStateAnnotationState) {
+async function buildDeliveryChainReportNode(state: DeliveryChainGraphStateAnnotationState, runtime: DeliveryChainGraphRuntime) {
     const nodeId = DELIVERY_CHAIN_GRAPH_NODE_IDS.buildDeliveryChainReport
 
+    emitWorkflowProgressStep(runtime, nodeId, 'running')
+
     if (state.status === 'failed' || !state.resources) {
+        emitWorkflowProgressStep(runtime, nodeId, 'completed', {
+            summary: '已生成交付计划报告',
+        })
+
         return {
             ...createGraphNodeUpdate(nodeId),
             reportMarkdown: buildFailureReport(state),
@@ -794,6 +1066,10 @@ function buildDeliveryChainReportNode(state: DeliveryChainGraphStateAnnotationSt
     const reviewDisposition = state.reviewDisposition ?? extractReviewDisposition(reviewStage.markdown)
     const hasStageFailure = [planStage, taskStage, reviewStage].some(stage => stage.status === 'failed')
 
+    emitWorkflowProgressStep(runtime, nodeId, 'completed', {
+        summary: '已生成交付计划报告',
+    })
+
     return {
         ...createGraphNodeUpdate(nodeId),
         reportMarkdown: buildReport({
@@ -816,7 +1092,7 @@ export function createDeliveryChainGraph(runtime: DeliveryChainGraphRuntime) {
         .addNode(DELIVERY_CHAIN_GRAPH_NODE_IDS.runPlanStage, state => runPlanStageNode(state, runtime))
         .addNode(DELIVERY_CHAIN_GRAPH_NODE_IDS.runTaskStage, state => runTaskStageNode(state, runtime))
         .addNode(DELIVERY_CHAIN_GRAPH_NODE_IDS.runReviewStage, state => runReviewStageNode(state, runtime))
-        .addNode(DELIVERY_CHAIN_GRAPH_NODE_IDS.buildDeliveryChainReport, buildDeliveryChainReportNode)
+        .addNode(DELIVERY_CHAIN_GRAPH_NODE_IDS.buildDeliveryChainReport, state => buildDeliveryChainReportNode(state, runtime))
         .addEdge(START, DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext)
         .addEdge(DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext, DELIVERY_CHAIN_GRAPH_NODE_IDS.runPlanStage)
         .addEdge(DELIVERY_CHAIN_GRAPH_NODE_IDS.runPlanStage, DELIVERY_CHAIN_GRAPH_NODE_IDS.runTaskStage)
@@ -832,6 +1108,7 @@ export async function runDeliveryChainGraph(options: RunDeliveryChainGraphOption
     const graph = createDeliveryChainGraph({
         context: options.context,
         model: options.model,
+        workflowProgress: options.workflowProgress,
         writeChunk: options.writeChunk,
     })
 
@@ -844,6 +1121,32 @@ function buildUnexpectedGraphFailureReport(input: DeliveryChainInput) {
         failureMessage: '当前交付链路运行失败，请稍后重试。',
         status: 'failed',
     })
+}
+
+function escapeMarkdownRegExp(value: string) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function stripLeadingEmbeddedHeading(markdown: string, title: string) {
+    const pattern = new RegExp(`^#{1,6}\\s+${escapeMarkdownRegExp(title)}\\s*(?:\\r?\\n)+`)
+
+    return markdown.replace(pattern, '').trim()
+}
+
+function demoteEmbeddedMarkdownHeadings(markdown: string) {
+    return markdown.replace(/^(#{1,6})\s+/gm, (_, hashes: string) => `${'#'.repeat(Math.min(Math.max(hashes.length + 1, 3), 6))} `)
+}
+
+function normalizeEmbeddedSectionMarkdown(markdown: string, parentTitle?: string) {
+    const trimmedMarkdown = markdown.trim()
+
+    if (!trimmedMarkdown) {
+        return trimmedMarkdown
+    }
+
+    const withoutDuplicateTitle = parentTitle ? stripLeadingEmbeddedHeading(trimmedMarkdown, parentTitle) : trimmedMarkdown
+
+    return demoteEmbeddedMarkdownHeadings(withoutDuplicateTitle).trim()
 }
 
 export function resolveDeliveryChainInvocation(request: ChatRequest): DeliveryChainInvocation | null {
@@ -972,18 +1275,51 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
     }
 
     const input = createDeliveryChainGraphInput(invocation)
+    const workflowProgress = createDeliveryChainWorkflowProgressRuntime()
 
     try {
+        emitWorkflowProgressStart({
+            context: options.context,
+            model: options.model,
+            workflowProgress,
+            writeChunk: options.writeChunk,
+        })
+
         const graphState = await runDeliveryChainGraph({
             context: options.context,
             input,
             model: options.model,
+            workflowProgress,
             writeChunk: options.writeChunk,
         })
+
+        emitWorkflowProgressEnd(
+            {
+                context: options.context,
+                model: options.model,
+                workflowProgress,
+                writeChunk: options.writeChunk,
+            },
+            graphState.status === 'completed' ? 'completed' : 'failed',
+            undefined,
+            graphState.status === 'completed' ? undefined : '交付计划未完整生成，已输出安全报告。'
+        )
 
         writeStaticTextPart(options.writeChunk, graphState.reportMarkdown ?? buildFailureReport(graphState))
         return true
     } catch {
+        emitWorkflowProgressEnd(
+            {
+                context: options.context,
+                model: options.model,
+                workflowProgress,
+                writeChunk: options.writeChunk,
+            },
+            'failed',
+            undefined,
+            '交付计划未完整生成，请稍后重试。'
+        )
+
         writeStaticTextPart(options.writeChunk, buildUnexpectedGraphFailureReport(input))
         return true
     }

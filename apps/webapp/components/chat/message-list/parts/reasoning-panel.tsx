@@ -31,8 +31,8 @@ export function ReasoningPanel({
     return (
         <Collapsible open={open} onOpenChange={setOpen}>
             <Card size="sm" className="mb-3 border-border/60 bg-muted/15 py-0 shadow-xs">
-                <CardContent>
-                    <CollapsibleTrigger className="group flex w-full flex-col items-start gap-1.5 rounded-xl pr-2 py-1 text-left outline-none transition-colors hover:bg-muted/30">
+                <CardContent style={{ padding: '0px 8px' }}>
+                    <CollapsibleTrigger className="group flex w-full flex-col items-start gap-1.5 rounded-xl pr-2 text-left outline-none transition-colors hover:bg-muted/30">
                         <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                             <ChevronRight className={`size-4 transition-transform ${open ? 'rotate-90' : ''}`} strokeWidth={2.2} />
                             {isThinking ? <ThinkingText /> : <span>已完成思考</span>}

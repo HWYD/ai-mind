@@ -16,6 +16,8 @@ import type {
     SkillPart,
     TextPart,
     ToolPart,
+    WorkflowProgressPart,
+    WorkflowProgressStep,
 } from '@/lib/ai/types/message'
 
 export function createTextPart(text: string, id?: string, displaySegments?: ChatComposerDisplaySegment[]): TextPart {
@@ -138,6 +140,35 @@ export function createAgentInterruptPart(chunk: Extract<ChatStreamChunk, { type:
         runId: chunk.runId,
         status: 'pending',
         threadId: chunk.threadId,
+    }
+}
+
+export function createWorkflowProgressPart(chunk: Extract<ChatStreamChunk, { type: 'workflow-progress-start' }>): WorkflowProgressPart {
+    return {
+        id: chunk.partId,
+        type: 'workflow-progress',
+        workflowId: chunk.workflowId,
+        workflowKind: chunk.workflowKind,
+        title: chunk.title,
+        status: 'running',
+        summary: chunk.summary,
+        steps: [],
+        startedAt: chunk.startedAt,
+        visibility: 'expanded',
+    }
+}
+
+export function createWorkflowProgressStep(chunk: Extract<ChatStreamChunk, { type: 'workflow-progress-step' }>): WorkflowProgressStep {
+    return {
+        id: chunk.stepId,
+        title: chunk.title,
+        status: chunk.status,
+        summary: chunk.summary,
+        details: chunk.details ?? [],
+        startedAt: chunk.startedAt,
+        endedAt: chunk.endedAt,
+        durationMs: chunk.durationMs,
+        failureMessage: chunk.failureMessage,
     }
 }
 

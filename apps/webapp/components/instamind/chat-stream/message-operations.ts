@@ -1,4 +1,4 @@
-import type { AgentGraphDebugSummary } from '@ai-mind/stream-core/protocol'
+import type { AgentGraphDebugSummary, ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 
 import type {
     AgentGraphNodeEntry,
@@ -13,9 +13,11 @@ import type {
     ResourcePart,
     TextPart,
     ToolPart,
+    WorkflowProgressPart,
+    WorkflowProgressStep,
 } from '@/lib/ai/types/message'
 
-import { createAgentGraphStepPart, createReasoningPart, createTextPart } from './message-factory'
+import { createAgentGraphStepPart, createReasoningPart, createTextPart, createWorkflowProgressStep } from './message-factory'
 
 export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
     return messages.filter(message => {
@@ -34,6 +36,7 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
                 part.type === 'resource' ||
                 part.type === 'skill' ||
                 part.type === 'prompt' ||
+                part.type === 'workflow-progress' ||
                 part.type === 'agent-interrupt'
             ) {
                 return true
@@ -318,6 +321,91 @@ export function updatePromptPart(
             }),
         }
     })
+}
+
+export function upsertWorkflowProgressPart(messages: MindMessage[], messageId: string, part: WorkflowProgressPart): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPartIndex = message.parts.findIndex(
+            existingPart => existingPart.type === 'workflow-progress' && existingPart.workflowId === part.workflowId
+        )
+
+        if (existingPartIndex === -1) {
+            return {
+                ...message,
+                parts: [...message.parts, part],
+            }
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map((existingPart, index) =>
+                index === existingPartIndex && existingPart.type === 'workflow-progress'
+                    ? {
+                          ...existingPart,
+                          ...part,
+                          steps: part.steps.length > 0 ? part.steps : existingPart.steps,
+                      }
+                    : existingPart
+            ),
+        }
+    })
+}
+
+function upsertWorkflowProgressStep(steps: WorkflowProgressStep[], nextStep: WorkflowProgressStep) {
+    const existingIndex = steps.findIndex(step => step.id === nextStep.id)
+
+    if (existingIndex === -1) {
+        return [...steps, nextStep]
+    }
+
+    return steps.map((step, index) =>
+        index === existingIndex
+            ? {
+                  ...step,
+                  ...nextStep,
+                  details: nextStep.details.length > 0 ? nextStep.details : step.details,
+              }
+            : step
+    )
+}
+
+export function updateWorkflowProgressPart(
+    messages: MindMessage[],
+    messageId: string,
+    workflowId: string,
+    updater: (part: WorkflowProgressPart) => WorkflowProgressPart
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map(part => {
+                if (part.type !== 'workflow-progress' || part.workflowId !== workflowId) {
+                    return part
+                }
+
+                return updater(part)
+            }),
+        }
+    })
+}
+
+export function applyWorkflowProgressStepChunk(
+    messages: MindMessage[],
+    messageId: string,
+    chunk: Extract<ChatStreamChunk, { type: 'workflow-progress-step' }>
+): MindMessage[] {
+    return updateWorkflowProgressPart(messages, messageId, chunk.workflowId, part => ({
+        ...part,
+        steps: upsertWorkflowProgressStep(part.steps, createWorkflowProgressStep(chunk)),
+    }))
 }
 
 type AgentGraphNodeUpdate = Partial<Omit<AgentGraphNodeEntry, 'nodeId'>> & Pick<AgentGraphNodeEntry, 'nodeId'>
