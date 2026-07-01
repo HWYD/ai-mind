@@ -203,12 +203,31 @@ function createCheckRequest() {
 
 function createSession(overrides: Record<string, unknown> = {}) {
     const baseModelStream = vi.fn().mockResolvedValue({ name: 'base-stream' })
+    const modelHandle = {
+        capabilities: {
+            jsonOutput: true,
+            reasoning: true,
+            streaming: true,
+            toolCalling: true,
+            usageInStream: true,
+        },
+        model: {
+            stream: baseModelStream,
+        },
+        normalizeError: vi.fn().mockReturnValue({
+            code: 'MODEL_STREAM_FAILED',
+            logMeta: {},
+            message: 'Model streaming failed.',
+            retryable: true,
+        }),
+    }
 
     return {
         request: createRequest(),
         baseModel: {
             stream: baseModelStream,
         },
+        modelHandle,
         toolBoundModel: null,
         skillDefinition: undefined,
         skillSystemPrompt: undefined,
@@ -405,7 +424,7 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.startDeliveryChainRun).toHaveBeenCalledWith(
             expect.objectContaining({
                 context: createExecutionContext(),
-                model: session.baseModel,
+                modelHandle: session.modelHandle,
                 request,
                 writeChunk: expect.any(Function),
             })
@@ -740,6 +759,7 @@ describe('runtime/chat-orchestrator', () => {
                 writeChunk: expect.any(Function),
             })
         )
+        expect(runtimeMocks.startDeliveryChainRun).not.toHaveBeenCalled()
         expect(session.baseModel.stream).not.toHaveBeenCalled()
         expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])

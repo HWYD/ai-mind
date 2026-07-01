@@ -14,6 +14,7 @@ function createTestConfig(apiKey?: string): ModelProviderConfig {
             baseURL: 'https://api.deepseek.com',
         },
         defaultModelId: 'deepseek/deepseek-v4-flash',
+        doubao: { apiKey: undefined, baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
         maxInputChars: 12000,
         ollama: { baseURL: 'http://127.0.0.1:11434' },
         qwen: { apiKey: undefined, baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },

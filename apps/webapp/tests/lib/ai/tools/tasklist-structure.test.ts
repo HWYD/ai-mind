@@ -6,6 +6,7 @@ import {
     isVersionPlanTasklistAgentToolAllowed,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
 import { utilitySkillDefinition } from '@/lib/ai/skills/utility-skill'
+import { getActiveChatToolDefinitionsForScope } from '@/lib/ai/tools'
 import { validateTasklistStructure, validateTasklistStructureWithDetail } from '@/lib/ai/tools/tasklist-structure'
 
 const planUri = 'demo://version-plans/v0.1.0-controlled-version-plan-to-tasklist-agent.md'
@@ -208,8 +209,15 @@ describe('tasklist-structure', () => {
     it('keeps validate_tasklist_structure inside Agent scope instead of utility-skill binding', async () => {
         const toolBinding = await resolveToolBindingForSkill(utilitySkillDefinition)
         const agentToolDefinitionMap = getVersionPlanTasklistAgentToolDefinitionMap()
+        const skillBindingToolNames = getActiveChatToolDefinitionsForScope('skill-binding').map(toolDefinition => toolDefinition.name)
+        const tasklistAgentToolNames = getActiveChatToolDefinitionsForScope('version-plan-tasklist-agent').map(
+            toolDefinition => toolDefinition.name
+        )
 
         expect(toolBinding.activeToolNames).not.toContain('validate_tasklist_structure')
+        expect(skillBindingToolNames).not.toContain('validate_tasklist_structure')
+        expect(skillBindingToolNames).toContain('calculator')
+        expect(tasklistAgentToolNames).toContain('validate_tasklist_structure')
         expect(isVersionPlanTasklistAgentToolAllowed('validate_tasklist_structure')).toBe(true)
         expect(agentToolDefinitionMap.has('validate_tasklist_structure')).toBe(true)
     })

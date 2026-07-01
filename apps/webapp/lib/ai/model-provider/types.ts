@@ -1,7 +1,7 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { Runnable } from '@langchain/core/runnables'
 
-export const aiMindLlmProviders = ['ollama', 'deepseek', 'qwen'] as const
+export const aiMindLlmProviders = ['ollama', 'deepseek', 'qwen', 'doubao'] as const
 
 export type AiMindLlmProvider = (typeof aiMindLlmProviders)[number]
 
@@ -78,6 +78,10 @@ export interface ModelProviderConfig {
         baseURL: string
     }
     qwen: {
+        apiKey?: string
+        baseURL: string
+    }
+    doubao: {
         apiKey?: string
         baseURL: string
     }

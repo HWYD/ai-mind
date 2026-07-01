@@ -14,6 +14,7 @@ describe('model catalog', () => {
             { id: 'qwen/qwen3.6-flash', providerModel: 'qwen3.6-flash' },
             { id: 'qwen/qwen3.6-plus', providerModel: 'qwen3.6-plus' },
             { id: 'qwen/qwen3.7-plus', providerModel: 'qwen3.7-plus' },
+            { id: 'doubao/Doubao-Seed-2.0-Code', providerModel: 'Doubao-Seed-2.0-Code' },
         ])
     })
 })

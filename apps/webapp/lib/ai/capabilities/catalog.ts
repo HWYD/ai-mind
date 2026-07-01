@@ -1,6 +1,6 @@
 import type { MCPServerId } from '@/lib/ai/mcp/protocol/types'
 import { mcpServerRegistry } from '@/lib/ai/mcp/registry/mcp-server-registry'
-import { type ChatToolDefinition, getActiveChatToolDefinitions, getChatToolDefinitions } from '@/lib/ai/tools'
+import { type ChatToolDefinition, getActiveChatToolDefinitionsForScope, getChatToolDefinitionsForScope } from '@/lib/ai/tools'
 
 import { buildCapabilityId } from './id'
 import type { CapabilityDefinition, CapabilityIdentity } from './types'
@@ -123,14 +123,14 @@ export function toCapabilityDefinition(toolDefinition: ChatToolDefinition): Capa
  * 返回当前注册表中的全部 capability（包含不可用能力）。
  */
 export function getChatCapabilityDefinitions() {
-    return [...getChatToolDefinitions().map(toCapabilityDefinition), ...staticCapabilityDefinitions]
+    return [...getChatToolDefinitionsForScope('skill-binding').map(toCapabilityDefinition), ...staticCapabilityDefinitions]
 }
 
 /**
  * 返回当前可用 capability（用于运行时候选能力集合）。
  */
 export function getActiveChatCapabilityDefinitions() {
-    return [...getActiveChatToolDefinitions().map(toCapabilityDefinition), ...staticCapabilityDefinitions]
+    return [...getActiveChatToolDefinitionsForScope('skill-binding').map(toCapabilityDefinition), ...staticCapabilityDefinitions]
 }
 
 /**

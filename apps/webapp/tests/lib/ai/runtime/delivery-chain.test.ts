@@ -2,11 +2,18 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { AIMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
+import type { SubagentToolCallInput } from '@/lib/ai/runtime/delivery-chain/manager'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 const testState = vi.hoisted(() => ({
     readResource: vi.fn(),
     writeStaticTextPart: vi.fn(),
+}))
+
+const modelProviderMocks = vi.hoisted(() => ({
+    createChatModel: vi.fn(),
+    getModelProviderConfig: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/mcp/adapters/project-docs-resource-adapter', () => ({
@@ -24,12 +31,41 @@ vi.mock('@ai-mind/stream-core', async importOriginal => {
     }
 })
 
-import {
-    DELIVERY_CHAIN_GRAPH_NODE_IDS,
-    resolveDeliveryChainInvocation,
-    runDeliveryChainGraph,
-    startDeliveryChainRun,
-} from '@/lib/ai/runtime/delivery-chain'
+vi.mock('@/lib/ai/model-provider', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/lib/ai/model-provider')>()
+
+    return {
+        ...actual,
+        createChatModel: modelProviderMocks.createChatModel,
+        getModelProviderConfig: modelProviderMocks.getModelProviderConfig,
+    }
+})
+
+import { resolveDeliveryChainInvocation, startDeliveryChainRun } from '@/lib/ai/runtime/delivery-chain'
+
+const testResolvedModelSelection: ResolvedModelSelection = {
+    catalogItem: {
+        availableIn: ['development'],
+        capabilities: {
+            chat: true,
+            embedding: false,
+            jsonOutput: true,
+            streaming: true,
+            tasklist: false,
+            toolCalling: true,
+        },
+        enabled: true,
+        id: 'test-model',
+        label: 'Test Model',
+        modelKey: 'test-model',
+        provider: 'ollama',
+        providerModel: 'test-model',
+    },
+    modelId: 'test-model',
+    provider: 'ollama',
+    providerModel: 'test-model',
+    routeType: 'chat',
+}
 
 function createRequest(overrides: Partial<ChatRequest> = {}): ChatRequest {
     return {
@@ -95,11 +131,109 @@ function createInlineRequest(text = '帮我规划一个登录表单，支持手�
     })
 }
 
-function createScenarioGraphInput() {
+function extractBalancedJson(content: string, startIndex: number) {
+    let depth = 0
+    let endIndex = -1
+
+    for (let index = startIndex; index < content.length; index += 1) {
+        const char = content[index]
+
+        if (char === '{') {
+            depth += 1
+        } else if (char === '}') {
+            depth -= 1
+
+            if (depth === 0) {
+                endIndex = index + 1
+                break
+            }
+        }
+    }
+
+    if (endIndex < 0) {
+        throw new Error(`未找到完整 JSON: ${content}`)
+    }
+
+    return content.slice(startIndex, endIndex)
+}
+
+function extractToolInvocation(messages: unknown[]) {
+    const humanMessage = messages.at(-1) as { content?: string }
+    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
+    const markerIndex = content.indexOf('请直接发起工具调用')
+    const jsonStart = content.indexOf('{', markerIndex >= 0 ? markerIndex : 0)
+
+    if (jsonStart < 0) {
+        throw new Error(`未找到 tool 参数 JSON: ${content}`)
+    }
+
+    return JSON.parse(extractBalancedJson(content, jsonStart)) as SubagentToolCallInput
+}
+
+function extractExpectedTool(messages: unknown[]) {
+    const humanMessage = messages.at(-1) as { content?: string }
+    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
+    const match = content.match(/下一步必须调用工具[:：]\s*(plan-subagent|task-subagent|review-subagent)/)
+
+    if (match?.[1]) {
+        return match[1] as 'plan-subagent' | 'task-subagent' | 'review-subagent'
+    }
+
+    return 'plan-subagent'
+}
+
+function createManagerToolCall(name: string, args: SubagentToolCallInput) {
     return {
-        requirementRef: 'demo://scenarios/request-limit-banner/requirement.md',
-        scenarioId: 'request-limit-banner',
-        source: 'demo_scenario' as const,
+        args,
+        id: `tool-call:${name}`,
+        name,
+        type: 'tool_call' as const,
+    }
+}
+
+function createDeliveryChainModelHandle(options?: {
+    boundInvoke?: (messages: unknown[]) => Promise<AIMessage>
+    stageResponses?: string[]
+    toolCalling?: boolean
+}) {
+    const stageResponses = [...(options?.stageResponses ?? [])]
+    const baseInvoke = vi.fn().mockImplementation(async () => new AIMessage({ content: stageResponses.shift() ?? '' }))
+    const boundInvoke =
+        options?.boundInvoke ??
+        (async (messages: unknown[]) =>
+            new AIMessage({
+                content: '',
+                tool_calls: [createManagerToolCall(extractExpectedTool(messages), extractToolInvocation(messages))],
+            }))
+
+    const modelHandle = {
+        bindTools:
+            options?.toolCalling === false
+                ? undefined
+                : vi.fn(() => ({
+                      invoke: vi.fn().mockImplementation(boundInvoke),
+                  })),
+        capabilities: {
+            jsonOutput: true,
+            reasoning: true,
+            streaming: true,
+            toolCalling: options?.toolCalling ?? true,
+            usageInStream: true,
+        },
+        model: {
+            invoke: baseInvoke,
+        },
+        modelId: 'test-model',
+        normalizeError: vi.fn(error => error),
+        provider: 'ollama' as const,
+        providerModel: 'test-model',
+    }
+
+    modelProviderMocks.createChatModel.mockReturnValue(modelHandle)
+
+    return {
+        baseInvoke,
+        handle: modelHandle,
     }
 }
 
@@ -111,17 +245,17 @@ function getWorkflowProgressChunks(writeChunk: ReturnType<typeof vi.fn>) {
     return getWrittenChunks(writeChunk).filter(chunk => chunk.type.startsWith('workflow-progress'))
 }
 
-const DELIVERY_CHAIN_GRAPH_NODE_ORDER = [
-    DELIVERY_CHAIN_GRAPH_NODE_IDS.loadDeliveryChainContext,
-    DELIVERY_CHAIN_GRAPH_NODE_IDS.runPlanStage,
-    DELIVERY_CHAIN_GRAPH_NODE_IDS.runTaskStage,
-    DELIVERY_CHAIN_GRAPH_NODE_IDS.runReviewStage,
-    DELIVERY_CHAIN_GRAPH_NODE_IDS.buildDeliveryChainReport,
-]
-
 describe('runtime/delivery-chain', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        modelProviderMocks.getModelProviderConfig.mockReturnValue({
+            allowedProviders: ['ollama'],
+            chatMaxOutputTokens: 4096,
+            deepseek: {},
+            ollama: { baseUrl: 'http://localhost:11434' },
+            qwen: {},
+            tasklistMaxOutputTokens: 8192,
+        })
         testState.readResource.mockImplementation(async ({ uri }: { uri: string }) => ({
             content: `content for ${uri}`,
             contentPreview: `preview for ${uri}`,
@@ -224,7 +358,7 @@ describe('runtime/delivery-chain', () => {
 
         const handled = await startDeliveryChainRun({
             context: {},
-            model: { invoke: vi.fn() } as never,
+            modelHandle: {} as never,
             request: createRequest({
                 composer: {
                     command: {
@@ -246,6 +380,7 @@ describe('runtime/delivery-chain', () => {
                     },
                 ],
             }),
+            resolvedModelSelection: testResolvedModelSelection,
             writeChunk,
         })
 
@@ -257,38 +392,88 @@ describe('runtime/delivery-chain', () => {
         )
     })
 
-    it('scenario-backed 模式只读取固定 demo 资源，按 Plan -> Task -> Review 顺序执行并输出报告', async () => {
-        const invoke = vi
-            .fn()
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 需求理解\n\n- 需要一个请求上限 banner。\n\n## 实现方案\n\n- 新增轻量提示层。\n\n## 涉及模块\n\n- Chat page\n\n## 非目标\n\n- 不改 stream protocol。\n\n## 风险\n\n- 需要和现有限流状态对齐。\n\n## 验收标准建议\n\n- 接近上限时显示。',
-                })
-            )
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 任务拆解\n\n- 接入限流状态。\n\n## 推荐顺序\n\n1. 先补状态判断\n\n## 风险任务\n\n- Banner 触发阈值\n\n## 验收相关任务\n\n- 补 UI 测试\n\n## 非目标保护任务\n\n- 确认不改 reducer',
-                })
-            )
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '结论: needs_changes\n\n## 覆盖检查\n\n- 覆盖主要需求。\n\n## 一致性检查\n\n- Plan 与 Task 基本一致。\n\n## 范围漂移检查\n\n- 未发现超出 public demo 边界。\n\n## 风险与下一步建议\n\n- 先确认触发阈值。',
-                })
-            )
+    it('scenario-backed 模式只读取固定 demo 资源，按 Manager 串行委派并输出报告', async () => {
+        const modelHandle = createDeliveryChainModelHandle({
+            stageResponses: [
+                [
+                    '## 需求理解',
+                    '',
+                    '- 需要一个请求上限 banner',
+                    '',
+                    '## 实现方案',
+                    '',
+                    '- 新增轻量提示层。',
+                    '',
+                    '## 涉及模块',
+                    '',
+                    '- Chat page',
+                    '',
+                    '## 非目标',
+                    '',
+                    '- 不改 stream protocol。',
+                    '',
+                    '## 风险',
+                    '',
+                    '- 需要和现有限流状态对齐。',
+                    '',
+                    '## 验收标准建议',
+                    '',
+                    '- 接近上限时显示。',
+                ].join('\n'),
+                [
+                    '## 任务拆解',
+                    '',
+                    '- 接入限流状态。',
+                    '',
+                    '## 推荐顺序',
+                    '',
+                    '1. 先补状态判断',
+                    '',
+                    '## 风险任务',
+                    '',
+                    '- Banner 触发阈值',
+                    '',
+                    '## 验收相关任务',
+                    '',
+                    '- 补 UI 测试',
+                    '',
+                    '## 非目标保护任务',
+                    '',
+                    '- 确认不改 reducer',
+                ].join('\n'),
+                [
+                    '结论: needs_changes',
+                    '',
+                    '## 覆盖检查',
+                    '',
+                    '- 覆盖主要需求。',
+                    '',
+                    '## 一致性检查',
+                    '',
+                    '- Plan 与 Task 基本一致。',
+                    '',
+                    '## 范围漂移检查',
+                    '',
+                    '- 未发现超出 public demo 边界。',
+                    '',
+                    '## 风险与下一步建议',
+                    '',
+                    '- 先确认触发阈值。',
+                ].join('\n'),
+            ],
+        })
         const writeChunk = vi.fn()
 
         const handled = await startDeliveryChainRun({
             context: {},
-            model: { invoke } as never,
+            modelHandle: modelHandle.handle as never,
             request: createScenarioRequest(),
+            resolvedModelSelection: testResolvedModelSelection,
             writeChunk,
         })
 
         expect(handled).toBe(true)
-        expect(invoke).toHaveBeenCalledTimes(3)
+        expect(modelHandle.baseInvoke).toHaveBeenCalledTimes(3)
         expect(testState.readResource.mock.calls.map(([input]) => input.uri)).toEqual([
             'demo://rubrics/plan-rubric.md',
             'demo://rubrics/task-rubric.md',
@@ -304,43 +489,33 @@ describe('runtime/delivery-chain', () => {
                 uri: 'demo://scenarios/request-limit-banner/requirement.md',
             })
         )
-        expect(getWorkflowProgressChunks(writeChunk)).toEqual([
-            expect.objectContaining({
-                type: 'workflow-progress-start',
-                workflowKind: 'delivery-chain',
-            }),
-            expect.objectContaining({ status: 'running', stepId: 'load', type: 'workflow-progress-step' }),
-            expect.objectContaining({ status: 'completed', stepId: 'load', type: 'workflow-progress-step' }),
-            expect.objectContaining({
-                details: ['调用模型：生成方案 (plan)'],
-                status: 'running',
-                stepId: 'plan',
-                type: 'workflow-progress-step',
-            }),
-            expect.objectContaining({ status: 'completed', stepId: 'plan', type: 'workflow-progress-step' }),
-            expect.objectContaining({
-                details: ['调用模型：拆解任务 (tasks)'],
-                status: 'running',
-                stepId: 'task',
-                type: 'workflow-progress-step',
-            }),
-            expect.objectContaining({ status: 'completed', stepId: 'task', type: 'workflow-progress-step' }),
-            expect.objectContaining({
-                details: ['调用模型：交付评审 (review)'],
-                status: 'running',
-                stepId: 'review',
-                type: 'workflow-progress-step',
-            }),
-            expect.objectContaining({ status: 'completed', stepId: 'review', type: 'workflow-progress-step' }),
-            expect.objectContaining({
-                details: ['汇总并生成最终报告'],
-                status: 'running',
-                stepId: 'report',
-                type: 'workflow-progress-step',
-            }),
-            expect.objectContaining({ status: 'completed', stepId: 'report', type: 'workflow-progress-step' }),
-            expect.objectContaining({ status: 'completed', type: 'workflow-progress-end' }),
+        expect(
+            getWorkflowProgressChunks(writeChunk)
+                .filter(chunk => chunk.type === 'workflow-progress-step')
+                .map(chunk => `${chunk.stepId}:${chunk.status}`)
+        ).toEqual([
+            'load:running',
+            'load:completed',
+            'delegate-plan:running',
+            'delegate-plan:completed',
+            'delegate-task:running',
+            'delegate-task:completed',
+            'delegate-review:running',
+            'delegate-review:completed',
+            'synthesize-report:running',
+            'synthesize-report:completed',
         ])
+        expect(getWorkflowProgressChunks(writeChunk)).toContainEqual(
+            expect.objectContaining({
+                type: 'workflow-progress-end',
+                status: 'completed',
+            })
+        )
+        const progressPayload = JSON.stringify(getWorkflowProgressChunks(writeChunk))
+        expect(progressPayload).not.toContain('"inputArtifacts"')
+        expect(progressPayload).not.toContain('"artifacts"')
+        expect(progressPayload).not.toContain('"markdown"')
+        expect(progressPayload).not.toContain('"summaryForManager"')
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(
             writeChunk,
             expect.stringContaining('# Delivery Chain Report / 交付计划报告')
@@ -349,116 +524,91 @@ describe('runtime/delivery-chain', () => {
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 任务拆解'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 交付评审'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`needs_changes`'))
+
+        const chunkTypes = new Set(getWrittenChunks(writeChunk).map(chunk => chunk.type))
+        expect(chunkTypes.has('tool-start')).toBe(false)
+        expect(chunkTypes.has('tool-end')).toBe(false)
+        expect(chunkTypes.has('artifact-start')).toBe(false)
+        expect(chunkTypes.has('artifact-end')).toBe(false)
     })
 
-    it('DeliveryChainGraph happy path 按固定节点顺序执行，且不引入额外 checkpoint 或 HITL chunk', async () => {
-        const invoke = vi
-            .fn()
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 需求理解\n\n- 需要一个请求上限 banner。\n\n## 实现方案\n\n- 新增轻量提示层。\n\n## 涉及模块\n\n- Chat page\n\n## 非目标\n\n- 不改 stream protocol。\n\n## 风险\n\n- 需要和现有限流状态对齐。\n\n## 验收标准建议\n\n- 接近上限时显示。',
-                })
-            )
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 任务拆解\n\n- 接入限流状态。\n\n## 推荐顺序\n\n1. 先补状态判断\n\n## 风险任务\n\n- Banner 触发阈值\n\n## 验收相关任务\n\n- 补 UI 测试\n\n## 非目标保护任务\n\n- 确认不改 reducer',
-                })
-            )
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '结论: pass\n\n## 覆盖检查\n\n- 覆盖主要需求。\n\n## 一致性检查\n\n- Plan 与 Task 基本一致。\n\n## 范围漂移检查\n\n- 未发现超出 public demo 边界。\n\n## 风险与下一步建议\n\n- 可以进入实现。',
-                })
-            )
-        const writeChunk = vi.fn()
-
-        const graphState = await runDeliveryChainGraph({
-            context: {},
-            input: createScenarioGraphInput(),
-            model: { invoke } as never,
-            writeChunk,
+    it('短 inline requirement 会在报告里补默认假设，blocked review 仍输出最终报告', async () => {
+        const modelHandle = createDeliveryChainModelHandle({
+            stageResponses: [
+                [
+                    '## 需求理解',
+                    '',
+                    '- 简化需求。',
+                    '',
+                    '## 实现方案',
+                    '',
+                    '- 轻量实现。',
+                    '',
+                    '## 涉及模块',
+                    '',
+                    '- Demo shell',
+                    '',
+                    '## 非目标',
+                    '',
+                    '- 不写代码。',
+                    '',
+                    '## 风险',
+                    '',
+                    '- 信息不足。',
+                    '',
+                    '## 验收标准建议',
+                    '',
+                    '- 人工确认。',
+                ].join('\n'),
+                [
+                    '## 任务拆解',
+                    '',
+                    '- 补充信息',
+                    '',
+                    '## 推荐顺序',
+                    '',
+                    '1. 先确认范围',
+                    '',
+                    '## 风险任务',
+                    '',
+                    '- 无',
+                    '',
+                    '## 验收相关任务',
+                    '',
+                    '- 无',
+                    '',
+                    '## 非目标保护任务',
+                    '',
+                    '- 无',
+                ].join('\n'),
+                [
+                    '结论: blocked',
+                    '',
+                    '## 覆盖检查',
+                    '',
+                    '- 信息不足。',
+                    '',
+                    '## 一致性检查',
+                    '',
+                    '- 暂无法确认。',
+                    '',
+                    '## 范围漂移检查',
+                    '',
+                    '- 无',
+                    '',
+                    '## 风险与下一步建议',
+                    '',
+                    '- 补充上下文。',
+                ].join('\n'),
+            ],
         })
-
-        expect(invoke).toHaveBeenCalledTimes(3)
-        expect(graphState.visitedNodes).toEqual(DELIVERY_CHAIN_GRAPH_NODE_ORDER)
-        expect(graphState.plan).toMatchObject({ stage: 'plan', status: 'completed' })
-        expect(graphState.task).toMatchObject({ stage: 'task', status: 'completed' })
-        expect(graphState.review).toMatchObject({ stage: 'review', status: 'completed' })
-        expect(graphState.reviewDisposition).toBe('pass')
-        expect(graphState.status).toBe('completed')
-        expect(graphState.reportMarkdown).toContain('# Delivery Chain Report / 交付计划报告')
-        expect(graphState.reportMarkdown).toContain('## 实现方案')
-        expect(graphState.reportMarkdown).toContain('## 任务拆解')
-        expect(graphState.reportMarkdown).toContain('## 交付评审')
-        expect(new Set(writeChunk.mock.calls.map(([chunk]) => chunk.type))).toEqual(new Set(['resource-start', 'resource-end']))
-    })
-
-    it('graph 在 stage 调用失败时会 soft fail，并继续输出安全报告', async () => {
-        const invoke = vi
-            .fn()
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 需求理解\n\n- 需要一个请求上限 banner。\n\n## 实现方案\n\n- 新增轻量提示层。\n\n## 涉及模块\n\n- Chat page\n\n## 非目标\n\n- 不改 stream protocol。\n\n## 风险\n\n- 需要和现有限流状态对齐。\n\n## 验收标准建议\n\n- 接近上限时显示。',
-                })
-            )
-            .mockRejectedValueOnce(new Error('task stage failed'))
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '结论: needs_changes\n\n## 覆盖检查\n\n- 需要补足任务拆解。\n\n## 一致性检查\n\n- Plan 与 Task 需人工复核。\n\n## 范围漂移检查\n\n- 未发现超出 public demo 边界。\n\n## 风险与下一步建议\n\n- 先补任务细节。',
-                })
-            )
-
-        const writeChunk = vi.fn()
-
-        const graphState = await runDeliveryChainGraph({
-            context: {},
-            input: createScenarioGraphInput(),
-            model: { invoke } as never,
-            writeChunk,
-        })
-
-        expect(invoke).toHaveBeenCalledTimes(3)
-        expect(graphState.visitedNodes).toEqual(DELIVERY_CHAIN_GRAPH_NODE_ORDER)
-        expect(graphState.task).toMatchObject({ stage: 'task', status: 'failed' })
-        expect(graphState.reviewDisposition).toBe('needs_changes')
-        expect(graphState.status).toBe('failed')
-        expect(graphState.reportMarkdown).toContain('TaskStage 调用失败')
-        expect(graphState.reportMarkdown).toContain('## 任务拆解')
-        expect(graphState.reportMarkdown).toContain('# Delivery Chain Report / 交付计划报告')
-        expect(new Set(writeChunk.mock.calls.map(([chunk]) => chunk.type))).toEqual(new Set(['resource-start', 'resource-end']))
-    })
-
-    it('短 inline requirement 会在报告里补默认假设', async () => {
-        const invoke = vi
-            .fn()
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 需求理解\n\n- 简化需求。\n\n## 实现方案\n\n- 轻量实现。\n\n## 涉及模块\n\n- Demo shell\n\n## 非目标\n\n- 不写代码。\n\n## 风险\n\n- 信息不足。\n\n## 验收标准建议\n\n- 人工确认。',
-                })
-            )
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '## 任务拆解\n\n- 补充信息\n\n## 推荐顺序\n\n1. 先确认范围\n\n## 风险任务\n\n- 无\n\n## 验收相关任务\n\n- 无\n\n## 非目标保护任务\n\n- 无',
-                })
-            )
-            .mockResolvedValueOnce(
-                new AIMessage({
-                    content:
-                        '结论: blocked\n\n## 覆盖检查\n\n- 信息不足。\n\n## 一致性检查\n\n- 暂无法确认。\n\n## 范围漂移检查\n\n- 无\n\n## 风险与下一步建议\n\n- 补充上下文。',
-                })
-            )
         const writeChunk = vi.fn()
 
         await startDeliveryChainRun({
             context: {},
-            model: { invoke } as never,
+            modelHandle: modelHandle.handle as never,
             request: createInlineRequest('做个表单'),
+            resolvedModelSelection: testResolvedModelSelection,
             writeChunk,
         })
 
@@ -469,16 +619,46 @@ describe('runtime/delivery-chain', () => {
         ).toEqual([
             'load:running',
             'load:completed',
-            'plan:running',
-            'plan:completed',
-            'task:running',
-            'task:completed',
-            'review:running',
-            'review:completed',
-            'report:running',
-            'report:completed',
+            'delegate-plan:running',
+            'delegate-plan:completed',
+            'delegate-task:running',
+            'delegate-task:completed',
+            'delegate-review:running',
+            'delegate-review:completed',
+            'synthesize-report:running',
+            'synthesize-report:completed',
         ])
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('inline requirement 较短'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`blocked`'))
+    })
+
+    it('当前模型不支持 tool-calling 时 fail closed，并输出安全报告', async () => {
+        const modelHandle = createDeliveryChainModelHandle({
+            toolCalling: false,
+        })
+        const writeChunk = vi.fn()
+
+        const handled = await startDeliveryChainRun({
+            context: {},
+            modelHandle: modelHandle.handle as never,
+            request: createScenarioRequest(),
+            resolvedModelSelection: testResolvedModelSelection,
+            writeChunk,
+        })
+
+        expect(handled).toBe(true)
+        expect(modelHandle.baseInvoke).not.toHaveBeenCalled()
+        expect(
+            getWorkflowProgressChunks(writeChunk)
+                .filter(chunk => chunk.type === 'workflow-progress-step')
+                .map(chunk => `${chunk.stepId}:${chunk.status}`)
+        ).toEqual(['load:running', 'load:completed', 'delegate-plan:failed'])
+        expect(getWorkflowProgressChunks(writeChunk)).toContainEqual(
+            expect.objectContaining({
+                type: 'workflow-progress-end',
+                status: 'failed',
+            })
+        )
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('tool-calling'))
     })
 })

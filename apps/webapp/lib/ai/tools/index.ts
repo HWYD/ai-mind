@@ -1,7 +1,7 @@
 import { calculatorToolDefinition } from './calculator-tool'
 import { cityWeatherToolDefinition } from './city-weather-tool'
 import { datetimeToolDefinition } from './datetime-tool'
-import { type ChatToolDefinition, createChatToolRegistry } from './registry'
+import { type ChatToolDefinition, createChatToolRegistry, type ToolRuntimeScope } from './registry'
 import { textTransformToolDefinition } from './text-transform-tool'
 import { unitConvertToolDefinition } from './unit-convert-tool'
 import { validateTasklistStructureToolDefinition } from './validate-tasklist-structure-tool'
@@ -26,6 +26,14 @@ export function getActiveChatToolDefinitions(): ChatToolDefinition[] {
     return chatToolRegistry.listActive()
 }
 
+export function getChatToolDefinitionsForScope(scope: ToolRuntimeScope): ChatToolDefinition[] {
+    return chatToolRegistry.listByRuntimeScope(scope)
+}
+
+export function getActiveChatToolDefinitionsForScope(scope: ToolRuntimeScope): ChatToolDefinition[] {
+    return chatToolRegistry.listActiveByRuntimeScope(scope)
+}
+
 export function getChatToolDefinition(toolName: string): ChatToolDefinition | undefined {
     return chatToolRegistry.get(toolName)
 }
@@ -38,4 +46,5 @@ export {
     unitConvertToolDefinition,
     validateTasklistStructureToolDefinition,
 }
-export type { ChatToolDefinition, ChatToolRegistry, ToolDisplayConfig, ToolExecutionResult } from './registry'
+export { createChatToolRegistry, toolRuntimeScopes, toolSupportsRuntimeScope } from './registry'
+export type { ChatToolDefinition, ChatToolRegistry, ToolDisplayConfig, ToolExecutionResult, ToolRuntimeScope } from './registry'

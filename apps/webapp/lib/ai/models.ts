@@ -1,6 +1,6 @@
 export type ChatModel = string
 
-export type ChatModelProvider = 'ollama' | 'deepseek' | 'qwen'
+export type ChatModelProvider = 'ollama' | 'deepseek' | 'qwen' | 'doubao'
 
 export interface PublicChatModel {
     id: ChatModel
@@ -32,7 +32,8 @@ export const defaultChatModel: ChatModel = 'ollama/qwen3-8b'
 const modelProviderOrder: Record<ChatModelProvider, number> = {
     qwen: 0,
     deepseek: 1,
-    ollama: 2,
+    doubao: 2,
+    ollama: 3,
 }
 
 export function findPublicChatModel(models: PublicChatModel[], modelId: ChatModel): PublicChatModel | null {

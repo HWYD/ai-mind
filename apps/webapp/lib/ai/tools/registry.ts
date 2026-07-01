@@ -3,6 +3,8 @@ import type { ZodType } from 'zod'
 
 export type ToolOutputPartType = 'tool' | 'resource'
 export type ToolSource = 'internal' | 'mcp'
+export const toolRuntimeScopes = ['skill-binding', 'delivery-chain-manager', 'version-plan-tasklist-agent'] as const
+export type ToolRuntimeScope = (typeof toolRuntimeScopes)[number]
 
 export interface ToolExecutionResult {
     content: string
@@ -53,6 +55,8 @@ export interface ChatToolDefinition<TArgs = unknown> {
     source?: ToolSource
     // MCP 工具或资源对应的 serverId，内建工具可省略。
     serverId?: string
+    // 标记当前工具允许被哪些 runtime 作用域消费；未声明时默认进入 skill-binding。
+    runtimeScopes?: ToolRuntimeScope[]
     // 确认工具结果可直接作为高优先级最终答案。
     resultIsAuthoritative?: boolean
     // 按需做能力开关判断，决定当前工具是否可用。
@@ -62,7 +66,17 @@ export interface ChatToolDefinition<TArgs = unknown> {
 export interface ChatToolRegistry {
     list(): ChatToolDefinition[]
     listActive(): ChatToolDefinition[]
+    listByRuntimeScope(scope: ToolRuntimeScope): ChatToolDefinition[]
+    listActiveByRuntimeScope(scope: ToolRuntimeScope): ChatToolDefinition[]
     get(name: string): ChatToolDefinition | undefined
+}
+
+export function toolSupportsRuntimeScope(toolDefinition: ChatToolDefinition, scope: ToolRuntimeScope) {
+    if (!toolDefinition.runtimeScopes || toolDefinition.runtimeScopes.length === 0) {
+        return scope === 'skill-binding'
+    }
+
+    return toolDefinition.runtimeScopes.includes(scope)
 }
 
 export function createChatToolRegistry(toolDefinitions: ChatToolDefinition[]): ChatToolRegistry {
@@ -75,6 +89,14 @@ export function createChatToolRegistry(toolDefinitions: ChatToolDefinition[]): C
         },
         listActive() {
             return toolDefinitions.filter(toolDefinition => toolDefinition.isAvailable?.() ?? true)
+        },
+        listByRuntimeScope(scope: ToolRuntimeScope) {
+            return toolDefinitions.filter(toolDefinition => toolSupportsRuntimeScope(toolDefinition, scope))
+        },
+        listActiveByRuntimeScope(scope: ToolRuntimeScope) {
+            return toolDefinitions.filter(
+                toolDefinition => toolSupportsRuntimeScope(toolDefinition, scope) && (toolDefinition.isAvailable?.() ?? true)
+            )
         },
         get(name: string) {
             return toolDefinitionMap.get(name)

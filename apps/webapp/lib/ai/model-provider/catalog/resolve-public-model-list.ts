@@ -76,5 +76,7 @@ function isPublicModelVisible(
             return Boolean(config.deepseek.apiKey)
         case 'qwen':
             return Boolean(config.qwen.apiKey)
+        case 'doubao':
+            return Boolean(config.doubao.apiKey)
     }
 }

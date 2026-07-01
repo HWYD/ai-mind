@@ -2,7 +2,7 @@
 
 ## Current Planning Spec
 
-- [037: Delivery Chain Workflow Progress Presentation](./037-delivery-chain-workflow-progress-presentation)
+- [040: Controlled Agent-as-tool Delivery Manager MVP](./040-controlled-agent-as-tool-delivery-manager-mvp)
 
 `specs/` 是 AI Mind 的正式 AI coding 规格工作区。
 
@@ -195,6 +195,18 @@ specs/<version-topic>/
 - 为什么首版只绑定 `/delivery-chain`，不影响 `/tasklist`、普通 resource、tool、prompt 展示
 - 为什么 workflow progress 是 presentation-level trace，不是 DB / checkpoint / artifact / event store
 - Report section presentation 如何 fallback 到普通 Markdown
+
+### 040 Controlled Agent-as-tool Delivery Manager MVP
+
+目录：[040-controlled-agent-as-tool-delivery-manager-mvp](./040-controlled-agent-as-tool-delivery-manager-mvp)
+
+回答的问题：
+
+- 为什么 v0.4.0 从 Session Artifact Handoff 改为 Controlled Agent-as-tool Delivery Manager MVP
+- `ControlledDeliveryManager` 如何通过受控 tool-calling loop 调用 `plan-subagent tool`、`task-subagent tool`、`review-subagent tool`
+- 为什么这不是自由 Supervisor，也不是全局 Agent Catalog
+- `RuntimeArtifact` 为什么只作为 run-local 内部交接物
+- 为什么本版本不新增 `@artifact://`、DB、HITL、checkpoint、resume、parallel subagents 或 Tasklist Agent HITL Graph 接入
 
 ## 后续新增规格时的约定
 

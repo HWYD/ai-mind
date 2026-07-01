@@ -164,7 +164,7 @@ v0.3.6 不做:
 
 ### US5: Roadmap is recorded but guarded
 
-作为维护者，我希望 v0.3.6 文档记录 v0.3.7-v0.5.0 的长期演进路线，这样后续 Spec Kit 规划能继承这条路线，但不会把未来版本误实现进 v0.3.6。
+作为维护者，我希望 v0.3.6 文档记录 v0.3.7 以及后续未编号能力方向，这样后续 Spec Kit 规划能继承这条路线，但不会把未来版本误实现进 v0.3.6。
 
 独立验收:
 
@@ -241,7 +241,7 @@ v0.3.6 不做:
 ### Docs and roadmap
 
 - FR-036-46: 必须新增或更新 `docs/architecture/agent-runtime-roadmap.md`。
-- FR-036-47: 路线文档必须说明 v0.3.6-v0.5.0 的阶段关系。
+- FR-036-47: 路线文档必须说明 v0.3.6、v0.3.7、v0.4.0 以及后续未编号能力方向的阶段关系。
 - FR-036-48: 必须新增 ADR，记录 v0.3.6 到 future multi-agent / artifact handoff 的关键取舍。
 - FR-036-49: Spec 中的 Future Roadmap 必须明确不属于 v0.3.6 实现范围。
 
@@ -287,12 +287,9 @@ v0.3.6 不做:
 
 v0.3.6 文档可以记录未来路线，但不得实现未来版本能力。
 
-- v0.3.7: Delivery Chain presentation and trace。
-- v0.4.0: Session artifact handoff and `@artifact://last-*`。
-- v0.4.1: Agent Catalog and runtime contract。
-- v0.4.2: Controlled multi-agent orchestration。
-- v0.4.3: HITL-aware multi-agent。
-- v0.5.0: Chat persistence foundation。
+- v0.3.7: Delivery Chain workflow progress presentation。
+- v0.4.0: Controlled Agent-as-tool Delivery Manager MVP，详见 `specs/040-controlled-agent-as-tool-delivery-manager-mvp/`。
+- 后续版本暂不编号：Session artifact handoff、Agent Catalog、parallel subagents、HITL-aware delegation、chat persistence 等需要等待独立 spec。
 
 这些路线只作为上下文，不属于 v0.3.6 tasks。
 

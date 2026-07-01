@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.3.7：Delivery Chain Workflow Progress Presentation，在 `/delivery-chain` 中新增通用 `workflow-progress-*` 过程展示，让固定阶段 workflow 在执行中可见、完成后可折叠复盘。
+> v0.4.0：Controlled Agent-as-tool Delivery Manager MVP，把 `/delivery-chain` 从固定 stage main path 推进为受控 Manager 通过 tool-calling 串行委派 `plan-subagent`、`task-subagent`、`review-subagent` 的第一版。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.3.7`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.0`。
 
 已经验证：
 
@@ -213,6 +213,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Spec Kit Governance Baseline。
 - Spec Kit CLI + Codex Skills Dual-track Pilot。
 - Spec Kit Full Skills Default Entry。
+- Controlled Agent-as-tool Delivery Manager。
 
 当前非目标：
 
@@ -247,44 +248,47 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.3.7
+## 当前版本：v0.4.0
 
-这版的主线是 Delivery Chain Workflow Progress Presentation：在 v0.3.6 已完成的 `DeliveryChainGraph` 之上，为 `/delivery-chain` 增加逐步出现的 workflow progress panel、完成后折叠摘要，以及更清晰的报告分段展示。
+这版的主线是 Controlled Agent-as-tool Delivery Manager MVP：把 `/delivery-chain` 从 v0.3.6/v0.3.7 的固定 stage main path，推进成一个受控 Manager 通过模型 tool-calling 串行委派三个 delivery-chain-local subagent tools，并在内部完成 artifact handoff 与最终报告汇总。
 
-v0.3.7 的边界非常明确：
+v0.4.0 的边界非常明确：
 
-- `/delivery-chain` 继续是唯一 Delivery Chain public command
+- `/delivery-chain` 仍然是唯一 Delivery Chain public command
 - 支持两种输入：`/delivery-chain + @demo://scenarios/*/requirement.md` 和 `/delivery-chain <inline requirement>`
-- 新增通用 `workflow-progress-start`、`workflow-progress-step`、`workflow-progress-end` 事件，但首版只给 `/delivery-chain` 消费
-- 过程步骤按实际执行顺序逐步出现，执行中默认展开，完成后折叠为“已处理 X”摘要
+- Manager 只允许固定顺序调用 `plan-subagent -> task-subagent -> review-subagent`
+- 子 Agent tool result 采用强 JSON Schema，并在 runtime 内部转换为 run-local `RuntimeArtifact`
+- 继续复用 `workflow-progress-start`、`workflow-progress-step`、`workflow-progress-end`
+- progress 只展示 curated safe summary，不暴露 raw tool invocation / result / RuntimeArtifact
 - 继续只读取 `@demo://` demo resource，不读取真实 `docs/`、`specs/`、`apps/`、`packages/` 或绝对路径
 - 保持 compact resource grouping，不让内部 demo resources 回退成多个大 ResourcePanel
+- 当前模型不支持 tool-calling 或没有 `bindTools` 时直接 fail closed，不降级成 runner fallback
 
 本版显式不做：
 
 - 不暴露 `/plan`、`/task`、`/review`
 - 不实现 `@artifact://`
-- 不做 artifact persistence
-- 不做 nested HITL
-- 不复用 `/tasklist` 的 `agent-graph-*` 时间线 UI
+- 不做 artifact persistence、chat persistence、DB schema 或 Prisma migration
+- 不做 HITL、checkpoint、resume、nested delegation、parallel subagents
+- 不引入 global Agent Catalog 或 user-selectable subagent picker
+- 不复用 `/tasklist` 的 HITL Graph 或 `agent-graph-*` 时间线 UI
 - 不把 workflow progress 升级成通用 tool/resource/prompt 日志回放
-- 不修改 Tasklist Agent Graph topology、HITL decision contract、checkpoint resume、stream 协议、frontend reducer、Prisma schema 或 PostgresSaver schema
+- 不修改 Tasklist Agent Graph topology、HITL decision contract 或 PostgresSaver schema
 
 本版完成的 public demo 演进包括：
 
-- `/delivery-chain` 继续作为受控 workflow 入口
+- `/delivery-chain` 继续作为 Delivery Chain public entry，但主控已切换为 `ControlledDeliveryManager`
 - 复用 `examples/agent-demo/scenarios/`、`rubrics/`、`governance/` 作为 Delivery Chain demo corpus
-- `@` picker 在 `/delivery-chain` 场景下只展示 `scenarios/*/requirement.md`
-- 快速访问新增 Delivery Chain demo 示例
-- 执行过程通过 compact workflow progress panel 渐进展示
-- Delivery Chain Report 支持更清晰的 section presentation，并保留 Markdown fallback
+- `@` picker 在 `/delivery-chain` 场景下仍只展示 `scenarios/*/requirement.md`
+- Manager 通过受控 tool-calling 串行委派 Plan / Task / Review 三个子 Agent tool
+- Delivery Chain Report 保持原有 headings 兼容，同时继续支持 compact workflow progress panel
 
 当前 runtime baseline 同时保留两条受控路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
-- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：固定 stage 的 Delivery Chain workflow，并带 progress presentation
+- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + serial Agent-as-tool delegation
 
-详细设计见 [v0.3.7 Delivery Chain Workflow Progress Presentation](./docs/versions/v0.3.7-delivery-chain-workflow-progress-presentation.md)、[v0.3.6 Controlled Delivery Chain MVP](./docs/versions/v0.3.6-controlled-delivery-chain-mvp.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0010](./docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)。
+详细设计见 [v0.4.0 Controlled Agent-as-tool Delivery Manager MVP](./docs/versions/v0.4.0-controlled-agent-as-tool-delivery-manager-mvp.md)、[v0.3.7 Delivery Chain Workflow Progress Presentation](./docs/versions/v0.3.7-delivery-chain-workflow-progress-presentation.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0010](./docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)。
 
 ## 当前能力
 
@@ -352,10 +356,11 @@ v0.3.7 的边界非常明确：
 
 - `Version Plan to Tasklist Agent`
 - 入口：`/tasklist + @demo://version-plans/*.md`
-- `Delivery Chain Workflow Progress Presentation`
+- `Controlled Agent-as-tool Delivery Manager`
 - 入口：`/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`
-- 内部固定执行 `loadDeliveryChainContext -> PlanStage -> TaskStage -> ReviewStage -> BuildReport`
-- 执行中通过 compact workflow progress panel 逐步展示阶段过程，完成后自动折叠摘要
+- 内部固定执行 `load -> delegate-plan -> delegate-task -> delegate-review -> synthesize-report`
+- Manager 只允许 `plan-subagent -> task-subagent -> review-subagent` 串行 tool-calling
+- 执行中通过 compact workflow progress panel 展示安全摘要，完成后自动折叠
 - Delivery Chain Report 只作为本轮非持久化文本输出，不写代码、不读真实仓库
 - v0.2.3 后 `/tasklist + @demo://version-plans/*.md` 固定走 Graph Runtime。
 - LangGraph `StateGraph` 是 Tasklist Agent 的唯一编排层。
@@ -607,32 +612,33 @@ pnpm lint:packages:fix
 
 AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运行时问题。
 
-| Version | Theme                                              | Key Changes                                                                                                                                |
-| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| v0.0.4  | 本地聊天闭环                                       | 完成本地聊天、流式输出与 Streamdown 展示                                                                                                   |
-| v0.0.5  | Tool Calling MVP                                   | 接入最小 Tool Calling 能力                                                                                                                 |
-| v0.0.6  | Multi-Tool Runtime                                 | 支持多工具运行时与工具结果回传                                                                                                             |
-| v0.0.7  | Skill Runtime                                      | 引入第一层 Skill Runtime，完成 `utility-skill`                                                                                             |
-| v0.0.8  | Reader Skill                                       | 新增 `reader-skill`，支持文件读取与阅读类能力                                                                                              |
-| v0.0.9  | MCP Host MVP                                       | 接入本地 stdio MCP，验证 MCP Tool / Resource                                                                                               |
-| v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                                                                        |
-| v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                                                                         |
-| v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime                                              |
-| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                                   |
-| v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                              |
-| v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary         |
-| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                           |
-| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                                     |
-| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                                     |
-| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                           |
-| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                         |
-| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                         |
-| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                             |
-| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                                  |
-| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                |
-| v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans |
-| v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                   |
-| v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板 |
+| Version | Theme                                              | Key Changes                                                                                                                                                                    |
+| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| v0.0.4  | 本地聊天闭环                                       | 完成本地聊天、流式输出与 Streamdown 展示                                                                                                                                       |
+| v0.0.5  | Tool Calling MVP                                   | 接入最小 Tool Calling 能力                                                                                                                                                     |
+| v0.0.6  | Multi-Tool Runtime                                 | 支持多工具运行时与工具结果回传                                                                                                                                                 |
+| v0.0.7  | Skill Runtime                                      | 引入第一层 Skill Runtime，完成 `utility-skill`                                                                                                                                 |
+| v0.0.8  | Reader Skill                                       | 新增 `reader-skill`，支持文件读取与阅读类能力                                                                                                                                  |
+| v0.0.9  | MCP Host MVP                                       | 接入本地 stdio MCP，验证 MCP Tool / Resource                                                                                                                                   |
+| v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                                                                                                            |
+| v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                                                                                                             |
+| v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime                                                                                  |
+| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                                                                       |
+| v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                                                                  |
+| v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary                                             |
+| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                                                               |
+| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                                                                         |
+| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                                                                         |
+| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                                                               |
+| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                                                             |
+| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                                                             |
+| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                                                                 |
+| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                                                                      |
+| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                                                    |
+| v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans                                     |
+| v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                                                       |
+| v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板                                     |
+| v0.4.0  | Controlled Agent-as-tool Delivery Manager MVP      | 用 `ControlledDeliveryManager` 接管 `/delivery-chain`，通过受控 tool-calling 串行委派 `plan/task/review` 子 Agent tool，并保持 RuntimeArtifact 仅在 run-local runtime 内部流转 |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

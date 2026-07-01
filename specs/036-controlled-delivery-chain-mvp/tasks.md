@@ -163,4 +163,4 @@
 人工收口结论：
 
 - 本轮 diff 收口在 `specs/036-controlled-delivery-chain-mvp/`、`docs/architecture/agent-runtime-roadmap.md`、`docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md`、`apps/webapp/lib/ai/runtime/delivery-chain/**` 及其 focused tests。
-- 未发现需要追加到 v0.3.6 的新任务；stage trace presentation、artifact handoff、checkpoint/HITL-aware multi-agent 仍后置到 v0.3.7-v0.4.x。
+- 未发现需要追加到 v0.3.6 的新任务；stage trace presentation 已由 v0.3.7 承接，artifact handoff、checkpoint/HITL-aware multi-agent 仍后置到后续独立版本。

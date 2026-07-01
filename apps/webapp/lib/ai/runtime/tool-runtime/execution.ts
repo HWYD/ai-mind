@@ -3,6 +3,7 @@ import { type ToolCall, ToolMessage } from '@langchain/core/messages'
 
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
+import { type ToolRuntimeScope, toolSupportsRuntimeScope } from '@/lib/ai/tools'
 
 import { throwIfAborted, writeStreamErrorChunk } from '../stream-errors'
 import type { ChatExecutionContext, ExecutedToolResult, ToolValidationError, WriteChunk } from '../types'
@@ -19,6 +20,7 @@ import {
 
 interface ExecuteToolCallOptions {
     errorStage?: StreamErrorStage
+    runtimeScope?: ToolRuntimeScope
     toolDefinitionMap: ToolDefinitionMap
 }
 
@@ -36,6 +38,10 @@ interface ToolExecutionErrorOptions {
 interface ToolValidationErrorWriteOptions {
     stage?: StreamErrorStage
     writeChunk: WriteChunk
+}
+
+function shouldEmitPublicToolTranscript(runtimeScope?: ToolRuntimeScope) {
+    return runtimeScope !== 'delivery-chain-manager'
 }
 
 /**
@@ -172,44 +178,49 @@ export async function executeToolCall(
     const resourceDisplayFields =
         displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, options.toolDefinitionMap) : undefined
     const resourceServerId = displayFields.serverId ?? 'mcp-resource'
+    const shouldEmitTranscript = shouldEmitPublicToolTranscript(options.runtimeScope)
 
-    if (displayFields.outputPartType === 'resource' && resourceDisplayFields) {
-        writeChunk({
-            type: 'resource-start',
-            partId,
-            resourceName: resourceDisplayFields.resourceName,
-            uri: resourceDisplayFields.uri,
-            source: displayFields.source,
-            location: displayFields.location,
-            serverId: resourceServerId,
-        })
-    } else {
-        writeChunk({
-            type: 'tool-start',
-            partId,
-            toolName: toolCall.name,
-            title: displayFields.title,
-            action: displayFields.action,
-            source: displayFields.source,
-            location: displayFields.location,
-            serverId: displayFields.serverId,
-            input,
-        })
+    if (shouldEmitTranscript) {
+        if (displayFields.outputPartType === 'resource' && resourceDisplayFields) {
+            writeChunk({
+                type: 'resource-start',
+                partId,
+                resourceName: resourceDisplayFields.resourceName,
+                uri: resourceDisplayFields.uri,
+                source: displayFields.source,
+                location: displayFields.location,
+                serverId: resourceServerId,
+            })
+        } else {
+            writeChunk({
+                type: 'tool-start',
+                partId,
+                toolName: toolCall.name,
+                title: displayFields.title,
+                action: displayFields.action,
+                source: displayFields.source,
+                location: displayFields.location,
+                serverId: displayFields.serverId,
+                input,
+            })
+        }
     }
 
-    if (!toolDefinition) {
+    if (!toolDefinition || (options.runtimeScope && !toolSupportsRuntimeScope(toolDefinition, options.runtimeScope))) {
         const message = '工具 ' + toolCall.name + ' 未注册。'
 
-        writeToolExecutionError({
-            displayFields,
-            input,
-            message,
-            partId,
-            resourceDisplayFields,
-            stage: options.errorStage,
-            toolCall,
-            writeChunk,
-        })
+        if (shouldEmitTranscript) {
+            writeToolExecutionError({
+                displayFields,
+                input,
+                message,
+                partId,
+                resourceDisplayFields,
+                stage: options.errorStage,
+                toolCall,
+                writeChunk,
+            })
+        }
 
         const toolMessage = new ToolMessage({
             content: message,
@@ -252,34 +263,36 @@ export async function executeToolCall(
             },
         })
 
-        if (displayFields.outputPartType === 'resource') {
-            const resourceResultFields = getResourceResultFields(toolCall, resultPayload, output, options.toolDefinitionMap)
+        if (shouldEmitTranscript) {
+            if (displayFields.outputPartType === 'resource') {
+                const resourceResultFields = getResourceResultFields(toolCall, resultPayload, output, options.toolDefinitionMap)
 
-            writeChunk({
-                type: 'resource-end',
-                partId,
-                resourceName: resourceResultFields.resourceName,
-                uri: resourceResultFields.uri,
-                source: displayFields.source,
-                location: displayFields.location,
-                serverId: resourceServerId,
-                contentPreview: resourceResultFields.contentPreview,
-                isTruncated: resourceResultFields.isTruncated,
-                previewChars: resourceResultFields.previewChars,
-            })
-        } else {
-            writeChunk({
-                type: 'tool-end',
-                partId,
-                toolName: toolCall.name,
-                title: displayFields.title,
-                action: displayFields.action,
-                source: displayFields.source,
-                location: displayFields.location,
-                serverId: displayFields.serverId,
-                input,
-                output,
-            })
+                writeChunk({
+                    type: 'resource-end',
+                    partId,
+                    resourceName: resourceResultFields.resourceName,
+                    uri: resourceResultFields.uri,
+                    source: displayFields.source,
+                    location: displayFields.location,
+                    serverId: resourceServerId,
+                    contentPreview: resourceResultFields.contentPreview,
+                    isTruncated: resourceResultFields.isTruncated,
+                    previewChars: resourceResultFields.previewChars,
+                })
+            } else {
+                writeChunk({
+                    type: 'tool-end',
+                    partId,
+                    toolName: toolCall.name,
+                    title: displayFields.title,
+                    action: displayFields.action,
+                    source: displayFields.source,
+                    location: displayFields.location,
+                    serverId: displayFields.serverId,
+                    input,
+                    output,
+                })
+            }
         }
 
         return {
@@ -296,16 +309,18 @@ export async function executeToolCall(
 
         const message = error instanceof Error ? error.message : '工具执行失败。'
 
-        writeToolExecutionError({
-            displayFields,
-            input,
-            message,
-            partId,
-            resourceDisplayFields,
-            stage: options.errorStage,
-            toolCall,
-            writeChunk,
-        })
+        if (shouldEmitTranscript) {
+            writeToolExecutionError({
+                displayFields,
+                input,
+                message,
+                partId,
+                resourceDisplayFields,
+                stage: options.errorStage,
+                toolCall,
+                writeChunk,
+            })
+        }
 
         const toolMessage = new ToolMessage({
             content: message,

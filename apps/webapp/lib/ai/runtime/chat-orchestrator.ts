@@ -481,8 +481,9 @@ export class ChatOrchestrator {
     private async runDeliveryChainEntryStage(session: ChatSession) {
         return startDeliveryChainRun({
             context: this.context,
-            model: session.baseModel,
+            modelHandle: session.modelHandle,
             request: this.request,
+            resolvedModelSelection: this.context.resolvedModelSelection,
             writeChunk: this.writeChunk,
         })
     }

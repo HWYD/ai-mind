@@ -5,13 +5,17 @@ import { getModelProviderConfig, modelCatalog, ModelProviderConfigError } from '
 describe('model-provider config', () => {
     it('默认使用本地 Ollama 模型，并允许本地开发可切换的 provider', () => {
         expect(getModelProviderConfig({})).toEqual({
-            allowedProviders: ['ollama', 'deepseek', 'qwen'],
+            allowedProviders: ['ollama', 'deepseek', 'qwen', 'doubao'],
             chatMaxOutputTokens: 4096,
             deepseek: {
                 apiKey: undefined,
                 baseURL: 'https://api.deepseek.com',
             },
             defaultModelId: 'ollama/qwen3-8b',
+            doubao: {
+                apiKey: undefined,
+                baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+            },
             maxInputChars: 12000,
             ollama: {
                 baseURL: 'http://127.0.0.1:11434',
@@ -49,6 +53,10 @@ describe('model-provider config', () => {
                 baseURL: 'https://deepseek.example/v1',
             },
             defaultModelId: 'qwen/qwen3.6-flash',
+            doubao: {
+                apiKey: undefined,
+                baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+            },
             maxInputChars: 6000,
             ollama: {
                 baseURL: 'http://127.0.0.1:11434',

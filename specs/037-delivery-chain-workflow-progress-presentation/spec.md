@@ -228,11 +228,9 @@ v0.3.7 不做：
 
 v0.3.7 的通用 workflow progress channel 是为了给未来 Agent 展示留扩展点，但不实现后续版本内容。
 
-- v0.4.0 的 `@artifact://` 和 session artifact handoff 不进入本版本。
-- v0.4.1 的 Agent Catalog / Runtime Contract 不进入本版本。
-- v0.4.2 的 controlled multi-agent orchestration 不进入本版本。
-- v0.4.3 的 HITL-aware multi-agent 不进入本版本。
-- v0.5.0 的 chat persistence foundation 不进入本版本。
+- v0.4.0 的 Controlled Agent-as-tool Delivery Manager MVP 不进入本版本，详见 `specs/040-controlled-agent-as-tool-delivery-manager-mvp/`。
+- 新路线下，`@artifact://`、session artifact handoff、全局 Agent Catalog、parallel subagents、HITL-aware delegation 和 chat persistence 均不进入本版本。
+- 后续能力暂不编号，必须等待独立 spec / ADR / acceptance 明确后再进入实现范围。
 
 如果实现过程中发现必须新增 DB schema、checkpoint/resume、artifact handoff 或 Tasklist Agent topology change，必须暂停并重开对应版本 spec。
 

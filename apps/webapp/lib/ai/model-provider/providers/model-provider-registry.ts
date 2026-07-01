@@ -1,11 +1,13 @@
 import type { AiMindChatModelHandle, AiMindLlmProvider, ModelProviderConfig, ResolvedModelSelection } from '../types'
 import { createDeepSeekProvider } from './deepseek-provider'
+import { createDoubaoProvider } from './doubao-provider'
 import type { ModelProvider, ModelProviderCreateOptions } from './model-provider-interface'
 import { OllamaProvider } from './ollama-provider'
 import { createQwenProvider } from './qwen-provider'
 
 const providerInstances: Record<AiMindLlmProvider, ModelProvider> = {
     deepseek: createDeepSeekProvider(),
+    doubao: createDoubaoProvider(),
     ollama: new OllamaProvider(),
     qwen: createQwenProvider(),
 }

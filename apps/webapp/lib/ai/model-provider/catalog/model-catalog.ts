@@ -171,4 +171,22 @@ export const modelCatalog = [
         provider: 'qwen',
         providerModel: 'qwen3.7-plus',
     },
+    //火山引擎
+    {
+        availableIn: ['development', 'production'],
+        capabilities: {
+            chat: true,
+            embedding: false,
+            jsonOutput: true,
+            streaming: true,
+            tasklist: true,
+            toolCalling: true,
+        },
+        enabled: true,
+        id: 'doubao/Doubao-Seed-2.0-Code',
+        label: 'Doubao-Seed-2.0-Code',
+        modelKey: 'Doubao-Seed-2.0-Code',
+        provider: 'doubao',
+        providerModel: 'Doubao-Seed-2.0-Code',
+    },
 ] satisfies AiMindModelCatalogItem[]

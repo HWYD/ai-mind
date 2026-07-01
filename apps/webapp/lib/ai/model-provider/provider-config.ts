@@ -21,6 +21,7 @@ const defaultModelProviderConfig = {
     chatMaxOutputTokens: 4096,
     deepseekBaseURL: 'https://api.deepseek.com',
     defaultModelId: 'ollama/qwen3-8b',
+    doubaoBaseURL: 'https://ark.cn-beijing.volces.com/api/v3',
     maxInputChars: 12000,
     ollamaBaseURL: 'http://127.0.0.1:11434',
     qwenBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -65,6 +66,10 @@ export function getModelProviderConfig(env: ModelProviderEnv = process.env): Mod
         qwen: {
             apiKey: env.AI_MIND_QWEN_API_KEY?.trim() || undefined,
             baseURL: env.AI_MIND_QWEN_BASE_URL?.trim() || defaultModelProviderConfig.qwenBaseURL,
+        },
+        doubao: {
+            apiKey: env.AI_MIND_DOUBAO_API_KEY?.trim() || undefined,
+            baseURL: env.AI_MIND_DOUBAO_BASE_URL?.trim() || defaultModelProviderConfig.doubaoBaseURL,
         },
         tasklistMaxOutputTokens: readPositiveInteger(
             env.AI_MIND_TASKLIST_MAX_OUTPUT_TOKENS,

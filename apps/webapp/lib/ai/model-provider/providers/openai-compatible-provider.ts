@@ -28,6 +28,8 @@ function resolveProviderApiKey(config: ModelProviderCreateOptions['config'], pro
             return config.deepseek.apiKey
         case 'qwen':
             return config.qwen.apiKey
+        case 'doubao':
+            return config.doubao.apiKey
         default:
             return undefined
     }
@@ -39,6 +41,8 @@ function resolveProviderBaseURL(config: ModelProviderCreateOptions['config'], pr
             return config.deepseek.baseURL
         case 'qwen':
             return config.qwen.baseURL
+        case 'doubao':
+            return config.doubao.baseURL
         default:
             return ''
     }

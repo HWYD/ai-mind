@@ -107,4 +107,5 @@ export const validateTasklistStructureToolDefinition: ChatToolDefinition<z.infer
     formatInput: formatValidateTasklistStructureToolInput,
     formatOutput: formatValidateTasklistStructureToolOutput,
     getDisplayConfig: getValidateTasklistStructureDisplayConfig,
+    runtimeScopes: ['version-plan-tasklist-agent'],
 }
