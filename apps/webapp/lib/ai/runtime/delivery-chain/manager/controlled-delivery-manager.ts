@@ -11,13 +11,16 @@ import { executeToolCall, normalizeAndValidateToolCalls } from '@/lib/ai/runtime
 import { createChatToolRegistry } from '@/lib/ai/tools'
 
 import type { DeliveryChainInput, DeliveryChainResourceBundle } from '../graph-state'
-import { deliveryChainDelegationPolicy, validateDelegationToolCall, validateToolCallBatch } from './delegation-policy'
+import type { DeliveryPhase } from './delegation-policy'
 import {
-    buildDeliveryManagerFailureReport,
-    buildDeliveryManagerReport,
-    extractReviewDisposition,
-    toSubagentReportSummary,
-} from './report-synthesis'
+    deliveryChainDelegationPolicy,
+    deliveryChainReviewGroupPolicy,
+    validateDelegationToolCall,
+    validateReviewGroupToolCall,
+    validateToolCallBatch,
+    validateToolCallBatchForPhase,
+} from './delegation-policy'
+import { buildDeliveryManagerFailureReport, synthesizeReviewBundle, toSubagentReportSummary } from './report-synthesis'
 import { createRuntimeArtifact, createSubagentResultArtifacts, findRuntimeArtifact } from './runtime-artifacts'
 import {
     type RuntimeArtifact,
@@ -27,7 +30,13 @@ import {
     subagentToolJsonResultSchema,
 } from './subagent-tool-schemas'
 import { createDeliveryChainSubagentTools, getDefaultArtifactTitle } from './subagent-tools'
-import type { DeliveryChainSubagentToolDefinition, SubagentToolInvocation, SubagentToolInvocationTrace, SubagentToolResult } from './types'
+import type {
+    DeliveryChainSubagentToolDefinition,
+    ReviewBundle,
+    SubagentToolInvocation,
+    SubagentToolInvocationTrace,
+    SubagentToolResult,
+} from './types'
 import type { DeliveryManagerProgressEvent } from './workflow-progress'
 
 interface ControlledDeliveryManagerOptions {
@@ -54,7 +63,21 @@ export interface ControlledDeliveryManagerResult {
     warnings: string[]
 }
 
-const CONTROLLED_SUBAGENT_ORDER: SubagentToolId[] = ['plan-subagent', 'task-subagent', 'review-subagent']
+// v0.4.1: phase 结构。Plan/Task 串行，Review Group 并行。
+const SERIAL_SUBAGENT_ORDER: SubagentToolId[] = ['plan-subagent', 'task-subagent']
+const REVIEW_GROUP_TOOLS: SubagentToolId[] = ['review-subagent', 'risk-subagent', 'boundary-subagent']
+
+function formatRuntimeError(error: unknown) {
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+
+    return message.replace(/\s+/g, ' ').trim().slice(0, 240)
+}
+
+function buildRuntimeFailureMessage(prefix: string, error: unknown) {
+    const detail = formatRuntimeError(error)
+
+    return detail ? `${prefix}：${detail}` : `${prefix}。`
+}
 
 function createManagerToolFailureResult(options: {
     artifacts: RuntimeArtifact[]
@@ -104,7 +127,7 @@ function createManagerMessages(options: {
             ? '当前还没有任何产物。'
             : options.artifacts.map(artifact => `- ${artifact.kind}: ${artifact.title}`).join('\n')
     const sourceSummary = options.resources.sourceRefs.length > 0 ? options.resources.sourceRefs.join('、') : '仅使用用户输入文本'
-    const stepOrder = CONTROLLED_SUBAGENT_ORDER
+    const stepOrder = SERIAL_SUBAGENT_ORDER
     const currentStep = stepOrder.indexOf(options.expectedToolId) + 1
 
     return [
@@ -140,8 +163,54 @@ function createManagerMessages(options: {
     ] satisfies BaseMessage[]
 }
 
+// v0.4.1: Review phase 的 manager messages，指示模型同时调用 3 个 review-class tools。
+function createReviewGroupManagerMessages(options: {
+    artifacts: RuntimeArtifact[]
+    reviewToolCalls: Array<{ invocationId: string; toolId: SubagentToolId }>
+    resources: DeliveryChainResourceBundle
+}) {
+    const artifactSummary = options.artifacts.map(artifact => `- ${artifact.kind}: ${artifact.title}`).join('\n')
+    const sourceSummary = options.resources.sourceRefs.length > 0 ? options.resources.sourceRefs.join('、') : '仅使用用户输入文本'
+    const toolList = options.reviewToolCalls.map(({ toolId, invocationId }) => `- ${toolId}: ${invocationId}`).join('\n')
+    const toolCallInputs = options.reviewToolCalls.map(({ invocationId }) => ({ invocationId }))
+
+    return [
+        new SystemMessage(
+            [
+                '你是一个任务委派管理器，负责协调多个子代理完成交付任务。',
+                '现在进入评审阶段，你需要同时调用 3 个评审工具：review-subagent、risk-subagent、boundary-subagent。',
+                '你必须严格按照以下规则执行：',
+                '1. 必须同时调用以上 3 个工具，不能只调用其中一部分',
+                '2. 不能调用评审以外的工具（如 plan-subagent、task-subagent）',
+                '3. 不能发起嵌套委派',
+                '4. 只需要传递工具调用的基本参数，不需要传递完整的输入数据，runtime 会自动注入必要的上下文信息',
+            ].join('\n')
+        ),
+        new HumanMessage(
+            [
+                `输入来源：${sourceSummary}`,
+                `当前可用产物：\n${artifactSummary}`,
+                '本轮需要同时调用以下 3 个评审工具：',
+                toolList,
+                '',
+                '请直接发起 3 个工具调用，使用以下参数：',
+                JSON.stringify(toolCallInputs, null, 2),
+                '',
+                '注意：',
+                '- 你需要同时发起 3 个工具调用，不需要输出任何解释性文本',
+                '- 每个工具调用会自动获取所需的上下文和输入数据',
+            ].join('\n')
+        ),
+    ] satisfies BaseMessage[]
+}
+
 function buildContextBlocks(subagentId: SubagentToolId, resources: DeliveryChainResourceBundle) {
     const rubricByTool: Record<SubagentToolId, { kind: string; markdown: string; title: string }> = {
+        'boundary-subagent': {
+            kind: 'rubric',
+            markdown: resources.reviewRubricText,
+            title: 'Boundary Rubric',
+        },
         'plan-subagent': {
             kind: 'rubric',
             markdown: resources.planRubricText,
@@ -151,6 +220,11 @@ function buildContextBlocks(subagentId: SubagentToolId, resources: DeliveryChain
             kind: 'rubric',
             markdown: resources.reviewRubricText,
             title: 'Review Rubric',
+        },
+        'risk-subagent': {
+            kind: 'rubric',
+            markdown: resources.reviewRubricText,
+            title: 'Risk Rubric',
         },
         'task-subagent': {
             kind: 'rubric',
@@ -194,12 +268,16 @@ function buildContextBlocks(subagentId: SubagentToolId, resources: DeliveryChain
 
 function buildSubagentInstruction(subagentId: SubagentToolId) {
     switch (subagentId) {
+        case 'boundary-subagent':
+            return '请检查方案和任务是否触碰项目边界约束，包括持久化、人工审批、流协议、工具注册等边界。'
         case 'plan-subagent':
             return '请仔细分析需求、上下文、治理规则和评估标准，产出一份完整的实现方案。方案应包含需求理解、技术方案、模块划分、风险评估和验收标准。'
-        case 'task-subagent':
-            return '请基于输入的方案，将其拆解为具体、可执行的任务清单。每个任务应有明确的目标、交付物和验收标准。'
         case 'review-subagent':
             return '请对方案和任务拆解进行全面评审，检查覆盖度、一致性和范围漂移，给出明确的评审结论和改进建议。'
+        case 'risk-subagent':
+            return '请评估方案和任务的风险等级，识别实现复杂度、测试覆盖、维护成本等风险，并给出缓解建议。'
+        case 'task-subagent':
+            return '请基于输入的方案，将其拆解为具体、可执行的任务清单。每个任务应有明确的目标、交付物和验收标准。'
     }
 }
 
@@ -226,7 +304,8 @@ function buildInputArtifacts(subagentId: SubagentToolId, artifacts: RuntimeArtif
         return artifacts.filter(artifact => artifact.kind === 'plan')
     }
 
-    if (subagentId === 'review-subagent') {
+    // v0.4.1: review/risk/boundary 三个 review-class tool 都消费 plan + tasks artifacts。
+    if (subagentId === 'review-subagent' || subagentId === 'risk-subagent' || subagentId === 'boundary-subagent') {
         return artifacts.filter(artifact => artifact.kind === 'plan' || artifact.kind === 'tasks')
     }
 
@@ -403,9 +482,8 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
 
     let planResult: SubagentToolResult | undefined
     let taskResult: SubagentToolResult | undefined
-    let reviewResult: SubagentToolResult | undefined
 
-    for (const expectedToolId of CONTROLLED_SUBAGENT_ORDER) {
+    for (const expectedToolId of SERIAL_SUBAGENT_ORDER) {
         const toolDefinition = subagentToolMap.get(expectedToolId)
 
         if (!toolDefinition) {
@@ -551,8 +629,6 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
                 planResult = normalizedResult
             } else if (expectedToolId === 'task-subagent') {
                 taskResult = normalizedResult
-            } else {
-                reviewResult = normalizedResult
             }
 
             if (normalizedResult.status === 'failed' || (expectedToolId !== 'review-subagent' && normalizedResult.status !== 'completed')) {
@@ -573,16 +649,311 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
                 stepId,
                 summary: toSubagentReportSummary(normalizedResult),
             })
+        } catch (error) {
+            return failCurrentStep(
+                buildRuntimeFailureMessage(`${toolDefinition.displayName} Tool 调用失败，当前交付链已安全失败`, error),
+                `${toolDefinition.displayName} Tool 调用失败`
+            )
         } finally {
             subagentInvocations.delete(traceEntry.invocationId)
         }
     }
 
+    // v0.4.1: Review Group 并行执行
+    const reviewToolCalls: Array<{ invocationId: string; toolId: SubagentToolId; traceEntry: ReturnType<typeof startTraceEntry> }> = []
+    for (const reviewToolId of REVIEW_GROUP_TOOLS) {
+        const toolDefinition = subagentToolMap.get(reviewToolId)
+
+        if (!toolDefinition) {
+            return createManagerToolFailureResult({
+                artifacts,
+                failureMessage: `ControlledDeliveryManager 未注册 ${reviewToolId}。`,
+                input: options.input,
+                resources: options.resources,
+                trace,
+                warnings,
+            })
+        }
+
+        const traceEntry = startTraceEntry(trace, reviewToolId)
+        const invocation = buildSubagentInvocation(
+            reviewToolId,
+            traceEntry.invocationId,
+            traceEntry.startedAt,
+            options.resources,
+            artifacts
+        )
+
+        subagentInvocations.set(traceEntry.invocationId, invocation)
+        reviewToolCalls.push({ invocationId: traceEntry.invocationId, toolId: reviewToolId, traceEntry })
+    }
+
+    const reviewToolNames = reviewToolCalls.map(({ toolId }) => {
+        const definition = subagentToolMap.get(toolId)
+        return definition?.displayName ?? toolId
+    })
+
+    emitProgress(options, {
+        details: ['Manager 并行调用评审子 Agent', ...reviewToolNames.map(name => `- ${name}`)],
+        status: 'running',
+        stepId: 'delegate-review-group',
+        summary: `Manager 正在并行调用 ${reviewToolNames.length} 个评审子 Agent：${reviewToolNames.join('、')}`,
+    })
+
+    const failReviewGroup = (failureMessage: string, failureSummary: string) => {
+        for (const { traceEntry } of reviewToolCalls) {
+            finishTraceEntry(trace, traceEntry.invocationId, 'failed', failureSummary)
+            subagentInvocations.delete(traceEntry.invocationId)
+        }
+
+        emitProgress(options, {
+            failureMessage,
+            status: 'failed',
+            stepId: 'delegate-review-group',
+            summary: failureSummary,
+        })
+
+        return createManagerToolFailureResult({
+            artifacts,
+            failureMessage,
+            input: options.input,
+            resources: options.resources,
+            trace,
+            warnings,
+        })
+    }
+
+    let reviewResponse: Awaited<ReturnType<Runnable['invoke']>>
+
+    try {
+        reviewResponse = await toolBoundModel.invoke(
+            createReviewGroupManagerMessages({
+                artifacts,
+                reviewToolCalls: reviewToolCalls.map(({ invocationId, toolId }) => ({ invocationId, toolId })),
+                resources: options.resources,
+            }),
+            {
+                signal: options.signal,
+            }
+        )
+    } catch (error) {
+        return failReviewGroup(
+            buildRuntimeFailureMessage('Review Group Tool 调用失败，当前交付链已安全失败', error),
+            'Review Group Tool 调用失败'
+        )
+    }
+
+    const reviewValidation = normalizeAndValidateToolCalls(reviewResponse, toolDefinitionMap)
+    const reviewBatchFailure = validateToolCallBatchForPhase(
+        reviewValidation.toolCalls.length,
+        'review-group',
+        deliveryChainReviewGroupPolicy,
+        deliveryChainDelegationPolicy
+    )
+
+    if (reviewValidation.toolErrors.length > 0 || reviewBatchFailure) {
+        const validationErrorMessage = reviewValidation.toolErrors[0]?.message
+        const failureMessage =
+            reviewBatchFailure?.message ?? validationErrorMessage ?? 'ControlledDeliveryManager Review Group 收到了不合法的 tool 参数。'
+        const failureSummary = reviewBatchFailure?.summary ?? validationErrorMessage ?? 'Review Group 收到了不合法的 tool 参数'
+
+        return failReviewGroup(failureMessage, failureSummary)
+    }
+
+    // 校验每个 review tool call
+    for (const toolCall of reviewValidation.toolCalls) {
+        const policyFailure = validateReviewGroupToolCall({
+            artifacts,
+            policy: deliveryChainDelegationPolicy,
+            reviewGroupPolicy: deliveryChainReviewGroupPolicy,
+            requestedToolId: toolCall?.name ?? '',
+            toolCallsSoFar: trace.invocations.length - 1,
+        })
+
+        if (!toolCall || policyFailure) {
+            const failureMessage = policyFailure?.message ?? 'ControlledDeliveryManager Review Group 未发起合法的子 Agent tool 调用。'
+            const failureSummary = policyFailure?.summary ?? 'Review Group 未发起合法的子 Agent tool 调用'
+
+            return failReviewGroup(failureMessage, failureSummary)
+        }
+    }
+
+    // 并行执行 review tool calls
+    let reviewResults: Array<{
+        executedToolResult: Awaited<ReturnType<typeof executeToolCall>>
+        toolCall: (typeof reviewValidation.toolCalls)[number]
+    }>
+
+    try {
+        reviewResults = await Promise.all(
+            reviewValidation.toolCalls.map(async toolCall => {
+                const executedToolResult = await executeToolCall(
+                    toolCall,
+                    {
+                        signal: options.signal,
+                    },
+                    noopWriteChunk,
+                    {
+                        errorStage: 'tool-execution',
+                        runtimeScope: 'delivery-chain-manager',
+                        toolDefinitionMap,
+                    }
+                )
+
+                return { executedToolResult, toolCall }
+            })
+        )
+    } catch (error) {
+        return failReviewGroup(
+            buildRuntimeFailureMessage('Review Group Tool 执行失败，当前交付链已安全失败', error),
+            'Review Group Tool 执行失败'
+        )
+    }
+
+    // 处理 partial failure
+    // v0.4.1: 通过 toolCall.name 查找对应的 reviewToolId，不依赖索引对齐
+    const failedReviews: Array<{ subagentId: SubagentToolId; summary: string }> = []
+    let generalReviewResult: SubagentToolResult | null = null
+    let riskReviewResult: SubagentToolResult | null = null
+    let boundaryReviewResult: SubagentToolResult | null = null
+
+    for (const { executedToolResult, toolCall } of reviewResults) {
+        const reviewToolId = (toolCall?.name ?? '') as SubagentToolId
+        const reviewToolCall = reviewToolCalls.find(({ toolId }) => toolId === reviewToolId)
+
+        if (!reviewToolCall) continue
+
+        const traceEntry = reviewToolCall.traceEntry
+
+        if (!executedToolResult.success) {
+            failedReviews.push({ subagentId: reviewToolId, summary: `${reviewToolId} 执行失败` })
+            finishTraceEntry(trace, traceEntry.invocationId, 'failed', `${reviewToolId} 执行失败`)
+            subagentInvocations.delete(traceEntry.invocationId)
+            continue
+        }
+
+        const parsedToolResult = subagentToolJsonResultSchema.safeParse(executedToolResult.rawResult)
+
+        if (!parsedToolResult.success) {
+            failedReviews.push({ subagentId: reviewToolId, summary: `${reviewToolId} 返回了不合法的 JSON result` })
+            finishTraceEntry(trace, traceEntry.invocationId, 'failed', `${reviewToolId} 返回了不合法的 JSON result`)
+            subagentInvocations.delete(traceEntry.invocationId)
+            continue
+        }
+
+        // v0.4.1: executor 返回 status: 'failed'（如 createSafeFailureResult）也计入 failedReviews
+        if (parsedToolResult.data.status === 'failed') {
+            failedReviews.push({ subagentId: reviewToolId, summary: `${reviewToolId} 执行失败` })
+            finishTraceEntry(trace, traceEntry.invocationId, 'failed', `${reviewToolId} 执行失败`)
+            subagentInvocations.delete(traceEntry.invocationId)
+            continue
+        }
+
+        const normalizedResult: SubagentToolResult = {
+            artifacts: createSubagentResultArtifacts(reviewToolId, parsedToolResult.data, getDefaultArtifactTitle(reviewToolId)),
+            endedAt: new Date().toISOString(),
+            invocationId: traceEntry.invocationId,
+            markdown: parsedToolResult.data.markdown,
+            status: parsedToolResult.data.status,
+            subagentId: reviewToolId,
+            summaryForManager: parsedToolResult.data.summaryForManager,
+            warnings: parsedToolResult.data.warnings,
+        }
+
+        warnings.push(...normalizedResult.warnings)
+        artifacts.push(...normalizedResult.artifacts)
+
+        if (reviewToolId === 'review-subagent') {
+            generalReviewResult = normalizedResult
+        } else if (reviewToolId === 'risk-subagent') {
+            riskReviewResult = normalizedResult
+        } else if (reviewToolId === 'boundary-subagent') {
+            boundaryReviewResult = normalizedResult
+        }
+
+        finishTraceEntry(
+            trace,
+            traceEntry.invocationId,
+            normalizedResult.status === 'blocked' ? 'blocked' : 'completed',
+            toSubagentReportSummary(normalizedResult)
+        )
+
+        subagentInvocations.delete(traceEntry.invocationId)
+    }
+
+    // v0.4.1: partial failure 处理 — 全部 failed 才 fail closed
+    if (failedReviews.length === REVIEW_GROUP_TOOLS.length) {
+        const failureMessage = 'ControlledDeliveryManager Review Group 全部评审子 Agent 失败，已安全失败。'
+        const failureSummary = 'Review Group 全部评审子 Agent 失败'
+
+        emitProgress(options, {
+            failureMessage,
+            status: 'failed',
+            stepId: 'delegate-review-group',
+            summary: failureSummary,
+        })
+
+        return createManagerToolFailureResult({
+            artifacts,
+            failureMessage,
+            input: options.input,
+            resources: options.resources,
+            trace,
+            warnings,
+        })
+    }
+
+    // 标记未返回的 tool call 为 failed
+    for (const { toolId, traceEntry } of reviewToolCalls) {
+        const hasResult =
+            generalReviewResult?.subagentId === toolId ||
+            riskReviewResult?.subagentId === toolId ||
+            boundaryReviewResult?.subagentId === toolId
+
+        if (!hasResult && !failedReviews.some(failed => failed.subagentId === toolId)) {
+            failedReviews.push({ subagentId: toolId, summary: `${toolId} 未返回结果` })
+            finishTraceEntry(trace, traceEntry.invocationId, 'failed', `${toolId} 未返回结果`)
+        }
+    }
+
+    // v0.4.1: 构造 ReviewBundle 并调用 synthesizeReviewBundle
+    const reviewBundle: ReviewBundle = {
+        boundaryReview: boundaryReviewResult,
+        failedReviews,
+        generalReview: generalReviewResult,
+        riskReview: riskReviewResult,
+    }
+
+    const completedReviews = [
+        generalReviewResult ? 'Review Subagent' : null,
+        riskReviewResult ? 'Risk Subagent' : null,
+        boundaryReviewResult ? 'Boundary Subagent' : null,
+    ].filter(Boolean)
+
+    const completedReviewNames = completedReviews as string[]
+    const failedReviewNames = failedReviews.map(f => f.subagentId)
+
+    const completedDetails =
+        completedReviewNames.length > 0
+            ? ['并行评审已完成。', ...completedReviewNames.map(name => `- ${name}：完成`)]
+            : ['并行评审已完成。']
+
+    const failedDetails = failedReviewNames.length > 0 ? [...failedReviewNames.map(name => `- ${name}：失败`)] : []
+
+    emitProgress(options, {
+        details: [...completedDetails, ...failedDetails],
+        status: 'completed',
+        stepId: 'delegate-review-group',
+        summary:
+            failedReviewNames.length > 0
+                ? `并行评审已完成，${completedReviewNames.length} 个成功，${failedReviewNames.length} 个失败：${failedReviewNames.join('、')}`
+                : `并行评审已完成，${completedReviewNames.length} 个评审全部通过`,
+    })
+
     const planArtifact = findRuntimeArtifact(artifacts, 'plan')
     const taskArtifact = findRuntimeArtifact(artifacts, 'tasks')
-    const reviewArtifact = findRuntimeArtifact(artifacts, 'review')
 
-    if (!planArtifact || !taskArtifact || !reviewArtifact || !reviewResult) {
+    if (!planArtifact || !taskArtifact) {
         return createManagerToolFailureResult({
             artifacts,
             failureMessage: 'ControlledDeliveryManager 缺少合成最终报告所需的 artifacts。',
@@ -600,20 +971,41 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
         summary: 'Manager 正在汇总最终报告',
     })
 
-    const reviewDisposition = reviewResult.status === 'blocked' ? 'blocked' : extractReviewDisposition(reviewArtifact.markdown)
-    const reportMarkdown = buildDeliveryManagerReport({
-        input: options.input,
-        planArtifact,
-        resources: options.resources,
-        reviewArtifact,
-        reviewDisposition,
-        taskArtifact,
-        warnings,
-    })
+    let synthesisResult: Awaited<ReturnType<typeof synthesizeReviewBundle>>
+
+    try {
+        synthesisResult = await synthesizeReviewBundle({
+            bundle: reviewBundle,
+            input: options.input,
+            planArtifact,
+            resources: options.resources,
+            taskArtifact,
+            warnings,
+        })
+    } catch (error) {
+        const failureMessage = buildRuntimeFailureMessage('Delivery Chain Report 汇总失败，当前交付链已安全失败', error)
+
+        emitProgress(options, {
+            failureMessage,
+            status: 'failed',
+            stepId: 'synthesize-report',
+            summary: 'Delivery Chain Report 汇总失败',
+        })
+
+        return createManagerToolFailureResult({
+            artifacts,
+            failureMessage,
+            input: options.input,
+            resources: options.resources,
+            trace,
+            warnings,
+        })
+    }
+    const reportMarkdown = synthesisResult.reportMarkdown
     const deliveryReportArtifact = createRuntimeArtifact({
         kind: 'delivery_report',
         markdown: reportMarkdown,
-        metadata: reviewDisposition === 'blocked' ? { blocked: true } : undefined,
+        metadata: synthesisResult.reviewDisposition === 'blocked' ? { blocked: true } : undefined,
         source: {
             stage: 'manager-synthesis',
         },
@@ -631,8 +1023,7 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
         deliveryReportArtifact,
         planResult,
         reportMarkdown,
-        reviewResult,
-        status: reviewDisposition === 'blocked' ? 'blocked' : 'completed',
+        status: synthesisResult.reviewDisposition === 'blocked' ? 'blocked' : 'completed',
         taskResult,
         trace,
         warnings,

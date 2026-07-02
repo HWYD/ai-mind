@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const subagentToolIds = ['plan-subagent', 'task-subagent', 'review-subagent'] as const
+export const subagentToolIds = ['plan-subagent', 'task-subagent', 'review-subagent', 'risk-subagent', 'boundary-subagent'] as const
 export type SubagentToolId = (typeof subagentToolIds)[number]
 
 export const runtimeArtifactKinds = ['plan', 'tasks', 'review', 'delivery_report'] as const

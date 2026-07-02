@@ -125,7 +125,46 @@ function extractExpectedTool(messages: unknown[]) {
         return match[1] as 'plan-subagent' | 'task-subagent' | 'review-subagent'
     }
 
+    // v0.4.1: Review Group 返回 3 个 review-class tools
+    if (content.includes('同时调用以下 3 个评审工具')) {
+        return 'review-group'
+    }
+
     return 'plan-subagent'
+}
+
+// v0.4.1: 从 Review Group 的 prompt 中提取 3 个 tool call inputs
+function extractReviewGroupToolInvocations(messages: unknown[]): SubagentToolCallInput[] {
+    const humanMessage = messages.at(-1) as { content?: string }
+    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
+    const marker = '请直接发起 3 个工具调用'
+    const markerIndex = content.indexOf(marker)
+    const arrayStart = content.indexOf('[', markerIndex >= 0 ? markerIndex : 0)
+
+    if (arrayStart < 0) {
+        throw new Error(`未找到 Review Group tool 参数 JSON: ${content}`)
+    }
+
+    // 找到匹配的 ]
+    let depth = 0
+    let endIndex = -1
+
+    for (let i = arrayStart; i < content.length; i += 1) {
+        if (content[i] === '[') depth += 1
+        else if (content[i] === ']') {
+            depth -= 1
+            if (depth === 0) {
+                endIndex = i + 1
+                break
+            }
+        }
+    }
+
+    if (endIndex < 0) {
+        throw new Error(`未找到完整 JSON 数组: ${content}`)
+    }
+
+    return JSON.parse(content.slice(arrayStart, endIndex)) as SubagentToolCallInput[]
 }
 
 function createManagerToolCall(name: string, args: SubagentToolCallInput) {
@@ -177,15 +216,52 @@ function setupMockChatModels(options?: {
     stageResponses?: string[]
     toolCalling?: boolean
 }) {
+    // v0.4.1: 使用索引而非 shift()，避免并行调用时竞态
     const stageResponses = [...(options?.stageResponses ?? [])]
-    const baseInvoke = vi.fn().mockImplementation(async () => new AIMessage({ content: stageResponses.shift() ?? '' }))
+    let invokeCount = 0
+    const baseInvoke = vi.fn().mockImplementation(async (messages: unknown[]) => {
+        // v0.4.1: Review Group 并行调用时，根据 SystemMessage 内容返回对应的 response
+        const systemMessage = (messages as Array<{ content?: string }>)[0]
+        const content = typeof systemMessage?.content === 'string' ? systemMessage.content : ''
+
+        if (content.includes('风险评审专家')) {
+            return new AIMessage({ content: stageResponses[3] ?? '' })
+        }
+
+        if (content.includes('边界检查专家')) {
+            return new AIMessage({ content: stageResponses[4] ?? '' })
+        }
+
+        if (content.includes('交付评审专家')) {
+            return new AIMessage({ content: stageResponses[2] ?? '' })
+        }
+
+        // 串行阶段按顺序返回
+        return new AIMessage({ content: stageResponses[invokeCount++] ?? '' })
+    })
     const boundInvoke =
         options?.boundInvoke ??
-        (async (messages: unknown[]) =>
-            new AIMessage({
+        (async (messages: unknown[]) => {
+            // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
+            const expectedTool = extractExpectedTool(messages)
+
+            if (expectedTool === 'review-group') {
+                const reviewInputs = extractReviewGroupToolInvocations(messages)
+                const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
+
+                return new AIMessage({
+                    content: '',
+                    tool_calls: reviewToolNames.map((name, index) =>
+                        createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
+                    ),
+                })
+            }
+
+            return new AIMessage({
                 content: '',
-                tool_calls: [createManagerToolCall(extractExpectedTool(messages), extractToolInvocation(messages))],
-            }))
+                tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
+            })
+        })
 
     const modelHandle = {
         bindTools: vi.fn(() => ({
@@ -241,10 +317,24 @@ describe('runtime/delivery-chain-manager run', () => {
         const { baseInvoke } = setupMockChatModels({
             boundInvoke: async messages => {
                 managerPrompts.push(serializeMessages(messages))
+                const expectedTool = extractExpectedTool(messages)
+
+                // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
+                if (expectedTool === 'review-group') {
+                    const reviewInputs = extractReviewGroupToolInvocations(messages)
+                    const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
+
+                    return new AIMessage({
+                        content: '',
+                        tool_calls: reviewToolNames.map((name, index) =>
+                            createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
+                        ),
+                    })
+                }
 
                 return new AIMessage({
                     content: '',
-                    tool_calls: [createManagerToolCall(extractExpectedTool(messages), extractToolInvocation(messages))],
+                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
                 })
             },
             stageResponses: [
@@ -294,6 +384,7 @@ describe('runtime/delivery-chain-manager run', () => {
                     '',
                     '- 确认不改 reducer',
                 ].join('\n'),
+                // v0.4.1: review-subagent
                 [
                     '结论: pass',
                     '',
@@ -313,6 +404,46 @@ describe('runtime/delivery-chain-manager run', () => {
                     '',
                     '- 可进入实现',
                 ].join('\n'),
+                // v0.4.1: risk-subagent
+                [
+                    'severity: low',
+                    '',
+                    '## 风险识别',
+                    '',
+                    '- 低风险',
+                    '',
+                    '## 风险等级',
+                    '',
+                    '- low',
+                    '',
+                    '## 缓解建议',
+                    '',
+                    '- 无需特殊处理',
+                ].join('\n'),
+                // v0.4.1: boundary-subagent
+                [
+                    'boundaryStatus: passed',
+                    '',
+                    '## DB / 持久化边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## HITL / checkpoint / resume 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Stream / UI 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Tool / Agent 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## 安全边界',
+                    '',
+                    '- 未触碰',
+                ].join('\n'),
             ],
         })
         const progress = createProgressRecorder()
@@ -326,24 +457,24 @@ describe('runtime/delivery-chain-manager run', () => {
             workflowId: 'workflow-1',
         })
 
-        expect(baseInvoke).toHaveBeenCalledTimes(3)
+        expect(baseInvoke).toHaveBeenCalledTimes(5)
         expect(result.status).toBe('completed')
         expect(findRuntimeArtifact(result.artifacts, 'plan')).toBeDefined()
         expect(findRuntimeArtifact(result.artifacts, 'tasks')).toBeDefined()
         expect(findRuntimeArtifact(result.artifacts, 'review')).toBeDefined()
         expect(findRuntimeArtifact(result.artifacts, 'delivery_report')).toBeDefined()
-        expect(result.trace.invocations).toHaveLength(3)
+        expect(result.trace.invocations).toHaveLength(5)
         expect(result.reportMarkdown).toContain('# Delivery Chain Report / 交付计划报告')
         expect(result.reportMarkdown).toContain('## 实现方案')
         expect(result.reportMarkdown).toContain('## 任务拆解')
-        expect(result.reportMarkdown).toContain('## 交付评审')
+        expect(result.reportMarkdown).toContain('## Review 总评')
         expect(progress.events.map(event => `${event.stepId}:${event.status}`)).toEqual([
             'delegate-plan:running',
             'delegate-plan:completed',
             'delegate-task:running',
             'delegate-task:completed',
-            'delegate-review:running',
-            'delegate-review:completed',
+            'delegate-review-group:running',
+            'delegate-review-group:completed',
             'synthesize-report:running',
             'synthesize-report:completed',
         ])
@@ -428,11 +559,26 @@ describe('runtime/delivery-chain-manager run', () => {
         expect(result.trace.invocations).toHaveLength(1)
     })
 
-    it('maxDelegations 通过固定 3 次工具调用生效，且不会继续第 4 次', async () => {
+    it('maxDelegations 通过固定 5 次工具调用生效，且不会继续第 6 次', async () => {
         const boundInvoke = vi.fn().mockImplementation(async messages => {
+            const expectedTool = extractExpectedTool(messages)
+
+            // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
+            if (expectedTool === 'review-group') {
+                const reviewInputs = extractReviewGroupToolInvocations(messages)
+                const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
+
+                return new AIMessage({
+                    content: '',
+                    tool_calls: reviewToolNames.map((name, index) =>
+                        createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
+                    ),
+                })
+            }
+
             return new AIMessage({
                 content: '',
-                tool_calls: [createManagerToolCall(extractExpectedTool(messages), extractToolInvocation(messages))],
+                tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
             })
         })
         setupMockChatModels({
@@ -484,6 +630,7 @@ describe('runtime/delivery-chain-manager run', () => {
                     '',
                     '- d',
                 ].join('\n'),
+                // v0.4.1: review-subagent
                 [
                     '结论: pass',
                     '',
@@ -503,6 +650,46 @@ describe('runtime/delivery-chain-manager run', () => {
                     '',
                     '- ok',
                 ].join('\n'),
+                // v0.4.1: risk-subagent
+                [
+                    'severity: low',
+                    '',
+                    '## 风险识别',
+                    '',
+                    '- low risk',
+                    '',
+                    '## 风险等级',
+                    '',
+                    '- low',
+                    '',
+                    '## 缓解建议',
+                    '',
+                    '- none',
+                ].join('\n'),
+                // v0.4.1: boundary-subagent
+                [
+                    'boundaryStatus: passed',
+                    '',
+                    '## DB / 持久化边界',
+                    '',
+                    '- ok',
+                    '',
+                    '## HITL / checkpoint / resume 边界',
+                    '',
+                    '- ok',
+                    '',
+                    '## Stream / UI 边界',
+                    '',
+                    '- ok',
+                    '',
+                    '## Tool / Agent 边界',
+                    '',
+                    '- ok',
+                    '',
+                    '## 安全边界',
+                    '',
+                    '- ok',
+                ].join('\n'),
             ],
         })
 
@@ -514,6 +701,7 @@ describe('runtime/delivery-chain-manager run', () => {
             workflowId: 'workflow-4',
         })
 
+        // v0.4.1: manager invoke 3 次（plan + task + review-group），baseInvoke 5 次（plan + task + 3 review）
         expect(boundInvoke).toHaveBeenCalledTimes(3)
     })
 
@@ -706,5 +894,185 @@ describe('runtime/delivery-chain-manager run', () => {
         expect(serializedPrompts).not.toContain('HITL')
         expect(serializedPrompts).toContain('人工审批或人工中断流程')
         expect(serializedPrompts).toContain('其他代理或其他工作流')
+    })
+
+    it('review group 内出现未注册 tool 必须 fail closed', async () => {
+        const { baseInvoke } = setupMockChatModels({
+            boundInvoke: async messages => {
+                const expectedTool = extractExpectedTool(messages)
+                if (expectedTool === 'review-group') {
+                    return new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            createManagerToolCall(
+                                'review-subagent',
+                                extractReviewGroupToolInvocations(messages)[0] ?? { invocationId: 'fallback-0' }
+                            ),
+                            createManagerToolCall(
+                                'rogue-subagent',
+                                extractReviewGroupToolInvocations(messages)[1] ?? { invocationId: 'fallback-1' }
+                            ),
+                            createManagerToolCall(
+                                'boundary-subagent',
+                                extractReviewGroupToolInvocations(messages)[2] ?? { invocationId: 'fallback-2' }
+                            ),
+                        ],
+                    })
+                }
+                return new AIMessage({
+                    content: '',
+                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
+                })
+            },
+            stageResponses: [
+                '## 实现方案\n\n- plan',
+                '## 任务拆解\n\n- task',
+                '结论: pass\n## 覆盖检查\n\n- ok',
+                'severity: low\n## 风险识别\n\n- low',
+                'boundaryStatus: passed\n## DB / 持久化边界\n\n- ok',
+            ],
+        })
+        const result = await runControlledDeliveryManager({
+            input: createInput(),
+            modelHandle: {} as never,
+            resolvedModelSelection: testResolvedModelSelection,
+            resources: createResources(),
+            workflowId: 'workflow-rogue-in-review',
+        })
+        expect(result.status).toBe('failed')
+        expect(result.failureMessage).toContain('未注册')
+    })
+
+    it('review group 不能调用 plan/task tool', async () => {
+        const { baseInvoke } = setupMockChatModels({
+            boundInvoke: async messages => {
+                const expectedTool = extractExpectedTool(messages)
+                if (expectedTool === 'review-group') {
+                    return new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            createManagerToolCall(
+                                'review-subagent',
+                                extractReviewGroupToolInvocations(messages)[0] ?? { invocationId: 'fallback-0' }
+                            ),
+                            createManagerToolCall(
+                                'plan-subagent',
+                                extractReviewGroupToolInvocations(messages)[1] ?? { invocationId: 'fallback-1' }
+                            ),
+                            createManagerToolCall(
+                                'boundary-subagent',
+                                extractReviewGroupToolInvocations(messages)[2] ?? { invocationId: 'fallback-2' }
+                            ),
+                        ],
+                    })
+                }
+                return new AIMessage({
+                    content: '',
+                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
+                })
+            },
+            stageResponses: [
+                '## 实现方案\n\n- plan',
+                '## 任务拆解\n\n- task',
+                '结论: pass\n## 覆盖检查\n\n- ok',
+                'severity: low\n## 风险识别\n\n- low',
+                'boundaryStatus: passed\n## DB / 持久化边界\n\n- ok',
+            ],
+        })
+        const result = await runControlledDeliveryManager({
+            input: createInput(),
+            modelHandle: {} as never,
+            resolvedModelSelection: testResolvedModelSelection,
+            resources: createResources(),
+            workflowId: 'workflow-plan-in-review',
+        })
+        expect(result.status).toBe('failed')
+        expect(result.failureMessage).toContain('非 review-class tool')
+    })
+
+    it('boundary blocked 强制 final report blocked', async () => {
+        const { baseInvoke } = setupMockChatModels({
+            stageResponses: [
+                '## 实现方案\n\n- plan',
+                '## 任务拆解\n\n- task',
+                '结论: pass\n## 覆盖检查\n\n- ok',
+                'severity: low\n## 风险识别\n\n- low',
+                'boundaryStatus: blocked\n## DB / 持久化边界\n\n- 触碰了数据库边界',
+            ],
+        })
+        const result = await runControlledDeliveryManager({
+            input: createInput(),
+            modelHandle: {} as never,
+            resolvedModelSelection: testResolvedModelSelection,
+            resources: createResources(),
+            workflowId: 'workflow-boundary-blocked',
+        })
+        expect(result.status).toBe('blocked')
+        expect(result.reportMarkdown).toContain('blocked')
+    })
+
+    it('3 个 review 全部 failed fail closed', async () => {
+        const { baseInvoke } = setupMockChatModels({
+            boundInvoke: async messages => {
+                const expectedTool = extractExpectedTool(messages)
+                if (expectedTool === 'review-group') {
+                    const reviewInputs = extractReviewGroupToolInvocations(messages)
+                    const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
+                    return new AIMessage({
+                        content: '',
+                        tool_calls: reviewToolNames.map((name, index) =>
+                            createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
+                        ),
+                    })
+                }
+                return new AIMessage({
+                    content: '',
+                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
+                })
+            },
+        })
+        // 让 review 阶段的 baseInvoke 抛异常，触发 executor catch 返回 failed
+        baseInvoke.mockImplementation(async (messages: unknown[]) => {
+            const systemMessage = (messages as Array<{ content?: string }>)[0]
+            const content = typeof systemMessage?.content === 'string' ? systemMessage.content : ''
+            if (content.includes('评审专家') || content.includes('边界检查专家')) {
+                throw new Error('model unavailable')
+            }
+            return new AIMessage({ content: baseInvoke.mock.calls.length === 1 ? '## 实现方案\n\n- plan' : '## 任务拆解\n\n- task' })
+        })
+        const result = await runControlledDeliveryManager({
+            input: createInput(),
+            modelHandle: {} as never,
+            resolvedModelSelection: testResolvedModelSelection,
+            resources: createResources(),
+            workflowId: 'workflow-all-review-failed',
+        })
+        expect(result.status).toBe('failed')
+        expect(result.failureMessage).toContain('全部评审子 Agent 失败')
+    })
+
+    it('Manager synthesis 不是 raw concatenation', async () => {
+        const { baseInvoke } = setupMockChatModels({
+            stageResponses: [
+                '## 实现方案\n\n- plan',
+                '## 任务拆解\n\n- task',
+                '结论: pass\n## 覆盖检查\n\n- ok',
+                'severity: low\n## 风险识别\n\n- low',
+                'boundaryStatus: passed\n## DB / 持久化边界\n\n- ok',
+            ],
+        })
+        const result = await runControlledDeliveryManager({
+            input: createInput(),
+            modelHandle: {} as never,
+            resolvedModelSelection: testResolvedModelSelection,
+            resources: createResources(),
+            workflowId: 'workflow-synthesis-check',
+        })
+        expect(result.status).toBe('completed')
+        expect(result.reportMarkdown).toContain('## 综合结论')
+        expect(result.reportMarkdown).toContain('## 本轮评审覆盖情况')
+        expect(result.reportMarkdown).toContain('## Review 总评')
+        expect(result.reportMarkdown).toContain('## 风险评估')
+        expect(result.reportMarkdown).toContain('## 边界检查')
     })
 })

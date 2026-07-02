@@ -179,7 +179,45 @@ function extractExpectedTool(messages: unknown[]) {
         return match[1] as 'plan-subagent' | 'task-subagent' | 'review-subagent'
     }
 
+    // v0.4.1: Review Group 返回 3 个 review-class tools
+    if (content.includes('同时调用以下 3 个评审工具')) {
+        return 'review-group'
+    }
+
     return 'plan-subagent'
+}
+
+// v0.4.1: 从 Review Group 的 prompt 中提取 3 个 tool call inputs
+function extractReviewGroupToolInvocations(messages: unknown[]): SubagentToolCallInput[] {
+    const humanMessage = messages.at(-1) as { content?: string }
+    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
+    const marker = '请直接发起 3 个工具调用'
+    const markerIndex = content.indexOf(marker)
+    const arrayStart = content.indexOf('[', markerIndex >= 0 ? markerIndex : 0)
+
+    if (arrayStart < 0) {
+        throw new Error(`未找到 Review Group tool 参数 JSON: ${content}`)
+    }
+
+    let depth = 0
+    let endIndex = -1
+
+    for (let i = arrayStart; i < content.length; i += 1) {
+        if (content[i] === '[') depth += 1
+        else if (content[i] === ']') {
+            depth -= 1
+            if (depth === 0) {
+                endIndex = i + 1
+                break
+            }
+        }
+    }
+
+    if (endIndex < 0) {
+        throw new Error(`未找到完整 JSON 数组: ${content}`)
+    }
+
+    return JSON.parse(content.slice(arrayStart, endIndex)) as SubagentToolCallInput[]
 }
 
 function createManagerToolCall(name: string, args: SubagentToolCallInput) {
@@ -196,15 +234,52 @@ function createDeliveryChainModelHandle(options?: {
     stageResponses?: string[]
     toolCalling?: boolean
 }) {
+    // v0.4.1: 使用索引而非 shift()，避免并行调用时竞态
     const stageResponses = [...(options?.stageResponses ?? [])]
-    const baseInvoke = vi.fn().mockImplementation(async () => new AIMessage({ content: stageResponses.shift() ?? '' }))
+    let invokeCount = 0
+    const baseInvoke = vi.fn().mockImplementation(async (messages: unknown[]) => {
+        // v0.4.1: Review Group 并行调用时，根据 SystemMessage 内容返回对应的 response
+        const systemMessage = (messages as Array<{ content?: string }>)[0]
+        const content = typeof systemMessage?.content === 'string' ? systemMessage.content : ''
+
+        if (content.includes('风险评审专家')) {
+            return new AIMessage({ content: stageResponses[3] ?? '' })
+        }
+
+        if (content.includes('边界检查专家')) {
+            return new AIMessage({ content: stageResponses[4] ?? '' })
+        }
+
+        if (content.includes('交付评审专家')) {
+            return new AIMessage({ content: stageResponses[2] ?? '' })
+        }
+
+        // 串行阶段按顺序返回
+        return new AIMessage({ content: stageResponses[invokeCount++] ?? '' })
+    })
     const boundInvoke =
         options?.boundInvoke ??
-        (async (messages: unknown[]) =>
-            new AIMessage({
+        (async (messages: unknown[]) => {
+            // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
+            const expectedTool = extractExpectedTool(messages)
+
+            if (expectedTool === 'review-group') {
+                const reviewInputs = extractReviewGroupToolInvocations(messages)
+                const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
+
+                return new AIMessage({
+                    content: '',
+                    tool_calls: reviewToolNames.map((name, index) =>
+                        createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
+                    ),
+                })
+            }
+
+            return new AIMessage({
                 content: '',
-                tool_calls: [createManagerToolCall(extractExpectedTool(messages), extractToolInvocation(messages))],
-            }))
+                tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
+            })
+        })
 
     const modelHandle = {
         bindTools:
@@ -270,6 +345,88 @@ describe('runtime/delivery-chain', () => {
 
     it('只在显式 /delivery-chain + scenario requirement 时解析为 ready-scenario', () => {
         expect(resolveDeliveryChainInvocation(createScenarioRequest())).toMatchObject({
+            kind: 'ready-scenario',
+            scenarioId: 'request-limit-banner',
+        })
+    })
+
+    it('scenario 模式不会把 command/resource fallback 文本误当成 inline requirement', () => {
+        expect(
+            resolveDeliveryChainInvocation(
+                createRequest({
+                    composer: {
+                        command: {
+                            label: '生成交付计划',
+                            name: 'delivery-chain',
+                        },
+                        plainText: '',
+                        references: [
+                            {
+                                id: 'demo:scenario:request-limit-banner',
+                                label: 'request-limit-banner/requirement.md',
+                                source: 'local',
+                                type: 'resource',
+                                uri: 'demo://scenarios/request-limit-banner/requirement.md',
+                            },
+                        ],
+                    },
+                    messages: [
+                        {
+                            role: 'user',
+                            parts: [
+                                {
+                                    type: 'text',
+                                    format: 'markdown',
+                                    text: '生成交付计划 @request-limit-banner/requirement.md',
+                                },
+                            ],
+                        },
+                    ],
+                })
+            )
+        ).toMatchObject({
+            inlineRequirementText: undefined,
+            kind: 'ready-scenario',
+            scenarioId: 'request-limit-banner',
+        })
+    })
+
+    it('scenario 模式仍保留用户显式补充的 inline note', () => {
+        expect(
+            resolveDeliveryChainInvocation(
+                createRequest({
+                    composer: {
+                        command: {
+                            label: '生成交付计划',
+                            name: 'delivery-chain',
+                        },
+                        plainText: '重点关注移动端状态提示和回退方案',
+                        references: [
+                            {
+                                id: 'demo:scenario:request-limit-banner',
+                                label: 'request-limit-banner/requirement.md',
+                                source: 'local',
+                                type: 'resource',
+                                uri: 'demo://scenarios/request-limit-banner/requirement.md',
+                            },
+                        ],
+                    },
+                    messages: [
+                        {
+                            role: 'user',
+                            parts: [
+                                {
+                                    type: 'text',
+                                    format: 'markdown',
+                                    text: '生成交付计划 @request-limit-banner/requirement.md',
+                                },
+                            ],
+                        },
+                    ],
+                })
+            )
+        ).toMatchObject({
+            inlineRequirementText: '重点关注移动端状态提示和回退方案',
             kind: 'ready-scenario',
             scenarioId: 'request-limit-banner',
         })
@@ -460,6 +617,46 @@ describe('runtime/delivery-chain', () => {
                     '',
                     '- 先确认触发阈值。',
                 ].join('\n'),
+                // v0.4.1: risk-subagent
+                [
+                    'severity: low',
+                    '',
+                    '## 风险识别',
+                    '',
+                    '- 低风险',
+                    '',
+                    '## 风险等级',
+                    '',
+                    '- low',
+                    '',
+                    '## 缓解建议',
+                    '',
+                    '- 无需特殊处理',
+                ].join('\n'),
+                // v0.4.1: boundary-subagent
+                [
+                    'boundaryStatus: passed',
+                    '',
+                    '## DB / 持久化边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## HITL / checkpoint / resume 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Stream / UI 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Tool / Agent 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## 安全边界',
+                    '',
+                    '- 未触碰',
+                ].join('\n'),
             ],
         })
         const writeChunk = vi.fn()
@@ -473,8 +670,14 @@ describe('runtime/delivery-chain', () => {
         })
 
         expect(handled).toBe(true)
-        expect(modelHandle.baseInvoke).toHaveBeenCalledTimes(3)
-        expect(testState.readResource.mock.calls.map(([input]) => input.uri)).toEqual([
+        // v0.4.1: baseInvoke 5 次（plan + task + 3 review）
+        expect(modelHandle.baseInvoke).toHaveBeenCalledTimes(5)
+        const resourceStartUris = writeChunk.mock.calls
+            .map(([chunk]) => chunk as ChatStreamChunk)
+            .filter((chunk): chunk is Extract<ChatStreamChunk, { type: 'resource-start' }> => chunk.type === 'resource-start')
+            .map(chunk => chunk.uri)
+
+        expect(resourceStartUris).toEqual([
             'demo://rubrics/plan-rubric.md',
             'demo://rubrics/task-rubric.md',
             'demo://rubrics/review-rubric.md',
@@ -500,8 +703,8 @@ describe('runtime/delivery-chain', () => {
             'delegate-plan:completed',
             'delegate-task:running',
             'delegate-task:completed',
-            'delegate-review:running',
-            'delegate-review:completed',
+            'delegate-review-group:running',
+            'delegate-review-group:completed',
             'synthesize-report:running',
             'synthesize-report:completed',
         ])
@@ -522,8 +725,8 @@ describe('runtime/delivery-chain', () => {
         )
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 实现方案'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 任务拆解'))
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 交付评审'))
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`needs_changes`'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## Review 总评'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`needs_review`'))
 
         const chunkTypes = new Set(getWrittenChunks(writeChunk).map(chunk => chunk.type))
         expect(chunkTypes.has('tool-start')).toBe(false)
@@ -600,6 +803,46 @@ describe('runtime/delivery-chain', () => {
                     '',
                     '- 补充上下文。',
                 ].join('\n'),
+                // v0.4.1: risk-subagent
+                [
+                    'severity: medium',
+                    '',
+                    '## 风险识别',
+                    '',
+                    '- 信息不足风险',
+                    '',
+                    '## 风险等级',
+                    '',
+                    '- medium',
+                    '',
+                    '## 缓解建议',
+                    '',
+                    '- 补充上下文',
+                ].join('\n'),
+                // v0.4.1: boundary-subagent
+                [
+                    'boundaryStatus: passed',
+                    '',
+                    '## DB / 持久化边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## HITL / checkpoint / resume 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Stream / UI 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Tool / Agent 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## 安全边界',
+                    '',
+                    '- 未触碰',
+                ].join('\n'),
             ],
         })
         const writeChunk = vi.fn()
@@ -623,8 +866,8 @@ describe('runtime/delivery-chain', () => {
             'delegate-plan:completed',
             'delegate-task:running',
             'delegate-task:completed',
-            'delegate-review:running',
-            'delegate-review:completed',
+            'delegate-review-group:running',
+            'delegate-review-group:completed',
             'synthesize-report:running',
             'synthesize-report:completed',
         ])
@@ -660,5 +903,31 @@ describe('runtime/delivery-chain', () => {
             })
         )
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('tool-calling'))
+    })
+
+    it('Manager 阶段模型调用抛错时不会误报读取上下文失败', async () => {
+        const modelHandle = createDeliveryChainModelHandle({
+            boundInvoke: async () => {
+                throw new Error('provider tool-call failed')
+            },
+        })
+        const writeChunk = vi.fn()
+
+        const handled = await startDeliveryChainRun({
+            context: {},
+            modelHandle: modelHandle.handle as never,
+            request: createScenarioRequest(),
+            resolvedModelSelection: testResolvedModelSelection,
+            writeChunk,
+        })
+
+        expect(handled).toBe(true)
+        expect(
+            getWorkflowProgressChunks(writeChunk)
+                .filter(chunk => chunk.type === 'workflow-progress-step')
+                .map(chunk => `${chunk.stepId}:${chunk.status}`)
+        ).toEqual(['load:running', 'load:completed', 'delegate-plan:running', 'delegate-plan:failed'])
+        expect(JSON.stringify(getWorkflowProgressChunks(writeChunk))).not.toContain('读取上下文未完成')
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('provider tool-call failed'))
     })
 })

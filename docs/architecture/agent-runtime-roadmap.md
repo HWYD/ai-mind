@@ -11,15 +11,15 @@ Roadmap 不是当前版本的实现清单。每个版本只能实现对应 spec 
 
 ## Current baseline
 
-截至 v0.3.7，当前基线是：
+截至 v0.4.1，当前基线是：
 
 - Public Agent demo resource root 已收口到 `examples/agent-demo/`。
 - Public Agent demo 文件资源只使用 `@demo://`。
 - Tasklist Agent public demo 入口是 `/tasklist + @demo://version-plans/*.md`。
 - Tasklist Agent 是受控 LangGraph Agent Runtime，包含 GraphState、HITL、checkpoint / resume 和 AgentRun 协调边界。
 - `/delivery-chain` 支持 demo scenario 和 inline requirement 两类输入。
-- `/delivery-chain` 当前内部 runtime 是 `DeliveryChainGraph`：使用 LangGraph `StateGraph` 表达固定顺序 workflow，并输出非持久化 Delivery Chain Report。
-- `/delivery-chain` 已支持 `workflow-progress-*` stream channel 和对应前端展示。
+- `/delivery-chain` 内部 runtime 是 `ControlledDeliveryManager`：通过受控 tool-calling 委派子 Agent tool，Review 阶段支持 3 个 review-class subagent 并行执行。
+- `/delivery-chain` 已支持 `workflow-progress-*` stream channel 和对应前端展示，包含 `delegate-review-group` step。
 - `@docs://`、`docs://versions/*.md` 不再作为 public Agent demo 输入。
 - `examples/agent-demo/scenarios/`、`rubrics/`、`governance/` 作为 Delivery Chain demo corpus 存在。
 
@@ -182,9 +182,33 @@ rejectOutOfOrderToolCalls: true
 把 Delivery Chain 从“LangGraph 固定 stage workflow”推进到“Controlled Manager -> Subagent Tool -> Subagent Tool Result -> Manager Synthesis”的 Agent-as-tool 架构雏形。
 ```
 
+## v0.4.1: Parallel Review Subagents + Manager Synthesis
+
+目标：
+
+- Review 阶段从单 `review-subagent` 升级为 3 个并行 review-class subagent（`review-subagent`、`risk-subagent`、`boundary-subagent`）。
+- 新增 phase-aware `DelegationPolicy`，只在 Review phase 内部允许并行 tool calls。
+- 新增 `ReviewBundle` 和 `synthesizeReviewBundle`，基于规则做综合判断（blocked / conflict / merge）。
+- Partial failure 安全处理：1-2 个 failed 继续 synthesis，3 个全 failed fail closed。
+- 保持 v0.4.0 的所有边界。
+
+明确不做：
+
+- 不修改全局 `allowParallel`。
+- 不新增 public command。
+- 不修改 stream chunk schema 或 frontend reducer shape。
+- 不新增 RuntimeArtifact kind。
+- 不实现 LLM 润色（预留降级路径）。
+
+价值：
+
+```text
+把 Review 阶段从"单 subagent 串行"推进到"多维度并行评审 + 规则综合判断"，为后续多 Agent 协作奠定基础。
+```
+
 ## Future Direction
 
-v0.4.0 之后的后续版本暂不编号。后续方向需要等 v0.4.0 的真实实现、测试和架构复盘收口后再决定。
+v0.4.1 之后的后续版本暂不编号。后续方向需要等 v0.4.1 的真实实现、测试和架构复盘收口后再决定。
 
 候选方向包括：
 
@@ -192,22 +216,21 @@ v0.4.0 之后的后续版本暂不编号。后续方向需要等 v0.4.0 的真�
 - Agent Catalog and Runtime Contract。
 - 可注册 / 可发现的通用 Agent-as-tool Catalog。
 - 更开放的 LLM dynamic routing。
-- Parallel Subagents + Manager Synthesis。
 - HITL-aware Subagent Delegation。
 - Chat persistence foundation。
 
-这些方向当前都不是 v0.4.0 的实现范围。
+这些方向当前都不是 v0.4.1 的实现范围。
 
 ## Guardrails
 
 - Roadmap 不是当前版本任务清单。
-- v0.4.0 的 Manager 是 Controlled Manager Runtime，不是自由 Supervisor Agent。
-- v0.4.0 的 Subagent Tool 是只对 ControlledDeliveryManager 暴露的受控 model tool，不是用户可选 tool，也不是全局 Agent Catalog entry。
-- v0.4.0 允许受控 tool-calling，但每次 tool call 都必须经过 DelegationPolicy 校验；未注册、乱序、超次数或缺少必要 artifact 的 tool call 必须 fail closed。
-- v0.4.0 可以复用统一 `executeToolCall()` 执行核心，但 `delivery-chain-manager` scope 不得向用户流出普通 `tool-*` / `resource-*` transcript。
-- v0.4.0 允许在 `/delivery-chain` 内部引入 run-local RuntimeArtifact，但不得引入 `@artifact://`、artifact persistence 或 DB schema。
-- v0.4.0 不得修改 `/tasklist` 路由、Tasklist Agent Graph topology、HITL decision contract、checkpoint / resume contract 或 AgentRun 持久化边界。
-- v0.4.0 不得让 Delivery Chain 子 Agent 调用 Tasklist Agent HITL Graph。
-- v0.4.0 继续复用 `workflow-progress-*`，不得把 progress panel 扩展成 raw prompt / raw response / stack / provider config transcript。
+- v0.4.1 的 Manager 是 Controlled Manager Runtime，不是自由 Supervisor Agent。
+- v0.4.1 的 Subagent Tool 是只对 ControlledDeliveryManager 暴露的受控 model tool，不是用户可选 tool，也不是全局 Agent Catalog entry。
+- v0.4.1 允许受控 tool-calling，但每次 tool call 都必须经过 DelegationPolicy 校验；未注册、乱序、超次数或缺少必要 artifact 的 tool call 必须 fail closed。Review phase 内部允许 3 个 review-class tool 并行，但 Plan/Task 阶段保持串行。
+- v0.4.1 可以复用统一 `executeToolCall()` 执行核心，但 `delivery-chain-manager` scope 不得向用户流出普通 `tool-*` / `resource-*` transcript。
+- v0.4.1 允许在 `/delivery-chain` 内部引入 run-local RuntimeArtifact，但不得引入 `@artifact://`、artifact persistence 或 DB schema。
+- v0.4.1 不得修改 `/tasklist` 路由、Tasklist Agent Graph topology、HITL decision contract、checkpoint / resume contract 或 AgentRun 持久化边界。
+- v0.4.1 不得让 Delivery Chain 子 Agent 调用 Tasklist Agent HITL Graph。
+- v0.4.1 继续复用 `workflow-progress-*`，不得把 progress panel 扩展成 raw prompt / raw response / stack / provider config transcript。
 - 除非正式 spec 明确允许，不得修改 stream protocol、frontend reducer、Prisma schema 或 PostgresSaver schema。
 - 后续版本编号必须等对应 spec / ADR / acceptance 明确后再写入 roadmap。

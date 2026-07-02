@@ -77,3 +77,14 @@ export interface DelegationPolicy {
 export interface DeliveryChainSubagentToolDefinition extends SubagentToolDefinition {
     chatToolDefinition: ChatToolDefinition<SubagentToolCallInput>
 }
+
+// v0.4.1: 并行 Review Group 的结果聚合，只在 Manager synthesis 内部使用，不进入 DB / stream / frontend message / public DTO。
+export interface ReviewBundle {
+    boundaryReview: SubagentToolResult | null
+    failedReviews: Array<{
+        subagentId: SubagentToolId
+        summary: string
+    }>
+    generalReview: SubagentToolResult | null
+    riskReview: SubagentToolResult | null
+}

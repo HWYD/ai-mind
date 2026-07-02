@@ -1,5 +1,5 @@
 import type { DeliveryChainInput, DeliveryChainResourceBundle } from '../graph-state'
-import type { RuntimeArtifact, SubagentToolResult } from './types'
+import type { ReviewBundle, RuntimeArtifact, SubagentToolResult } from './types'
 
 function stripLeadingEmbeddedHeading(markdown: string, title: string) {
     const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -184,4 +184,273 @@ export function buildDeliveryManagerReport(options: {
 
 export function toSubagentReportSummary(result: SubagentToolResult) {
     return result.summaryForManager.trim() || `${result.subagentId} 已完成。`
+}
+
+// v0.4.1: ReviewBundle synthesis
+
+export interface SynthesisResult {
+    conclusion: 'blocked' | 'needs_review' | 'pass'
+    reportMarkdown: string
+    reviewDisposition: 'blocked' | 'needs_changes' | 'pass'
+}
+
+interface SynthesisContext {
+    conclusion: 'blocked' | 'needs_review' | 'pass'
+    coverageStatus: string[]
+    highRiskItems: string[]
+    blockedItems: string[]
+    missingReviews: string[]
+    conflicts: string[]
+    mergedIssues: string[]
+}
+
+function extractBoundaryStatus(result: SubagentToolResult | null): 'blocked' | 'needs_review' | 'passed' | null {
+    if (!result) return null
+
+    if (result.status === 'blocked') return 'blocked'
+
+    const metadata = result.artifacts[0]?.metadata as { boundaryStatus?: string } | undefined
+
+    return (metadata?.boundaryStatus as 'blocked' | 'needs_review' | 'passed' | undefined) ?? null
+}
+
+function extractRiskSeverity(result: SubagentToolResult | null): 'blocker' | 'high' | 'medium' | 'low' | 'info' | null {
+    if (!result) return null
+
+    const metadata = result.artifacts[0]?.metadata as { severity?: string } | undefined
+
+    return (metadata?.severity as 'blocker' | 'high' | 'medium' | 'low' | 'info' | undefined) ?? null
+}
+
+function applySynthesisRules(bundle: ReviewBundle): SynthesisContext {
+    const ctx: SynthesisContext = {
+        blockedItems: [],
+        conclusion: 'pass',
+        conflicts: [],
+        coverageStatus: [],
+        highRiskItems: [],
+        mergedIssues: [],
+        missingReviews: [],
+    }
+
+    const boundaryStatus = extractBoundaryStatus(bundle.boundaryReview)
+    const riskSeverity = extractRiskSeverity(bundle.riskReview)
+
+    // 规则 1: boundary blocked → final = blocked
+    if (boundaryStatus === 'blocked' || bundle.boundaryReview?.status === 'blocked') {
+        ctx.conclusion = 'blocked'
+        ctx.blockedItems.push('boundary-subagent 判定为 blocked，存在边界违规')
+    }
+
+    // 规则 1a: risk severity = blocker → final = blocked
+    if (riskSeverity === 'blocker') {
+        ctx.conclusion = 'blocked'
+        ctx.blockedItems.push('risk-subagent 判定为 blocker 级别风险')
+    }
+
+    // 规则 2: boundary failed → final ≥ needs_review
+    if (!bundle.boundaryReview && !bundle.failedReviews.some(f => f.subagentId === 'boundary-subagent')) {
+        ctx.missingReviews.push('boundary-subagent')
+    }
+
+    if (bundle.failedReviews.some(f => f.subagentId === 'boundary-subagent')) {
+        ctx.missingReviews.push('boundary-subagent')
+        if (ctx.conclusion !== 'blocked') ctx.conclusion = 'needs_review'
+    }
+
+    // 规则 3: review failed → final = needs_review
+    if (bundle.failedReviews.some(f => f.subagentId === 'review-subagent')) {
+        ctx.missingReviews.push('review-subagent')
+        if (ctx.conclusion !== 'blocked') ctx.conclusion = 'needs_review'
+    }
+
+    // v0.4.1: review-subagent 的 disposition 影响 conclusion
+    if (bundle.generalReview) {
+        const generalDisposition = extractReviewDisposition(bundle.generalReview.markdown)
+
+        if (generalDisposition === 'blocked') {
+            ctx.conclusion = 'blocked'
+            ctx.blockedItems.push('review-subagent 判定为 blocked')
+        } else if (generalDisposition === 'needs_changes' && ctx.conclusion !== 'blocked') {
+            ctx.conclusion = 'needs_review'
+        }
+    }
+
+    // 规则 4: risk high → report 包含 high risk section
+    if (riskSeverity === 'high') {
+        ctx.highRiskItems.push('risk-subagent 识别到 high 级别风险')
+        if (ctx.conclusion !== 'blocked') ctx.conclusion = 'needs_review'
+    }
+
+    // 规则 5: risk failed → report 标注 risk missing
+    if (bundle.failedReviews.some(f => f.subagentId === 'risk-subagent')) {
+        ctx.missingReviews.push('risk-subagent')
+    }
+
+    // 覆盖情况
+    if (bundle.generalReview) {
+        ctx.coverageStatus.push('review-subagent: 已完成')
+    }
+
+    if (bundle.riskReview) {
+        ctx.coverageStatus.push(`risk-subagent: 已完成（severity: ${riskSeverity ?? 'unknown'}）`)
+    }
+
+    if (bundle.boundaryReview) {
+        ctx.coverageStatus.push(`boundary-subagent: 已完成（status: ${boundaryStatus ?? 'unknown'}）`)
+    }
+
+    // 规则 6: 相同问题合并（简化版：检测相同关键词）
+    const allReviews = [bundle.generalReview, bundle.riskReview, bundle.boundaryReview].filter((r): r is SubagentToolResult => r !== null)
+    const issueMap = new Map<string, string[]>()
+
+    for (const review of allReviews) {
+        const lines = review.markdown.split('\n').filter(line => line.trim().startsWith('-') || line.trim().startsWith('•'))
+
+        for (const line of lines) {
+            const key = line.trim().toLowerCase().slice(0, 40)
+
+            if (!issueMap.has(key)) {
+                issueMap.set(key, [])
+            }
+
+            issueMap.get(key)?.push(review.subagentId)
+        }
+    }
+
+    for (const [issue, mentionedBy] of issueMap) {
+        if (mentionedBy.length > 1) {
+            ctx.mergedIssues.push(`${issue}（${mentionedBy.join('、')} 均提及）`)
+        }
+    }
+
+    // 规则 7: 冲突意见标注
+    const generalConclusion = bundle.generalReview ? extractReviewDisposition(bundle.generalReview.markdown) : undefined
+    const boundaryConclusion = bundle.boundaryReview ? extractReviewDisposition(bundle.boundaryReview.markdown) : undefined
+
+    if (generalConclusion && boundaryConclusion && generalConclusion !== boundaryConclusion) {
+        ctx.conflicts.push(`review-subagent 结论为 ${generalConclusion}，boundary-subagent 结论为 ${boundaryConclusion}，存在分歧`)
+    }
+
+    return ctx
+}
+
+function buildRuleBasedReport(options: {
+    ctx: SynthesisContext
+    bundle: ReviewBundle
+    input: DeliveryChainInput
+    planArtifact: RuntimeArtifact
+    resources: DeliveryChainResourceBundle
+    taskArtifact: RuntimeArtifact
+    warnings: string[]
+}): string {
+    const { ctx, bundle, input, planArtifact, resources, taskArtifact, warnings } = options
+    const sourceSummary = input.source === 'demo_scenario' ? `demo scenario：\`${input.scenarioId}\`` : 'inline requirement'
+
+    const sections: string[] = [
+        '# Delivery Chain Report / 交付计划报告',
+        '',
+        '> 这是受控规划与评审报告，不会直接修改代码、文件、数据库或真实项目目录。',
+        '',
+        '## 输入来源',
+        `- 来源类型：${sourceSummary}`,
+        resources.sourceRefs.length > 0 ? `- 资源引用：${resources.sourceRefs.join('、')}` : '- 资源引用：无，仅使用用户输入文本。',
+        '',
+        '## 需求摘要',
+        normalizeEmbeddedSectionMarkdown(resources.requirementText),
+        '',
+        '## 综合结论',
+        `- 结论：\`${ctx.conclusion}\``,
+        ctx.blockedItems.length > 0 ? '- 阻塞项：' : '',
+        ctx.blockedItems.map(item => `  - ${item}`).join('\n'),
+        ctx.conflicts.length > 0 ? '- 冲突项：' : '',
+        ctx.conflicts.map(item => `  - ${item}`).join('\n'),
+        '',
+        '## 本轮评审覆盖情况',
+        ctx.coverageStatus.map(item => `- ${item}`).join('\n'),
+        ctx.missingReviews.length > 0 ? '- 缺失检查：' : '',
+        ctx.missingReviews.map(item => `  - ${item}（未返回有效结果）`).join('\n'),
+        '',
+        '## 实现方案',
+        normalizeEmbeddedSectionMarkdown(planArtifact.markdown, '实现方案'),
+        '',
+        '## 任务拆解',
+        normalizeEmbeddedSectionMarkdown(taskArtifact.markdown, '任务拆解'),
+        '',
+        '## Review 总评',
+        bundle.generalReview
+            ? normalizeEmbeddedSectionMarkdown(bundle.generalReview.markdown, 'Review 总评')
+            : '- review-subagent 未返回结果，缺少总评。',
+        '',
+        '## 风险评估',
+        bundle.riskReview
+            ? normalizeEmbeddedSectionMarkdown(bundle.riskReview.markdown, '风险评估')
+            : '- risk-subagent 未返回结果，缺少风险评估。',
+        ctx.highRiskItems.length > 0 ? '' : '',
+        ctx.highRiskItems.length > 0 ? '**高风险项：**' : '',
+        ctx.highRiskItems.map(item => `- ${item}`).join('\n'),
+        '',
+        '## 边界检查',
+        bundle.boundaryReview
+            ? normalizeEmbeddedSectionMarkdown(bundle.boundaryReview.markdown, '边界检查')
+            : '- boundary-subagent 未返回结果，缺少边界检查。',
+        '',
+        '## 合并后的关键问题',
+        ctx.mergedIssues.length > 0 ? ctx.mergedIssues.map(item => `- ${item}`).join('\n') : '- 未发现多 Agent 重复提及的问题。',
+        '',
+        '## 阻塞项 / 高风险项',
+        ctx.blockedItems.length === 0 && ctx.highRiskItems.length === 0
+            ? '- 无阻塞项和高风险项。'
+            : [...ctx.blockedItems, ...ctx.highRiskItems].map(item => `- ${item}`).join('\n'),
+        '',
+        '## 默认假设与警告',
+        buildAssumptions({ input, resources, warnings })
+            .map(assumption => `- ${assumption}`)
+            .join('\n'),
+        '',
+        '## 非目标',
+        buildNonGoals()
+            .map(nonGoal => `- ${nonGoal}`)
+            .join('\n'),
+        '',
+        '## 建议下一步',
+        buildNextSteps({
+            input,
+            reviewDisposition: ctx.conclusion === 'pass' ? 'pass' : ctx.conclusion === 'blocked' ? 'blocked' : 'needs_changes',
+        })
+            .map(step => `- ${step}`)
+            .join('\n'),
+    ]
+
+    return sections.filter(line => line !== undefined).join('\n')
+}
+
+export async function synthesizeReviewBundle(options: {
+    bundle: ReviewBundle
+    input: DeliveryChainInput
+    planArtifact: RuntimeArtifact
+    resources: DeliveryChainResourceBundle
+    taskArtifact: RuntimeArtifact
+    warnings: string[]
+}): Promise<SynthesisResult> {
+    const ctx = applySynthesisRules(options.bundle)
+
+    // 规则优先生成基础报告
+    const ruleBasedReport = buildRuleBasedReport({
+        ctx,
+        bundle: options.bundle,
+        input: options.input,
+        planArtifact: options.planArtifact,
+        resources: options.resources,
+        taskArtifact: options.taskArtifact,
+        warnings: options.warnings,
+    })
+
+    const reviewDisposition = ctx.conclusion === 'pass' ? 'pass' : ctx.conclusion === 'blocked' ? 'blocked' : 'needs_changes'
+
+    return {
+        conclusion: ctx.conclusion,
+        reportMarkdown: ruleBasedReport,
+        reviewDisposition,
+    }
 }

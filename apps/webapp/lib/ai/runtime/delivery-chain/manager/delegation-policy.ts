@@ -1,11 +1,24 @@
 import { findRuntimeArtifact, hasRuntimeArtifact } from './runtime-artifacts'
 import type { DelegationPolicy, RuntimeArtifact, SubagentToolId } from './types'
 
+// v0.4.1: Review Group 并行策略，只在 Review phase 内部生效，不修改全局 allowParallel。
+export interface ReviewGroupPolicy {
+    allowedReviewTools: SubagentToolId[]
+    allowParallelInReview: boolean
+    maxReviewToolCalls: number
+}
+
+export const deliveryChainReviewGroupPolicy: ReviewGroupPolicy = {
+    allowedReviewTools: ['review-subagent', 'risk-subagent', 'boundary-subagent'],
+    allowParallelInReview: true,
+    maxReviewToolCalls: 3,
+}
+
 export const deliveryChainDelegationPolicy: DelegationPolicy = {
-    allowedSubagentTools: ['plan-subagent', 'task-subagent', 'review-subagent'],
+    allowedSubagentTools: ['plan-subagent', 'task-subagent', 'review-subagent', 'risk-subagent', 'boundary-subagent'],
     allowNestedDelegation: false,
     allowParallel: false,
-    maxToolCalls: 3,
+    maxToolCalls: 5,
     rejectOutOfOrderToolCalls: true,
     rejectUnregisteredTools: true,
     requirePlanBeforeTask: true,
@@ -16,6 +29,9 @@ export interface DelegationValidationFailure {
     message: string
     summary: string
 }
+
+// v0.4.1: phase 上下文，用于区分串行阶段和并行 Review 阶段。
+export type DeliveryPhase = 'plan' | 'task' | 'review-group'
 
 export function validateToolCallBatch(toolCallCount: number, allowParallel: boolean): DelegationValidationFailure | null {
     if (toolCallCount === 1) {
@@ -37,6 +53,42 @@ export function validateToolCallBatch(toolCallCount: number, allowParallel: bool
     }
 
     return null
+}
+
+// v0.4.1: phase-aware batch 校验。Review phase 允许 count > 1（上限 maxReviewToolCalls），其余 phase 保持 count === 1。
+export function validateToolCallBatchForPhase(
+    toolCallCount: number,
+    phase: DeliveryPhase,
+    reviewGroupPolicy: ReviewGroupPolicy,
+    basePolicy: DelegationPolicy
+): DelegationValidationFailure | null {
+    if (toolCallCount === 0) {
+        return {
+            message: 'ControlledDeliveryManager 未收到合法 tool call。',
+            summary: 'Manager 未发起合法子 Agent tool 调用',
+        }
+    }
+
+    if (phase === 'review-group') {
+        if (!reviewGroupPolicy.allowParallelInReview && toolCallCount > 1) {
+            return {
+                message: 'ControlledDeliveryManager Review phase 不允许并行 tool 调用。',
+                summary: 'Manager 在 Review phase 发起了并行 tool 调用，已被拒绝',
+            }
+        }
+
+        if (toolCallCount > reviewGroupPolicy.maxReviewToolCalls) {
+            return {
+                message: `ControlledDeliveryManager Review phase 超过最大并行 tool 数量 ${reviewGroupPolicy.maxReviewToolCalls}。`,
+                summary: 'Manager 在 Review phase 超过最大并行 tool 数量，已被拒绝',
+            }
+        }
+
+        return null
+    }
+
+    // Plan/Task phase 保持串行
+    return validateToolCallBatch(toolCallCount, basePolicy.allowParallel)
 }
 
 export function validateDelegationToolCall(options: {
@@ -84,6 +136,57 @@ export function validateDelegationToolCall(options: {
         return {
             message: 'review-subagent 缺少 plan 或 tasks artifact，不得 completed。',
             summary: 'review-subagent 缺少必要 artifact，已被拒绝',
+        }
+    }
+
+    return null
+}
+
+// v0.4.1: Review Group 单个 tool call 校验。
+// Review phase 允许 review-class tool，拒绝 plan/task tool、未注册 tool、nested delegation。
+export function validateReviewGroupToolCall(options: {
+    artifacts: RuntimeArtifact[]
+    policy: DelegationPolicy
+    reviewGroupPolicy: ReviewGroupPolicy
+    requestedToolId: string
+    toolCallsSoFar: number
+}): DelegationValidationFailure | null {
+    const { artifacts, policy, reviewGroupPolicy, requestedToolId, toolCallsSoFar } = options
+
+    // 拒绝未注册 tool
+    if (policy.rejectUnregisteredTools && !policy.allowedSubagentTools.includes(requestedToolId as SubagentToolId)) {
+        return {
+            message: `ControlledDeliveryManager Review Group 收到未注册的 tool call：${requestedToolId}。`,
+            summary: 'Manager 在 Review Group 调用了未注册的子 Agent tool',
+        }
+    }
+
+    // 拒绝超出最大委派次数
+    if (toolCallsSoFar >= policy.maxToolCalls) {
+        return {
+            message: `ControlledDeliveryManager 超过最大委派次数 ${policy.maxToolCalls}。`,
+            summary: 'Manager 超过最大委派次数，已安全失败',
+        }
+    }
+
+    // 拒绝 plan/task tool（Review phase 只允许 review-class tool）
+    if (!reviewGroupPolicy.allowedReviewTools.includes(requestedToolId as SubagentToolId)) {
+        return {
+            message: `ControlledDeliveryManager Review Group 拒绝非 review-class tool：${requestedToolId}。`,
+            summary: 'Manager 在 Review Group 调用了非 review-class tool，已被拒绝',
+        }
+    }
+
+    // 拒绝 nested delegation
+    if (policy.allowNestedDelegation === false) {
+        // nested delegation 由 tool executor 层保证，这里只做 policy 级别声明
+    }
+
+    // 要求 plan + tasks artifacts 存在
+    if (findRuntimeArtifact(artifacts, 'plan') === undefined || findRuntimeArtifact(artifacts, 'tasks') === undefined) {
+        return {
+            message: 'Review Group 缺少 plan 或 tasks artifact，不得执行。',
+            summary: 'Review Group 缺少必要 artifact，已被拒绝',
         }
     }
 

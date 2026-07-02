@@ -89,5 +89,24 @@ export function createSubagentResultArtifacts(
         ]
     }
 
+    // v0.4.1: risk-subagent 和 boundary-subagent 也产出 kind: 'review'，通过 metadata.reviewType 区分。
+    if (
+        (subagentId === 'risk-subagent' || subagentId === 'boundary-subagent') &&
+        (result.status === 'completed' || result.status === 'blocked')
+    ) {
+        return [
+            createRuntimeArtifact({
+                kind: 'review',
+                markdown: result.markdown,
+                metadata: result.status === 'blocked' ? { ...result.metadata, blocked: true } : result.metadata,
+                source: {
+                    stage: 'review',
+                    subagentId,
+                },
+                title: result.artifactTitle ?? defaultTitle,
+            }),
+        ]
+    }
+
     return []
 }

@@ -71,6 +71,16 @@ describe('runtime/delivery-chain-manager contracts', () => {
                 inputArtifactKinds: ['plan', 'tasks'],
                 outputArtifactKinds: ['review'],
             }),
+            expect.objectContaining({
+                id: 'risk-subagent',
+                inputArtifactKinds: ['plan', 'tasks'],
+                outputArtifactKinds: ['review'],
+            }),
+            expect.objectContaining({
+                id: 'boundary-subagent',
+                inputArtifactKinds: ['plan', 'tasks'],
+                outputArtifactKinds: ['review'],
+            }),
         ])
         expect(definitions.every(definition => definition.allowedTools.length === 0)).toBe(true)
         expect(definitions.every(definition => definition.nonGoals.some(goal => goal.includes('Tasklist Agent')))).toBe(true)
@@ -123,7 +133,7 @@ describe('runtime/delivery-chain-manager contracts', () => {
             title: 'Delivery Chain Tasks',
         })
 
-        expect(deliveryChainDelegationPolicy.maxToolCalls).toBe(3)
+        expect(deliveryChainDelegationPolicy.maxToolCalls).toBe(5)
         expect(
             validateDelegationToolCall({
                 artifacts: [],
@@ -165,7 +175,7 @@ describe('runtime/delivery-chain-manager contracts', () => {
                 expectedToolId: 'review-subagent',
                 policy: deliveryChainDelegationPolicy,
                 requestedToolId: 'review-subagent',
-                toolCallsSoFar: 3,
+                toolCallsSoFar: 5,
             })
         ).toEqual(
             expect.objectContaining({

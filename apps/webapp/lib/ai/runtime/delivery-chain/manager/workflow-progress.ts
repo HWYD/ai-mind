@@ -1,6 +1,11 @@
 import type { SubagentToolId } from './types'
 
-export type DeliveryManagerProgressStepId = 'delegate-plan' | 'delegate-review' | 'delegate-task' | 'synthesize-report'
+export type DeliveryManagerProgressStepId =
+    | 'delegate-plan'
+    | 'delegate-review'
+    | 'delegate-review-group'
+    | 'delegate-task'
+    | 'synthesize-report'
 export type DeliveryManagerProgressStatus = 'completed' | 'failed' | 'running'
 
 export interface DeliveryManagerProgressEvent {
@@ -19,6 +24,12 @@ interface DeliveryManagerStepDefinition {
 }
 
 const SUBAGENT_STEP_DEFINITIONS: Record<SubagentToolId, DeliveryManagerStepDefinition> = {
+    'boundary-subagent': {
+        details: ['Manager 调用 Boundary Subagent Tool'],
+        runningSummary: 'Manager 正在委派 Boundary Subagent Tool',
+        stepId: 'delegate-review',
+        title: '委派 Boundary Subagent Tool',
+    },
     'plan-subagent': {
         details: ['Manager 调用 Plan Subagent Tool'],
         runningSummary: 'Manager 正在委派 Plan Subagent Tool',
@@ -30,6 +41,12 @@ const SUBAGENT_STEP_DEFINITIONS: Record<SubagentToolId, DeliveryManagerStepDefin
         runningSummary: 'Manager 正在委派 Review Subagent Tool',
         stepId: 'delegate-review',
         title: '委派 Review Subagent Tool',
+    },
+    'risk-subagent': {
+        details: ['Manager 调用 Risk Subagent Tool'],
+        runningSummary: 'Manager 正在委派 Risk Subagent Tool',
+        stepId: 'delegate-review',
+        title: '委派 Risk Subagent Tool',
     },
     'task-subagent': {
         details: ['Manager 调用 Task Subagent Tool'],

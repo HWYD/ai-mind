@@ -1,8 +1,19 @@
+import { existsSync } from 'node:fs'
+import { lstat, readFile, realpath, stat } from 'node:fs/promises'
+import path from 'node:path'
+
 import { writeStaticTextPart } from '@ai-mind/stream-core'
 
 import { createId } from '@/lib/ai/create-id'
-import { PROJECT_DOCS_SERVER_ID } from '@/lib/ai/mcp/adapters/docs-resource-shared'
-import { projectDocsResourceAdapter } from '@/lib/ai/mcp/adapters/project-docs-resource-adapter'
+import {
+    assertSafeDocsResourcePath,
+    createDocsResourcePreview,
+    createDocsResourceUri,
+    MAX_PROJECT_DOCS_RESOURCE_BYTES,
+    MAX_PROJECT_DOCS_RESOURCE_CONTENT_CHARS,
+    MAX_PROJECT_DOCS_RESOURCE_PREVIEW_CHARS,
+    PROJECT_DOCS_SERVER_ID,
+} from '@/lib/ai/mcp/adapters/docs-resource-shared'
 import type { AiMindChatModelHandle, ResolvedModelSelection } from '@/lib/ai/model-provider'
 import type { ChatComposerReference, ChatRequest } from '@/lib/ai/types/chat'
 
@@ -43,7 +54,13 @@ const GOVERNANCE_FALLBACK = `- 只读 @demo:// 公开 demo 资源
 - 不读取真实项目目录，不写真实代码文件
 - 不引入 nested HITL、artifact persistence 或 DB schema 变更`
 
-type DeliveryChainWorkflowStepId = 'load' | 'delegate-plan' | 'delegate-task' | 'delegate-review' | 'synthesize-report'
+type DeliveryChainWorkflowStepId =
+    | 'load'
+    | 'delegate-plan'
+    | 'delegate-task'
+    | 'delegate-review'
+    | 'delegate-review-group'
+    | 'synthesize-report'
 
 interface DeliveryChainWorkflowProgressRuntime {
     partId: string
@@ -140,6 +157,10 @@ function getInlineRequirementText(request: ChatRequest) {
 
     if (composerText) {
         return composerText
+    }
+
+    if (request.composer) {
+        return ''
     }
 
     return getLastUserMessageText(request)
@@ -301,6 +322,16 @@ function mapManagerProgressEvent(event: DeliveryManagerProgressEvent): DeliveryC
         }
     }
 
+    // v0.4.1: Review Group 并行评审使用独立 step，保留 event 中的详细信息
+    if (event.stepId === 'delegate-review-group') {
+        return {
+            details: event.details ?? ['Manager 并行调用评审子 Agent'],
+            runningSummary: event.summary ?? 'Manager 正在并行调用评审子 Agent',
+            stepId: 'delegate-review-group',
+            title: 'Manager 并行评审',
+        }
+    }
+
     const subagentId =
         event.stepId === 'delegate-plan' ? 'plan-subagent' : event.stepId === 'delegate-task' ? 'task-subagent' : 'review-subagent'
     const definition = getSubagentProgressStepDefinition(subagentId)
@@ -313,6 +344,82 @@ function mapManagerProgressEvent(event: DeliveryManagerProgressEvent): DeliveryC
                 : event.stepId === 'delegate-task'
                   ? 'Manager 委派 Task Subagent'
                   : 'Manager 委派 Review Subagent',
+    }
+}
+
+function resolveProjectRoot() {
+    let currentDir = process.cwd()
+
+    for (let depth = 0; depth < 6; depth += 1) {
+        if (existsSync(path.join(currentDir, 'pnpm-workspace.yaml'))) {
+            return currentDir
+        }
+
+        const parentDir = path.dirname(currentDir)
+
+        if (parentDir === currentDir) {
+            break
+        }
+
+        currentDir = parentDir
+    }
+
+    return process.cwd()
+}
+
+function isInsideDirectory(parentDir: string, childPath: string) {
+    const relativePath = path.relative(parentDir, childPath)
+
+    return relativePath === '' || (!!relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath))
+}
+
+async function readLocalDemoResource(uri: string) {
+    const resourcePath = assertSafeDocsResourcePath(uri)
+    const demoRoot = path.join(resolveProjectRoot(), 'examples', 'agent-demo')
+    const absolutePath = path.resolve(demoRoot, resourcePath)
+    const relativePath = path.relative(demoRoot, absolutePath)
+
+    if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
+        throw new Error('demo resource 不允许越界读取。')
+    }
+
+    const linkStat = await lstat(absolutePath).catch(() => null)
+
+    if (!linkStat) {
+        throw new Error(`demo workspace 下未找到资源：${resourcePath}`)
+    }
+
+    if (linkStat.isSymbolicLink()) {
+        throw new Error('demo resource 不允许读取符号链接。')
+    }
+
+    const [realDemoRoot, realFilePath] = await Promise.all([realpath(demoRoot), realpath(absolutePath)])
+
+    if (!isInsideDirectory(realDemoRoot, realFilePath)) {
+        throw new Error('demo resource 不允许通过真实路径越界读取。')
+    }
+
+    const fileStat = await stat(absolutePath)
+
+    if (!fileStat.isFile()) {
+        throw new Error(`demo workspace 下未找到资源：${resourcePath}`)
+    }
+
+    if (fileStat.size > MAX_PROJECT_DOCS_RESOURCE_BYTES) {
+        throw new Error(`demo resource 过大，当前最多支持 ${MAX_PROJECT_DOCS_RESOURCE_BYTES} 字节。`)
+    }
+
+    const rawContent = await readFile(absolutePath, 'utf8')
+    const content = rawContent.slice(0, MAX_PROJECT_DOCS_RESOURCE_CONTENT_CHARS)
+
+    return {
+        content,
+        contentPreview: createDocsResourcePreview(content),
+        previewChars: MAX_PROJECT_DOCS_RESOURCE_PREVIEW_CHARS,
+        resourceName: resourcePath,
+        serverId: PROJECT_DOCS_SERVER_ID,
+        truncated: rawContent.length > MAX_PROJECT_DOCS_RESOURCE_CONTENT_CHARS,
+        uri: createDocsResourceUri(resourcePath),
     }
 }
 
@@ -332,14 +439,12 @@ async function readDemoResource(options: {
         location: 'local',
         resourceName: options.label,
         serverId: PROJECT_DOCS_SERVER_ID,
-        source: 'mcp',
+        source: 'internal',
         uri: options.uri,
     })
 
     try {
-        const resource = await projectDocsResourceAdapter.read({
-            uri: options.uri,
-        })
+        const resource = await readLocalDemoResource(options.uri)
 
         options.writeChunk({
             type: 'resource-end',
@@ -350,7 +455,7 @@ async function readDemoResource(options: {
             previewChars: resource.previewChars,
             resourceName: resource.resourceName,
             serverId: resource.serverId,
-            source: 'mcp',
+            source: 'internal',
             uri: resource.uri,
         })
 
@@ -607,16 +712,29 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
     emitWorkflowProgressStart(options.writeChunk, workflowProgress)
     emitWorkflowProgressStep(options.writeChunk, workflowProgress, LOAD_STEP_DEFINITION, 'running')
 
+    let resources: DeliveryChainResourceBundle
+
     try {
-        const resources = await loadDeliveryChainContext(input, {
+        resources = await loadDeliveryChainContext(input, {
             writeChunk: options.writeChunk,
         })
-
-        emitWorkflowProgressStep(options.writeChunk, workflowProgress, LOAD_STEP_DEFINITION, 'completed', {
-            details: buildLoadStepDetails(input, resources),
-            summary: buildLoadCompletedSummary(input, resources),
+    } catch {
+        emitWorkflowProgressStep(options.writeChunk, workflowProgress, LOAD_STEP_DEFINITION, 'failed', {
+            failureMessage: '读取上下文未完成，当前交付计划已安全停止。',
+            summary: '读取上下文未完成',
         })
+        emitWorkflowProgressEnd(options.writeChunk, workflowProgress, 'failed', undefined, '交付计划未完整生成，请稍后重试。')
 
+        writeStaticTextPart(options.writeChunk, buildUnexpectedFailureReport(input, '当前交付链路读取上下文失败，请稍后重试。'))
+        return true
+    }
+
+    emitWorkflowProgressStep(options.writeChunk, workflowProgress, LOAD_STEP_DEFINITION, 'completed', {
+        details: buildLoadStepDetails(input, resources),
+        summary: buildLoadCompletedSummary(input, resources),
+    })
+
+    try {
         const result = await runControlledDeliveryManager({
             input,
             modelHandle: options.modelHandle,
@@ -646,13 +764,16 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
         writeStaticTextPart(options.writeChunk, result.reportMarkdown)
         return true
     } catch {
-        emitWorkflowProgressStep(options.writeChunk, workflowProgress, LOAD_STEP_DEFINITION, 'failed', {
-            failureMessage: '读取上下文未完成，当前交付计划已安全停止。',
-            summary: '读取上下文未完成',
+        emitWorkflowProgressStep(options.writeChunk, workflowProgress, getReportProgressStepDefinition(), 'failed', {
+            failureMessage: 'Delivery Manager 执行异常，当前交付计划已安全停止。',
+            summary: 'Delivery Manager 执行异常',
         })
         emitWorkflowProgressEnd(options.writeChunk, workflowProgress, 'failed', undefined, '交付计划未完整生成，请稍后重试。')
 
-        writeStaticTextPart(options.writeChunk, buildUnexpectedFailureReport(input, '当前交付链路运行失败，请稍后重试。'))
+        writeStaticTextPart(
+            options.writeChunk,
+            buildUnexpectedFailureReport(input, 'Delivery Manager 执行异常，请稍后重试。', resources.warnings)
+        )
         return true
     }
 }

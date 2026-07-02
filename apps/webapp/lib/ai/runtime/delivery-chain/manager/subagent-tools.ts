@@ -32,6 +32,16 @@ interface SubagentToolExecutionOptions {
 type ExecuteSubagentTool = (input: SubagentToolInput, options: SubagentToolExecutionOptions) => Promise<SubagentToolJsonResult>
 
 const DELIVERY_CHAIN_SUBAGENT_DEFINITIONS: Record<SubagentToolId, Omit<SubagentToolDefinition, 'id'>> = {
+    'boundary-subagent': {
+        allowedContextKinds: ['requirement', 'context', 'governance', 'rubric', 'user-note'],
+        allowedTools: [],
+        description: '检查 plan/tasks 是否触碰持久化、人工审批、流协议、工具注册等边界约束。',
+        displayName: 'Boundary Subagent',
+        inputArtifactKinds: ['plan', 'tasks'],
+        nonGoals: ['不写代码', '不修改 plan/tasks', '不做源码级 code review', '不调用 Tasklist Agent'],
+        outputArtifactKinds: ['review'],
+        roleInstruction: '你负责检查方案和任务是否触碰项目边界约束。',
+    },
     'plan-subagent': {
         allowedContextKinds: ['requirement', 'context', 'governance', 'rubric', 'user-note'],
         allowedTools: [],
@@ -51,6 +61,16 @@ const DELIVERY_CHAIN_SUBAGENT_DEFINITIONS: Record<SubagentToolId, Omit<SubagentT
         nonGoals: ['不写代码', '不修改 plan/tasks', '不做源码级 code review', '不调用 Tasklist Agent'],
         outputArtifactKinds: ['review'],
         roleInstruction: '你负责基于 plan 和 tasks 判断覆盖度、一致性和范围漂移。',
+    },
+    'risk-subagent': {
+        allowedContextKinds: ['requirement', 'context', 'governance', 'rubric', 'user-note'],
+        allowedTools: [],
+        description: '专门做风险评审，检查实现复杂度、测试覆盖、维护成本等风险。',
+        displayName: 'Risk Subagent',
+        inputArtifactKinds: ['plan', 'tasks'],
+        nonGoals: ['不写代码', '不修改 plan/tasks', '不做源码级 code review', '不调用 Tasklist Agent'],
+        outputArtifactKinds: ['review'],
+        roleInstruction: '你负责评估方案和任务的风险等级并给出缓解建议。',
     },
     'task-subagent': {
         allowedContextKinds: ['requirement', 'context', 'governance', 'rubric', 'user-note'],
@@ -380,13 +400,161 @@ function createReviewSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool
             return {
                 artifactTitle: 'Delivery Chain Review',
                 markdown,
-                metadata: isBlocked ? { blocked: true } : undefined,
+                metadata: isBlocked ? { blocked: true, reviewType: 'general' } : { reviewType: 'general' },
                 status: isBlocked ? 'blocked' : 'completed',
                 summaryForManager: isBlocked ? '评审已完成，结论为 blocked。' : '评审已完成。',
                 warnings: [],
             }
         } catch {
             return createSafeFailureResult('Review Subagent', '交付评审')
+        }
+    }
+}
+
+function createRiskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+    return async (input, options) => {
+        const hasPlanArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'plan')
+        const hasTasksArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'tasks')
+
+        if (!hasPlanArtifact || !hasTasksArtifact) {
+            return {
+                markdown: createStageFallbackText('风险评审'),
+                status: 'failed',
+                summaryForManager: '风险评审缺少方案或任务输入。',
+                warnings: ['缺少必要输入，已拒绝完成。'],
+            }
+        }
+
+        try {
+            const markdown =
+                (await invokeMarkdown(
+                    model,
+                    [
+                        new SystemMessage(
+                            '你是一个风险评审专家，负责评估方案和任务的风险等级。你的职责是基于治理规则和约束条件，识别实现复杂度、可验证性、外部依赖、回滚难度、影响范围、时效性等通用风险维度，并给出缓解建议。你只需要输出风险评估内容，不需要进行代码审查或修改输入内容。'
+                        ),
+                        new HumanMessage(
+                            [
+                                input.instruction,
+                                '上下文信息：',
+                                formatContextBlocks(input.contextBlocks),
+                                '输入产物：',
+                                formatInputArtifacts(input.inputArtifacts),
+                                '约束条件：',
+                                input.constraints.map(constraint => `- ${constraint}`).join('\n'),
+                                '请按照以下格式输出风险评估：',
+                                '',
+                                'severity: blocker|high|medium|low|info',
+                                '（blocker=存在阻塞性风险；high=高风险需优先处理；medium=中等风险；low=低风险；info=提示信息）',
+                                '',
+                                '## 风险识别',
+                                '- 基于约束条件和治理规则，识别方案在各维度的风险',
+                                '- 分析实现复杂度和技术可行性',
+                                '- 评估可验证性和测试覆盖程度',
+                                '- 识别外部依赖和潜在故障点',
+                                '- 评估回滚难度和影响范围',
+                                '- 分析时效性和进度风险',
+                                '',
+                                '## 风险等级',
+                                '- 对每个风险标注等级（blocker/high/medium/low/info）',
+                                '- 说明判定依据',
+                                '',
+                                '## 缓解建议',
+                                '- 针对每项风险给出具体缓解措施',
+                                '- 标注优先处理顺序',
+                            ].join('\n')
+                        ),
+                    ],
+                    options.signal
+                )) || createStageFallbackText('风险评审')
+
+            const severityMatch = markdown.match(/severity:\s*(blocker|high|medium|low|info)/i)
+            const severity = (severityMatch?.[1]?.toLowerCase() as string | undefined) ?? 'medium'
+
+            return {
+                artifactTitle: 'Delivery Chain Risk Review',
+                markdown,
+                metadata: { reviewType: 'risk', severity },
+                status: 'completed',
+                summaryForManager: `风险评估已完成，severity=${severity}。`,
+                warnings: [],
+            }
+        } catch {
+            return createSafeFailureResult('Risk Subagent', '风险评审')
+        }
+    }
+}
+
+function createBoundarySubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+    return async (input, options) => {
+        const hasPlanArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'plan')
+        const hasTasksArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'tasks')
+
+        if (!hasPlanArtifact || !hasTasksArtifact) {
+            return {
+                markdown: createStageFallbackText('边界检查'),
+                status: 'failed',
+                summaryForManager: '边界检查缺少方案或任务输入。',
+                warnings: ['缺少必要输入，已拒绝完成。'],
+            }
+        }
+
+        try {
+            const markdown =
+                (await invokeMarkdown(
+                    model,
+                    [
+                        new SystemMessage(
+                            '你是一个边界检查专家，负责根据传入的治理规则和约束条件，逐条检查方案和任务是否触碰任何声明的边界约束。你需要认真阅读治理规则中的每一条边界定义，判断方案是否符合这些约束。你只需要输出边界检查结论，不需要修改输入内容。'
+                        ),
+                        new HumanMessage(
+                            [
+                                input.instruction,
+                                '上下文信息：',
+                                formatContextBlocks(input.contextBlocks),
+                                '输入产物：',
+                                formatInputArtifacts(input.inputArtifacts),
+                                '约束条件：',
+                                input.constraints.map(constraint => `- ${constraint}`).join('\n'),
+                                '请按照以下格式输出边界检查结果：',
+                                '',
+                                'boundaryStatus: passed|needs_review|blocked',
+                                '（passed=未触碰任何边界；needs_review=需要人工确认；blocked=存在边界违规）',
+                                '',
+                                '## 边界触碰识别',
+                                '- 基于治理规则和约束条件，识别方案中可能触碰的边界点',
+                                '- 列出每个触碰点及其对应的约束规则',
+                                '- 分析触碰的严重程度和影响范围',
+                                '',
+                                '## 边界分类',
+                                '- 根据治理规则的分类，对触碰点进行归类',
+                                '- 说明每类边界的约束要求',
+                                '',
+                                '## 边界状态说明',
+                                '- 对每个触碰点标注状态（passed/needs_review/blocked）',
+                                '- 说明判定依据和理由',
+                            ].join('\n')
+                        ),
+                    ],
+                    options.signal
+                )) || createStageFallbackText('边界检查')
+
+            const boundaryStatusMatch = markdown.match(/boundaryStatus:\s*(passed|needs_review|blocked)/i)
+            const boundaryStatus = (boundaryStatusMatch?.[1]?.toLowerCase() as string | undefined) ?? 'needs_review'
+            const isBlocked = boundaryStatus === 'blocked'
+
+            return {
+                artifactTitle: 'Delivery Chain Boundary Review',
+                markdown,
+                metadata: isBlocked
+                    ? { blocked: true, boundaryStatus, reviewType: 'boundary' }
+                    : { boundaryStatus, reviewType: 'boundary' },
+                status: isBlocked ? 'blocked' : 'completed',
+                summaryForManager: isBlocked ? '边界检查完成，存在边界违规。' : `边界检查完成，boundaryStatus=${boundaryStatus}。`,
+                warnings: [],
+            }
+        } catch {
+            return createSafeFailureResult('Boundary Subagent', '边界检查')
         }
     }
 }
@@ -405,8 +573,10 @@ export function getDeliveryChainSubagentDefinitions() {
 export function createDeliveryChainSubagentTools(options: CreateDeliveryChainSubagentToolsOptions): DeliveryChainSubagentToolDefinition[] {
     const resolveInvocationInput = options.resolveInvocationInput ?? (() => null)
     const executors: Record<SubagentToolId, ExecuteSubagentTool> = {
+        'boundary-subagent': createBoundarySubagentExecutor(options.model),
         'plan-subagent': createPlanSubagentExecutor(options.model),
         'review-subagent': createReviewSubagentExecutor(options.model),
+        'risk-subagent': createRiskSubagentExecutor(options.model),
         'task-subagent': createTaskSubagentExecutor(options.model),
     }
 
@@ -422,8 +592,10 @@ export function createDeliveryChainSubagentTools(options: CreateDeliveryChainSub
 
 export function getDefaultArtifactTitle(subagentId: SubagentToolId) {
     const titles: Record<SubagentToolId, string> = {
+        'boundary-subagent': 'Delivery Chain Boundary Review',
         'plan-subagent': 'Delivery Chain Plan',
         'review-subagent': 'Delivery Chain Review',
+        'risk-subagent': 'Delivery Chain Risk Review',
         'task-subagent': 'Delivery Chain Tasks',
     }
 

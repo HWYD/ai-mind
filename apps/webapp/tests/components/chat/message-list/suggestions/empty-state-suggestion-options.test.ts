@@ -24,7 +24,8 @@ describe('emptyStateSuggestions', () => {
         expect(deliveryChainDemo).toBeTruthy()
         expect(deliveryChainDemo?.composer?.command?.name).toBe('delivery-chain')
         expect(deliveryChainDemo?.composer?.command?.label).toBe('生成交付计划')
-        expect(deliveryChainDemo?.text).toBe('基于这个 demo scenario 生成交付计划报告')
+        expect(deliveryChainDemo?.text).toBe('')
+        expect(deliveryChainDemo?.composer?.plainText).toBe('')
         expect(deliveryChainDemo?.composer?.references).toEqual([
             expect.objectContaining({
                 label: 'request-limit-banner/requirement.md',

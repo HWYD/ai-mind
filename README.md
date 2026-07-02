@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.4.0：Controlled Agent-as-tool Delivery Manager MVP，把 `/delivery-chain` 从固定 stage main path 推进为受控 Manager 通过 tool-calling 串行委派 `plan-subagent`、`task-subagent`、`review-subagent` 的第一版。
+> v0.4.1：Parallel Review Subagents + Manager Synthesis，在 v0.4.0 基础上将 Review 阶段升级为 3 个 review-class subagent 并行执行，并引入基于规则的 `synthesizeReviewBundle` 综合判断。
 
 ## 项目解决的问题
 
@@ -639,6 +639,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                                                       |
 | v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板                                     |
 | v0.4.0  | Controlled Agent-as-tool Delivery Manager MVP      | 用 `ControlledDeliveryManager` 接管 `/delivery-chain`，通过受控 tool-calling 串行委派 `plan/task/review` 子 Agent tool，并保持 RuntimeArtifact 仅在 run-local runtime 内部流转 |
+| v0.4.1  | Parallel Review Subagents + Manager Synthesis      | Review 阶段升级为 3 个 review-class subagent 并行执行，引入 phase-aware DelegationPolicy 和基于规则的 `synthesizeReviewBundle` 综合判断                                        |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
