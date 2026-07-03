@@ -20,6 +20,7 @@ export { getChatMemoryRuntimeConfig, type ChatMemoryCheckpointMode, type ChatMem
 export {
     chatMemoryService,
     createChatMemoryService,
+    getChatMemoryService,
     type AppendCompletedTurnInput,
     type AppendCompletedTurnOptions,
     type ChatMemoryService,

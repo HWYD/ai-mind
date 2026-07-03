@@ -101,6 +101,13 @@ interface CreateChatMemoryServiceOptions {
     compactionGenerator?: ChatMemoryCompactionGenerator
 }
 
+let sharedChatMemoryService: ChatMemoryService | undefined
+let sharedChatMemoryServiceKey: string | undefined
+
+function buildChatMemoryServiceKey(config: ChatMemoryRuntimeConfig, env: Record<string, string | undefined>): string {
+    return [config.checkpointMode, env.NODE_ENV ?? '', env.DATABASE_URL?.trim() ?? ''].join('|')
+}
+
 export function createChatMemoryService(
     config: ChatMemoryRuntimeConfig = getChatMemoryRuntimeConfig(),
     env: Record<string, string | undefined> = process.env,
@@ -239,4 +246,29 @@ export function createChatMemoryService(
     }
 }
 
-export const chatMemoryService = createChatMemoryService()
+export function getChatMemoryService(
+    config: ChatMemoryRuntimeConfig = getChatMemoryRuntimeConfig(),
+    env: Record<string, string | undefined> = process.env,
+    options: CreateChatMemoryServiceOptions = {}
+): ChatMemoryService {
+    const serviceKey = buildChatMemoryServiceKey(config, env)
+
+    if (!sharedChatMemoryService || sharedChatMemoryServiceKey !== serviceKey) {
+        sharedChatMemoryService = createChatMemoryService(config, env, options)
+        sharedChatMemoryServiceKey = serviceKey
+    }
+
+    return sharedChatMemoryService
+}
+
+export const chatMemoryService: ChatMemoryService = {
+    appendCompletedTurn(threadId, input, options) {
+        return getChatMemoryService().appendCompletedTurn(threadId, input, options)
+    },
+    readThreadState(threadId) {
+        return getChatMemoryService().readThreadState(threadId)
+    },
+    writeThreadState(threadId, state) {
+        return getChatMemoryService().writeThreadState(threadId, state)
+    },
+}
