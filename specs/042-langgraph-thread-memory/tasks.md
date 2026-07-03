@@ -91,11 +91,11 @@
 
 **Goal**: 长对话后只把 summary、pinned decisions 和 recent messages 注入模型上下文，不发送无限完整历史。
 
-**Independent Test**: 构造超过阈值的多轮普通 text chat，确认 compaction 只接受结构化 `summary/pinnedDecisions` 输出，recent messages 在 compaction 后降到 4 条以内，下一轮模型上下文不包含完整历史。
+**Independent Test**: 构造超过阈值的多轮普通 text chat，确认 compaction 只接受结构化 `summary/pinnedDecisions` 输出，recent messages 在 compaction 后按完整保留轮次下降，下一轮模型上下文不包含完整历史。
 
 ### Tests for User Story 2
 
-- [x] T035 [P] [US2] Update compaction policy tests for 8-message trigger, 4-message post-compaction retention, summary bound, pinned decision bound, and latest-message preservation in `apps/webapp/tests/lib/ai/runtime/chat-memory-compaction.test.ts`
+- [x] T035 [P] [US2] Update compaction policy tests for turn-based trigger, derived post-compaction retention, summary bound, pinned decision bound, and latest-message preservation in `apps/webapp/tests/lib/ai/runtime/chat-memory-compaction.test.ts`
 - [x] T036 [P] [US2] Add structured-output compaction failure tests for invalid schema output, provider/model error, and no corruption of previous ThreadState in `apps/webapp/tests/lib/ai/runtime/chat-memory-compaction.test.ts`
 - [x] T037 [P] [US2] Add context builder tests proving summary/pins/recent messages are injected and full history is not injected in `apps/webapp/tests/lib/ai/runtime/chat-memory-context-builder.test.ts`
 - [x] T038 [US2] Add chat orchestrator context integration tests for memory context in direct answer, reader/utility, and docs summary style text paths in `apps/webapp/tests/lib/ai/runtime/chat-orchestrator.test.ts`
@@ -103,7 +103,7 @@
 ### Implementation for User Story 2
 
 - [x] T039 [US2] Replace deterministic compaction with LangChain structured-output compaction using fixed internal model id `deepseek/deepseek-v4-pro` in `apps/webapp/lib/ai/runtime/chat-memory/compaction.ts`
-- [x] T040 [US2] Implement compaction policy with 8-message trigger, local 4-message retention after compaction, 2500-char summary target, and 20 pinned decisions in `apps/webapp/lib/ai/runtime/chat-memory/compaction.ts`
+- [x] T040 [US2] Implement compaction policy with turn-based trigger, local retained whole turns after compaction, 2500-char summary target, and 20 pinned decisions in `apps/webapp/lib/ai/runtime/chat-memory/compaction.ts`
 - [x] T041 [US2] Keep compaction failure as no-op without fallback in `apps/webapp/lib/ai/runtime/chat-memory/chat-memory-service.ts`
 - [x] T042 [US2] Implement memory context builder in `apps/webapp/lib/ai/runtime/chat-memory/context-builder.ts`
 - [x] T043 [US2] Inject chat memory context into direct answer messages without replacing existing skill/output policy prompts in `apps/webapp/lib/ai/runtime/chat-session.ts`
@@ -291,7 +291,7 @@ Task: "Add frontend hydrate hook tests for initial restore, empty restore, and r
 ## Parallel Example: User Story 2
 
 ```text
-Task: "Add compaction policy tests for 8-message threshold, summary bound, pinned decision bound, and latest-message preservation in apps/webapp/tests/lib/ai/runtime/chat-memory-compaction.test.ts"
+Task: "Add compaction policy tests for turn-based threshold, summary bound, pinned decision bound, and latest-message preservation in apps/webapp/tests/lib/ai/runtime/chat-memory-compaction.test.ts"
 Task: "Add context builder tests proving summary/pins/recent messages are injected and full history is not injected in apps/webapp/tests/lib/ai/runtime/chat-memory-context-builder.test.ts"
 ```
 

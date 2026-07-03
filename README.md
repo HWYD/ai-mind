@@ -258,6 +258,7 @@ v0.4.2 的边界非常明确：
 - 只支持当前浏览器单会话 chat memory，不做 ChatGPT 左侧多会话历史。
 - 普通 chat thread 使用派生的 `chat:${sessionHash}`，不暴露原始 session id。
 - 只保存普通聊天的 text-only recent messages，不保存 tool transcript、MCP transcript、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact 或 raw provider/runtime internals。
+- recent memory window 以完整 user/assistant turns 定义，消息条数由 turn window 派生，避免 compaction 后残留半轮上下文。
 - chat memory checkpoint 与 Tasklist Agent checkpoint 分离：Tasklist 继续使用 `langgraph_checkpoint`，chat memory 使用 `langgraph_chat_memory`。
 - development 默认 `AI_MIND_CHAT_MEMORY_CHECKPOINT=memory`，production 发布目标默认 `postgres`。
 - hydrate 只通过 `GET /api/chat/thread` 返回安全 DTO；压缩状态通过可选 `thread-memory-status` stream chunk 传递，不改变既有 reducer public shape。

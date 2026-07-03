@@ -94,8 +94,8 @@
 - **FR-042-005**: System MUST NOT expose raw browser session identifiers in public DTOs or client-readable thread identifiers.
 - **FR-042-006**: System MUST store only text-based user-visible recent messages in chat memory for this version.
 - **FR-042-007**: System MUST NOT store ordinary tool transcripts, MCP tool/resource transcripts, Tasklist GraphState, HITL checkpoint state, Delivery Chain RuntimeArtifact, subagent raw invocation/result, raw prompt, raw provider response, stack trace, API key, cookie value, or provider config in chat ThreadState.
-- **FR-042-008**: System MUST keep chat memory recent messages bounded by a configurable or documented threshold.
-- **FR-042-009**: System MUST compact older conversation content into a bounded summary when recent messages exceed the threshold.
+- **FR-042-008**: System MUST keep chat memory recent context bounded by a configurable or documented recent-turn threshold, with message-count retention derived from whole user/assistant turns.
+- **FR-042-009**: System MUST compact older conversation content into a bounded summary when recent stored messages exceed the derived threshold.
 - **FR-042-010**: System MUST preserve a bounded list of pinned decisions that represent important user decisions, architecture boundaries, and explicit conclusions.
 - **FR-042-011**: System MUST ensure compaction failure does not corrupt existing chat memory or fail an already completed user-facing answer.
 - **FR-042-012**: System MUST write chat memory at most once per completed assistant turn, not once per streaming chunk.
@@ -115,7 +115,7 @@
 - **FR-042-026**: System MUST derive `recentMessages` and `lastCompactedAt` locally after a successful compaction, rather than trusting model output for those fields.
 - **FR-042-027**: System MUST use the fixed internal compaction model id `deepseek/deepseek-v4-pro` for v0.4.2, independent from the user's selected chat model id.
 - **FR-042-028**: System MUST disable reasoning and use non-streaming invocation for the internal compaction call.
-- **FR-042-029**: System MUST reduce retained recent messages to half of `CHAT_MEMORY_RECENT_MESSAGE_LIMIT` after a successful compaction so the next turn does not immediately re-trigger compaction.
+- **FR-042-029**: System MUST reduce retained recent turns to half of `CHAT_MEMORY_RECENT_TURN_LIMIT` after a successful compaction so the next turn does not immediately re-trigger compaction.
 - **FR-042-030**: System MUST treat server-side chat ThreadState as the authoritative model-context history source for eligible chat memory paths.
 - **FR-042-031**: System MUST use only the latest eligible user message from the frontend chat request as the current turn input when chat memory is authoritative; frontend-sent historical messages are compatibility/UI payload, not model-context history.
 - **FR-042-032**: System MUST apply input length validation to the effective server-authoritative model input for eligible chat memory paths, so oversized frontend history payloads do not block a request that only needs the latest user turn plus bounded ThreadState context.
@@ -166,7 +166,7 @@
 ### Measurable Outcomes
 
 - **SC-042-001**: After completing a normal chat turn and refreshing the page in the same browser session, the user sees restored recent messages in at least 95% of healthy storage cases.
-- **SC-042-002**: A chat with more than the configured recent-message threshold continues without sending the full historical conversation to the model.
+- **SC-042-002**: A chat with more than the configured recent-turn threshold continues without sending the full historical conversation to the model.
 - **SC-042-003**: Hydration responses contain zero raw checkpoint, raw prompt, provider response, stack trace, Tasklist GraphState, or Delivery Chain RuntimeArtifact fields in contract tests.
 - **SC-042-004**: Compaction failure does not prevent the user from receiving the already completed assistant answer in 100% of tested failure scenarios.
 - **SC-042-005**: Existing Tasklist Agent HITL resume tests and Delivery Chain manager tests continue to pass with chat memory enabled.

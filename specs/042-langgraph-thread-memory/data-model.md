@@ -11,7 +11,7 @@ Represents the recoverable state for the current browser chat thread.
 
 - `messages: ChatThreadMessage[]`
     - Recent text-only user-visible messages.
-    - Maximum: 8 messages after compaction.
+    - Maximum: derived from the recent-turn window.
 - `summary: string`
     - Bounded summary of older conversation turns.
     - Maximum target: about 2500 Chinese characters.
@@ -117,7 +117,7 @@ Values derived locally after a successful model compaction.
 
 - `recentMessages: ChatThreadMessage[]`
     - Retained locally from the latest eligible messages.
-    - Maximum after compaction: half of `CHAT_MEMORY_RECENT_MESSAGE_LIMIT`.
+    - Maximum after compaction: derived from half of `CHAT_MEMORY_RECENT_TURN_LIMIT`.
 - `compactedAt: string`
     - Local ISO timestamp written by the server after a successful compaction.
 

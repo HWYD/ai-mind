@@ -105,15 +105,21 @@ Expected outcome:
 
 ## Manual Smoke: Compaction
 
-1. Send enough ordinary text turns to exceed the recent-message threshold.
+1. Send enough ordinary text turns to exceed the recent-turn threshold.
 2. Send one more turn and wait for completion.
 3. Refresh the page.
 4. Inspect the restored message count and any safe summary/pinned-decision indicators exposed by DTO or debug tooling.
 
+Current code default:
+
+- `CHAT_MEMORY_RECENT_TURN_LIMIT = 4`
+- Trigger after more than 4 completed user/assistant turns are stored
+- Successful compaction retains half of the turn window, which is currently 2 turns
+
 Expected outcome:
 
 - Recent messages are bounded.
-- After a successful compaction, the restored recent-message window drops below the trigger threshold instead of staying at the full threshold.
+- After a successful compaction, the restored recent-turn window drops below the trigger threshold instead of staying at the full threshold.
 - Older content is represented by summary/pinned decisions.
 - Full historical messages are not injected into the next model request.
 - During compaction, the frontend shows a subtle runtime hint such as `上下自动压缩中` and then updates it to `上下文已自动压缩` or `上下文自动压缩失败` after completion.

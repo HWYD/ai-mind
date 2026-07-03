@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
     CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT,
-    CHAT_MEMORY_RECENT_MESSAGE_LIMIT,
+    CHAT_MEMORY_RECENT_TURN_LIMIT,
     createChatMemoryService,
 } from '@/lib/ai/runtime/chat-memory'
 
@@ -87,7 +87,7 @@ describe('runtime/chat-memory service', () => {
         )
         const threadId = `chat:${'d'.repeat(64)}`
 
-        for (let index = 0; index < CHAT_MEMORY_RECENT_MESSAGE_LIMIT / 2 + 1; index += 1) {
+        for (let index = 0; index < CHAT_MEMORY_RECENT_TURN_LIMIT + 1; index += 1) {
             await service.appendCompletedTurn(
                 threadId,
                 {
@@ -125,7 +125,7 @@ describe('runtime/chat-memory service', () => {
         const service = createChatMemoryService({ checkpointMode: 'memory' }, {}, { compactionGenerator: async () => ({ invalid: true }) })
         const threadId = `chat:${'e'.repeat(64)}`
 
-        for (let index = 0; index < CHAT_MEMORY_RECENT_MESSAGE_LIMIT / 2; index += 1) {
+        for (let index = 0; index < CHAT_MEMORY_RECENT_TURN_LIMIT; index += 1) {
             await service.appendCompletedTurn(threadId, {
                 assistantText: `assistant ${index}`,
                 userText: `user ${index}`,
@@ -172,7 +172,7 @@ describe('runtime/chat-memory service', () => {
         )
         const threadId = `chat:${'f'.repeat(64)}`
 
-        for (let index = 0; index < CHAT_MEMORY_RECENT_MESSAGE_LIMIT / 2; index += 1) {
+        for (let index = 0; index < CHAT_MEMORY_RECENT_TURN_LIMIT; index += 1) {
             await service.appendCompletedTurn(threadId, {
                 assistantText: `assistant ${index}`,
                 userText: `user ${index}`,

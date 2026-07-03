@@ -60,9 +60,9 @@
 
 ## D042-006: Compaction Policy
 
-**Decision**: Keep up to 8 recent text messages before compaction. When the threshold is exceeded after a successful assistant turn, compact older messages into a summary of about 2500 Chinese characters and up to 20 pinned decisions. After successful compaction, keep only half of the recent-message window as retained recent messages. Use model-generated structured output with strict validation of only `summary` and `pinnedDecisions`; failure is no-op.
+**Decision**: Define the recent window by complete turns instead of raw message count. The current default keeps up to 4 recent text turns before compaction, which derives to 8 recent text messages. When the derived message threshold is exceeded after a successful assistant turn, compact older messages into a summary of about 2500 Chinese characters and up to 20 pinned decisions. After successful compaction, keep only half of the recent-turn window as retained recent turns. Use model-generated structured output with strict validation of only `summary` and `pinnedDecisions`; failure is no-op.
 
-**Rationale**: Recent messages preserve local conversational texture, while summary and pinned decisions preserve older context. Keeping only half of the recent-message window after compaction avoids a long conversation re-triggering compaction on every immediately following turn. A no-op failure mode protects the already completed user answer and existing memory.
+**Rationale**: Chat memory is appended per completed user/assistant turn, so turn count is the stable business unit. Defining the window by complete turns avoids retaining a half turn after compaction. Recent messages preserve local conversational texture, while summary and pinned decisions preserve older context. Keeping only half of the recent-turn window after compaction avoids a long conversation re-triggering compaction on every immediately following turn. A no-op failure mode protects the already completed user answer and existing memory.
 
 **Alternatives considered**:
 

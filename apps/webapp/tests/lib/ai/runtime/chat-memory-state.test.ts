@@ -4,7 +4,9 @@ import {
     aiMindThreadStateSchema,
     CHAT_MEMORY_PINNED_DECISION_LIMIT,
     CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT,
+    CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT,
     CHAT_MEMORY_RECENT_MESSAGE_LIMIT,
+    CHAT_MEMORY_RECENT_TURN_LIMIT,
     createEmptyThreadState,
     normalizeCheckpointThreadState,
     threadHydrationDtoSchema,
@@ -56,8 +58,12 @@ describe('runtime/chat-memory state schema', () => {
         expect(state.messages).toHaveLength(CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 2)
     })
 
-    it('post-compaction recent-message limit 至少保留完整一轮消息', () => {
-        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT).toBeGreaterThanOrEqual(2)
+    it('recent turn limit 以完整轮次定义，并派生消息窗口', () => {
+        expect(CHAT_MEMORY_RECENT_TURN_LIMIT).toBeGreaterThanOrEqual(2)
+        expect(CHAT_MEMORY_RECENT_MESSAGE_LIMIT).toBe(CHAT_MEMORY_RECENT_TURN_LIMIT * 2)
+        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT).toBeGreaterThanOrEqual(1)
+        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT).toBeLessThanOrEqual(CHAT_MEMORY_RECENT_TURN_LIMIT)
+        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT).toBe(CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT * 2)
         expect(CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT).toBeLessThanOrEqual(CHAT_MEMORY_RECENT_MESSAGE_LIMIT)
     })
 

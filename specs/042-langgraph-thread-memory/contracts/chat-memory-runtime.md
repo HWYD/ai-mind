@@ -113,8 +113,10 @@ Rules:
 
 ## Compaction Limits
 
-- Recent messages before compaction: 8.
-- Recent messages retained after compaction: 4.
+- Recent-turn threshold before compaction: `CHAT_MEMORY_RECENT_TURN_LIMIT`.
+- Recent-message threshold before compaction: `CHAT_MEMORY_RECENT_MESSAGE_LIMIT`, derived as `CHAT_MEMORY_RECENT_TURN_LIMIT * 2`.
+- Recent-turn retention after compaction: half of `CHAT_MEMORY_RECENT_TURN_LIMIT`.
+- Recent-message retention after compaction: `CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT`, derived from whole retained turns.
 - Summary target: about 2500 Chinese characters.
 - Pinned decisions: 20 entries.
 - Compaction output must be schema-validated before replacing state.

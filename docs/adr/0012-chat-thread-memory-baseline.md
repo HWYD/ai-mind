@@ -61,6 +61,16 @@ v0.4.2 的 `AiMindThreadState` 只允许包含：
 - cookie value
 - API key
 
+### recent window 以完整轮次定义
+
+普通 chat memory 的 recent window 以完整 user/assistant turn 为单位定义，而不是直接按裸消息条数定义。
+
+这意味着：
+
+- trigger threshold 先定义为 recent turn limit
+- recent message limit 由 `turn limit * 2` 派生
+- successful compaction 后的保留窗口按完整 turn 缩减，避免留下半轮上下文
+
 ### chat memory 是 runtime support，不是业务历史表
 
 chat memory checkpoint 只承担：

@@ -43,8 +43,8 @@ v0.4.2 为当前浏览器会话引入可恢复的单线程 chat memory baseline�
 
 - 只支持当前浏览器的单个 chat session。
 - 不做 multi-session history list、pagination、search、edit/delete persistence、long-term memory、vector memory 或 memory inspector。
-- Recent chat memory 在 compaction 前最多保留 8 条 text messages。
-- Recent chat memory 在成功 compaction 后只保留最近 4 条 text messages，避免下一轮立即再次触发压缩。
+- Recent chat memory 以完整轮次定义阈值，当前默认最多保留 4 轮 text turns（即 8 条 text messages）。
+- Recent chat memory 在成功 compaction 后只保留最近一半的完整轮次，当前默认保留 2 轮 text turns（即 4 条 text messages），避免下一轮立即再次触发压缩。
 - Conversation summary 约束在约 2500 中文字符。
 - Pinned decisions 最多 20 条。
 - Eligible ordinary chat memory paths use server-authoritative context assembly: `summary + pinnedDecisions + ThreadState recent messages + latest frontend user message`.

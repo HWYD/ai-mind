@@ -33,22 +33,22 @@ describe('runtime/chat-memory compaction', () => {
     })
 
     it('超过阈值后保留最近完整一轮消息，并把旧消息压缩到 summary/pins', async () => {
+        const expectedRecentMessages = Array.from({ length: CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT }, (_, index) =>
+            message(index + (CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 4 - CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT))
+        )
         const compacted = await compactThreadState(state(CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 4), async () => ({
             pinnedDecisions: ['决定：v0.4.2 不保存 Tasklist GraphState 到 chat memory。'],
             summary: '更早对话已被压缩。',
         }))
 
-        expect(compacted?.messages).toEqual(
-            Array.from({ length: CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT }, (_, index) =>
-                message(index + (CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 4 - CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT))
-            )
-        )
+        expect(compacted?.messages).toEqual(expectedRecentMessages)
         expect(compacted?.summary).toContain('更早对话已被压缩。')
         expect(compacted?.summary.length).toBeLessThanOrEqual(CHAT_MEMORY_SUMMARY_TARGET_LIMIT)
         expect(compacted?.pinnedDecisions).toContain('决定：v0.4.2 不保存 Tasklist GraphState 到 chat memory。')
         expect(compacted?.pinnedDecisions.length).toBeLessThanOrEqual(CHAT_MEMORY_PINNED_DECISION_LIMIT)
         expect(compacted?.lastCompactedAt).toBeTruthy()
-        expect(compacted?.messages.map(message => message.role)).toEqual(['user', 'assistant'])
+        expect(compacted?.messages).toHaveLength(CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT)
+        expect(compacted?.messages.map(message => message.role)).toEqual(['user', 'assistant', 'user', 'assistant'])
     })
 
     it('未超过阈值时不压缩', async () => {
