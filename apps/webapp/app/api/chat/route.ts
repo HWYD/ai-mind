@@ -18,13 +18,9 @@ const chatService = createChatService()
 const rateLimitConfig = getRateLimitConfig()
 const rateLimitStore = new MemoryRateLimitStore(rateLimitConfig)
 
-function getMessagesForInputLengthValidation(payload: ChatRequest, routeType: ReturnType<typeof resolveRouteType>) {
-    if (routeType !== 'tasklist') {
-        return payload.messages
-    }
-
-    // /tasklist 受控入口只消费当前这一轮用户目标和选中的 version plan。
-    // 历史对话过长不应在进入 Agent 前就把整条链路拦死。
+function getMessagesForInputLengthValidation(payload: ChatRequest) {
+    // Server-authoritative runtime 只消费当前 user turn；历史由后端 ThreadState 或受控 Agent/Workflow 自己的状态提供。
+    // 前端历史 payload 可能仍用于 UI 兼容，但不应在入口层阻断有效的当前请求。
     for (let index = payload.messages.length - 1; index >= 0; index -= 1) {
         const message = payload.messages[index]
 
@@ -48,7 +44,7 @@ export async function POST(request: NextRequest) {
             routeType,
         })
 
-        validateInputLength(getMessagesForInputLengthValidation(payload, routeType))
+        validateInputLength(getMessagesForInputLengthValidation(payload))
 
         const clientIp = resolveClientIp(request)
         const { sessionId, setCookie } = resolveSessionId(request.cookies)

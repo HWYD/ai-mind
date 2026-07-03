@@ -104,6 +104,32 @@ describe('chat stream graph chunks', () => {
     })
 })
 
+describe('chat stream thread memory status chunks', () => {
+    it('accepts optional thread-memory-status chunks in the protocol union', () => {
+        const chunks = [
+            {
+                type: 'thread-memory-status',
+                status: 'started',
+                message: '上下自动压缩中',
+            },
+            {
+                type: 'thread-memory-status',
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                summaryLength: 128,
+                pinnedDecisionCount: 2,
+            },
+            {
+                type: 'thread-memory-status',
+                status: 'failed',
+                message: '上下文自动压缩失败',
+            },
+        ] satisfies ChatStreamChunk[]
+
+        expect(chunks.map(chunk => chunk.type)).toEqual(['thread-memory-status', 'thread-memory-status', 'thread-memory-status'])
+    })
+})
+
 describe('chat stream HITL chunks', () => {
     it('accepts generic interrupt and resume chunks in the protocol union', () => {
         const chunks = [
@@ -186,5 +212,45 @@ describe('chat stream workflow progress chunks', () => {
             'workflow-progress-step',
             'workflow-progress-end',
         ])
+    })
+})
+
+describe('chat stream backward-compatible chunk inventory', () => {
+    it('includes the optional thread-memory-status chunk without removing existing chunk types', () => {
+        const knownChunkTypes = [
+            'start',
+            'skill-selected',
+            'thread-memory-status',
+            'agent-graph-node-start',
+            'agent-graph-node-end',
+            'agent-graph-route',
+            'agent-graph-state-patch',
+            'agent-graph-debug-summary',
+            'agent-interrupt',
+            'agent-resume',
+            'workflow-progress-start',
+            'workflow-progress-step',
+            'workflow-progress-end',
+            'text-start',
+            'text-delta',
+            'text-end',
+            'artifact-start',
+            'artifact-delta',
+            'artifact-end',
+            'reasoning-start',
+            'reasoning-delta',
+            'reasoning-end',
+            'tool-start',
+            'tool-end',
+            'prompt-start',
+            'prompt-end',
+            'resource-start',
+            'resource-end',
+            'finish',
+            'error',
+        ] satisfies ChatStreamChunk['type'][]
+
+        expect(knownChunkTypes).toContain('thread-memory-status')
+        expect(knownChunkTypes).toContain('finish')
     })
 })

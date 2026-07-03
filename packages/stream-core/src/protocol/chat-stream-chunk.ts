@@ -10,6 +10,16 @@ export interface SkillSelectedChunk {
     description?: string
 }
 
+export type ThreadMemoryStatus = 'started' | 'succeeded' | 'failed'
+
+export interface ThreadMemoryStatusChunk {
+    type: 'thread-memory-status'
+    status: ThreadMemoryStatus
+    message: string
+    summaryLength?: number
+    pinnedDecisionCount?: number
+}
+
 export type AgentStepStatus = 'completed' | 'failed' | 'paused' | 'running' | 'skipped'
 export type AgentStepSeverity = 'error' | 'info' | 'warning'
 
@@ -382,6 +392,7 @@ export interface ErrorChunk {
 export type ChatStreamChunk =
     | StartChunk
     | SkillSelectedChunk
+    | ThreadMemoryStatusChunk
     | AgentGraphNodeStartChunk
     | AgentGraphNodeEndChunk
     | AgentGraphRouteChunk

@@ -1,4 +1,4 @@
-﻿import { AIMessage, ToolMessage } from '@langchain/core/messages'
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -7,6 +7,9 @@ import { TASKLIST_AGENT_MODEL_POLICIES } from '@/lib/ai/runtime/version-plan-tas
 const runtimeMocks = vi.hoisted(() => {
     return {
         buildSystemMessages: vi.fn(),
+        appendCompletedTurn: vi.fn(),
+        readThreadState: vi.fn(),
+        buildChatMemoryContextMessages: vi.fn(),
         createChatSession: vi.fn(),
         decideAuthoritativeToolAnswer: vi.fn(),
         executeComposerContextInvocation: vi.fn(),
@@ -41,6 +44,33 @@ vi.mock('@/lib/ai/runtime/authoritative-answer', () => ({
 vi.mock('@/lib/ai/runtime/chat-session', () => ({
     buildSystemMessages: runtimeMocks.buildSystemMessages,
     createChatSession: runtimeMocks.createChatSession,
+    withChatMemoryContextMessages: (
+        messages: Array<SystemMessage | HumanMessage>,
+        memoryContextMessages: Array<SystemMessage | HumanMessage>
+    ) => {
+        if (memoryContextMessages.length === 0) {
+            return messages
+        }
+
+        const firstNonSystemIndex = messages.findIndex(message => message._getType() !== 'system')
+
+        if (firstNonSystemIndex === -1) {
+            return [...messages, ...memoryContextMessages]
+        }
+
+        return [...messages.slice(0, firstNonSystemIndex), ...memoryContextMessages, ...messages.slice(firstNonSystemIndex)]
+    },
+}))
+
+vi.mock('@/lib/ai/runtime/chat-memory', () => ({
+    buildChatMemoryContextMessages: runtimeMocks.buildChatMemoryContextMessages,
+    buildChatMemoryThreadId: (sessionId: string) => `chat:${sessionId}`,
+    chatMemoryService: {
+        appendCompletedTurn: runtimeMocks.appendCompletedTurn,
+        readThreadState: runtimeMocks.readThreadState,
+    },
+    isChatMemoryEligibleRequest: (request: { composer?: { command?: { name?: string } } }) =>
+        request.composer?.command?.name !== 'tasklist' && request.composer?.command?.name !== 'delivery-chain',
 }))
 
 vi.mock('@/lib/ai/runtime/composer-context', () => ({
@@ -286,6 +316,15 @@ describe('runtime/chat-orchestrator', () => {
         vi.clearAllMocks()
 
         runtimeMocks.buildSystemMessages.mockReturnValue([])
+        runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([])
+        runtimeMocks.readThreadState.mockResolvedValue({
+            restored: false,
+            state: {
+                messages: [],
+                pinnedDecisions: [],
+                summary: '',
+            },
+        })
         runtimeMocks.resolveComposerContextInvocation.mockReturnValue(null)
         runtimeMocks.executeComposerContextInvocation.mockResolvedValue([])
         runtimeMocks.hasVisibleAssistantText.mockReturnValue(false)
@@ -325,6 +364,250 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('direct-answer 成功完成后写入 chat memory 一次', async () => {
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('你好，我是 AI Mind。')
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+        const context = createExecutionContext()
+
+        const orchestrator = new ChatOrchestrator({
+            context,
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            'chat:test-session',
+            {
+                assistantMessageId: expect.any(String),
+                assistantText: '你好，我是 AI Mind。',
+                userText: '你好',
+            },
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+    })
+
+    it('chat memory compaction status 会在 finish 前写出独立 stream chunk', async () => {
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('压缩后的回答')
+        runtimeMocks.appendCompletedTurn.mockImplementationOnce(
+            async (_threadId, _input, options?: { onStatus?: (event: unknown) => void }) => {
+                options?.onStatus?.({
+                    status: 'started',
+                    message: '上下自动压缩中',
+                })
+                options?.onStatus?.({
+                    status: 'succeeded',
+                    message: '上下文已自动压缩',
+                    summaryLength: 120,
+                    pinnedDecisionCount: 2,
+                })
+            }
+        )
+        const writtenChunks: Array<{
+            type: string
+            status?: string
+            message?: string
+            summaryLength?: number
+            pinnedDecisionCount?: number
+        }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'thread-memory-status', 'thread-memory-status', 'finish'])
+        expect(writtenChunks[1]).toMatchObject({
+            type: 'thread-memory-status',
+            status: 'started',
+            message: '上下自动压缩中',
+        })
+        expect(writtenChunks[2]).toMatchObject({
+            type: 'thread-memory-status',
+            status: 'succeeded',
+            message: '上下文已自动压缩',
+            summaryLength: 120,
+            pinnedDecisionCount: 2,
+        })
+    })
+
+    it('assistant 文本已完整返回后，会先写 chat memory 再发 finish 收口', async () => {
+        const session = createSession()
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('完整回答文本')
+        const writtenChunks: Array<{ type: string; scope?: string }> = []
+        let chatMemoryAppended = false
+        runtimeMocks.appendCompletedTurn.mockImplementationOnce(async () => {
+            chatMemoryAppended = true
+        })
+        let finishObservedAfterAppend = false
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: chunk => {
+                writtenChunks.push(chunk)
+                if (chunk.type === 'finish' && chatMemoryAppended) {
+                    finishObservedAfterAppend = true
+                }
+            },
+        })
+
+        await orchestrator.run()
+
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
+        expect(finishObservedAfterAppend).toBe(true)
+        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            'chat:test-session',
+            {
+                assistantMessageId: expect.any(String),
+                assistantText: '完整回答文本',
+                userText: '你好',
+            },
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
+    })
+
+    it('direct-answer 路径会把 chat memory context 注入模型上下文', async () => {
+        const memoryMessage = new SystemMessage('memory summary')
+        const userMessage = new HumanMessage('current user')
+        const session = createSession({
+            directAnswerMessages: [new SystemMessage('base system'), userMessage],
+        })
+
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.readThreadState.mockResolvedValueOnce({
+            restored: true,
+            state: {
+                messages: [],
+                pinnedDecisions: ['必须保持边界'],
+                summary: '旧摘要',
+            },
+        })
+        runtimeMocks.buildChatMemoryContextMessages.mockReturnValueOnce([memoryMessage])
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: vi.fn(),
+        })
+
+        await orchestrator.run()
+
+        expect(session.baseModel.stream).toHaveBeenCalledWith([new SystemMessage('base system'), memoryMessage, userMessage], {
+            signal: undefined,
+        })
+    })
+
+    it('direct-answer server-authoritative 路径只组合 memory context 和最新 user 输入，不重复前端旧历史', async () => {
+        const memorySummary = new SystemMessage('memory summary')
+        const memoryRecentUser = new HumanMessage('thread recent user')
+        const memoryRecentAssistant = new AIMessage('thread recent assistant')
+        const latestUser = new HumanMessage('当前最新问题')
+        const session = createSession({
+            directAnswerMessages: [new SystemMessage('base system'), latestUser],
+        })
+        const request = {
+            ...createRequest(),
+            messages: [
+                {
+                    role: 'user' as const,
+                    parts: [{ format: 'markdown' as const, text: '前端旧问题不应进入模型', type: 'text' as const }],
+                },
+                {
+                    role: 'assistant' as const,
+                    parts: [{ format: 'markdown' as const, text: '前端旧回答不应进入模型', type: 'text' as const }],
+                },
+                {
+                    role: 'user' as const,
+                    parts: [{ format: 'markdown' as const, text: '当前最新问题', type: 'text' as const }],
+                },
+            ],
+        }
+
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.readThreadState.mockResolvedValueOnce({
+            restored: true,
+            state: {
+                messages: [],
+                pinnedDecisions: [],
+                summary: 'memory summary',
+            },
+        })
+        runtimeMocks.buildChatMemoryContextMessages.mockReturnValueOnce([memorySummary, memoryRecentUser, memoryRecentAssistant])
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request,
+            writeChunk: vi.fn(),
+        })
+
+        await orchestrator.run()
+
+        const modelMessages = session.baseModel.stream.mock.calls[0]?.[0] ?? []
+        const modelContent = modelMessages.map(message => String(message.content)).join('\n')
+
+        expect(modelMessages).toEqual([
+            new SystemMessage('base system'),
+            memorySummary,
+            memoryRecentUser,
+            memoryRecentAssistant,
+            latestUser,
+        ])
+        expect(modelContent).not.toContain('前端旧问题不应进入模型')
+        expect(modelContent).not.toContain('前端旧回答不应进入模型')
+    })
+
+    it('composer docs-summary 路径会注入 chat memory context', async () => {
+        const memoryMessage = new SystemMessage('memory for docs summary')
+        const request = createSummaryDocsRequest()
+        const session = createSession({
+            langChainMessages: [new HumanMessage('summary current user')],
+        })
+
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        runtimeMocks.resolveComposerContextInvocation.mockReturnValue({
+            kind: 'docs-summary',
+        })
+        runtimeMocks.buildSystemMessages.mockReturnValue([new SystemMessage('summary system')])
+        runtimeMocks.buildChatMemoryContextMessages.mockReturnValueOnce([memoryMessage])
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request,
+            writeChunk: vi.fn(),
+        })
+
+        await orchestrator.run()
+
+        expect(session.baseModel.stream).toHaveBeenCalledWith(
+            [new SystemMessage('summary system'), memoryMessage, new HumanMessage('summary current user')],
+            {
+                signal: undefined,
+            }
+        )
     })
 
     it.each([
@@ -432,6 +715,8 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
         expect(runtimeMocks.executeComposerContextInvocation).not.toHaveBeenCalled()
         expect(session.baseModel.stream).not.toHaveBeenCalled()
+        expect(runtimeMocks.readThreadState).not.toHaveBeenCalled()
+        expect(runtimeMocks.appendCompletedTurn).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
@@ -762,6 +1047,8 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.startDeliveryChainRun).not.toHaveBeenCalled()
         expect(session.baseModel.stream).not.toHaveBeenCalled()
         expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
+        expect(runtimeMocks.readThreadState).not.toHaveBeenCalled()
+        expect(runtimeMocks.appendCompletedTurn).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
@@ -876,6 +1163,43 @@ describe('runtime/chat-orchestrator', () => {
         )
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'error:runtime'])
         expectSingleTerminalChunk(writtenChunks)
+    })
+
+    it('输入长度超过运行时上限时返回 MODEL_PROVIDER_INVALID_REQUEST 而不是 MODEL_STREAM_FAILED', async () => {
+        const session = createSession({
+            directAnswerMessages: [new HumanMessage('a'.repeat(12001))],
+        })
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        const writtenChunks: Array<{
+            type: string
+            scope?: string
+            errorCode?: string
+            message?: string
+            retryable?: boolean
+        }> = []
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'error',
+                scope: 'runtime',
+                errorCode: 'MODEL_PROVIDER_INVALID_REQUEST',
+                retryable: false,
+            })
+        )
+        expect(writtenChunks).not.toContainEqual(
+            expect.objectContaining({
+                errorCode: 'MODEL_STREAM_FAILED',
+            })
+        )
     })
 
     it('Tasklist Agent 缺少 session secret 时不误报为模型响应失败', async () => {

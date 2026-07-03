@@ -12,6 +12,7 @@ import type {
     PromptPart,
     ResourcePart,
     TextPart,
+    ThreadMemoryStatusPart,
     ToolPart,
     WorkflowProgressPart,
     WorkflowProgressStep,
@@ -35,6 +36,7 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
                 part.type === 'tool' ||
                 part.type === 'resource' ||
                 part.type === 'skill' ||
+                part.type === 'thread-memory-status' ||
                 part.type === 'prompt' ||
                 part.type === 'workflow-progress' ||
                 part.type === 'agent-interrupt'
@@ -190,6 +192,28 @@ export function appendPart(messages: MindMessage[], messageId: string, part: Min
         return {
             ...message,
             parts: [...message.parts, part],
+        }
+    })
+}
+
+export function upsertThreadMemoryStatusPart(messages: MindMessage[], messageId: string, part: ThreadMemoryStatusPart): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPartIndex = message.parts.findIndex(existingPart => existingPart.type === 'thread-memory-status')
+
+        if (existingPartIndex === -1) {
+            return {
+                ...message,
+                parts: [...message.parts, part],
+            }
+        }
+
+        return {
+            ...message,
+            parts: message.parts.map((existingPart, index) => (index === existingPartIndex ? part : existingPart)),
         }
     })
 }

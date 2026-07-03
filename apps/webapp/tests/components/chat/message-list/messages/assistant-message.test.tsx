@@ -351,4 +351,52 @@ describe('AssistantMessage', () => {
         expect(screen.getByText('资源读取：v034-langsmith-observability.md')).toBeTruthy()
         expect(screen.queryByText(/已读取 demo 上下文/)).toBeNull()
     })
+
+    it('does not render thread-memory-status part inside the assistant message list', () => {
+        const message: MindMessage = {
+            id: 'assistant-thread-memory',
+            role: 'assistant',
+            createdAt: '2026-07-03T12:10:00.000Z',
+            parts: [
+                {
+                    id: 'text-thread-memory',
+                    type: 'text',
+                    text: '这是本轮回答。',
+                    format: 'markdown',
+                },
+                {
+                    id: 'thread-memory-status',
+                    type: 'thread-memory-status',
+                    status: 'succeeded',
+                    message: '上下文已自动压缩',
+                    summaryLength: 128,
+                    pinnedDecisionCount: 2,
+                },
+            ],
+        }
+
+        render(
+            <AssistantMessage
+                message={message}
+                combinedReasoning=""
+                contentParts={message.parts}
+                feedbackState={null}
+                hasTextContent
+                isAssistantReplyCompleted
+                isCopied={false}
+                isLatestAssistantMessage
+                isThinking={false}
+                onCopy={vi.fn()}
+                onFeedbackChange={vi.fn()}
+                onRegenerateLastTurn={vi.fn()}
+                onSelectFollowUpQuestion={vi.fn()}
+                showFollowUpSuggestions={false}
+            />
+        )
+
+        expect(screen.getByText('这是本轮回答。')).toBeTruthy()
+        expect(screen.queryByRole('status')).toBeNull()
+        expect(screen.queryByText('上下文已自动压缩')).toBeNull()
+        expect(screen.queryByText('摘要 128 字 · 关键决策 2 条')).toBeNull()
+    })
 })

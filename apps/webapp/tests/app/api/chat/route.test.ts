@@ -140,6 +140,64 @@ describe('POST /api/chat', () => {
         expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
     })
 
+    it('普通 chat memory 路径只校验最新 user 输入，不因前端历史 payload 过长而拦截', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: true,
+        })
+        streamChatMock.mockResolvedValueOnce(new Response('ok'))
+
+        const payload = {
+            conversationId: 'test-server-authoritative-input-length',
+            messages: [
+                {
+                    role: 'user',
+                    parts: [
+                        {
+                            type: 'text',
+                            format: 'markdown',
+                            text: 'a'.repeat(8000),
+                        },
+                    ],
+                },
+                {
+                    role: 'assistant',
+                    parts: [
+                        {
+                            type: 'text',
+                            format: 'markdown',
+                            text: 'b'.repeat(8000),
+                        },
+                    ],
+                },
+                {
+                    role: 'user',
+                    parts: [
+                        {
+                            type: 'text',
+                            format: 'markdown',
+                            text: '当前最新问题',
+                        },
+                    ],
+                },
+            ],
+            options: {
+                modelId: 'ollama/qwen3-8b',
+            },
+        }
+
+        const response = await POST(createPostRequest(payload))
+
+        expect(response.status).toBe(200)
+        expect(streamChatMock).toHaveBeenCalledWith(
+            payload,
+            expect.objectContaining({
+                resolvedModelSelection: expect.objectContaining({
+                    routeType: 'chat',
+                }),
+            })
+        )
+    })
+
     it('非法请求体会返回 400 + INVALID_CHAT_REQUEST', async () => {
         const response = await POST(createPostRequest({}))
         const body = await response.json()

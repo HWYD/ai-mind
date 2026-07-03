@@ -18,6 +18,20 @@ export function buildSystemMessages(...prompts: Array<string | undefined>): Base
         .map(prompt => new SystemMessage(prompt))
 }
 
+export function withChatMemoryContextMessages(messages: BaseMessage[], memoryContextMessages: BaseMessage[]): BaseMessage[] {
+    if (memoryContextMessages.length === 0) {
+        return messages
+    }
+
+    const firstNonSystemIndex = messages.findIndex(message => message._getType() !== 'system')
+
+    if (firstNonSystemIndex === -1) {
+        return [...messages, ...memoryContextMessages]
+    }
+
+    return [...messages.slice(0, firstNonSystemIndex), ...memoryContextMessages, ...messages.slice(firstNonSystemIndex)]
+}
+
 function getSkillOutputPolicyPrompt(skillDefinition?: SkillDefinition) {
     if (!skillDefinition?.outputPolicy) {
         return undefined
@@ -29,6 +43,18 @@ function getSkillOutputPolicyPrompt(skillDefinition?: SkillDefinition) {
         case 'context-reader':
             return '请优先基于外部上下文先给结论，再用一到两句话补充必要来源或依据；不要展开冗长叙述，也不要假装读取了工具未返回的信息。'
     }
+}
+
+function getLatestUserMessageOnly(request: ChatRequest): ChatRequest['messages'] {
+    for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+        const message = request.messages[index]
+
+        if (message.role === 'user') {
+            return [message]
+        }
+    }
+
+    return request.messages
 }
 
 export async function createChatSession(request: ChatRequest, resolvedModelSelection: ResolvedModelSelection): Promise<ChatSession> {
@@ -54,7 +80,7 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
         activeTools.length > 0 && modelHandle.bindTools
             ? modelHandle.bindTools(activeTools.map(toolDefinition => toolDefinition.tool))
             : null
-    const langChainMessages = toLangChainMessages(request.messages)
+    const langChainMessages = toLangChainMessages(getLatestUserMessageOnly(request))
     const directAnswerMessages: BaseMessage[] = [...buildSystemMessages(skillSystemPrompt, skillOutputPolicyPrompt), ...langChainMessages]
 
     return {

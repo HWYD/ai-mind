@@ -15,6 +15,7 @@ import type {
     ResourcePart,
     SkillPart,
     TextPart,
+    ThreadMemoryStatusPart,
     ToolPart,
     WorkflowProgressPart,
     WorkflowProgressStep,
@@ -91,6 +92,17 @@ export function createSkillPart(skillId: string, name: string, description?: str
         skillId,
         name,
         description,
+    }
+}
+
+export function createThreadMemoryStatusPart(chunk: Extract<ChatStreamChunk, { type: 'thread-memory-status' }>): ThreadMemoryStatusPart {
+    return {
+        id: 'thread-memory-status',
+        type: 'thread-memory-status',
+        status: chunk.status,
+        message: chunk.message,
+        ...(typeof chunk.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: chunk.pinnedDecisionCount } : {}),
+        ...(typeof chunk.summaryLength === 'number' ? { summaryLength: chunk.summaryLength } : {}),
     }
 }
 

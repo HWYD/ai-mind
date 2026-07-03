@@ -63,6 +63,14 @@ export interface SkillPart extends BasePart {
     description?: string
 }
 
+export interface ThreadMemoryStatusPart extends BasePart {
+    type: 'thread-memory-status'
+    status: 'failed' | 'started' | 'succeeded'
+    message: string
+    pinnedDecisionCount?: number
+    summaryLength?: number
+}
+
 export interface PromptPart extends BasePart {
     type: 'prompt'
     promptName: string
@@ -181,6 +189,7 @@ export type MindMessagePart =
     | ToolPart
     | ResourcePart
     | SkillPart
+    | ThreadMemoryStatusPart
     | PromptPart
     | WorkflowProgressPart
     | AgentStepPart

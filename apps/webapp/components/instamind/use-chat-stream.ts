@@ -31,6 +31,11 @@ const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
 // 如果后续重新启用，必须同时恢复 assistant message、interrupt payload 和同消息续写上下文，而不是只拉起一张审核卡。
 const PENDING_AGENT_RUN_STORAGE_KEY = 'ai-mind:pending-agent-run-id'
 
+interface ThreadHydrationResponse {
+    messages?: MindMessage[]
+    restored?: boolean
+}
+
 type ChatRequestError = Error & {
     code?: string
     userMessage?: string
@@ -63,6 +68,13 @@ export interface PendingAgentInterrupt {
     part: AgentInterruptPart
 }
 
+export interface ThreadMemoryStatusHint {
+    status: 'failed' | 'started' | 'succeeded'
+    message: string
+    pinnedDecisionCount?: number
+    summaryLength?: number
+}
+
 function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterrupt | null {
     for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
         const message = messages[messageIndex]
@@ -84,11 +96,12 @@ function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterru
 export function useChatStream(options: UseChatStreamOptions = {}) {
     const skillMode = options.skillMode ?? 'auto'
     const model = options.model ?? defaultChatModel
-    const enableReasoning = options.enableReasoning ?? true
+    const enableReasoning = options.enableReasoning ?? false
 
     const [messages, setMessages] = useState<MindMessage[]>([])
     const [status, setStatus] = useState<ChatStatus>('ready')
     const [error, setError] = useState<string | null>(null)
+    const [threadMemoryStatusHint, setThreadMemoryStatusHint] = useState<ThreadMemoryStatusHint | null>(null)
 
     const messagesRef = useRef(messages)
     const conversationIdRef = useRef(createId())
@@ -160,6 +173,51 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         window.localStorage.removeItem(PENDING_AGENT_RUN_STORAGE_KEY)
+    }, [])
+
+    useEffect(() => {
+        if (typeof window === 'undefined') {
+            return
+        }
+
+        let cancelled = false
+
+        async function hydrateThread() {
+            try {
+                const response = await fetch('/api/chat/thread')
+                const contentType = response.headers.get('Content-Type') ?? ''
+
+                if (!response.ok || !contentType.includes('application/json')) {
+                    return
+                }
+
+                const data = (await response.json()) as ThreadHydrationResponse
+
+                if (cancelled || !data.restored || !Array.isArray(data.messages) || messagesRef.current.length > 0) {
+                    return
+                }
+
+                const restoredMessages = data.messages.filter(
+                    (message): message is MindMessage =>
+                        (message.role === 'user' || message.role === 'assistant') &&
+                        (message.status === undefined || message.status === 'completed') &&
+                        message.parts.length > 0 &&
+                        message.parts.every(part => part.type === 'text')
+                )
+
+                syncMessageSnapshots(restoredMessages)
+                streamMessageStateRef.current = createStreamMessageState(restoredMessages)
+                setMessages(restoredMessages)
+            } catch {
+                // Hydration 是刷新恢复增强能力，失败时保持空白新会话。
+            }
+        }
+
+        void hydrateThread()
+
+        return () => {
+            cancelled = true
+        }
     }, [])
 
     /**
@@ -234,6 +292,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             case 'reasoning-delta':
                 appendReasoningDeltaBuffered(chunk)
                 return
+            case 'thread-memory-status':
+                setThreadMemoryStatusHint({
+                    status: chunk.status,
+                    message: chunk.message,
+                    ...(typeof chunk.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: chunk.pinnedDecisionCount } : {}),
+                    ...(typeof chunk.summaryLength === 'number' ? { summaryLength: chunk.summaryLength } : {}),
+                })
+                commitStreamReduction(current => reduceStreamChunk(current, chunk))
+                return
             default:
                 // 结构性 chunk 统一交给 reducer：start/tool/resource/prompt/artifact/error/finish 等消息树变化都在一个入口收口。
                 commitStreamReduction(current => reduceStreamChunk(current, chunk))
@@ -258,6 +325,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         textBuffer.clear()
+        setThreadMemoryStatusHint(null)
         // 发送前清理上一轮的空占位或临时消息，保证请求上下文只包含稳定内容。
         const stableBaseMessages = pruneTransientMessages(baseMessages)
         const userMessage = createMessage('user', [createTextPart(text, undefined, displaySegments)], composer)
@@ -369,6 +437,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         const controller = new AbortController()
 
         textBuffer.clear()
+        setThreadMemoryStatusHint(null)
         setError(null)
         setStatus('submitted')
         abortControllerRef.current = controller
@@ -462,6 +531,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         messages,
         status,
         error,
+        threadMemoryStatusHint,
         pendingInterrupt: findPendingAgentInterrupt(messages),
         sendMessage,
         resumeAgentRun,

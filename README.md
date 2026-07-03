@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.4.1：Parallel Review Subagents + Manager Synthesis，在 v0.4.0 基础上将 Review 阶段升级为 3 个 review-class subagent 并行执行，并引入基于规则的 `synthesizeReviewBundle` 综合判断。
+> v0.4.2：LangGraph Single Thread Memory Baseline。为当前唯一聊天会话引入可恢复的 thread memory，在刷新后恢复 recent messages，并通过 summary compaction 和 pinned decisions 控制上下文大小，同时保持 Tasklist Agent 与 Delivery Chain 边界不变。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.0`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.2`。
 
 已经验证：
 
@@ -214,6 +214,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Spec Kit CLI + Codex Skills Dual-track Pilot。
 - Spec Kit Full Skills Default Entry。
 - Controlled Agent-as-tool Delivery Manager。
+- LangGraph 单会话 chat memory baseline。
 
 当前非目标：
 
@@ -248,47 +249,36 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.0
+## 当前版本：v0.4.2
 
-这版的主线是 Controlled Agent-as-tool Delivery Manager MVP：把 `/delivery-chain` 从 v0.3.6/v0.3.7 的固定 stage main path，推进成一个受控 Manager 通过模型 tool-calling 串行委派三个 delivery-chain-local subagent tools，并在内部完成 artifact handoff 与最终报告汇总。
+这版的主线是 `LangGraph Single Thread Memory Baseline`：为当前浏览器的唯一普通聊天会话引入可恢复的 thread memory，让刷新后能够恢复 recent text messages，并用 summary compaction 与 pinned decisions 控制模型上下文大小。
 
-v0.4.0 的边界非常明确：
+v0.4.2 的边界非常明确：
 
-- `/delivery-chain` 仍然是唯一 Delivery Chain public command
-- 支持两种输入：`/delivery-chain + @demo://scenarios/*/requirement.md` 和 `/delivery-chain <inline requirement>`
-- Manager 只允许固定顺序调用 `plan-subagent -> task-subagent -> review-subagent`
-- 子 Agent tool result 采用强 JSON Schema，并在 runtime 内部转换为 run-local `RuntimeArtifact`
-- 继续复用 `workflow-progress-start`、`workflow-progress-step`、`workflow-progress-end`
-- progress 只展示 curated safe summary，不暴露 raw tool invocation / result / RuntimeArtifact
-- 继续只读取 `@demo://` demo resource，不读取真实 `docs/`、`specs/`、`apps/`、`packages/` 或绝对路径
-- 保持 compact resource grouping，不让内部 demo resources 回退成多个大 ResourcePanel
-- 当前模型不支持 tool-calling 或没有 `bindTools` 时直接 fail closed，不降级成 runner fallback
+- 只支持当前浏览器单会话 chat memory，不做 ChatGPT 左侧多会话历史。
+- 普通 chat thread 使用派生的 `chat:${sessionHash}`，不暴露原始 session id。
+- 只保存普通聊天的 text-only recent messages，不保存 tool transcript、MCP transcript、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact 或 raw provider/runtime internals。
+- chat memory checkpoint 与 Tasklist Agent checkpoint 分离：Tasklist 继续使用 `langgraph_checkpoint`，chat memory 使用 `langgraph_chat_memory`。
+- development 默认 `AI_MIND_CHAT_MEMORY_CHECKPOINT=memory`，production 发布目标默认 `postgres`。
+- hydrate 只通过 `GET /api/chat/thread` 返回安全 DTO；压缩状态通过可选 `thread-memory-status` stream chunk 传递，不改变既有 reducer public shape。
+- compaction 失败只能 no-op，不得影响已经完成的用户回答。
 
 本版显式不做：
 
-- 不暴露 `/plan`、`/task`、`/review`
-- 不实现 `@artifact://`
-- 不做 artifact persistence、chat persistence、DB schema 或 Prisma migration
-- 不做 HITL、checkpoint、resume、nested delegation、parallel subagents
-- 不引入 global Agent Catalog 或 user-selectable subagent picker
-- 不复用 `/tasklist` 的 HITL Graph 或 `agent-graph-*` 时间线 UI
-- 不把 workflow progress 升级成通用 tool/resource/prompt 日志回放
-- 不修改 Tasklist Agent Graph topology、HITL decision contract 或 PostgresSaver schema
+- 不新增 ChatSession / ChatMessage Prisma 业务表。
+- 不做多会话菜单、历史分页、搜索、编辑/删除持久化。
+- 不做长期记忆、LangGraph Store、pgvector 或 Memory Inspector。
+- 不把 `/tasklist`、`/delivery-chain`、普通 tool-calling transcript 写入 chat ThreadState。
+- 不修改 Tasklist Agent HITL / checkpoint / resume 语义。
+- 不修改 Delivery Chain ControlledDeliveryManager、RuntimeArtifact run-local 边界或 `delivery-chain-manager` transcript suppression。
 
-本版完成的 public demo 演进包括：
-
-- `/delivery-chain` 继续作为 Delivery Chain public entry，但主控已切换为 `ControlledDeliveryManager`
-- 复用 `examples/agent-demo/scenarios/`、`rubrics/`、`governance/` 作为 Delivery Chain demo corpus
-- `@` picker 在 `/delivery-chain` 场景下仍只展示 `scenarios/*/requirement.md`
-- Manager 通过受控 tool-calling 串行委派 Plan / Task / Review 三个子 Agent tool
-- Delivery Chain Report 保持原有 headings 兼容，同时继续支持 compact workflow progress panel
-
-当前 runtime baseline 同时保留两条受控路径：
+当前 runtime baseline 保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
-- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + serial Agent-as-tool delegation
+- `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
+- 普通 text chat：可恢复的 chat memory baseline（recent messages + summary + pinned decisions）
 
-详细设计见 [v0.4.0 Controlled Agent-as-tool Delivery Manager MVP](./docs/versions/v0.4.0-controlled-agent-as-tool-delivery-manager-mvp.md)、[v0.3.7 Delivery Chain Workflow Progress Presentation](./docs/versions/v0.3.7-delivery-chain-workflow-progress-presentation.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0010](./docs/adr/0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)。
+详细设计见 [v0.4.2 LangGraph Single Thread Memory Baseline](./docs/versions/v0.4.2-langgraph-single-thread-memory-baseline.md)、[Runtime 边界](./docs/architecture/runtime-boundary.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0012](./docs/adr/0012-chat-thread-memory-baseline.md)。
 
 ## 当前能力
 
@@ -300,11 +290,12 @@ v0.4.0 的边界非常明确：
 - Skill 命中与 Prompt 执行事实展示。
 - 统一 `error` chunk 语义。
 - `authoritative answer`：在单工具确定性结果场景下支持工具结果直出，减少模型二次改写带来的偏差。
-- 最近 `N=8` 轮上下文。
+- 普通 chat 采用 server-authoritative memory：前端 payload 可继续携带本地历史用于 UI 兼容，后端模型上下文只取当前 user turn，并从 ThreadState 注入 recent messages + summary + pinned decisions。
 - Capability-driven Tool Runtime。
 - Composer payload hint 消费。
 - Runtime-controlled Agent path。
 - Tasklist Agent Graph Runtime 单一路线。
+- 普通 chat refresh recovery 与有界上下文压缩。
 
 ### Model Provider Runtime
 
@@ -561,6 +552,26 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 
 当前限流状态只保存在单个 Node.js 进程内存中，服务重启后会清空，也不能在多实例之间共享。多实例公开访问需要接入 Redis / KV 等集中式存储；这不属于 v0.2.1 的实现范围。
 
+### Runtime checkpoint 与 chat memory setup
+
+如果要验证 durable Tasklist checkpoint 或 v0.4.2 的 chat memory checkpoint，先准备 `DATABASE_URL`，再执行：
+
+```bash
+pnpm db:setup:deploy
+```
+
+这个命令会按顺序完成：
+
+- Prisma 业务表 deploy migration
+- Tasklist Agent `langgraph_checkpoint` schema/setup
+- chat memory `langgraph_chat_memory` schema/setup
+
+如果只想单独初始化 chat memory checkpoint，也可以运行：
+
+```bash
+pnpm db:chat-memory:setup
+```
+
 ## 可以试试这些问题
 
 启动项目后，可以从下面几类问题开始验证当前能力：
@@ -640,6 +651,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板                                     |
 | v0.4.0  | Controlled Agent-as-tool Delivery Manager MVP      | 用 `ControlledDeliveryManager` 接管 `/delivery-chain`，通过受控 tool-calling 串行委派 `plan/task/review` 子 Agent tool，并保持 RuntimeArtifact 仅在 run-local runtime 内部流转 |
 | v0.4.1  | Parallel Review Subagents + Manager Synthesis      | Review 阶段升级为 3 个 review-class subagent 并行执行，引入 phase-aware DelegationPolicy 和基于规则的 `synthesizeReviewBundle` 综合判断                                        |
+| v0.4.2  | LangGraph Single Thread Memory Baseline            | 为当前单聊天会话引入 LangGraph thread memory、refresh hydration、summary compaction 与 pinned decisions，并保持 Tasklist / Delivery / stream 边界不变                          |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -674,6 +686,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Spec Kit CLI + Codex Skills Dual-track Pilot
 - [x] Spec Kit Full Skills Default Entry
 - [x] Tasklist Agent LangSmith Observability
+- [x] LangGraph 单会话 chat memory baseline
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

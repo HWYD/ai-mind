@@ -1,4 +1,5 @@
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres'
+import { loadSetupDatabaseUrlFromEnvFiles } from './load-setup-env.mjs'
 
 try {
     await import('dotenv/config')
@@ -7,10 +8,12 @@ try {
     // so dotenv is optional for this one-shot setup script.
 }
 
+loadSetupDatabaseUrlFromEnvFiles()
+
 const connectionString = process.env.DATABASE_URL?.trim()
 
 if (!connectionString) {
-    throw new Error('DATABASE_URL is required to set up the LangGraph Postgres checkpointer.')
+    throw new Error('DATABASE_URL is required to set up the Tasklist LangGraph Postgres checkpointer.')
 }
 
 const checkpointer = PostgresSaver.fromConnString(connectionString, {
@@ -19,7 +22,7 @@ const checkpointer = PostgresSaver.fromConnString(connectionString, {
 
 try {
     await checkpointer.setup()
-    console.log('LangGraph Postgres checkpointer schema is ready.')
+    console.log('Tasklist LangGraph Postgres checkpointer schema is ready.')
 } finally {
     await checkpointer.end()
 }

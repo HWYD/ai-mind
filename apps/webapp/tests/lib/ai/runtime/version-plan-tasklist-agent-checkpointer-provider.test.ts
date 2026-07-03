@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { CHAT_MEMORY_CHECKPOINT_SCHEMA } from '@/lib/ai/runtime/chat-memory'
 import {
     getVersionPlanTasklistCheckpointer,
     VERSION_PLAN_TASKLIST_CHECKPOINT_SCHEMA,
@@ -25,5 +26,6 @@ describe('runtime/version-plan-tasklist-agent checkpointer provider', () => {
 
     it('checkpoint 使用独立 PostgreSQL schema', () => {
         expect(VERSION_PLAN_TASKLIST_CHECKPOINT_SCHEMA).toBe('langgraph_checkpoint')
+        expect(VERSION_PLAN_TASKLIST_CHECKPOINT_SCHEMA).not.toBe(CHAT_MEMORY_CHECKPOINT_SCHEMA)
     })
 })

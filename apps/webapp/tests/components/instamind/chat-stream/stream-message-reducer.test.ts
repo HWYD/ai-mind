@@ -17,6 +17,45 @@ function getAssistantMessage(state: StreamMessageState) {
 }
 
 describe('stream-message-reducer', () => {
+    it('hydrated text messages can coexist with later workflow progress parts without public shape changes', () => {
+        const hydratedMessages = [
+            {
+                id: 'hydrated-user',
+                role: 'user' as const,
+                parts: [{ type: 'text' as const, text: '刷新前问题', format: 'markdown' as const }],
+                createdAt: '2026-07-02T10:00:00.000Z',
+                status: 'completed' as const,
+            },
+            {
+                id: 'hydrated-assistant',
+                role: 'assistant' as const,
+                parts: [{ type: 'text' as const, text: '刷新前回答', format: 'markdown' as const }],
+                createdAt: '2026-07-02T10:00:01.000Z',
+                status: 'completed' as const,
+            },
+        ]
+        const state = [
+            { type: 'start' as const, messageId: 'assistant-workflow-after-hydrate' },
+            {
+                type: 'workflow-progress-start' as const,
+                partId: 'workflow-progress-part',
+                workflowId: 'delivery-chain-run-1',
+                workflowKind: 'delivery-chain',
+                title: '正在生成交付计划...',
+            },
+            { type: 'finish' as const },
+        ].reduce((current, chunk) => reduceStreamChunk(current, chunk).state, createStreamMessageState(hydratedMessages))
+
+        expect(state.messages[0]).toMatchObject({
+            id: 'hydrated-user',
+            parts: [{ type: 'text' }],
+        })
+        expect(state.messages[2]?.parts[0]).toMatchObject({
+            type: 'workflow-progress',
+            workflowKind: 'delivery-chain',
+        })
+    })
+
     it('按 chunk 顺序聚合 text 和 tool part', () => {
         let state = reduceChunks([
             { type: 'start', messageId: 'assistant-1' },

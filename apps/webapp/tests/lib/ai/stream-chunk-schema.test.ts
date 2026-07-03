@@ -62,6 +62,47 @@ describe('chatStreamChunkSchema artifact chunks', () => {
     })
 })
 
+describe('chatStreamChunkSchema thread memory status chunks', () => {
+    it('accepts safe thread-memory-status chunks', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'thread-memory-status',
+                status: 'started',
+                message: '上下自动压缩中',
+            }).success
+        ).toBe(true)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'thread-memory-status',
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                summaryLength: 120,
+                pinnedDecisionCount: 2,
+            }).success
+        ).toBe(true)
+    })
+
+    it('rejects raw-like or malformed thread-memory-status chunks', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'thread-memory-status',
+                status: 'running',
+                message: '上下自动压缩中',
+            }).success
+        ).toBe(false)
+
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'thread-memory-status',
+                status: 'failed',
+                message: '',
+                rawError: 'provider timeout',
+            }).success
+        ).toBe(false)
+    })
+})
+
 describe('chatStreamChunkSchema graph chunks', () => {
     it('接受合法 graph event chunk', () => {
         expect(

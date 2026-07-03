@@ -11,7 +11,14 @@ import type { ChatRequest } from '@/lib/ai/types/chat'
 import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, stripMessageText } from './assistant-stream'
 import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from './authoritative-answer'
 import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
-import { buildSystemMessages, createChatSession } from './chat-session'
+import {
+    buildChatMemoryContextMessages,
+    buildChatMemoryThreadId,
+    chatMemoryService,
+    isChatMemoryEligibleRequest,
+    type ThreadMemoryStatusEvent,
+} from './chat-memory'
+import { buildSystemMessages, createChatSession, withChatMemoryContextMessages } from './chat-session'
 import { executeComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
 import { startDeliveryChainRun } from './delivery-chain'
 import { PromptRuntimeError, resolvePromptContextInvocation } from './prompt-context'
@@ -85,7 +92,7 @@ async function streamDirectAnswer(
         signal: context.signal,
     })
 
-    await streamAssistantParts(stream, context, writeChunk, isClosed, emitReasoning)
+    return streamAssistantParts(stream, context, writeChunk, isClosed, emitReasoning)
 }
 
 function getLastUserMessageText(request: ChatRequest) {
@@ -111,6 +118,7 @@ export class ChatOrchestrator {
     private readonly request: ChatRequest
     private readonly writeChunk: WriteChunk
     private readonly assistantMessageId = createId()
+    private memoryContextMessages: BaseMessage[] = []
     private modelHandle: AiMindChatModelHandle | null = null
 
     constructor(options: ChatOrchestratorOptions) {
@@ -124,17 +132,104 @@ export class ChatOrchestrator {
         return this.request.options?.enableReasoning !== false
     }
 
+    private writeThreadMemoryStatus(event: ThreadMemoryStatusEvent) {
+        this.writeChunk({
+            type: 'thread-memory-status',
+            status: event.status,
+            message: event.message,
+            ...(typeof event.summaryLength === 'number' ? { summaryLength: event.summaryLength } : {}),
+            ...(typeof event.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: event.pinnedDecisionCount } : {}),
+        })
+    }
+
+    private async appendCompletedChatMemoryTurn(assistantText: string | undefined) {
+        const normalizedAssistantText = assistantText?.trim()
+
+        if (!normalizedAssistantText) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'empty-assistant-text',
+            })
+            return
+        }
+
+        if (!this.context.sessionId) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'missing-session',
+            })
+            return
+        }
+
+        if (!isChatMemoryEligibleRequest(this.request)) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'ineligible-request',
+            })
+            return
+        }
+
+        if (this.context.signal?.aborted) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'request-aborted',
+            })
+            return
+        }
+
+        const userText = getLastUserMessageText(this.request)
+
+        if (!userText) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'empty-user-text',
+            })
+            return
+        }
+
+        try {
+            await chatMemoryService.appendCompletedTurn(
+                buildChatMemoryThreadId(this.context.sessionId),
+                {
+                    assistantMessageId: this.assistantMessageId,
+                    assistantText: normalizedAssistantText,
+                    userText,
+                },
+                {
+                    onStatus: event => this.writeThreadMemoryStatus(event),
+                }
+            )
+        } catch (error) {
+            logSkillRuntime('chat-memory-append-failed', {
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+            })
+            // Chat memory 是可降级能力，失败不影响已经完成的用户回答。
+        }
+    }
+
+    private async resolveChatMemoryContextMessages() {
+        if (!this.context.sessionId || !isChatMemoryEligibleRequest(this.request)) {
+            return []
+        }
+
+        try {
+            const result = await chatMemoryService.readThreadState(buildChatMemoryThreadId(this.context.sessionId))
+
+            return buildChatMemoryContextMessages(result.state)
+        } catch {
+            return []
+        }
+    }
+
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
         // 普通 Tool Calling 的 planning 阶段仍沿用 Skill + Tool prompt 组合。
-        return [
-            ...buildSystemMessages(
-                session.skillSystemPrompt,
-                session.skillOutputPolicyPrompt,
-                session.toolUseSystemPrompt,
-                withRetryPrompt ? session.toolRetrySystemPrompt : undefined
-            ),
-            ...session.langChainMessages,
-        ]
+        return withChatMemoryContextMessages(
+            [
+                ...buildSystemMessages(
+                    session.skillSystemPrompt,
+                    session.skillOutputPolicyPrompt,
+                    session.toolUseSystemPrompt,
+                    withRetryPrompt ? session.toolRetrySystemPrompt : undefined
+                ),
+                ...session.langChainMessages,
+            ],
+            this.memoryContextMessages
+        )
     }
 
     private async runPlanningAttempt(session: ChatSession, withRetryPrompt: boolean): Promise<PlanningAttemptResult> {
@@ -308,27 +403,30 @@ export class ChatOrchestrator {
 
         // 普通 Tool Calling 的最终回答阶段：把 planning 消息、ToolMessage 和可选 Prompt 上下文合并，
         // 再交给基础模型生成自然语言收束。Agent 的最终回答由 Agent runner 自己生成，不复用这里。
-        const finalMessages: BaseMessage[] = [
-            ...buildSystemMessages(
-                session.skillSystemPrompt,
-                session.skillOutputPolicyPrompt,
-                session.toolUseSystemPrompt,
-                session.toolResultSystemPrompt
-            ),
-            ...session.langChainMessages,
-            stripMessageText(planningMessage),
-            ...toolMessages,
-            ...promptContextMessages,
-        ]
+        const finalMessages: BaseMessage[] = withChatMemoryContextMessages(
+            [
+                ...buildSystemMessages(
+                    session.skillSystemPrompt,
+                    session.skillOutputPolicyPrompt,
+                    session.toolUseSystemPrompt,
+                    session.toolResultSystemPrompt
+                ),
+                ...session.langChainMessages,
+                stripMessageText(planningMessage),
+                ...toolMessages,
+                ...promptContextMessages,
+            ],
+            this.memoryContextMessages
+        )
         validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
 
-        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
+        return streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
     }
 
-    private async runCapabilityContextAnswerStage(session: ChatSession) {
+    private async runCapabilityContextAnswerStage(session: ChatSession): Promise<false | string> {
         // Capability Context 是比普通 Tool Calling 更早的“上下文注入”分支。
         // 它只处理固定 capability 场景，例如 remote resource / prompt 已被 runtime 主动解析出的情况。
         // 命中后由 runtime 主动获取上下文，再进入最终回答阶段；未命中则继续原有 tool/direct-answer 链路。
@@ -342,27 +440,28 @@ export class ChatOrchestrator {
             context: this.context,
             writeChunk: this.writeChunk,
         })
-        const finalMessages: BaseMessage[] = [
-            ...buildSystemMessages(
-                session.skillSystemPrompt,
-                session.skillOutputPolicyPrompt,
-                // 这条 prompt 只约束 capability context 的最终回答，避免模型把内部注入状态暴露给用户。
-                '请优先基于本轮 runtime 已获取的 capability 结果或 Prompt 指令回答；不要向用户暴露“已注入/未注入上下文”等内部执行状态。如果某个 capability 调用失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
-            ),
-            ...session.langChainMessages,
-            ...capabilityContextMessages,
-        ]
+        const finalMessages: BaseMessage[] = withChatMemoryContextMessages(
+            [
+                ...buildSystemMessages(
+                    session.skillSystemPrompt,
+                    session.skillOutputPolicyPrompt,
+                    // 这条 prompt 只约束 capability context 的最终回答，避免模型把内部注入状态暴露给用户。
+                    '请优先基于本轮 runtime 已获取的 capability 结果或 Prompt 指令回答；不要向用户暴露“已注入/未注入上下文”等内部执行状态。如果某个 capability 调用失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
+                ),
+                ...session.langChainMessages,
+                ...capabilityContextMessages,
+            ],
+            this.memoryContextMessages
+        )
         validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
 
-        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
-
-        return true
+        return streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
     }
 
-    private async runComposerContextAnswerStage(session: ChatSession) {
+    private async runComposerContextAnswerStage(session: ChatSession): Promise<false | string> {
         // Composer Context 处理用户在输入框里显式选择的 command / reference。
         // 注意：/tasklist + demo://version-plans/*.md 会先被 Agent 分支接管，不会落到这里变成普通 docs summary。
         const composerInvocation = resolveComposerContextInvocation(this.request)
@@ -375,23 +474,24 @@ export class ChatOrchestrator {
             context: this.context,
             writeChunk: this.writeChunk,
         })
-        const finalMessages: BaseMessage[] = [
-            ...buildSystemMessages(
-                session.skillSystemPrompt,
-                session.skillOutputPolicyPrompt,
-                '请优先基于本轮 Composer 引用读取到的上下文或 Prompt 指令回答；不要向用户暴露“已注入上下文”等内部执行状态。如果资源或 Prompt 获取失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
-            ),
-            ...session.langChainMessages,
-            ...composerContextMessages,
-        ]
+        const finalMessages: BaseMessage[] = withChatMemoryContextMessages(
+            [
+                ...buildSystemMessages(
+                    session.skillSystemPrompt,
+                    session.skillOutputPolicyPrompt,
+                    '请优先基于本轮 Composer 引用读取到的上下文或 Prompt 指令回答；不要向用户暴露“已注入上下文”等内部执行状态。如果资源或 Prompt 获取失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
+                ),
+                ...session.langChainMessages,
+                ...composerContextMessages,
+            ],
+            this.memoryContextMessages
+        )
         validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
 
-        await streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
-
-        return true
+        return streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
     }
 
     private async runVersionPlanTasklistAgentEntryStage(session: ChatSession) {
@@ -504,6 +604,7 @@ export class ChatOrchestrator {
             const session = await createChatSession(this.request, this.context.resolvedModelSelection)
 
             this.modelHandle = session.modelHandle
+            this.memoryContextMessages = await this.resolveChatMemoryContextMessages()
 
             throwIfAborted(this.context.signal)
 
@@ -539,25 +640,32 @@ export class ChatOrchestrator {
                 return
             }
 
-            if (await this.runComposerContextAnswerStage(session)) {
+            const composerAssistantText = await this.runComposerContextAnswerStage(session)
+
+            if (composerAssistantText !== false) {
+                await this.appendCompletedChatMemoryTurn(composerAssistantText)
                 lifecycle.emitFinishIfOpen()
                 return
             }
 
-            if (await this.runCapabilityContextAnswerStage(session)) {
+            const capabilityAssistantText = await this.runCapabilityContextAnswerStage(session)
+
+            if (capabilityAssistantText !== false) {
+                await this.appendCompletedChatMemoryTurn(capabilityAssistantText)
                 lifecycle.emitFinishIfOpen()
                 return
             }
 
             if (!session.toolBoundModel) {
-                await streamDirectAnswer(
+                const assistantText = await streamDirectAnswer(
                     session.baseModel,
-                    session.directAnswerMessages,
+                    withChatMemoryContextMessages(session.directAnswerMessages, this.memoryContextMessages),
                     this.context,
                     this.writeChunk,
                     this.isClosed,
                     this.shouldEmitReasoning()
                 )
+                await this.appendCompletedChatMemoryTurn(assistantText)
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -565,14 +673,15 @@ export class ChatOrchestrator {
             const planningStage = await this.runPlanningStage(session)
 
             if (planningStage.kind === 'direct-fallback') {
-                await streamDirectAnswer(
+                const assistantText = await streamDirectAnswer(
                     session.baseModel,
-                    session.directAnswerMessages,
+                    withChatMemoryContextMessages(session.directAnswerMessages, this.memoryContextMessages),
                     this.context,
                     this.writeChunk,
                     this.isClosed,
                     this.shouldEmitReasoning()
                 )
+                await this.appendCompletedChatMemoryTurn(assistantText)
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -605,16 +714,18 @@ export class ChatOrchestrator {
                     tools: authoritativeDecision.toolNames,
                 })
                 writeStaticTextPart(this.writeChunk, authoritativeDecision.answerText ?? '')
+                await this.appendCompletedChatMemoryTurn(authoritativeDecision.answerText ?? '')
                 lifecycle.emitFinishIfOpen()
                 return
             }
 
-            await this.runFinalAnswerStage(
+            const assistantText = await this.runFinalAnswerStage(
                 session,
                 planningStage.planningMessage,
                 toolExecutionResult.executedToolResults,
                 toolExecutionResult.toolMessages
             )
+            await this.appendCompletedChatMemoryTurn(assistantText)
             lifecycle.emitFinishIfOpen()
         } catch (error) {
             if (isAbortError(error) || this.context.signal?.aborted || this.isClosed()) {

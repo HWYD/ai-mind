@@ -43,6 +43,7 @@ export async function streamAssistantParts(
 ) {
     let textStarted = false
     let reasoningStarted = false
+    let completedText = ''
     const textPartId = createId()
     const reasoningPartId = createId()
 
@@ -91,6 +92,7 @@ export async function streamAssistantParts(
         }
 
         if (text) {
+            completedText += text
             ensureTextPartStarted()
             writeChunk({
                 type: 'text-delta',
@@ -113,6 +115,8 @@ export async function streamAssistantParts(
             partId: textPartId,
         })
     }
+
+    return completedText
 }
 
 function toAIMessage(chunk: AIMessageChunk | null, includeReasoningMetadata = true): AIMessage {

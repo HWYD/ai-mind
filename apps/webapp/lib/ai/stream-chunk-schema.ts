@@ -240,6 +240,15 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         name: z.string().min(1),
         description: z.string().min(1).optional(),
     }),
+    z
+        .object({
+            type: z.literal('thread-memory-status'),
+            status: z.enum(['started', 'succeeded', 'failed']),
+            message: z.string().min(1),
+            summaryLength: z.number().int().nonnegative().optional(),
+            pinnedDecisionCount: z.number().int().nonnegative().optional(),
+        })
+        .strict(),
     z.object({
         type: z.literal('agent-graph-node-start'),
         partId: z.string().min(1),

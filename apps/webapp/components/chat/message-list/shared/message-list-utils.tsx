@@ -30,6 +30,7 @@ export function hasVisibleContent(part: MindMessagePart) {
         case 'workflow-progress':
         case 'agent-step':
             return true
+        case 'thread-memory-status':
         case 'agent-interrupt':
             return false
         default:

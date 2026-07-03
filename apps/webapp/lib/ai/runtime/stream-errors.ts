@@ -1,5 +1,7 @@
 import type { StreamErrorCode } from '@ai-mind/stream-core/protocol'
 
+import { InputLengthExceededError } from '@/lib/ai/model-provider'
+
 export { createStreamErrorChunk, writeStreamErrorChunk, type StreamErrorPayload } from '@ai-mind/stream-core'
 
 export interface NormalizedKnownRuntimeError {
@@ -102,6 +104,14 @@ function normalizePrismaDataLayerError(error: unknown): NormalizedKnownRuntimeEr
 export function normalizeKnownRuntimeError(error: unknown): NormalizedKnownRuntimeError | null {
     const code = getErrorCode(error)
     const name = getErrorName(error)
+
+    if (error instanceof InputLengthExceededError || (name === 'InputLengthExceededError' && code === 'MODEL_PROVIDER_INVALID_REQUEST')) {
+        return {
+            code: 'MODEL_PROVIDER_INVALID_REQUEST',
+            message: '请求内容超出模型处理上限，请缩短输入后重试。',
+            retryable: false,
+        }
+    }
 
     if (name === 'AgentRunServiceError' || code?.startsWith('AGENT_') || code === 'INVALID_AGENT_REVIEW_DECISION') {
         return {

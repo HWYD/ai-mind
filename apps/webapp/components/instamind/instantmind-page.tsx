@@ -14,13 +14,14 @@ import type { ChatModelsInitialState } from '@/lib/ai/models'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatSkillMode } from '@/lib/ai/types/chat'
 
 import { HumanReviewComposerPanel } from './human-review/human-review-composer-panel'
+import { ThreadMemoryStatusHint } from './thread-memory-status-hint'
 import { useChatAutoScroll } from './use-chat-auto-scroll'
 import { useChatModels } from './use-chat-models'
 import { useChatStream } from './use-chat-stream'
 
 export default function InstantMindPage({ initialChatModelsState }: { initialChatModelsState: ChatModelsInitialState }) {
     const [skillMode, setSkillMode] = useState<ChatSkillMode>('auto')
-    const [enableReasoning, setEnableReasoning] = useState(true)
+    const [enableReasoning, setEnableReasoning] = useState(false)
     const {
         hasAvailableModels,
         isLoading: isModelLoading,
@@ -29,12 +30,22 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         modelGroups,
         setModel,
     } = useChatModels(initialChatModelsState)
-    const { messages, status, error, pendingInterrupt, sendMessage, resumeAgentRun, cancel, deleteUserTurn, regenerateLastTurn } =
-        useChatStream({
-            skillMode,
-            model,
-            enableReasoning,
-        })
+    const {
+        messages,
+        status,
+        error,
+        threadMemoryStatusHint,
+        pendingInterrupt,
+        sendMessage,
+        resumeAgentRun,
+        cancel,
+        deleteUserTurn,
+        regenerateLastTurn,
+    } = useChatStream({
+        skillMode,
+        model,
+        enableReasoning,
+    })
     const hasPendingReview = Boolean(pendingInterrupt)
     const isStreamingOutput = status === 'submitted' || status === 'streaming'
     const { inputContainerRef, bottomSpacing, showScrollToBottom, resetAutoScrollForNewTurn, restoreAutoFollowAndScrollToBottom } =
@@ -142,6 +153,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                     </div>
 
                     <div ref={inputContainerRef}>
+                        <ThreadMemoryStatusHint hint={threadMemoryStatusHint} />
                         <HumanReviewComposerPanel pendingInterrupt={pendingInterrupt} onResumeDecision={handleResumeDecision} />
                         <ChatComposer
                             disabled={hasPendingReview}

@@ -90,7 +90,7 @@ describe('POST /api/chat tasklist input length routing', () => {
                 },
             ],
             options: {
-                modelId: 'qwen/qwen3.6-plus',
+                modelId: 'qwen/qwen3.6-flash',
             },
         }
 

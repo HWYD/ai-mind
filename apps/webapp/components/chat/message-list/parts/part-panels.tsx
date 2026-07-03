@@ -1,10 +1,10 @@
-import { Calculator, CalendarClock, CircleAlert, CloudSun, FileText, Ruler, Wrench } from 'lucide-react'
+import { Calculator, CalendarClock, CircleAlert, CircleCheckBig, CloudSun, FileText, LoaderCircle, Ruler, Wrench } from 'lucide-react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
-import type { PromptPart, ResourcePart, SkillPart, ToolPart } from '@/lib/ai/types/message'
+import type { PromptPart, ResourcePart, SkillPart, ThreadMemoryStatusPart, ToolPart } from '@/lib/ai/types/message'
 
 import {
     getActionLabel,
@@ -135,6 +135,28 @@ function ErrorBlock({ error }: { error?: string }) {
     )
 }
 
+function getThreadMemoryStatusClassName(status: ThreadMemoryStatusPart['status']) {
+    switch (status) {
+        case 'failed':
+            return 'border-amber-200 bg-amber-50/80 text-amber-800'
+        case 'succeeded':
+            return 'border-emerald-200 bg-emerald-50/70 text-emerald-800'
+        case 'started':
+            return 'border-sky-200 bg-sky-50/70 text-sky-800'
+    }
+}
+
+function renderThreadMemoryStatusIcon(status: ThreadMemoryStatusPart['status']) {
+    switch (status) {
+        case 'failed':
+            return <CircleAlert className="size-3.5" strokeWidth={2.2} />
+        case 'succeeded':
+            return <CircleCheckBig className="size-3.5" strokeWidth={2.2} />
+        case 'started':
+            return <LoaderCircle className="size-3.5 animate-spin" strokeWidth={2.2} />
+    }
+}
+
 export function SkillPanel({ part }: { part: SkillPart }) {
     return (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-full border border-border/70 bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground shadow-xs">
@@ -144,6 +166,32 @@ export function SkillPanel({ part }: { part: SkillPart }) {
                 ID：{part.skillId}
             </Badge>
             {part.description ? <span className="min-w-0 flex-1 truncate">{part.description}</span> : null}
+        </div>
+    )
+}
+
+export function ThreadMemoryStatusPanel({ part }: { part: ThreadMemoryStatusPart }) {
+    const metadata: string[] = []
+
+    if (typeof part.summaryLength === 'number') {
+        metadata.push(`摘要 ${part.summaryLength} 字`)
+    }
+
+    if (typeof part.pinnedDecisionCount === 'number') {
+        metadata.push(`关键决策 ${part.pinnedDecisionCount} 条`)
+    }
+
+    return (
+        <div
+            role="status"
+            aria-live="polite"
+            className={`mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm shadow-xs ${getThreadMemoryStatusClassName(part.status)}`}
+        >
+            <div className="flex min-w-0 items-center gap-2">
+                {renderThreadMemoryStatusIcon(part.status)}
+                <span className="truncate font-medium">{part.message}</span>
+            </div>
+            {metadata.length > 0 ? <span className="shrink-0 text-xs opacity-80">{metadata.join(' · ')}</span> : null}
         </div>
     )
 }

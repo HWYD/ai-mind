@@ -733,6 +733,8 @@ describe('runtime/delivery-chain', () => {
         expect(chunkTypes.has('tool-end')).toBe(false)
         expect(chunkTypes.has('artifact-start')).toBe(false)
         expect(chunkTypes.has('artifact-end')).toBe(false)
+        expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('runtimeArtifact')
+        expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('chat-memory')
     })
 
     it('短 inline requirement 会在报告里补默认假设，blocked review 仍输出最终报告', async () => {

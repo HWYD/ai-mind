@@ -27,6 +27,10 @@ function createNdjsonResponse(chunks: ChatStreamChunk[], status = 200) {
     })
 }
 
+function getChatFetchCalls(fetchMock: ReturnType<typeof vi.fn>) {
+    return fetchMock.mock.calls.filter(call => String(call[0]) !== '/api/chat/thread')
+}
+
 afterEach(() => {
     window.localStorage.clear()
     vi.unstubAllGlobals()
@@ -82,7 +86,7 @@ describe('useChatStream', () => {
             await result.current.sendMessage('你好')
         })
 
-        const requestInit = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined
+        const requestInit = getChatFetchCalls(fetchMock)[0]?.[1] as RequestInit | undefined
         const requestBody = typeof requestInit?.body === 'string' ? JSON.parse(requestInit.body) : null
 
         expect(requestBody?.options?.modelId).toBe('qwen/qwen3.6-plus')
@@ -165,8 +169,10 @@ describe('useChatStream', () => {
         const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
         const textPart = assistantMessage?.parts.find(part => part.type === 'text')
 
-        expect(fetchMock).toHaveBeenCalledTimes(1)
-        expect(fetchMock.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
+        const chatFetchCalls = getChatFetchCalls(fetchMock)
+
+        expect(chatFetchCalls).toHaveLength(1)
+        expect(chatFetchCalls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
         expect(result.current.error).toBeNull()
         expect(assistantMessage).toBeDefined()
         expect(textPart?.type).toBe('text')
@@ -501,7 +507,7 @@ describe('useChatStream', () => {
             expect(result.current.deleteUserTurn(userMessageId ?? 'missing-user-message')).toBe(false)
         })
 
-        expect(fetchMock).toHaveBeenCalledTimes(1)
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
     })
 
     it('页面初始化不会恢复 pending HITL，并会清理旧的 pendingAgentRunId', async () => {
@@ -515,7 +521,7 @@ describe('useChatStream', () => {
             expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
         })
 
-        expect(fetchMock).not.toHaveBeenCalled()
+        expect(fetchMock).toHaveBeenCalledWith('/api/chat/thread')
         expect(result.current.pendingInterrupt).toBeNull()
         expect(result.current.messages).toHaveLength(0)
     })

@@ -37,3 +37,5 @@ ADR 不是 tasklist。它解释为什么做出这个决定、带来什么取舍�
 - [0008: LangSmith Observability Boundary](./0008-langsmith-observability-boundary.md)
 - [0009: Public Agent Demo Resource Boundary](./0009-public-agent-demo-resource-boundary.md)
 - [0010: Controlled Delivery Chain and Artifact Handoff Roadmap](./0010-controlled-delivery-chain-and-artifact-handoff-roadmap.md)
+- [0011: Phase-aware Delegation Policy and Parallel Review Group](./0011-phase-aware-delegation-policy-and-parallel-review-group.md)
+- [0012: Chat Thread Memory Baseline](./0012-chat-thread-memory-baseline.md)

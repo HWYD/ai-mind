@@ -12,6 +12,7 @@ vi.mock('@/lib/ai/mcp/adapters', () => ({
 }))
 
 import type { AgentRunPublicDto } from '@/lib/ai/agent-runs/contracts'
+import { buildChatMemoryThreadId, isChatMemoryThreadId } from '@/lib/ai/runtime/chat-memory'
 import type { ChatSession } from '@/lib/ai/runtime/types'
 import {
     createNoopTasklistLangSmithObserver,
@@ -397,6 +398,22 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(agentRunService.markCompleted).not.toHaveBeenCalled()
         expect(agentRunService.markRejected).not.toHaveBeenCalled()
         expect(agentRunService.markFailed).not.toHaveBeenCalled()
+    })
+
+    it('Tasklist resume 使用 tasklist-agent thread id，不接受 chat memory thread id 语义', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const { options } = createStartOptions(agentRunService, proceedPlanningOutput)
+        const result = await startVersionPlanTasklistAgentRun(options)
+        const createRunInput = agentRunService.createRun.mock.calls[0]?.[1]
+        const chatThreadId = buildChatMemoryThreadId('session-coordinator-test', {
+            AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
+        })
+
+        expect(result.graphResult.status).toBe('interrupted')
+        expect(createRunInput.threadId).toBe(`tasklist-agent:conversation-coordinator-test:${createRunInput.id}`)
+        expect(isChatMemoryThreadId(chatThreadId)).toBe(true)
+        expect(createRunInput.threadId).not.toBe(chatThreadId)
+        expect(isChatMemoryThreadId(createRunInput.threadId)).toBe(false)
     })
 
     it('initial run 记录 LangSmith initial 与 interrupt metadata', async () => {

@@ -11,6 +11,7 @@ import {
     createResourcePart,
     createSkillPart,
     createTextPart,
+    createThreadMemoryStatusPart,
     createToolPart,
     createWorkflowProgressPart,
 } from './message-factory'
@@ -33,6 +34,7 @@ import {
     upsertAgentGraphDebugSummaryPart,
     upsertAgentGraphNodePart,
     upsertAgentInterruptPart,
+    upsertThreadMemoryStatusPart,
     upsertWorkflowProgressPart,
 } from './message-operations'
 
@@ -127,6 +129,22 @@ function appendActivePart(state: StreamMessageState, part: MindMessagePart): Str
 
 function findMessage(messages: MindMessage[], messageId: string | null) {
     return messageId ? messages.find(message => message.id === messageId) : undefined
+}
+
+function getThreadMemoryTargetMessageId(state: StreamMessageState) {
+    if (state.activeStream.messageId) {
+        return state.activeStream.messageId
+    }
+
+    for (let index = state.messages.length - 1; index >= 0; index -= 1) {
+        const message = state.messages[index]
+
+        if (message.role === 'assistant') {
+            return message.id
+        }
+    }
+
+    return null
 }
 
 /** 局部 part 错误只更新卡片；顶层错误返回 fatalError 交给 hook 收口。 */
@@ -256,6 +274,15 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
             )
         case 'skill-selected':
             return appendActivePart(state, createSkillPart(chunk.skillId, chunk.name, chunk.description))
+        case 'thread-memory-status': {
+            const messageId = getThreadMemoryTargetMessageId(state)
+
+            if (!messageId) {
+                return { state }
+            }
+
+            return applyMessages(state, upsertThreadMemoryStatusPart(state.messages, messageId, createThreadMemoryStatusPart(chunk)))
+        }
         case 'agent-graph-node-start':
             return updateActiveMessage(state, (messages, messageId) =>
                 upsertAgentGraphNodePart(

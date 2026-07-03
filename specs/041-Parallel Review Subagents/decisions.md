@@ -157,7 +157,7 @@ Reason:
 Decision:
 
 - v0.4.1 不做 HITL。
-- HITL-aware Subagent Delegation 放到 v0.4.2 或后续版本。
+- HITL-aware Subagent Delegation 放到后续版本。
 
 Reason:
 
