@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowDown, CircleAlert } from 'lucide-react'
+import { ArrowDown } from 'lucide-react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useState } from 'react'
@@ -8,7 +8,6 @@ import { useState } from 'react'
 import { ChatComposer } from '@/components/chat/composer/chat-composer'
 import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
 import type { EmptyStateSuggestion } from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import type { ChatModelsInitialState } from '@/lib/ai/models'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatSkillMode } from '@/lib/ai/types/chat'
@@ -33,7 +32,6 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const {
         messages,
         status,
-        error,
         threadMemoryStatusHint,
         pendingInterrupt,
         sendMessage,
@@ -61,7 +59,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
 
         resetAutoScrollForNewTurn()
 
-        // sendMessage 内部会立即写入用户消息并切到 submitted；这里返回 true 代表 Composer 可以立刻清空草稿，
+        // sendMessage 内部会立刻写入用户消息并切到 submitted，这里返回 true 代表 Composer 可以立即清空草稿；
         // 不需要等完整流式回答结束后才清空输入框。
         void sendMessage(value, composer, displaySegments)
         return true
@@ -92,7 +90,11 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     async function handleResumeDecision(decision: Parameters<typeof resumeAgentRun>[0]) {
         resetAutoScrollForNewTurn()
 
-        return resumeAgentRun(decision)
+        try {
+            return await resumeAgentRun(decision)
+        } catch {
+            return false
+        }
     }
 
     return (
@@ -110,14 +112,6 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                 className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl flex-col gap-5 px-6 pt-8"
                 style={{ paddingBottom: `${bottomSpacing}px` }}
             >
-                {error ? (
-                    <Alert variant="destructive">
-                        <CircleAlert className="size-4" strokeWidth={2.2} />
-                        <AlertTitle>请求错误</AlertTitle>
-                        <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                ) : null}
-
                 <ChatMessageList
                     messages={messages}
                     status={status}

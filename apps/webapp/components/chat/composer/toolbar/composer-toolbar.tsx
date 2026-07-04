@@ -238,7 +238,7 @@ export function ComposerToolbar({
                 )}
             >
                 {status === 'streaming' ? (
-                    <Square className="size-4 sm:size-5 fill-current" strokeWidth={2.4} />
+                    <Square className="size-3 sm:size-4 fill-current" strokeWidth={2.4} />
                 ) : (
                     <ArrowUp className="size-4 sm:size-5" strokeWidth={2.4} />
                 )}

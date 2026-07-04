@@ -3,6 +3,7 @@ import { type ChunkWriter, createNdjsonChunkWriter } from '@ai-mind/stream-core/
 
 import type { AgentRunService } from '@/lib/ai/agent-runs'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
+import { createChatModel, getModelProviderConfig } from '@/lib/ai/model-provider'
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
 import { logChatCancellation, normalizeKnownRuntimeError } from '@/lib/ai/runtime/stream-errors'
 import type { ChatExecutionContext, ResolvedChatExecutionContext, StreamResult, WriteChunk } from '@/lib/ai/runtime/types'
@@ -41,8 +42,42 @@ interface RejectAgentRunStreamInput {
     threadId: string
 }
 
+function normalizeResumeStreamError(
+    error: unknown,
+    context: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] }
+): { code: import('@ai-mind/stream-core/protocol').StreamErrorCode; message: string; retryable: boolean } {
+    const knownRuntimeError = normalizeKnownRuntimeError(error)
+
+    if (knownRuntimeError) {
+        return knownRuntimeError
+    }
+
+    if (!context.resolvedModelSelection) {
+        return {
+            code: 'MODEL_STREAM_FAILED',
+            message: '模型配置不可用。',
+            retryable: false,
+        }
+    }
+
+    const modelHandle = createChatModel({
+        config: getModelProviderConfig(),
+        enableReasoning: false,
+        resolvedModelSelection: context.resolvedModelSelection,
+        streaming: false,
+        temperature: 0,
+    })
+
+    const normalizedError = modelHandle.normalizeError(error)
+    return {
+        code: normalizedError.code as import('@ai-mind/stream-core/protocol').StreamErrorCode,
+        message: normalizedError.message,
+        retryable: normalizedError.retryable,
+    }
+}
+
 async function createNdjsonStreamResult(
-    context: ChatExecutionContext,
+    context: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] },
     execute: (options: StreamExecutorOptions) => Promise<void>
 ): Promise<StreamResult> {
     let closed = false
@@ -106,14 +141,14 @@ async function createNdjsonStreamResult(
                         return
                     }
 
-                    const knownRuntimeError = normalizeKnownRuntimeError(streamError)
+                    const normalizedRuntimeError = normalizeResumeStreamError(streamError, context)
 
                     // 兜底收口：任何未在主链内被消费的异常都按 runtime 错误统一下发。
                     writeStreamErrorChunk(writer.writeChunk, {
                         scope: 'runtime',
-                        errorCode: knownRuntimeError?.code ?? 'MODEL_STREAM_FAILED',
-                        retryable: knownRuntimeError?.retryable ?? true,
-                        message: knownRuntimeError?.message ?? 'Model streaming failed.',
+                        errorCode: normalizedRuntimeError.code,
+                        retryable: normalizedRuntimeError.retryable,
+                        message: normalizedRuntimeError.message,
                         stage: 'runtime',
                     })
                 } finally {

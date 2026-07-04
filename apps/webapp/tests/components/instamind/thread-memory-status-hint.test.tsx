@@ -19,7 +19,7 @@ describe('ThreadMemoryStatusHint', () => {
     it.each([
         {
             status: 'started' as const,
-            message: '上下自动压缩中',
+            message: '自动压缩上下文中',
         },
         {
             status: 'succeeded' as const,

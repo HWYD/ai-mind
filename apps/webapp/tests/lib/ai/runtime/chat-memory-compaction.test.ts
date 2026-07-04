@@ -110,4 +110,69 @@ describe('runtime/chat-memory compaction', () => {
             })
         ).toThrow()
     })
+
+    it('mixed final turns 进入 compaction 时仍保持 text-only，已截断 delivery report 会原样保留在 recent messages', async () => {
+        const truncatedDeliveryReport = `# Delivery Chain Report\n\n${'D'.repeat(7_972)}`
+        let capturedInput:
+            | {
+                  messagesToCompact: ChatThreadMessage[]
+                  previousPinnedDecisions: string[]
+                  previousSummary: string
+                  recentMessages: ChatThreadMessage[]
+              }
+            | undefined
+        const mixedState: AiMindThreadState = {
+            messages: [
+                ...Array.from({ length: CHAT_MEMORY_RECENT_MESSAGE_LIMIT }, (_, index) => message(index)),
+                {
+                    createdAt: '2026-07-02T10:00:00.000Z',
+                    id: 'tool-user',
+                    role: 'user',
+                    text: '帮我执行工具',
+                },
+                {
+                    createdAt: '2026-07-02T10:00:01.000Z',
+                    id: 'tool-assistant',
+                    role: 'assistant',
+                    text: 'tool final answer',
+                },
+                {
+                    createdAt: '2026-07-02T10:00:02.000Z',
+                    id: 'delivery-user',
+                    role: 'user',
+                    text: '生成交付计划',
+                },
+                {
+                    createdAt: '2026-07-02T10:00:03.000Z',
+                    id: 'delivery-assistant',
+                    role: 'assistant',
+                    text: truncatedDeliveryReport,
+                },
+            ],
+            pinnedDecisions: [],
+            summary: '',
+        }
+
+        const compacted = await compactThreadState(mixedState, async input => {
+            capturedInput = input
+            return {
+                pinnedDecisions: ['必须保持 raw runtime state 不进入 chat memory。'],
+                summary: '更早消息已压缩。',
+            }
+        })
+
+        expect(capturedInput?.recentMessages.map(item => item.id)).toEqual([
+            'tool-user',
+            'tool-assistant',
+            'delivery-user',
+            'delivery-assistant',
+        ])
+        expect(Object.keys(capturedInput?.recentMessages[3] ?? {}).sort()).toEqual(['createdAt', 'id', 'role', 'text'])
+        expect(compacted?.messages[3]?.text).toBe(truncatedDeliveryReport)
+        expect(compacted?.messages[3]?.text.length).toBe(truncatedDeliveryReport.length)
+        expect(Object.keys(capturedInput?.recentMessages[1] ?? {}).sort()).toEqual(['createdAt', 'id', 'role', 'text'])
+        expect(compacted?.messages[1]?.text).toBe('tool final answer')
+        expect(compacted?.messages[1]?.text.length).toBe('tool final answer'.length)
+        expect(compacted?.messages[3]?.text.length).toBe(truncatedDeliveryReport.length)
+    })
 })

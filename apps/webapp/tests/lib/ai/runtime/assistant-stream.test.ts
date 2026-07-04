@@ -55,4 +55,32 @@ describe('assistant-stream', () => {
         expect(response.additional_kwargs?.reasoning_content).toBeUndefined()
         expect(response.additional_kwargs?.trace_id).toBe('trace-1')
     })
+
+    it('只累计可见文本，忽略混入 content 数组中的非文本中间 parts', async () => {
+        const writtenChunks: ChatStreamChunk[] = []
+
+        const completedText = await streamAssistantParts(
+            toAsyncChunks([
+                new AIMessageChunk({
+                    content: [
+                        { type: 'text', text: '最终回答第一段。' },
+                        { type: 'tool_result', value: { raw: true } },
+                        { type: 'text', text: '最终回答第二段。' },
+                    ],
+                }),
+            ]),
+            {},
+            chunk => writtenChunks.push(chunk),
+            () => false,
+            false
+        )
+
+        expect(completedText).toBe('最终回答第一段。最终回答第二段。')
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'text-delta',
+                delta: '最终回答第一段。最终回答第二段。',
+            })
+        )
+    })
 })

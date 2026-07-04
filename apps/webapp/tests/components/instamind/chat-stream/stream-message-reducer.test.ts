@@ -56,6 +56,42 @@ describe('stream-message-reducer', () => {
         })
     })
 
+    it('hydrated tool / Tasklist / Delivery final turns 仍保持普通 text message shape', () => {
+        const state = createStreamMessageState([
+            {
+                id: 'hydrated-tool-user',
+                role: 'user' as const,
+                parts: [{ type: 'text' as const, text: '帮我执行工具', format: 'markdown' as const }],
+                createdAt: '2026-07-02T10:00:00.000Z',
+                status: 'completed' as const,
+            },
+            {
+                id: 'hydrated-tool-assistant',
+                role: 'assistant' as const,
+                parts: [{ type: 'text' as const, text: 'tool final answer', format: 'markdown' as const }],
+                createdAt: '2026-07-02T10:00:01.000Z',
+                status: 'completed' as const,
+            },
+            {
+                id: 'hydrated-tasklist-assistant',
+                role: 'assistant' as const,
+                parts: [{ type: 'text' as const, text: '已生成任务清单摘要。', format: 'markdown' as const }],
+                createdAt: '2026-07-02T10:00:02.000Z',
+                status: 'completed' as const,
+            },
+            {
+                id: 'hydrated-delivery-assistant',
+                role: 'assistant' as const,
+                parts: [{ type: 'text' as const, text: '# Delivery Chain Report', format: 'markdown' as const }],
+                createdAt: '2026-07-02T10:00:03.000Z',
+                status: 'completed' as const,
+            },
+        ])
+
+        expect(state.messages).toHaveLength(4)
+        expect(state.messages.every(message => message.parts.every(part => part.type === 'text'))).toBe(true)
+    })
+
     it('按 chunk 顺序聚合 text 和 tool part', () => {
         let state = reduceChunks([
             { type: 'start', messageId: 'assistant-1' },

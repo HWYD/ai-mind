@@ -1,6 +1,7 @@
 import { AgentRunService } from '@/lib/ai/agent-runs'
 import type { AgentInterruptPublicDto, AgentRunPublicDto, AgentRunResultStatus } from '@/lib/ai/agent-runs/contracts'
 import { createId } from '@/lib/ai/create-id'
+import { buildChatMemoryThreadId, chatMemoryService, type ThreadMemoryStatusEvent } from '@/lib/ai/runtime/chat-memory'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 import type { ChatExecutionContext, WriteChunk } from '../types'
@@ -22,6 +23,7 @@ import {
     extractTasklistLangSmithDecisionType,
     type TasklistLangSmithObserver,
 } from './observability'
+import { buildTasklistFinalAnswerTextSummary } from './stream/tasklist-agent-output'
 
 export interface StartVersionPlanTasklistAgentRunOptions {
     assistantMessageId: string
@@ -107,6 +109,46 @@ async function observeTasklistLangSmith(action: () => Promise<void>) {
     }
 }
 
+function writeThreadMemoryStatus(writeChunk: WriteChunk, event: ThreadMemoryStatusEvent) {
+    writeChunk({
+        type: 'thread-memory-status',
+        status: event.status,
+        message: event.message,
+        ...(typeof event.summaryLength === 'number' ? { summaryLength: event.summaryLength } : {}),
+        ...(typeof event.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: event.pinnedDecisionCount } : {}),
+    })
+}
+
+async function appendTasklistFinalTurn(options: {
+    assistantMessageId: string
+    graphResult: Extract<RunVersionPlanTasklistGraphResult, { status: 'completed' }>
+    sessionId: string
+    userGoal: string
+    writeChunk: WriteChunk
+}) {
+    let assistantText: string
+
+    try {
+        assistantText = buildTasklistFinalAnswerTextSummary(options.graphResult.graphState)
+    } catch {
+        return
+    }
+
+    await chatMemoryService.appendCompletedTurn(
+        buildChatMemoryThreadId(options.sessionId),
+        {
+            assistantMessageId: options.assistantMessageId,
+            assistantText,
+            completionStatus: options.graphResult.resultStatus === 'blocked' ? 'blocked' : 'final',
+            source: 'tasklist-agent',
+            userText: options.userGoal,
+        },
+        {
+            onStatus: event => writeThreadMemoryStatus(options.writeChunk, event),
+        }
+    )
+}
+
 async function persistGraphResult(options: {
     agentRunService: AgentRunCoordinatorService
     assistantMessageId: string
@@ -114,7 +156,9 @@ async function persistGraphResult(options: {
     graphResult: RunVersionPlanTasklistGraphResult
     langSmithObserver: TasklistLangSmithObserver
     runId: string
+    sessionId: string
     stage: 'initial' | 'resume'
+    userGoal: string
     writeChunk: WriteChunk
 }) {
     const { agentRunService, graphResult, langSmithObserver, runId, writeChunk } = options
@@ -163,6 +207,17 @@ async function persistGraphResult(options: {
                     threadId: graphResult.graphState.threadId,
                 })
             )
+            try {
+                await appendTasklistFinalTurn({
+                    assistantMessageId: options.assistantMessageId,
+                    graphResult,
+                    sessionId: options.sessionId,
+                    userGoal: options.userGoal,
+                    writeChunk: options.writeChunk,
+                })
+            } catch {
+                // chat memory 是可降级能力，失败不影响 Tasklist Agent 已完成结果。
+            }
             break
         case 'rejected':
             await agentRunService.markRejected(runId)
@@ -255,7 +310,9 @@ export async function startVersionPlanTasklistAgentRun(
             graphResult,
             langSmithObserver,
             runId,
+            sessionId: options.sessionId,
             stage: 'initial',
+            userGoal: options.userGoal,
             writeChunk: options.writeChunk,
         })
 
@@ -351,7 +408,9 @@ export async function resumeVersionPlanTasklistAgentRun(
             graphResult,
             langSmithObserver,
             runId: options.runId,
+            sessionId: options.sessionId,
             stage: 'resume',
+            userGoal: options.userGoal,
             writeChunk: options.writeChunk,
         })
 

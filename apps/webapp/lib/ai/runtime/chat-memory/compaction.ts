@@ -22,7 +22,7 @@ export const CHAT_MEMORY_COMPACTION_PROMPT = [
     '你是 AI Mind 的对话记忆压缩器。',
     '只根据输入的旧摘要、旧 pinned decisions、待压缩的用户可见文本消息和将被保留的 recent messages 生成结构化结果。',
     '你的输出只允许包含两个字段：summary、pinnedDecisions。',
-    '不要保留 raw prompt、tool transcript、GraphState、RuntimeArtifact、provider response 或 stack trace。',
+    '不要保留 raw prompt、tool transcript、GraphState、RuntimeArtifact、workflow progress、subagent raw result、provider response 或 stack trace。',
     `summary 控制在 ${CHAT_MEMORY_SUMMARY_TARGET_LIMIT} 字以内。`,
     `pinnedDecisions 最多 ${CHAT_MEMORY_PINNED_DECISION_LIMIT} 条，每条不超过 ${CHAT_MEMORY_PINNED_DECISION_TEXT_LIMIT} 字。`,
     '不要重复 recent messages 中已经保留的局部上下文，优先压缩更早内容。',

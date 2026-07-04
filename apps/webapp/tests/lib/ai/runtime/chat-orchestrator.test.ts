@@ -69,8 +69,22 @@ vi.mock('@/lib/ai/runtime/chat-memory', () => ({
         appendCompletedTurn: runtimeMocks.appendCompletedTurn,
         readThreadState: runtimeMocks.readThreadState,
     },
-    isChatMemoryEligibleRequest: (request: { composer?: { command?: { name?: string } } }) =>
+    isChatMemoryContextEligibleRequest: (request: { composer?: { command?: { name?: string } } }) =>
         request.composer?.command?.name !== 'tasklist' && request.composer?.command?.name !== 'delivery-chain',
+    isChatMemoryWriteEligibleRequest: (
+        request: { composer?: { command?: { name?: string } } },
+        source: 'chat' | 'delivery-chain' | 'mcp-resource' | 'tasklist-agent' | 'tool'
+    ) => {
+        if (source === 'tasklist-agent') {
+            return request.composer?.command?.name === 'tasklist'
+        }
+
+        if (source === 'delivery-chain') {
+            return request.composer?.command?.name === 'delivery-chain'
+        }
+
+        return request.composer?.command?.name !== 'tasklist' && request.composer?.command?.name !== 'delivery-chain'
+    },
 }))
 
 vi.mock('@/lib/ai/runtime/composer-context', () => ({
@@ -388,6 +402,7 @@ describe('runtime/chat-orchestrator', () => {
             {
                 assistantMessageId: expect.any(String),
                 assistantText: '你好，我是 AI Mind。',
+                source: 'chat',
                 userText: '你好',
             },
             expect.objectContaining({
@@ -405,7 +420,7 @@ describe('runtime/chat-orchestrator', () => {
             async (_threadId, _input, options?: { onStatus?: (event: unknown) => void }) => {
                 options?.onStatus?.({
                     status: 'started',
-                    message: '上下自动压缩中',
+                    message: '自动压缩上下文中',
                 })
                 options?.onStatus?.({
                     status: 'succeeded',
@@ -436,7 +451,7 @@ describe('runtime/chat-orchestrator', () => {
         expect(writtenChunks[1]).toMatchObject({
             type: 'thread-memory-status',
             status: 'started',
-            message: '上下自动压缩中',
+            message: '自动压缩上下文中',
         })
         expect(writtenChunks[2]).toMatchObject({
             type: 'thread-memory-status',
@@ -479,6 +494,7 @@ describe('runtime/chat-orchestrator', () => {
             {
                 assistantMessageId: expect.any(String),
                 assistantText: '完整回答文本',
+                source: 'chat',
                 userText: '你好',
             },
             expect.objectContaining({
@@ -592,6 +608,7 @@ describe('runtime/chat-orchestrator', () => {
         })
         runtimeMocks.buildSystemMessages.mockReturnValue([new SystemMessage('summary system')])
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValueOnce([memoryMessage])
+        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('docs summary final answer')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -607,6 +624,15 @@ describe('runtime/chat-orchestrator', () => {
             {
                 signal: undefined,
             }
+        )
+        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            'chat:test-session',
+            expect.objectContaining({
+                source: 'mcp-resource',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
         )
     })
 
@@ -902,6 +928,7 @@ describe('runtime/chat-orchestrator', () => {
             output: '2',
             success: true,
         })
+        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('工具最终回答')
 
         const writtenChunks: Array<{ type: string; scope?: string }> = []
         const orchestrator = new ChatOrchestrator({
@@ -924,6 +951,15 @@ describe('runtime/chat-orchestrator', () => {
         expect(toolBoundModelStream).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            'chat:test-session',
+            expect.objectContaining({
+                source: 'tool',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
@@ -998,6 +1034,17 @@ describe('runtime/chat-orchestrator', () => {
 
         expect(runtimeMocks.writeStaticTextPart).toHaveBeenCalledTimes(1)
         expect(toolBoundModelStream).toHaveBeenCalledTimes(1)
+        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            'chat:test-session',
+            expect.objectContaining({
+                assistantText: '`1+1` 的结果是 **2**。',
+                source: 'tool',
+                userText: '1+1=？',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })

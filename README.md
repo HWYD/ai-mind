@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.4.2：LangGraph Single Thread Memory Baseline。为当前唯一聊天会话引入可恢复的 thread memory，在刷新后恢复 recent messages，并通过 summary compaction 和 pinned decisions 控制上下文大小，同时保持 Tasklist Agent 与 Delivery Chain 边界不变。
+> v0.4.3：Tool & Agent Final Turn Memory。在 v0.4.2 单会话 memory baseline 上，把 ordinary tool、MCP/resource、Tasklist final answer 和 Delivery final report 的最终用户可见问答也纳入可恢复 thread history，同时继续排除 raw transcript、GraphState 和 RuntimeArtifact。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.2`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.3`。
 
 已经验证：
 
@@ -215,6 +215,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Spec Kit Full Skills Default Entry。
 - Controlled Agent-as-tool Delivery Manager。
 - LangGraph 单会话 chat memory baseline。
+- Tool & Agent final-turn memory。
 
 当前非目标：
 
@@ -249,19 +250,22 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.2
+## 当前版本：v0.4.3
 
-这版的主线是 `LangGraph Single Thread Memory Baseline`：为当前浏览器的唯一普通聊天会话引入可恢复的 thread memory，让刷新后能够恢复 recent text messages，并用 summary compaction 与 pinned decisions 控制模型上下文大小。
+这版的主线是 `Tool & Agent Final Turn Memory`：在 v0.4.2 的单会话 chat memory baseline 上，继续把 tool / MCP / Tasklist / Delivery 的“最终用户可见问答”纳入同一个可恢复 thread history。
 
-v0.4.2 的边界非常明确：
+v0.4.3 的边界非常明确：
 
 - 只支持当前浏览器单会话 chat memory，不做 ChatGPT 左侧多会话历史。
 - 普通 chat thread 使用派生的 `chat:${sessionHash}`，不暴露原始 session id。
-- 只保存普通聊天的 text-only recent messages，不保存 tool transcript、MCP transcript、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact 或 raw provider/runtime internals。
+- persisted messages 继续只保存 text-only user / assistant messages，不保存 `source`、`turnId`、`displayKind` 或任何 raw runtime metadata。
+- ordinary tool、reader / utility、docs summary、MCP / resource、Tasklist final answer summary、Delivery final report 现在都可以作为 safe final turn 写入 memory。
+- 不保存 tool transcript、MCP raw transcript、Tasklist artifact markdown、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact、workflow progress、subagent raw result 或 raw provider/runtime internals。
 - recent memory window 以完整 user/assistant turns 定义，消息条数由 turn window 派生，避免 compaction 后残留半轮上下文。
 - chat memory checkpoint 与 Tasklist Agent checkpoint 分离：Tasklist 继续使用 `langgraph_checkpoint`，chat memory 使用 `langgraph_chat_memory`。
 - development 默认 `AI_MIND_CHAT_MEMORY_CHECKPOINT=memory`，production 发布目标默认 `postgres`。
 - hydrate 只通过 `GET /api/chat/thread` 返回安全 DTO；压缩状态通过可选 `thread-memory-status` stream chunk 传递，不改变既有 reducer public shape。
+- Tasklist 和 Delivery final-turn append 命中压缩时，也会 relay `thread-memory-status`。
 - compaction 失败只能 no-op，不得影响已经完成的用户回答。
 
 本版显式不做：
@@ -269,17 +273,18 @@ v0.4.2 的边界非常明确：
 - 不新增 ChatSession / ChatMessage Prisma 业务表。
 - 不做多会话菜单、历史分页、搜索、编辑/删除持久化。
 - 不做长期记忆、LangGraph Store、pgvector 或 Memory Inspector。
-- 不把 `/tasklist`、`/delivery-chain`、普通 tool-calling transcript 写入 chat ThreadState。
-- 不修改 Tasklist Agent HITL / checkpoint / resume 语义。
-- 不修改 Delivery Chain ControlledDeliveryManager、RuntimeArtifact run-local 边界或 `delivery-chain-manager` transcript suppression。
+- 不引入 execution summary、reasoning summary、contextEntries 或 agent run summary。
+- 不把 raw tool-calling transcript、raw MCP transcript、Tasklist GraphState / HITL payload、Delivery RuntimeArtifact / subagent raw result 写入 chat ThreadState。
+- 不修改 Tasklist Agent HITL / checkpoint / resume 语义，只保存 final answer text summary。
+- 不修改 Delivery Chain ControlledDeliveryManager、RuntimeArtifact run-local 边界或 `delivery-chain-manager` transcript suppression，只保存 final report text。
 
 当前 runtime baseline 保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
-- 普通 text chat：可恢复的 chat memory baseline（recent messages + summary + pinned decisions）
+- 普通 text chat / safe final turn：可恢复的 chat memory baseline（recent messages + summary + pinned decisions）
 
-详细设计见 [v0.4.2 LangGraph Single Thread Memory Baseline](./docs/versions/v0.4.2-langgraph-single-thread-memory-baseline.md)、[Runtime 边界](./docs/architecture/runtime-boundary.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md) 和 [ADR-0012](./docs/adr/0012-chat-thread-memory-baseline.md)。
+详细设计见 [v0.4.3 Tool & Agent Final Turn Memory](./docs/versions/v0.4.3-tool-agent-final-turn-memory.md)、[Runtime 边界](./docs/architecture/runtime-boundary.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md)、[ADR-0012](./docs/adr/0012-chat-thread-memory-baseline.md) 和 [ADR-0013](./docs/adr/0013-tool-agent-final-turn-memory.md)。
 
 ## 当前能力
 
@@ -292,11 +297,12 @@ v0.4.2 的边界非常明确：
 - 统一 `error` chunk 语义。
 - `authoritative answer`：在单工具确定性结果场景下支持工具结果直出，减少模型二次改写带来的偏差。
 - 普通 chat 采用 server-authoritative memory：前端 payload 可继续携带本地历史用于 UI 兼容，后端模型上下文只取当前 user turn，并从 ThreadState 注入 recent messages + summary + pinned decisions。
+- safe final-turn memory：tool / MCP / Tasklist / Delivery 的最终用户可见问答可在刷新后恢复，但中间执行态仍不进入 memory。
 - Capability-driven Tool Runtime。
 - Composer payload hint 消费。
 - Runtime-controlled Agent path。
 - Tasklist Agent Graph Runtime 单一路线。
-- 普通 chat refresh recovery 与有界上下文压缩。
+- 普通 chat 与 safe final turn refresh recovery、有界上下文压缩。
 
 ### Model Provider Runtime
 
@@ -555,7 +561,7 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 
 ### Runtime checkpoint 与 chat memory setup
 
-如果要验证 durable Tasklist checkpoint 或 v0.4.2 的 chat memory checkpoint，先准备 `DATABASE_URL`，再执行：
+如果要验证 durable Tasklist checkpoint 或 v0.4.3 的 chat memory checkpoint，先准备 `DATABASE_URL`，再执行：
 
 ```bash
 pnpm db:setup:deploy
@@ -653,6 +659,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.0  | Controlled Agent-as-tool Delivery Manager MVP      | 用 `ControlledDeliveryManager` 接管 `/delivery-chain`，通过受控 tool-calling 串行委派 `plan/task/review` 子 Agent tool，并保持 RuntimeArtifact 仅在 run-local runtime 内部流转 |
 | v0.4.1  | Parallel Review Subagents + Manager Synthesis      | Review 阶段升级为 3 个 review-class subagent 并行执行，引入 phase-aware DelegationPolicy 和基于规则的 `synthesizeReviewBundle` 综合判断                                        |
 | v0.4.2  | LangGraph Single Thread Memory Baseline            | 为当前单聊天会话引入 LangGraph thread memory、refresh hydration、summary compaction 与 pinned decisions，并保持 Tasklist / Delivery / stream 边界不变                          |
+| v0.4.3  | Tool & Agent Final Turn Memory                     | 把 tool / MCP / Tasklist / Delivery 的最终用户可见问答纳入可恢复 chat memory，同时继续排除 raw transcript、GraphState、RuntimeArtifact 和 protocol / reducer breaking change   |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -688,6 +695,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Spec Kit Full Skills Default Entry
 - [x] Tasklist Agent LangSmith Observability
 - [x] LangGraph 单会话 chat memory baseline
+- [x] Tool & Agent final-turn memory
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

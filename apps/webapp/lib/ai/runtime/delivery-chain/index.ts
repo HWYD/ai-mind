@@ -15,6 +15,7 @@ import {
     PROJECT_DOCS_SERVER_ID,
 } from '@/lib/ai/mcp/adapters/docs-resource-shared'
 import type { AiMindChatModelHandle, ResolvedModelSelection } from '@/lib/ai/model-provider'
+import { buildChatMemoryThreadId, chatMemoryService, type ThreadMemoryStatusEvent } from '@/lib/ai/runtime/chat-memory'
 import type { ChatComposerReference, ChatRequest } from '@/lib/ai/types/chat'
 
 import type { ChatExecutionContext, WriteChunk } from '../types'
@@ -573,6 +574,49 @@ async function loadDeliveryChainContext(input: DeliveryChainInput, options: { wr
     } satisfies DeliveryChainResourceBundle
 }
 
+async function appendCompletedDeliveryTurn(options: {
+    assistantMessageId?: string
+    assistantText: string
+    context: ChatExecutionContext
+    request: ChatRequest
+    status: 'blocked' | 'completed'
+    userMessageId?: string
+    writeChunk: WriteChunk
+}) {
+    if (!options.context.sessionId || options.context.signal?.aborted) {
+        return
+    }
+
+    const userText = getLastUserMessageText(options.request)
+
+    if (!userText) {
+        return
+    }
+
+    await chatMemoryService.appendCompletedTurn(
+        buildChatMemoryThreadId(options.context.sessionId),
+        {
+            assistantMessageId: options.assistantMessageId,
+            assistantText: options.assistantText,
+            completionStatus: options.status === 'blocked' ? 'blocked' : 'completed',
+            source: 'delivery-chain',
+            userMessageId: options.userMessageId,
+            userText,
+        },
+        {
+            onStatus(event: ThreadMemoryStatusEvent) {
+                options.writeChunk({
+                    type: 'thread-memory-status',
+                    status: event.status,
+                    message: event.message,
+                    ...(typeof event.summaryLength === 'number' ? { summaryLength: event.summaryLength } : {}),
+                    ...(typeof event.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: event.pinnedDecisionCount } : {}),
+                })
+            },
+        }
+    )
+}
+
 function buildUnexpectedFailureReport(input: DeliveryChainInput, failureMessage: string, warnings: string[] = []) {
     return buildDeliveryManagerFailureReport({
         failureMessage,
@@ -762,6 +806,23 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
         )
 
         writeStaticTextPart(options.writeChunk, result.reportMarkdown)
+
+        if (result.status === 'completed' || result.status === 'blocked') {
+            try {
+                await appendCompletedDeliveryTurn({
+                    assistantMessageId: `${workflowProgress.workflowId}:assistant`,
+                    assistantText: result.reportMarkdown,
+                    context: options.context,
+                    request: options.request,
+                    status: result.status,
+                    userMessageId: `${workflowProgress.workflowId}:user`,
+                    writeChunk: options.writeChunk,
+                })
+            } catch {
+                // chat memory 是可降级能力，失败不影响 Delivery 最终报告返回。
+            }
+        }
+
         return true
     } catch {
         emitWorkflowProgressStep(options.writeChunk, workflowProgress, getReportProgressStepDefinition(), 'failed', {

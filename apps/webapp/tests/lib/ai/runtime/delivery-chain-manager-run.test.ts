@@ -3,6 +3,7 @@ import { tool } from '@langchain/core/tools'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
+import { adaptFinalTurnCandidate, DELIVERY_FINAL_TEXT_LIMIT, DELIVERY_FINAL_TEXT_TRUNCATION_NOTICE } from '@/lib/ai/runtime/chat-memory'
 import type { DeliveryChainInput, DeliveryChainResourceBundle } from '@/lib/ai/runtime/delivery-chain/graph-state'
 import {
     createDeliveryChainSubagentTools,
@@ -490,6 +491,139 @@ describe('runtime/delivery-chain-manager run', () => {
         expect(managerPrompts.join('\n')).not.toContain('AI Mind 的 ControlledDeliveryManager')
         expect(managerPrompts.join('\n')).not.toContain('Agent-as-tool delegation MVP')
         expect(managerPrompts.join('\n')).toContain('任务委派管理器')
+    })
+
+    it('manager long final report 交给 final-turn adapter 时会按 8000 字符确定性截断', async () => {
+        const longPlanSection = 'A'.repeat(4_600)
+        const longTaskSection = 'B'.repeat(4_600)
+        setupMockChatModels({
+            stageResponses: [
+                [
+                    '## 需求理解',
+                    '',
+                    `- ${longPlanSection}`,
+                    '',
+                    '## 实现方案',
+                    '',
+                    `- ${longPlanSection}`,
+                    '',
+                    '## 涉及模块',
+                    '',
+                    '- Chat page',
+                    '',
+                    '## 非目标',
+                    '',
+                    '- 不改 reducer',
+                    '',
+                    '## 风险',
+                    '',
+                    '- 阈值定义',
+                    '',
+                    '## 验收标准建议',
+                    '',
+                    '- 接近上限时展示 banner',
+                ].join('\n'),
+                [
+                    '## 任务拆解',
+                    '',
+                    `- ${longTaskSection}`,
+                    '',
+                    '## 推荐顺序',
+                    '',
+                    '1. 先补状态',
+                    '',
+                    '## 风险任务',
+                    '',
+                    '- 阈值确认',
+                    '',
+                    '## 验收相关任务',
+                    '',
+                    '- UI 验证',
+                    '',
+                    '## 非目标保护任务',
+                    '',
+                    '- 确认不改 reducer',
+                ].join('\n'),
+                [
+                    '结论: pass',
+                    '',
+                    '## 覆盖检查',
+                    '',
+                    '- 覆盖主要需求',
+                    '',
+                    '## 一致性检查',
+                    '',
+                    '- plan 与 tasks 一致',
+                    '',
+                    '## 范围漂移检查',
+                    '',
+                    '- 未超边界',
+                    '',
+                    '## 风险与下一步建议',
+                    '',
+                    '- 可进入实现',
+                ].join('\n'),
+                [
+                    'severity: low',
+                    '',
+                    '## 风险识别',
+                    '',
+                    '- 低风险',
+                    '',
+                    '## 风险等级',
+                    '',
+                    '- low',
+                    '',
+                    '## 缓解建议',
+                    '',
+                    '- 无需特殊处理',
+                ].join('\n'),
+                [
+                    'boundaryStatus: passed',
+                    '',
+                    '## DB / 持久化边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## HITL / checkpoint / resume 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Stream / UI 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Tool / Agent 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## 安全边界',
+                    '',
+                    '- 未触碰',
+                ].join('\n'),
+            ],
+        })
+
+        const result = await runControlledDeliveryManager({
+            input: createInput(),
+            modelHandle: {} as never,
+            resolvedModelSelection: testResolvedModelSelection,
+            resources: createResources(),
+            workflowId: 'workflow-long-report',
+        })
+
+        expect(result.status).toBe('completed')
+        expect(result.reportMarkdown.length).toBeGreaterThan(DELIVERY_FINAL_TEXT_LIMIT)
+
+        const adapted = adaptFinalTurnCandidate({
+            assistantText: result.reportMarkdown,
+            completionStatus: 'completed',
+            source: 'delivery-chain',
+            userText: '生成交付计划',
+        })
+
+        expect(adapted?.assistantText.length).toBeLessThanOrEqual(DELIVERY_FINAL_TEXT_LIMIT)
+        expect(adapted?.assistantText.endsWith(DELIVERY_FINAL_TEXT_TRUNCATION_NOTICE)).toBe(true)
     })
 
     it('task-subagent 缺少 plan artifact 时不能 completed', async () => {

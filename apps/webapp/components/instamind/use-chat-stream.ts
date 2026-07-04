@@ -11,7 +11,15 @@ import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequest, Chat
 import type { AgentInterruptPart, MindMessage } from '@/lib/ai/types/message'
 
 import { createMessage, createTextPart } from './chat-stream/message-factory'
-import { getLastUserTurnForRegeneration, pruneTransientMessages, removeMessage, removeUserTurnPair } from './chat-stream/message-operations'
+import {
+    appendPart,
+    ensureAssistantMessage,
+    getLastUserTurnForRegeneration,
+    pruneTransientMessages,
+    removeMessage,
+    removeUserTurnPair,
+    updateMessageStatus,
+} from './chat-stream/message-operations'
 import { buildRequestMessages, toRequestSkill } from './chat-stream/request-message-builder'
 import {
     createInitialActiveStreamState,
@@ -49,12 +57,19 @@ function getErrorMessage(error: unknown): string {
     return '请求失败，请稍后重试。'
 }
 
-function getErrorCode(error: unknown): string | null {
-    if (!(error instanceof Error) || !('code' in error)) {
-        return null
+function getResumeAgentRunUserMessage(code: string | null, fallback: string, status: number): string {
+    switch (code) {
+        case 'AGENT_RUN_FORBIDDEN':
+            return '当前审核点不属于当前浏览器会话，可能是页面会话或本地密钥已变化。请重新发起 /tasklist。'
+        case 'AGENT_INTERRUPT_NOT_PENDING':
+            return '当前审核点已被处理或已失效。请重新发起 /tasklist。'
+        case 'AGENT_RUN_NOT_PAUSED':
+            return '当前 AgentRun 已不在等待审核状态。请重新发起 /tasklist。'
+        case 'AGENT_RUN_VERSION_MISMATCH':
+            return '当前审核点来自旧版本运行，无法继续恢复。请重新发起 /tasklist。'
+        default:
+            return fallback || `恢复 AgentRun 失败，状态码：${status}`
     }
-
-    return typeof error.code === 'string' ? error.code : null
 }
 
 interface UseChatStreamOptions {
@@ -251,6 +266,44 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         resetActiveStream()
     }
 
+    function surfaceAssistantErrorReply(
+        messageText: string,
+        options: {
+            preservePausedStatus?: boolean
+            targetMessageId?: string
+        } = {}
+    ) {
+        const text = messageText.trim() || '请求失败，请稍后重试。'
+        const targetMessageId = options.targetMessageId ?? streamMessageStateRef.current.activeStream.messageId
+
+        textBuffer.clear()
+        updateMessages(current => {
+            const stableMessages = pruneTransientMessages(current)
+
+            if (!targetMessageId) {
+                return [
+                    ...stableMessages,
+                    {
+                        ...createMessage('assistant', [createTextPart(text)]),
+                        status: 'failed',
+                    },
+                ]
+            }
+
+            const existingTargetMessage = stableMessages.find(message => message.id === targetMessageId)
+            const alreadyHasSameText = existingTargetMessage?.parts.some(part => part.type === 'text' && part.text.trim() === text) ?? false
+            let nextMessages = ensureAssistantMessage(stableMessages, targetMessageId)
+
+            if (!alreadyHasSameText) {
+                nextMessages = appendPart(nextMessages, targetMessageId, createTextPart(text))
+            }
+
+            return updateMessageStatus(nextMessages, targetMessageId, options.preservePausedStatus ? 'paused' : 'failed')
+        })
+        setError(null)
+        resetActiveStream()
+    }
+
     /**
      * 缓存当前打开 text part 的 delta。
      * partId 不匹配时丢弃，保护多段输出时不会串写。
@@ -394,23 +447,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 return true
             }
 
-            discardActiveAssistantMessage()
-            const requestErrorCode = getErrorCode(requestError)
-
-            if (requestErrorCode === 'MODEL_PROVIDER_RATE_LIMITED') {
-                updateMessages(current => [
-                    ...pruneTransientMessages(current),
-                    createMessage('assistant', [
-                        createTextPart((requestError as ChatRequestError).userMessage ?? getErrorMessage(requestError)),
-                    ]),
-                ])
-                setError(null)
-                setStatus('ready')
-            } else {
-                updateMessages(current => pruneTransientMessages(current))
-                setError(getErrorMessage(requestError))
-                setStatus('error')
-            }
+            surfaceAssistantErrorReply((requestError as ChatRequestError).userMessage ?? getErrorMessage(requestError))
+            setStatus('ready')
         } finally {
             // finish、error、abort 都会走 finally，再兜底 flush 一次，保证不会丢尾字符。
             textBuffer.flush()
@@ -459,8 +497,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 const responseJson = await response.json().catch(() => null)
                 const errorMessage = responseJson?.error ?? `恢复 AgentRun 失败，状态码：${response.status}`
                 const errorCode = typeof responseJson?.code === 'string' ? responseJson.code : null
+                const userMessage = getResumeAgentRunUserMessage(errorCode, errorMessage, response.status)
+                const requestError = new Error(errorCode ? `${userMessage}（${errorCode}）` : userMessage) as ChatRequestError
 
-                throw new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage)
+                requestError.code = errorCode ?? undefined
+                requestError.userMessage = userMessage
+                throw requestError
             }
 
             if (!response.body) {
@@ -483,7 +525,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 return false
             }
 
+            const currentPendingInterrupt = findPendingAgentInterrupt(messagesRef.current)
+            const userMessage = (resumeError as ChatRequestError).userMessage ?? getErrorMessage(resumeError)
+
+            surfaceAssistantErrorReply(userMessage, {
+                preservePausedStatus: Boolean(currentPendingInterrupt),
+                targetMessageId: currentPendingInterrupt?.messageId ?? pendingInterrupt.messageId,
+            })
             setStatus('ready')
+            setError(userMessage)
             throw resumeError
         } finally {
             textBuffer.flush()

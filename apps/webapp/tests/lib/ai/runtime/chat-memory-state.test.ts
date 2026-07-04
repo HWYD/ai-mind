@@ -95,6 +95,23 @@ describe('runtime/chat-memory state schema', () => {
                 summary: '',
             })
         ).toThrow()
+
+        expect(() =>
+            aiMindThreadStateSchema.parse({
+                messages: [
+                    {
+                        createdAt: new Date().toISOString(),
+                        displayKind: 'tool-final',
+                        id: 'message-1',
+                        role: 'assistant',
+                        source: 'tool',
+                        text: 'tool answer',
+                    },
+                ],
+                pinnedDecisions: [],
+                summary: '',
+            })
+        ).toThrow()
     })
 
     it('hydration DTO 是 strict safe public shape', () => {

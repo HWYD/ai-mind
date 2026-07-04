@@ -50,15 +50,22 @@ describe('useChatStream hydration', () => {
                             {
                                 id: 'hydrated-assistant',
                                 role: 'assistant',
-                                parts: [{ type: 'text', text: '刷新前回答', format: 'markdown' }],
+                                parts: [{ type: 'text', text: '刷新前 tool final answer', format: 'markdown' }],
                                 createdAt: '2026-07-02T10:00:01.000Z',
+                                status: 'completed',
+                            },
+                            {
+                                id: 'hydrated-tasklist',
+                                role: 'assistant',
+                                parts: [{ type: 'text', text: '刷新前 tasklist 最终摘要', format: 'markdown' }],
+                                createdAt: '2026-07-02T10:00:02.000Z',
                                 status: 'completed',
                             },
                             {
                                 id: 'hydrated-tool',
                                 role: 'assistant',
                                 parts: [{ type: 'tool', toolName: 'raw-tool', status: 'completed', input: '{}', output: '{}' }],
-                                createdAt: '2026-07-02T10:00:02.000Z',
+                                createdAt: '2026-07-02T10:00:03.000Z',
                                 status: 'completed',
                             },
                         ],
@@ -76,7 +83,7 @@ describe('useChatStream hydration', () => {
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await waitFor(() => {
-            expect(result.current.messages).toHaveLength(2)
+            expect(result.current.messages).toHaveLength(3)
         })
 
         expect(fetchMock).toHaveBeenCalledWith('/api/chat/thread')
@@ -90,6 +97,10 @@ describe('useChatStream hydration', () => {
         expect(requestBody.messages[0]).toMatchObject({
             role: 'user',
             parts: [expect.objectContaining({ text: '刷新前问题' })],
+        })
+        expect(requestBody.messages[1]).toMatchObject({
+            role: 'assistant',
+            parts: [expect.objectContaining({ text: '刷新前 tool final answer' })],
         })
     })
 

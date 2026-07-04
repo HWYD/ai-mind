@@ -122,7 +122,7 @@ Expected outcome:
 - After a successful compaction, the restored recent-turn window drops below the trigger threshold instead of staying at the full threshold.
 - Older content is represented by summary/pinned decisions.
 - Full historical messages are not injected into the next model request.
-- During compaction, the frontend shows a subtle runtime hint such as `上下自动压缩中` and then updates it to `上下文已自动压缩` or `上下文自动压缩失败` after completion.
+- During compaction, the frontend shows a subtle runtime hint such as `自动压缩上下文中` and then updates it to `上下文已自动压缩` or `上下文自动压缩失败` after completion.
 
 ## Non-Regression Validation
 

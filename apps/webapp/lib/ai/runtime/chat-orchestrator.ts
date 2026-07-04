@@ -15,7 +15,9 @@ import {
     buildChatMemoryContextMessages,
     buildChatMemoryThreadId,
     chatMemoryService,
-    isChatMemoryEligibleRequest,
+    type FinalTurnSource,
+    isChatMemoryContextEligibleRequest,
+    isChatMemoryWriteEligibleRequest,
     type ThreadMemoryStatusEvent,
 } from './chat-memory'
 import { buildSystemMessages, createChatSession, withChatMemoryContextMessages } from './chat-session'
@@ -142,7 +144,7 @@ export class ChatOrchestrator {
         })
     }
 
-    private async appendCompletedChatMemoryTurn(assistantText: string | undefined) {
+    private async appendCompletedChatMemoryTurn(assistantText: string | undefined, source: FinalTurnSource = 'chat') {
         const normalizedAssistantText = assistantText?.trim()
 
         if (!normalizedAssistantText) {
@@ -159,9 +161,10 @@ export class ChatOrchestrator {
             return
         }
 
-        if (!isChatMemoryEligibleRequest(this.request)) {
+        if (!isChatMemoryWriteEligibleRequest(this.request, source)) {
             logSkillRuntime('chat-memory-append-skipped', {
                 reason: 'ineligible-request',
+                source,
             })
             return
         }
@@ -188,6 +191,7 @@ export class ChatOrchestrator {
                 {
                     assistantMessageId: this.assistantMessageId,
                     assistantText: normalizedAssistantText,
+                    source,
                     userText,
                 },
                 {
@@ -203,7 +207,7 @@ export class ChatOrchestrator {
     }
 
     private async resolveChatMemoryContextMessages() {
-        if (!this.context.sessionId || !isChatMemoryEligibleRequest(this.request)) {
+        if (!this.context.sessionId || !isChatMemoryContextEligibleRequest(this.request)) {
             return []
         }
 
@@ -643,7 +647,7 @@ export class ChatOrchestrator {
             const composerAssistantText = await this.runComposerContextAnswerStage(session)
 
             if (composerAssistantText !== false) {
-                await this.appendCompletedChatMemoryTurn(composerAssistantText)
+                await this.appendCompletedChatMemoryTurn(composerAssistantText, 'mcp-resource')
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -651,7 +655,7 @@ export class ChatOrchestrator {
             const capabilityAssistantText = await this.runCapabilityContextAnswerStage(session)
 
             if (capabilityAssistantText !== false) {
-                await this.appendCompletedChatMemoryTurn(capabilityAssistantText)
+                await this.appendCompletedChatMemoryTurn(capabilityAssistantText, 'mcp-resource')
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -665,7 +669,7 @@ export class ChatOrchestrator {
                     this.isClosed,
                     this.shouldEmitReasoning()
                 )
-                await this.appendCompletedChatMemoryTurn(assistantText)
+                await this.appendCompletedChatMemoryTurn(assistantText, 'chat')
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -681,7 +685,7 @@ export class ChatOrchestrator {
                     this.isClosed,
                     this.shouldEmitReasoning()
                 )
-                await this.appendCompletedChatMemoryTurn(assistantText)
+                await this.appendCompletedChatMemoryTurn(assistantText, 'chat')
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -714,7 +718,7 @@ export class ChatOrchestrator {
                     tools: authoritativeDecision.toolNames,
                 })
                 writeStaticTextPart(this.writeChunk, authoritativeDecision.answerText ?? '')
-                await this.appendCompletedChatMemoryTurn(authoritativeDecision.answerText ?? '')
+                await this.appendCompletedChatMemoryTurn(authoritativeDecision.answerText ?? '', 'tool')
                 lifecycle.emitFinishIfOpen()
                 return
             }
@@ -725,7 +729,7 @@ export class ChatOrchestrator {
                 toolExecutionResult.executedToolResults,
                 toolExecutionResult.toolMessages
             )
-            await this.appendCompletedChatMemoryTurn(assistantText)
+            await this.appendCompletedChatMemoryTurn(assistantText, 'tool')
             lifecycle.emitFinishIfOpen()
         } catch (error) {
             if (isAbortError(error) || this.context.signal?.aborted || this.isClosed()) {

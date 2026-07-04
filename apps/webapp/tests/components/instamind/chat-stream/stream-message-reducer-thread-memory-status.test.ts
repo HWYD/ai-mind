@@ -23,7 +23,7 @@ describe('stream-message-reducer thread-memory-status', () => {
         state = reduceStreamChunk(state, {
             type: 'thread-memory-status',
             status: 'started',
-            message: '上下自动压缩中',
+            message: '自动压缩上下文中',
         }).state
         state = reduceStreamChunk(state, {
             type: 'thread-memory-status',

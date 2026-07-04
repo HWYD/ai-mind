@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Mind Implementation Reader"
+  short_description: "Read AI Mind version code paths and key files"
+  default_prompt: "Use $ai-mind-implementation-reader to read a completed AI Mind version implementation, starting from the version spec and then the real code path."

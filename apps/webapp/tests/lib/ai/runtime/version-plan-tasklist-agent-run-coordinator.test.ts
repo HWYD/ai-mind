@@ -11,6 +11,22 @@ vi.mock('@/lib/ai/mcp/adapters', () => ({
     },
 }))
 
+const chatMemoryMocks = vi.hoisted(() => ({
+    appendCompletedTurn: vi.fn(),
+}))
+
+vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/lib/ai/runtime/chat-memory')>()
+
+    return {
+        ...actual,
+        chatMemoryService: {
+            ...actual.chatMemoryService,
+            appendCompletedTurn: chatMemoryMocks.appendCompletedTurn,
+        },
+    }
+})
+
 import type { AgentRunPublicDto } from '@/lib/ai/agent-runs/contracts'
 import { buildChatMemoryThreadId, isChatMemoryThreadId } from '@/lib/ai/runtime/chat-memory'
 import type { ChatSession } from '@/lib/ai/runtime/types'
@@ -24,6 +40,9 @@ import { getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tas
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 const planUri = 'demo://version-plans/v0.3.0-hitl-checkpoint-resume.md'
+const chatMemoryEnv = {
+    AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
+}
 
 const versionPlanReference: ChatComposerReference = {
     id: planUri,
@@ -353,10 +372,26 @@ function createResumeOptions(
     }
 }
 
+function getThreadMemoryStatusChunks(writtenChunks: unknown[]) {
+    return writtenChunks.filter(
+        (
+            chunk
+        ): chunk is {
+            type: 'thread-memory-status'
+            status: 'failed' | 'started' | 'succeeded'
+            message: string
+            summaryLength?: number
+            pinnedDecisionCount?: number
+        } => typeof chunk === 'object' && chunk !== null && 'type' in chunk && chunk.type === 'thread-memory-status'
+    )
+}
+
 describe('runtime/version-plan-tasklist-agent run coordinator', () => {
     beforeEach(() => {
         resourceMocks.readDocsResource.mockReset()
         mockResources()
+        chatMemoryMocks.appendCompletedTurn.mockReset()
+        vi.stubEnv('AI_MIND_AGENT_RUN_SESSION_SECRET', chatMemoryEnv.AI_MIND_AGENT_RUN_SESSION_SECRET)
     })
 
     it('initial run 创建 AgentRun，并在 Strategy Review 暂停时持久化 pending interrupt', async () => {
@@ -398,6 +433,7 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(agentRunService.markCompleted).not.toHaveBeenCalled()
         expect(agentRunService.markRejected).not.toHaveBeenCalled()
         expect(agentRunService.markFailed).not.toHaveBeenCalled()
+        expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 
     it('Tasklist resume 使用 tasklist-agent thread id，不接受 chat memory thread id 语义', async () => {
@@ -469,12 +505,61 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(agentRunService.markCompleted).toHaveBeenCalledWith(runId, 'final')
         expect(agentRunService.markRejected).not.toHaveBeenCalled()
         expect(model.invoke).toHaveBeenCalledTimes(1)
+        expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            buildChatMemoryThreadId('session-coordinator-test', chatMemoryEnv),
+            expect.objectContaining({
+                assistantMessageId: 'assistant-coordinator-test',
+                completionStatus: 'final',
+                source: 'tasklist-agent',
+                userText: '基于这个版本方案生成 tasklist 草稿',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
         expect(writtenChunks[0]).toMatchObject({
             assistantMessageId: 'assistant-coordinator-test',
             interruptId: expect.any(String),
             runId,
             type: 'agent-resume',
         })
+    })
+
+    it('Tasklist final-turn append 会把 chat-memory compaction status relay 到当前 stream', async () => {
+        chatMemoryMocks.appendCompletedTurn.mockImplementationOnce(async (_threadId, _input, options) => {
+            options?.onStatus?.({
+                status: 'started',
+                message: '自动压缩上下文中',
+            })
+            options?.onStatus?.({
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                pinnedDecisionCount: 2,
+                summaryLength: 128,
+            })
+        })
+        const agentRunService = createFakeAgentRunService()
+        const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
+        const runId = started.run!.runId
+        const { options, writtenChunks } = createResumeOptions(agentRunService, runId, { type: 'approve' }, validTasklist)
+
+        const resumed = await resumeVersionPlanTasklistAgentRun(options)
+
+        expect(resumed.graphResult.status).toBe('completed')
+        expect(getThreadMemoryStatusChunks(writtenChunks)).toEqual([
+            {
+                type: 'thread-memory-status',
+                status: 'started',
+                message: '自动压缩上下文中',
+            },
+            {
+                type: 'thread-memory-status',
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                pinnedDecisionCount: 2,
+                summaryLength: 128,
+            },
+        ])
     })
 
     it('resume 记录 human decision、resume 与 final result metadata', async () => {
@@ -546,6 +631,16 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
 
         expect(completed.graphResult.status).toBe('completed')
         expect(agentRunService.markCompleted).toHaveBeenCalledWith(runId, 'blocked')
+        expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenLastCalledWith(
+            buildChatMemoryThreadId('session-coordinator-test', chatMemoryEnv),
+            expect.objectContaining({
+                completionStatus: 'blocked',
+                source: 'tasklist-agent',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
     })
 
     it('blocked result 记录 LangSmith result metadata 且不标记 artifactGenerated', async () => {
@@ -648,6 +743,7 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
             'TASKLIST_AGENT_RUN_FAILED',
             expect.stringContaining('No checkpointer set')
         )
+        expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 
     it('initial run failed 记录 LangSmith failed result metadata', async () => {

@@ -2,6 +2,7 @@ import { Annotation, type BaseCheckpointSaver, END, START, StateGraph } from '@l
 
 import { getChatMemoryCheckpointer } from './checkpointer-provider'
 import { type ChatMemoryCompactionGenerator, compactThreadState } from './compaction'
+import { adaptFinalTurnCandidate, type FinalTurnCompletionStatus, type FinalTurnSource, hasDuplicateFinalTurn } from './final-turn-adapter'
 import { createChatThreadMessage } from './message-adapter'
 import { type ChatMemoryRuntimeConfig, getChatMemoryRuntimeConfig } from './runtime-config'
 import {
@@ -74,6 +75,8 @@ export interface ChatMemoryReadResult {
 export interface AppendCompletedTurnInput {
     assistantMessageId?: string
     assistantText: string
+    completionStatus?: FinalTurnCompletionStatus
+    source?: FinalTurnSource
     userMessageId?: string
     userText: string
 }
@@ -173,20 +176,45 @@ export function createChatMemoryService(
         },
 
         async appendCompletedTurn(threadId, input, appendOptions = {}) {
-            const userMessage = createChatThreadMessage('user', input.userText, input.userMessageId)
-            const assistantMessage = createChatThreadMessage('assistant', input.assistantText, input.assistantMessageId)
+            const candidate = adaptFinalTurnCandidate(input)
 
-            if (!userMessage || !assistantMessage || !graph) {
+            if (!candidate || !graph) {
                 logChatMemoryServiceEvent('append-skipped', {
-                    assistantTextLength: input.assistantText.trim().length,
+                    assistantTextLength: typeof input.assistantText === 'string' ? input.assistantText.trim().length : 0,
                     hasGraph: Boolean(graph),
+                    source: input.source ?? 'chat',
                     threadId,
-                    userTextLength: input.userText.trim().length,
+                    userTextLength: typeof input.userText === 'string' ? input.userText.trim().length : 0,
                 })
                 return
             }
 
             const state = await readCheckpointState(threadId)
+
+            if (hasDuplicateFinalTurn(state.messages, candidate)) {
+                logChatMemoryServiceEvent('append-skipped-duplicate', {
+                    assistantMessageId: candidate.assistantMessageId ?? null,
+                    source: candidate.source,
+                    threadId,
+                    userMessageId: candidate.userMessageId ?? null,
+                })
+                return
+            }
+
+            const userMessage = createChatThreadMessage('user', candidate.userText, candidate.userMessageId)
+            const assistantMessage = createChatThreadMessage('assistant', candidate.assistantText, candidate.assistantMessageId)
+
+            if (!userMessage || !assistantMessage) {
+                logChatMemoryServiceEvent('append-skipped', {
+                    assistantTextLength: candidate.assistantText.length,
+                    hasGraph: Boolean(graph),
+                    source: candidate.source,
+                    threadId,
+                    userTextLength: candidate.userText.length,
+                })
+                return
+            }
+
             const messages = [...state.messages, userMessage, assistantMessage]
             const nextState = {
                 ...state,
@@ -196,7 +224,7 @@ export function createChatMemoryService(
             if (messages.length > CHAT_MEMORY_RECENT_MESSAGE_LIMIT) {
                 appendOptions.onStatus?.({
                     status: 'started',
-                    message: '上下自动压缩中',
+                    message: '自动压缩上下文中',
                 })
 
                 try {
@@ -240,6 +268,7 @@ export function createChatMemoryService(
             await this.writeThreadState(threadId, nextState)
             logChatMemoryServiceEvent('append-write-succeeded', {
                 messageCount: nextState.messages.length,
+                source: candidate.source,
                 threadId,
             })
         },

@@ -5,6 +5,16 @@ export {
     getChatMemoryCheckpointer,
 } from './checkpointer-provider'
 export {
+    DELIVERY_FINAL_TEXT_LIMIT,
+    DELIVERY_FINAL_TEXT_TRUNCATION_NOTICE,
+    adaptFinalTurnCandidate,
+    hasDuplicateFinalTurn,
+    type FinalTurnCandidate,
+    type FinalTurnCandidateInput,
+    type FinalTurnCompletionStatus,
+    type FinalTurnSource,
+} from './final-turn-adapter'
+export {
     CHAT_MEMORY_COMPACTION_PROMPT,
     CHAT_MEMORY_COMPACTION_MODEL_ID,
     compactThreadState,
@@ -13,7 +23,7 @@ export {
     type ChatMemoryCompactionInput,
 } from './compaction'
 export { buildChatMemoryContextMessages } from './context-builder'
-export { isChatMemoryEligibleRequest } from './eligibility'
+export { isChatMemoryContextEligibleRequest, isChatMemoryEligibleRequest, isChatMemoryWriteEligibleRequest } from './eligibility'
 export { assertNoForbiddenHydrationFields, buildThreadHydrationDTO, HYDRATION_FORBIDDEN_FIELDS } from './hydration-dto'
 export { createChatThreadMessage, toChatThreadMessage, toMindMessage, toMindMessages } from './message-adapter'
 export { getChatMemoryRuntimeConfig, type ChatMemoryCheckpointMode, type ChatMemoryRuntimeConfig } from './runtime-config'

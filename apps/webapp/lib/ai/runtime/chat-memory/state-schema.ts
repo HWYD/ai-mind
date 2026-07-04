@@ -2,9 +2,9 @@ import { z } from 'zod'
 
 import type { MindMessage } from '@/lib/ai/types/message'
 
-export const CHAT_MEMORY_RECENT_TURN_LIMIT = 4 // 最近完整对话轮次上限，一轮固定为 user + assistant
+export const CHAT_MEMORY_RECENT_TURN_LIMIT = 2 // 最近完整对话轮次上限，一轮固定为 user + assistant
 export const CHAT_MEMORY_RECENT_MESSAGE_LIMIT = CHAT_MEMORY_RECENT_TURN_LIMIT * 2 // 最近消息上限
-export const CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT = Math.max(1, Math.floor(CHAT_MEMORY_RECENT_TURN_LIMIT / 2)) // 压缩后保留的完整对话轮次上限
+export const CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT = CHAT_MEMORY_RECENT_TURN_LIMIT // 压缩后保留的完整对话轮次上限
 export const CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT = CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT * 2 // 压缩后最近消息上限
 export const CHAT_MEMORY_SUMMARY_PREVIEW_LIMIT = 240 // 摘要预览上限
 export const CHAT_MEMORY_SUMMARY_TARGET_LIMIT = 2500 // 摘要目标上限

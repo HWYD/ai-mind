@@ -71,6 +71,40 @@ describe('runtime/chat-memory service', () => {
         expect((await service.readThreadState(threadId)).restored).toBe(false)
     })
 
+    it('duplicate assistant message id skips a second final-turn append', async () => {
+        const service = createChatMemoryService({ checkpointMode: 'memory' }, {})
+        const threadId = `chat:${'c'.repeat(64)}`
+
+        await service.appendCompletedTurn(threadId, {
+            assistantMessageId: 'assistant-duplicate',
+            assistantText: 'assistant answer',
+            userText: 'user input',
+        })
+        await service.appendCompletedTurn(threadId, {
+            assistantMessageId: 'assistant-duplicate',
+            assistantText: 'assistant answer',
+            userText: 'user input',
+        })
+
+        expect((await service.readThreadState(threadId)).state.messages).toHaveLength(2)
+    })
+
+    it('duplicate text-only pair without stable ids skips a second append', async () => {
+        const service = createChatMemoryService({ checkpointMode: 'memory' }, {})
+        const threadId = `chat:${'c'.repeat(64)}`
+
+        await service.appendCompletedTurn(threadId, {
+            assistantText: 'assistant answer',
+            userText: 'user input',
+        })
+        await service.appendCompletedTurn(threadId, {
+            assistantText: 'assistant answer',
+            userText: 'user input',
+        })
+
+        expect((await service.readThreadState(threadId)).state.messages).toHaveLength(2)
+    })
+
     it('exceeds threshold, compacts thread state, and keeps recent messages bounded', async () => {
         const compactedPinnedDecision = 'Decision: keep text-only memory.'
         const compactedSummary = 'Earlier summary string'
@@ -109,7 +143,7 @@ describe('runtime/chat-memory service', () => {
         expect(result.state.pinnedDecisions).toContain(compactedPinnedDecision)
         expect(onStatus).toHaveBeenNthCalledWith(1, {
             status: 'started',
-            message: '上下自动压缩中',
+            message: '自动压缩上下文中',
         })
         expect(onStatus).toHaveBeenNthCalledWith(2, {
             status: 'succeeded',
@@ -149,7 +183,7 @@ describe('runtime/chat-memory service', () => {
         expect(consoleInfoSpy).toHaveBeenCalledWith('[chat-memory-service]', expect.stringContaining('"event":"compaction-write-skipped"'))
         expect(onStatus).toHaveBeenNthCalledWith(1, {
             status: 'started',
-            message: '上下自动压缩中',
+            message: '自动压缩上下文中',
         })
         expect(onStatus).toHaveBeenNthCalledWith(2, {
             status: 'failed',
@@ -196,7 +230,7 @@ describe('runtime/chat-memory service', () => {
 
         expect(onStatus).toHaveBeenNthCalledWith(1, {
             status: 'started',
-            message: '上下自动压缩中',
+            message: '自动压缩上下文中',
         })
         expect(onStatus).toHaveBeenNthCalledWith(2, {
             status: 'failed',

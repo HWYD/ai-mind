@@ -1,7 +1,7 @@
 # Agent Runtime Roadmap
 
 状态: Active
-日期: 2026-07-01
+日期: 2026-07-04
 
 ## Purpose
 
@@ -11,7 +11,7 @@ Roadmap 不是当前版本的实现清单。每个版本只能实现对应 spec 
 
 ## Current baseline
 
-截至 v0.4.2，当前 Agent Runtime 基线是：
+截至 v0.4.3，当前 Agent Runtime 基线是：
 
 - Public Agent demo resource root 已收口到 `examples/agent-demo/`。
 - Public Agent demo 文件资源只使用 `@demo://`。
@@ -20,7 +20,7 @@ Roadmap 不是当前版本的实现清单。每个版本只能实现对应 spec 
 - `/delivery-chain` 支持 demo scenario 和 inline requirement 两类输入。
 - `/delivery-chain` 内部 runtime 是 `ControlledDeliveryManager`：通过受控 tool-calling 委派子 Agent tool，Review 阶段支持 3 个 review-class subagent 并行执行。
 - `/delivery-chain` 已支持 `workflow-progress-*` stream channel 和对应前端展示，包含 `delegate-review-group` step。
-- 普通 text chat 已有单会话 chat memory baseline，但它不进入 Agent Runtime、GraphState 或 Delivery runtime artifact 边界。
+- 普通 chat 已有单会话 chat memory baseline；tool / MCP final answer、Tasklist final answer summary、Delivery final report 现在也可作为安全 final turn 进入 chat history，但它们仍不进入 Agent Runtime、GraphState 或 Delivery runtime artifact 边界。
 - `@docs://`、`docs://versions/*.md` 不再作为 public Agent demo 输入。
 - `examples/agent-demo/scenarios/`、`rubrics/`、`governance/` 作为 Delivery Chain demo corpus 存在。
 
@@ -209,7 +209,7 @@ rejectOutOfOrderToolCalls: true
 
 ## Future Direction
 
-v0.4.2 已作为普通 chat memory baseline 发布，但不改变 Agent Runtime 的后续方向。后续 Agent 方向仍需要等 v0.4.1/v0.4.2 的真实实现、测试和架构复盘收口后再决定。
+v0.4.3 已作为 Tool & Agent Final Turn Memory 发布，但不改变 Agent Runtime 的后续方向。后续 Agent 方向仍需要等 v0.4.1-v0.4.3 的真实实现、测试和架构复盘收口后再决定。
 
 候选方向包括：
 
@@ -220,19 +220,19 @@ v0.4.2 已作为普通 chat memory baseline 发布，但不改变 Agent Runtime 
 - HITL-aware Subagent Delegation。
 - Chat persistence foundation。
 
-这些方向当前都不是 v0.4.2 的实现范围。
+这些方向当前都不是 v0.4.3 的实现范围。
 
 ## Guardrails
 
 - Roadmap 不是当前版本任务清单。
-- v0.4.1/v0.4.2 的 Manager 仍是 Controlled Manager Runtime，不是自由 Supervisor Agent。
-- v0.4.1/v0.4.2 的 Subagent Tool 是只对 ControlledDeliveryManager 暴露的受控 model tool，不是用户可选 tool，也不是全局 Agent Catalog entry。
-- v0.4.1/v0.4.2 允许受控 tool-calling，但每次 tool call 都必须经过 DelegationPolicy 校验；未注册、乱序、超次数或缺少必要 artifact 的 tool call 必须 fail closed。Review phase 内部允许 3 个 review-class tool 并行，但 Plan/Task 阶段保持串行。
-- v0.4.1/v0.4.2 可以复用统一 `executeToolCall()` 执行核心，但 `delivery-chain-manager` scope 不得向用户流出普通 `tool-*` / `resource-*` transcript。
-- v0.4.1/v0.4.2 允许在 `/delivery-chain` 内部引入 run-local RuntimeArtifact，但不得引入 `@artifact://`、artifact persistence 或 DB schema。
-- v0.4.2 的普通 chat memory 不得保存 Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact 或 subagent raw invocation/result。
-- v0.4.1/v0.4.2 不得修改 `/tasklist` 路由、Tasklist Agent Graph topology、HITL decision contract、checkpoint / resume contract 或 AgentRun 持久化边界。
-- v0.4.1/v0.4.2 不得让 Delivery Chain 子 Agent 调用 Tasklist Agent HITL Graph。
-- v0.4.1/v0.4.2 继续复用 `workflow-progress-*`，不得把 progress panel 扩展成 raw prompt / raw response / stack / provider config transcript。
+- v0.4.1-v0.4.3 的 Manager 仍是 Controlled Manager Runtime，不是自由 Supervisor Agent。
+- v0.4.1-v0.4.3 的 Subagent Tool 是只对 ControlledDeliveryManager 暴露的受控 model tool，不是用户可选 tool，也不是全局 Agent Catalog entry。
+- v0.4.1-v0.4.3 允许受控 tool-calling，但每次 tool call 都必须经过 DelegationPolicy 校验；未注册、乱序、超次数或缺少必要 artifact 的 tool call 必须 fail closed。Review phase 内部允许 3 个 review-class tool 并行，但 Plan/Task 阶段保持串行。
+- v0.4.1-v0.4.3 可以复用统一 `executeToolCall()` 执行核心，但 `delivery-chain-manager` scope 不得向用户流出普通 `tool-*` / `resource-*` transcript。
+- v0.4.1-v0.4.3 允许在 `/delivery-chain` 内部引入 run-local RuntimeArtifact，但不得引入 `@artifact://`、artifact persistence 或 DB schema。
+- v0.4.3 的 chat memory 可以保存用户可见 final text，但不得保存 Tasklist GraphState、HITL checkpoint、Tasklist artifact markdown、Delivery RuntimeArtifact、workflow progress 或 subagent raw invocation/result。
+- v0.4.1-v0.4.3 不得修改 `/tasklist` 路由、Tasklist Agent Graph topology、HITL decision contract、checkpoint / resume contract 或 AgentRun 持久化边界。
+- v0.4.1-v0.4.3 不得让 Delivery Chain 子 Agent 调用 Tasklist Agent HITL Graph。
+- v0.4.1-v0.4.3 继续复用 `workflow-progress-*`，不得把 progress panel 扩展成 raw prompt / raw response / stack / provider config transcript。
 - 除非正式 spec 明确允许，不得修改 stream protocol、frontend reducer、Prisma schema 或 PostgresSaver schema。
 - 后续版本编号必须等对应 spec / ADR / acceptance 明确后再写入 roadmap。

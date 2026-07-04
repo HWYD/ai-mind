@@ -35,6 +35,20 @@ describe('runtime/chat-memory hydration DTO', () => {
         ).toThrow()
     })
 
+    it('forbidden field scanner rejects source metadata and runtime payload fields', () => {
+        expect(() =>
+            assertNoForbiddenHydrationFields({
+                messages: [
+                    {
+                        displayKind: 'agent-final',
+                        source: 'tasklist-agent',
+                    },
+                ],
+                workflowProgress: [],
+            })
+        ).toThrow()
+    })
+
     it('forbidden field scanner 能拒绝嵌套 raw runtime 字段', () => {
         expect(() =>
             assertNoForbiddenHydrationFields({

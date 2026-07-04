@@ -31,6 +31,39 @@ function getChatFetchCalls(fetchMock: ReturnType<typeof vi.fn>) {
     return fetchMock.mock.calls.filter(call => String(call[0]) !== '/api/chat/thread')
 }
 
+function createStrategyInterruptResponse(runId = 'run-resume-error', interruptId = 'interrupt-strategy-error') {
+    return createNdjsonResponse([
+        { type: 'start', messageId: 'assistant-resume-error' },
+        {
+            agentName: 'version-plan-to-tasklist-agent',
+            assistantMessageId: 'assistant-resume-error',
+            interruptId,
+            interruptKind: 'strategy_review',
+            payload: {
+                allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                data: {
+                    planUri: 'demo://version-plans/v0.3.0.md',
+                    reviewRound: 1,
+                    strategy: {
+                        granularity: 'medium',
+                        grouping: 'by_phase',
+                        priorityFocus: ['core_runtime'],
+                        stepCountRange: '5-8',
+                    },
+                },
+                kind: 'strategy_review',
+                nodeName: 'reviewTasklistStrategy',
+                runId,
+                threadId: `tasklist-agent:c1:${runId}`,
+            },
+            runId,
+            threadId: `tasklist-agent:c1:${runId}`,
+            type: 'agent-interrupt',
+        },
+        { type: 'finish' },
+    ])
+}
+
 afterEach(() => {
     window.localStorage.clear()
     vi.unstubAllGlobals()
@@ -286,10 +319,16 @@ describe('useChatStream', () => {
         })
 
         await waitFor(() => {
-            expect(result.current.status).toBe('error')
+            expect(result.current.status).toBe('ready')
         })
 
-        expect(result.current.error).toContain('Model streaming failed.')
+        const assistantMessage = result.current.messages.find(message => message.id === 'assistant-3')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(result.current.error).toBeNull()
+        expect(assistantMessage?.status).toBe('failed')
+        expect(textPart?.type).toBe('text')
+        expect(textPart?.text).toContain('Model streaming failed.')
     })
 
     it('artifact chunks 会聚合到 message.artifacts 且不混入普通 text part', async () => {
@@ -631,6 +670,61 @@ describe('useChatStream', () => {
         expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
     })
 
+    it.each([
+        [403, 'AGENT_RUN_FORBIDDEN', '当前审核点不属于当前浏览器会话，可能是页面会话或本地密钥已变化。请重新发起 /tasklist。'],
+        [409, 'AGENT_INTERRUPT_NOT_PENDING', '当前审核点已被处理或已失效。请重新发起 /tasklist。'],
+    ] as const)('resumeAgentRun 收到 %i %s 时在主界面显示明确错误并保留 pending interrupt', async (status, code, expectedMessage) => {
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url.includes('/resume')) {
+                return Promise.resolve(
+                    Response.json(
+                        {
+                            code,
+                            error: 'resume rejected',
+                        },
+                        { status }
+                    )
+                )
+            }
+
+            return Promise.resolve(createStrategyInterruptResponse())
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+        await waitFor(() => {
+            expect(result.current.pendingInterrupt?.part.runId).toBe('run-resume-error')
+        })
+
+        await act(async () => {
+            await expect(result.current.resumeAgentRun({ type: 'approve' })).rejects.toThrow(`${expectedMessage}（${code}）`)
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.id === 'assistant-resume-error')
+        const interruptPart = assistantMessage?.parts.find(part => part.type === 'agent-interrupt')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(result.current.error).toBe(expectedMessage)
+        expect(result.current.pendingInterrupt?.part.interruptId).toBe('interrupt-strategy-error')
+        expect(assistantMessage?.status).toBe('paused')
+        expect(textPart?.type).toBe('text')
+        expect(textPart?.text).toBe(expectedMessage)
+        expect(interruptPart).toMatchObject({
+            interruptId: 'interrupt-strategy-error',
+            status: 'pending',
+        })
+    })
+
     it('reject resume 会结束当前 AgentRun，并解除 pending interrupt', async () => {
         const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
             const url = String(input)
@@ -719,5 +813,37 @@ describe('useChatStream', () => {
         expect(assistantMessage?.parts.some(part => part.type === 'text' && part.text.includes('已终止本轮 tasklist 生成。'))).toBe(true)
         expect(result.current.pendingInterrupt).toBeNull()
         expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
+    })
+
+    it('chat request 失败时会在当前轮次追加 assistant 失败回复', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                Response.json(
+                    {
+                        error: 'API Key 无效或已过期，请检查配置后重试。',
+                    },
+                    { status: 401 }
+                )
+            )
+        )
+
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成交付计划')
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(result.current.error).toBeNull()
+        expect(assistantMessage?.status).toBe('failed')
+        expect(textPart?.type).toBe('text')
+        expect(textPart?.text).toBe('API Key 无效或已过期，请检查配置后重试。')
     })
 })

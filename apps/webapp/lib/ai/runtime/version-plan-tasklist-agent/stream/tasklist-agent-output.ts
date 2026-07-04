@@ -48,7 +48,7 @@ export function buildControlledPlannerOutputFailureAnswer(error: unknown) {
     ].join('\n')
 }
 
-function buildFinalAnswerSummary(state: VersionPlanTasklistGraphStateAnnotationState) {
+export function buildTasklistFinalAnswerTextSummary(state: VersionPlanTasklistGraphStateAnnotationState) {
     const draft = state.tasklist.draft
     const validationResult = draft?.validationV3 ?? draft?.validationV2 ?? draft?.validationV1
     const revisionEffect = state.planning.revisionEffect
@@ -107,7 +107,7 @@ export function runFinalAnswerStep(options: {
 }): VersionPlanTasklistGraphStatePatch {
     const draft = options.state.tasklist.draft
     const validationResult = draft?.validationV3 ?? draft?.validationV2 ?? draft?.validationV1
-    const answer = buildFinalAnswerSummary(options.state)
+    const answer = buildTasklistFinalAnswerTextSummary(options.state)
     const update = applyVersionPlanTasklistGraphAction(options.state, {
         reason: '输出任务清单草稿、结构校验结论和人工确认点。',
         type: 'final_answer',

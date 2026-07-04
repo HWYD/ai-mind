@@ -47,7 +47,7 @@ describe('useChatStream thread-memory status', () => {
             {
                 type: 'thread-memory-status',
                 status: 'started',
-                message: '上下自动压缩中',
+                message: '自动压缩上下文中',
             },
             {
                 type: 'thread-memory-status',

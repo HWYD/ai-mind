@@ -69,22 +69,23 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - `composer-context`：消费 Composer command 与 resource reference，生成本轮受控上下文。
 - `version-plan-tasklist-agent`：承接 `/tasklist + @demo://version-plans/*.md` 的受控单 Agent 路径。
 
-## Chat Thread Memory Baseline
+## Chat Thread Memory
 
-`v0.4.2` 为普通 text chat 引入了单会话 chat memory baseline，但它仍然属于 runtime support boundary，不是新的业务数据层或 Agent runtime。
+`v0.4.2` 为普通 text chat 引入了单会话 chat memory baseline；`v0.4.3` 继续把它扩展到安全 final turn。但它仍然属于 runtime support boundary，不是新的业务数据层或 Agent runtime。
 
 它负责：
 
 - 基于当前浏览器 session 派生 chat thread id。
 - 以 LangGraph checkpointer 保存普通 chat 的 bounded ThreadState。
 - 在刷新时通过 `GET /api/chat/thread` 返回安全 hydration DTO。
-- 在普通聊天完成后追加 recent text messages，并在超阈值时做 summary compaction。
+- 在 eligible turn 完成后只追加“用户输入文本 + 最终用户可见文本”，来源可以是 ordinary chat、tool/resource final answer、Tasklist final answer summary 或 Delivery final report。
+- 在超阈值时做 summary compaction。
 - 在下一轮普通 text chat 中以后端 ThreadState 为历史事实源，注入 summary、pinned decisions 和 recent messages，并只从前端请求取本轮最新 user input。
 
 它不负责：
 
 - 保存完整 ChatSession / ChatMessage 业务历史。
-- 保存 tool transcript、MCP transcript、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact 或 raw provider/runtime internals。
+- 保存 tool transcript、MCP raw transcript、Tasklist artifact markdown、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact、workflow progress、subagent raw result 或 raw provider/runtime internals。
 - 改变 Tasklist Agent checkpoint / resume 语义。
 - 改变 Delivery Chain 的 run-local artifact 边界。
 - 扩展 stream-core chunk union。

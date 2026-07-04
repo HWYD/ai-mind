@@ -110,7 +110,7 @@ describe('chat stream thread memory status chunks', () => {
             {
                 type: 'thread-memory-status',
                 status: 'started',
-                message: '上下自动压缩中',
+                message: '自动压缩上下文中',
             },
             {
                 type: 'thread-memory-status',
@@ -252,5 +252,44 @@ describe('chat stream backward-compatible chunk inventory', () => {
 
         expect(knownChunkTypes).toContain('thread-memory-status')
         expect(knownChunkTypes).toContain('finish')
+    })
+
+    it('does not require any tool or agent final-turn specific stream chunk types', () => {
+        const knownChunkTypes = [
+            'start',
+            'skill-selected',
+            'thread-memory-status',
+            'agent-graph-node-start',
+            'agent-graph-node-end',
+            'agent-graph-route',
+            'agent-graph-state-patch',
+            'agent-graph-debug-summary',
+            'agent-interrupt',
+            'agent-resume',
+            'workflow-progress-start',
+            'workflow-progress-step',
+            'workflow-progress-end',
+            'text-start',
+            'text-delta',
+            'text-end',
+            'artifact-start',
+            'artifact-delta',
+            'artifact-end',
+            'reasoning-start',
+            'reasoning-delta',
+            'reasoning-end',
+            'tool-start',
+            'tool-end',
+            'prompt-start',
+            'prompt-end',
+            'resource-start',
+            'resource-end',
+            'finish',
+            'error',
+        ] satisfies ChatStreamChunk['type'][]
+
+        expect(knownChunkTypes).not.toContain('final-turn')
+        expect(knownChunkTypes).not.toContain('tool-final')
+        expect(knownChunkTypes).not.toContain('agent-final')
     })
 })

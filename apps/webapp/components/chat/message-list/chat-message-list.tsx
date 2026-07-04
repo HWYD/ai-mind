@@ -225,6 +225,7 @@ export function ChatMessageList({
                     isAssistantReplyCompleted &&
                     !actionsDisabled &&
                     status === 'ready' &&
+                    message.status !== 'failed' &&
                     getMessageTextContent(message).trim().length > 0
 
                 return (

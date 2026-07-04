@@ -16,6 +16,10 @@ const modelProviderMocks = vi.hoisted(() => ({
     getModelProviderConfig: vi.fn(),
 }))
 
+const chatMemoryMocks = vi.hoisted(() => ({
+    appendCompletedTurn: vi.fn(),
+}))
+
 vi.mock('@/lib/ai/mcp/adapters/project-docs-resource-adapter', () => ({
     projectDocsResourceAdapter: {
         read: testState.readResource,
@@ -41,7 +45,24 @@ vi.mock('@/lib/ai/model-provider', async importOriginal => {
     }
 })
 
+vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/lib/ai/runtime/chat-memory')>()
+
+    return {
+        ...actual,
+        chatMemoryService: {
+            ...actual.chatMemoryService,
+            appendCompletedTurn: chatMemoryMocks.appendCompletedTurn,
+        },
+    }
+})
+
+import { buildChatMemoryThreadId } from '@/lib/ai/runtime/chat-memory'
 import { resolveDeliveryChainInvocation, startDeliveryChainRun } from '@/lib/ai/runtime/delivery-chain'
+
+const chatMemoryEnv = {
+    AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
+}
 
 const testResolvedModelSelection: ResolvedModelSelection = {
     catalogItem: {
@@ -320,9 +341,16 @@ function getWorkflowProgressChunks(writeChunk: ReturnType<typeof vi.fn>) {
     return getWrittenChunks(writeChunk).filter(chunk => chunk.type.startsWith('workflow-progress'))
 }
 
+function getThreadMemoryStatusChunks(writeChunk: ReturnType<typeof vi.fn>) {
+    return getWrittenChunks(writeChunk).filter(
+        (chunk): chunk is Extract<ChatStreamChunk, { type: 'thread-memory-status' }> => chunk.type === 'thread-memory-status'
+    )
+}
+
 describe('runtime/delivery-chain', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.stubEnv('AI_MIND_AGENT_RUN_SESSION_SECRET', chatMemoryEnv.AI_MIND_AGENT_RUN_SESSION_SECRET)
         modelProviderMocks.getModelProviderConfig.mockReturnValue({
             allowedProviders: ['ollama'],
             chatMaxOutputTokens: 4096,
@@ -662,7 +690,9 @@ describe('runtime/delivery-chain', () => {
         const writeChunk = vi.fn()
 
         const handled = await startDeliveryChainRun({
-            context: {},
+            context: {
+                sessionId: 'delivery-scenario-session',
+            },
             modelHandle: modelHandle.handle as never,
             request: createScenarioRequest(),
             resolvedModelSelection: testResolvedModelSelection,
@@ -735,6 +765,168 @@ describe('runtime/delivery-chain', () => {
         expect(chunkTypes.has('artifact-end')).toBe(false)
         expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('runtimeArtifact')
         expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('chat-memory')
+        expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            buildChatMemoryThreadId('delivery-scenario-session', chatMemoryEnv),
+            expect.objectContaining({
+                assistantMessageId: expect.stringContaining('delivery-chain:'),
+                completionStatus: 'completed',
+                source: 'delivery-chain',
+                userMessageId: expect.stringContaining('delivery-chain:'),
+                userText: '帮我规划一个登录表单，支持手机号、密码和错误提示',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
+    })
+
+    it('Delivery final-turn append 会把 chat-memory compaction status relay 到当前 stream', async () => {
+        chatMemoryMocks.appendCompletedTurn.mockImplementationOnce(async (_threadId, _input, options) => {
+            options?.onStatus?.({
+                status: 'started',
+                message: '自动压缩上下文中',
+            })
+            options?.onStatus?.({
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                pinnedDecisionCount: 1,
+                summaryLength: 96,
+            })
+        })
+        const modelHandle = createDeliveryChainModelHandle({
+            stageResponses: [
+                [
+                    '## 需求理解',
+                    '',
+                    '- 需要一个请求上限 banner',
+                    '',
+                    '## 实现方案',
+                    '',
+                    '- 新增轻量提示层。',
+                    '',
+                    '## 涉及模块',
+                    '',
+                    '- Chat page',
+                    '',
+                    '## 非目标',
+                    '',
+                    '- 不改 stream protocol。',
+                    '',
+                    '## 风险',
+                    '',
+                    '- 需要和现有限流状态对齐。',
+                    '',
+                    '## 验收标准建议',
+                    '',
+                    '- 接近上限时显示。',
+                ].join('\n'),
+                [
+                    '## 任务拆解',
+                    '',
+                    '- 接入限流状态。',
+                    '',
+                    '## 推荐顺序',
+                    '',
+                    '1. 先补状态判断',
+                    '',
+                    '## 风险任务',
+                    '',
+                    '- Banner 触发阈值',
+                    '',
+                    '## 验收相关任务',
+                    '',
+                    '- 补 UI 测试',
+                    '',
+                    '## 非目标保护任务',
+                    '',
+                    '- 确认不改 reducer',
+                ].join('\n'),
+                [
+                    '结论: needs_changes',
+                    '',
+                    '## 覆盖检查',
+                    '',
+                    '- 覆盖主要需求。',
+                    '',
+                    '## 一致性检查',
+                    '',
+                    '- Plan 与 Task 基本一致。',
+                    '',
+                    '## 范围漂移检查',
+                    '',
+                    '- 未发现超出 public demo 边界。',
+                    '',
+                    '## 风险与下一步建议',
+                    '',
+                    '- 先确认触发阈值。',
+                ].join('\n'),
+                [
+                    'severity: low',
+                    '',
+                    '## 风险识别',
+                    '',
+                    '- 低风险',
+                    '',
+                    '## 风险等级',
+                    '',
+                    '- low',
+                    '',
+                    '## 缓解建议',
+                    '',
+                    '- 无需特殊处理',
+                ].join('\n'),
+                [
+                    'boundaryStatus: passed',
+                    '',
+                    '## DB / 持久化边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## HITL / checkpoint / resume 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Stream / UI 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## Tool / Agent 边界',
+                    '',
+                    '- 未触碰',
+                    '',
+                    '## 安全边界',
+                    '',
+                    '- 未触碰',
+                ].join('\n'),
+            ],
+        })
+        const writeChunk = vi.fn()
+
+        const handled = await startDeliveryChainRun({
+            context: {
+                sessionId: 'delivery-scenario-session',
+            },
+            modelHandle: modelHandle.handle as never,
+            request: createScenarioRequest(),
+            resolvedModelSelection: testResolvedModelSelection,
+            writeChunk,
+        })
+
+        expect(handled).toBe(true)
+        expect(getThreadMemoryStatusChunks(writeChunk)).toEqual([
+            {
+                type: 'thread-memory-status',
+                status: 'started',
+                message: '自动压缩上下文中',
+            },
+            {
+                type: 'thread-memory-status',
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                pinnedDecisionCount: 1,
+                summaryLength: 96,
+            },
+        ])
     })
 
     it('短 inline requirement 会在报告里补默认假设，blocked review 仍输出最终报告', async () => {
@@ -850,7 +1042,9 @@ describe('runtime/delivery-chain', () => {
         const writeChunk = vi.fn()
 
         await startDeliveryChainRun({
-            context: {},
+            context: {
+                sessionId: 'delivery-inline-session',
+            },
             modelHandle: modelHandle.handle as never,
             request: createInlineRequest('做个表单'),
             resolvedModelSelection: testResolvedModelSelection,
@@ -875,6 +1069,19 @@ describe('runtime/delivery-chain', () => {
         ])
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('inline requirement 较短'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`blocked`'))
+        expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
+            buildChatMemoryThreadId('delivery-inline-session', chatMemoryEnv),
+            expect.objectContaining({
+                assistantMessageId: expect.stringContaining('delivery-chain:'),
+                completionStatus: 'blocked',
+                source: 'delivery-chain',
+                userMessageId: expect.stringContaining('delivery-chain:'),
+                userText: '做个表单',
+            }),
+            expect.objectContaining({
+                onStatus: expect.any(Function),
+            })
+        )
     })
 
     it('当前模型不支持 tool-calling 时 fail closed，并输出安全报告', async () => {
@@ -905,6 +1112,7 @@ describe('runtime/delivery-chain', () => {
             })
         )
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('tool-calling'))
+        expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 
     it('Manager 阶段模型调用抛错时不会误报读取上下文失败', async () => {
@@ -931,5 +1139,6 @@ describe('runtime/delivery-chain', () => {
         ).toEqual(['load:running', 'load:completed', 'delegate-plan:running', 'delegate-plan:failed'])
         expect(JSON.stringify(getWorkflowProgressChunks(writeChunk))).not.toContain('读取上下文未完成')
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('provider tool-call failed'))
+        expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 })
