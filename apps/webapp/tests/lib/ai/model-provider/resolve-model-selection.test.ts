@@ -25,6 +25,7 @@ function createCatalogItem(overrides: Partial<AiMindModelCatalogItem> = {}): AiM
             toolCalling: true,
         },
         enabled: true,
+        family: 'ollama',
         id: 'ollama/qwen3-8b',
         label: 'Qwen3 8B Local',
         modelKey: 'qwen3-8b',
@@ -86,6 +87,7 @@ describe('resolveModelSelection', () => {
     it('provider 不在 allowed providers 中时会 fail closed', () => {
         testState.catalog = [
             createCatalogItem({
+                family: 'qwen',
                 id: 'qwen/qwen3.6-flash',
                 modelKey: 'qwen3.6-flash',
                 provider: 'qwen',
@@ -132,6 +134,7 @@ describe('resolveModelSelection', () => {
                     tasklist: false,
                     toolCalling: false,
                 },
+                family: 'qwen',
                 id: 'qwen/chat-only',
                 modelKey: 'chat-only',
                 provider: 'qwen',
@@ -161,6 +164,7 @@ describe('resolveModelSelection', () => {
                     tasklist: true,
                     toolCalling: false,
                 },
+                family: 'qwen',
                 id: 'qwen/no-tool-calling',
                 modelKey: 'no-tool-calling',
                 provider: 'qwen',

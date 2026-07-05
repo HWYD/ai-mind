@@ -40,12 +40,21 @@ export interface ChatRequestOptions {
     enableReasoning?: boolean
 }
 
-export interface ChatRequest {
-    conversationId: string
+export interface ChatRequestBase {
     composer?: ChatComposerPayload
     messages: MindMessageInput[]
     options?: ChatRequestOptions
 }
+
+export interface ChatRequest extends ChatRequestBase {
+    conversationId: string
+}
+
+export interface ChatDraftCreateRequest extends ChatRequestBase {
+    createConversation: true
+}
+
+export type ChatRequestInput = ChatRequest | ChatDraftCreateRequest
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 export type ChatSkillMode = 'auto' | 'utility' | 'reader'

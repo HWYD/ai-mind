@@ -1,4 +1,4 @@
-﻿import type { ChatRequest } from '@/lib/ai/types/chat'
+import type { ChatRequest, ChatRequestInput } from '@/lib/ai/types/chat'
 
 import { getChatSkillDefinition } from './index'
 import type { SkillDefinition } from './registry'
@@ -17,7 +17,7 @@ function createInvalidSkillError(skillId: string) {
 /**
  * 取最后一条用户消息文本，用于自动 skill 路由规则判断。
  */
-function getLastUserMessageText(request: ChatRequest) {
+function getLastUserMessageText(request: ChatRequest | ChatRequestInput) {
     for (let index = request.messages.length - 1; index >= 0; index -= 1) {
         const message = request.messages[index]
 
@@ -40,7 +40,7 @@ function getLastUserMessageText(request: ChatRequest) {
  * 2. 否则走规则路由
  * 3. 都不命中则返回 undefined（走普通聊天链路）
  */
-export function resolveSkillDefinitionForRequest(request: ChatRequest): SkillDefinition | undefined {
+export function resolveSkillDefinitionForRequest(request: ChatRequest | ChatRequestInput): SkillDefinition | undefined {
     const explicitSkillId = request.options?.skill?.trim()
 
     if (explicitSkillId) {
@@ -72,7 +72,7 @@ export function resolveSkillDefinitionForRequest(request: ChatRequest): SkillDef
  * 仅用于请求入口的显式 skill 校验。
  * 当用户传入非法或不可用 skill 时，提前抛错并终止请求。
  */
-export function validateExplicitSkillForRequest(request: ChatRequest) {
+export function validateExplicitSkillForRequest(request: ChatRequest | ChatRequestInput) {
     const explicitSkillId = request.options?.skill?.trim()
 
     if (!explicitSkillId) {

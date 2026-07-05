@@ -224,6 +224,7 @@ export class AgentRunService {
         }
 
         return {
+            conversationId: run.conversationId,
             decision: parsedDecision.data,
             interrupt: this.toPublicInterruptDto(result.interrupt),
             run: this.toPublicRunDto(result.run),

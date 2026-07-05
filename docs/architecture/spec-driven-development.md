@@ -28,6 +28,12 @@ private-folder/
   -> 草稿、历史过程、个人内部材料和长文推演；默认不是正式开发事实源
 ```
 
+## Language Policy for Specs
+
+`specs/` 可以使用中文正文，但必须保持 official Spec Kit 兼容的英文骨架。规格文件名使用 `spec.md`、`plan.md`、`tasks.md`、`acceptance.md`、`decisions.md`；核心 section heading 建议保留英文，例如 `Summary`、`Goals`、`Non-goals`、`Functional Requirements`、`Technical Plan`、`Acceptance Criteria`、`Decisions`。
+
+技术专有名词、代码标识符、文件路径、命令、类型名、API 名称和 package 名称保持英文或中英混写，例如 `GraphState`、`AgentRun`、`AgentInterrupt`、`PostgresSaver`、`stream-core`、`checkpoint`、`resume`、`interrupt`、`HITL`、`ADR`、`adapter layer`、`converge`、`public DTO`、`schema`。中文正文不能削弱 `Non-goals`、安全边界、兼容性边界和 release closing 检查。
+
 ## 一个复杂版本应该包含什么
 
 复杂版本应至少创建或更新：

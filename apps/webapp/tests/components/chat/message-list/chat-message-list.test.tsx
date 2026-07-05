@@ -68,7 +68,7 @@ function createResourcePart(resourceName: string, uri: string) {
 }
 
 describe('ChatMessageList', () => {
-    it('关闭深度思考时不展示 reasoning 面板', () => {
+    it('隐藏深度思考时不展示 reasoning 面板', () => {
         render(
             <ChatMessageList
                 messages={[createAssistantMessage()]}
@@ -156,5 +156,22 @@ describe('ChatMessageList', () => {
 
         expect(screen.getByText('已读取 demo 上下文 6 项')).toBeTruthy()
         expect(screen.queryByText('资源读取：plan-rubric.md')).toBeNull()
+    })
+
+    it('hides empty-state suggestions when the parent marks the empty state as non-draft', () => {
+        render(
+            <ChatMessageList
+                messages={[]}
+                status="ready"
+                enableReasoning={false}
+                showEmptyStateSuggestions={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        expect(screen.queryByText('试试这些能力')).toBeNull()
     })
 })

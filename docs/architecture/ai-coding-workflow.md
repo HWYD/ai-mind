@@ -135,9 +135,11 @@ Spec Kit full skills 是复杂变更的默认执行入口，不是所有任务�
 
 - Level C / D 默认使用 official full skills；如果 tooling 不可用，则先完成人工等价 specify / clarify / plan / checklist / tasks / analyze，再进入实现。
 - Level C / D 实现后执行 converge 或人工等价收口检查。
+- 读取中文 specs 时，必须保留原文中的英文技术名词、文件路径、命令、类型名、API 名称和 package 名称。
 - 只实现当前 task。
 - 不提前实现后续 task。
 - 不修改 Non-goals 范围。
+- 不因为 specs 正文是中文就忽略 Non-goals、安全边界、兼容性边界和 release closing 检查。
 - 不重构无关代码。
 - 不新增无复用价值的 helper / mapper / util。
 - 不绕过 GraphState。

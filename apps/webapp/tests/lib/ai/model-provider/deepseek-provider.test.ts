@@ -37,6 +37,7 @@ function createTestSelection(): ResolvedModelSelection {
                 toolCalling: true,
             },
             enabled: true,
+            family: 'deepseek',
             id: 'deepseek/deepseek-v4-flash',
             label: 'DeepSeek V4 Flash',
             modelKey: 'deepseek-v4-flash',

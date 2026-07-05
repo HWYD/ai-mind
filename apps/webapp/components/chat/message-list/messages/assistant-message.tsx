@@ -295,7 +295,7 @@ export function AssistantMessage({
 
     return (
         <article className="flex justify-start">
-            <div className="w-full max-w-[51rem] text-foreground">
+            <div className="w-full max-w-[var(--chat-content-column-width,51rem)] text-foreground">
                 <ReasoningPanel combinedReasoning={combinedReasoning} isThinking={isThinking} reserveSpace={reserveReasoningSpace} />
 
                 {contentParts.map((part, index) => {

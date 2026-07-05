@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const streamChatMock = vi.hoisted(() => vi.fn())
 const rateLimitCheckAndIncrementMock = vi.hoisted(() => vi.fn())
 const resolveSessionIdMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'test-session', setCookie: vi.fn() })))
+const getConversationMock = vi.hoisted(() => vi.fn())
+const touchConversationMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/ai/chat-service', () => ({
     createChatService: () => ({
@@ -26,6 +28,13 @@ vi.mock('@/lib/ai/rate-limit', () => ({
     resolveSessionId: resolveSessionIdMock,
 }))
 
+vi.mock('@/lib/ai/runtime/chat-memory', () => ({
+    conversationRegistryService: {
+        getConversation: getConversationMock,
+        touchConversation: touchConversationMock,
+    },
+}))
+
 import { POST } from '@/app/api/chat/route'
 
 function createPostRequest(payload: unknown) {
@@ -41,6 +50,10 @@ function createPostRequest(payload: unknown) {
 describe('POST /api/chat tasklist input length routing', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        getConversationMock.mockResolvedValue({
+            id: 'test-tasklist-history-length',
+        })
+        touchConversationMock.mockResolvedValue(undefined)
     })
 
     it('does not reject tasklist requests only because prior history is too long', async () => {
@@ -103,6 +116,14 @@ describe('POST /api/chat tasklist input length routing', () => {
                 resolvedModelSelection: expect.objectContaining({
                     routeType: 'tasklist',
                 }),
+            })
+        )
+        expect(getConversationMock).toHaveBeenCalledWith('test-session', 'test-tasklist-history-length')
+        expect(touchConversationMock).toHaveBeenCalledWith(
+            'test-session',
+            'test-tasklist-history-length',
+            expect.objectContaining({
+                markSelected: true,
             })
         )
     })

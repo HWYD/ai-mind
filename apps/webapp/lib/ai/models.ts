@@ -1,8 +1,10 @@
 export type ChatModel = string
 
 export type ChatModelProvider = 'ollama' | 'deepseek' | 'qwen' | 'doubao'
+export type ChatModelFamily = ChatModelProvider | 'kimi'
 
 export interface PublicChatModel {
+    family: ChatModelFamily
     id: ChatModel
     label: string
     provider: ChatModelProvider
@@ -29,19 +31,12 @@ export interface ChatModelGroup {
 // Step 13 后它不再代表真实可选模型集合，只用于首屏 hydration 期间的稳定初值。
 export const defaultChatModel: ChatModel = 'ollama/qwen3-8b'
 
-const modelProviderOrder: Record<ChatModelProvider, number> = {
-    qwen: 0,
-    deepseek: 1,
-    doubao: 2,
-    ollama: 3,
-}
-
 export function findPublicChatModel(models: PublicChatModel[], modelId: ChatModel): PublicChatModel | null {
     return models.find(model => model.id === modelId) ?? null
 }
 
 export function groupPublicChatModels(models: PublicChatModel[]): ChatModelGroup[] {
-    const onlineModels = sortOnlineModels(models.filter(model => model.provider !== 'ollama'))
+    const onlineModels = models.filter(model => model.provider !== 'ollama')
     const localModels = models.filter(model => model.provider === 'ollama')
 
     const groups: ChatModelGroup[] = []
@@ -95,7 +90,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isChatModelProvider(value: unknown): value is ChatModelProvider {
-    return value === 'ollama' || value === 'deepseek' || value === 'qwen'
+    return value === 'ollama' || value === 'deepseek' || value === 'qwen' || value === 'doubao'
+}
+
+function isChatModelFamily(value: unknown): value is ChatModelFamily {
+    return value === 'ollama' || value === 'deepseek' || value === 'qwen' || value === 'doubao' || value === 'kimi'
 }
 
 function parsePublicChatModel(value: unknown): PublicChatModel | null {
@@ -103,28 +102,19 @@ function parsePublicChatModel(value: unknown): PublicChatModel | null {
         return null
     }
 
-    if (typeof value.id !== 'string' || typeof value.label !== 'string' || !isChatModelProvider(value.provider)) {
+    if (
+        typeof value.id !== 'string' ||
+        typeof value.label !== 'string' ||
+        !isChatModelProvider(value.provider) ||
+        !isChatModelFamily(value.family)
+    ) {
         return null
     }
 
     return {
+        family: value.family,
         id: value.id,
         label: value.label,
         provider: value.provider,
     }
-}
-
-function sortOnlineModels(models: PublicChatModel[]): PublicChatModel[] {
-    return models
-        .map((model, index) => ({ model, index }))
-        .sort((left, right) => {
-            const providerOrderDifference = modelProviderOrder[left.model.provider] - modelProviderOrder[right.model.provider]
-
-            if (providerOrderDifference !== 0) {
-                return providerOrderDifference
-            }
-
-            return left.index - right.index
-        })
-        .map(entry => entry.model)
 }

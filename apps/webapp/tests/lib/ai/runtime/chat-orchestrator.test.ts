@@ -10,6 +10,7 @@ const runtimeMocks = vi.hoisted(() => {
         appendCompletedTurn: vi.fn(),
         readThreadState: vi.fn(),
         buildChatMemoryContextMessages: vi.fn(),
+        touchConversation: vi.fn(),
         createChatSession: vi.fn(),
         decideAuthoritativeToolAnswer: vi.fn(),
         executeComposerContextInvocation: vi.fn(),
@@ -64,10 +65,13 @@ vi.mock('@/lib/ai/runtime/chat-session', () => ({
 
 vi.mock('@/lib/ai/runtime/chat-memory', () => ({
     buildChatMemoryContextMessages: runtimeMocks.buildChatMemoryContextMessages,
-    buildChatMemoryThreadId: (sessionId: string) => `chat:${sessionId}`,
+    buildChatConversationThreadId: (sessionId: string, conversationId: string) => `chat-conversation:${sessionId}:${conversationId}`,
     chatMemoryService: {
         appendCompletedTurn: runtimeMocks.appendCompletedTurn,
         readThreadState: runtimeMocks.readThreadState,
+    },
+    conversationRegistryService: {
+        touchConversation: runtimeMocks.touchConversation,
     },
     isChatMemoryContextEligibleRequest: (request: { composer?: { command?: { name?: string } } }) =>
         request.composer?.command?.name !== 'tasklist' && request.composer?.command?.name !== 'delivery-chain',
@@ -301,6 +305,7 @@ function createExecutionContext(): ResolvedChatExecutionContext {
                     toolCalling: true,
                 },
                 enabled: true,
+                family: 'ollama',
                 id: 'ollama/qwen3-8b',
                 label: 'qwen3-8b',
                 modelKey: 'qwen3-8b',
@@ -331,6 +336,7 @@ describe('runtime/chat-orchestrator', () => {
 
         runtimeMocks.buildSystemMessages.mockReturnValue([])
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([])
+        runtimeMocks.touchConversation.mockResolvedValue(undefined)
         runtimeMocks.readThreadState.mockResolvedValue({
             restored: false,
             state: {
@@ -398,7 +404,7 @@ describe('runtime/chat-orchestrator', () => {
 
         expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat:test-session',
+            'chat-conversation:test-session:test-conversation',
             {
                 assistantMessageId: expect.any(String),
                 assistantText: '你好，我是 AI Mind。',
@@ -490,7 +496,7 @@ describe('runtime/chat-orchestrator', () => {
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expect(finishObservedAfterAppend).toBe(true)
         expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat:test-session',
+            'chat-conversation:test-session:test-conversation',
             {
                 assistantMessageId: expect.any(String),
                 assistantText: '完整回答文本',
@@ -626,7 +632,7 @@ describe('runtime/chat-orchestrator', () => {
             }
         )
         expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat:test-session',
+            'chat-conversation:test-session:test-conversation',
             expect.objectContaining({
                 source: 'mcp-resource',
             }),
@@ -952,7 +958,7 @@ describe('runtime/chat-orchestrator', () => {
         expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat:test-session',
+            'chat-conversation:test-session:test-conversation',
             expect.objectContaining({
                 source: 'tool',
             }),
@@ -1035,7 +1041,7 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.writeStaticTextPart).toHaveBeenCalledTimes(1)
         expect(toolBoundModelStream).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat:test-session',
+            'chat-conversation:test-session:test-conversation',
             expect.objectContaining({
                 assistantText: '`1+1` 的结果是 **2**。',
                 source: 'tool',

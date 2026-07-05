@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.4.3：Tool & Agent Final Turn Memory。在 v0.4.2 单会话 memory baseline 上，把 ordinary tool、MCP/resource、Tasklist final answer 和 Delivery final report 的最终用户可见问答也纳入可恢复 thread history，同时继续排除 raw transcript、GraphState 和 RuntimeArtifact。
+> v0.4.4：Minimal Multi-thread Chat Sessions。在 v0.4.2 / v0.4.3 chat memory 基线上，把当前 browser session 从“单会话 thread”扩展为“最多 10 个最近 conversations”，同时保持 final-turn memory、stream protocol、Tasklist / Delivery 边界不变。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.3`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.4`。
 
 已经验证：
 
@@ -216,6 +216,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Controlled Agent-as-tool Delivery Manager。
 - LangGraph 单会话 chat memory baseline。
 - Tool & Agent final-turn memory。
+- Minimal multi-thread chat sessions。
 
 当前非目标：
 
@@ -250,41 +251,34 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.3
+## 当前版本：v0.4.4
 
-这版的主线是 `Tool & Agent Final Turn Memory`：在 v0.4.2 的单会话 chat memory baseline 上，继续把 tool / MCP / Tasklist / Delivery 的“最终用户可见问答”纳入同一个可恢复 thread history。
+这版的主线是 `Minimal Multi-thread Chat Sessions`：在 v0.4.2 单会话 memory baseline 和 v0.4.3 final-turn memory 基线上，把当前 browser session 的 chat page 扩展为“最多 10 个最近 conversations”的最小多会话形态。
 
-v0.4.3 的边界非常明确：
+v0.4.4 的边界非常明确：
 
-- 只支持当前浏览器单会话 chat memory，不做 ChatGPT 左侧多会话历史。
-- 普通 chat thread 使用派生的 `chat:${sessionHash}`，不暴露原始 session id。
-- persisted messages 继续只保存 text-only user / assistant messages，不保存 `source`、`turnId`、`displayKind` 或任何 raw runtime metadata。
-- ordinary tool、reader / utility、docs summary、MCP / resource、Tasklist final answer summary、Delivery final report 现在都可以作为 safe final turn 写入 memory。
-- 不保存 tool transcript、MCP raw transcript、Tasklist artifact markdown、Tasklist GraphState、HITL checkpoint、Delivery RuntimeArtifact、workflow progress、subagent raw result 或 raw provider/runtime internals。
-- recent memory window 以完整 user/assistant turns 定义，消息条数由 turn window 派生，避免 compaction 后残留半轮上下文。
-- chat memory checkpoint 与 Tasklist Agent checkpoint 分离：Tasklist 继续使用 `langgraph_checkpoint`，chat memory 使用 `langgraph_chat_memory`。
-- development 默认 `AI_MIND_CHAT_MEMORY_CHECKPOINT=memory`，production 发布目标默认 `postgres`。
-- hydrate 只通过 `GET /api/chat/thread` 返回安全 DTO；压缩状态通过可选 `thread-memory-status` stream chunk 传递，不改变既有 reducer public shape。
-- Tasklist 和 Delivery final-turn append 命中压缩时，也会 relay `thread-memory-status`。
-- compaction 失败只能 no-op，不得影响已经完成的用户回答。
+- Conversation Registry 只属于当前 browser session，不是账号级历史，也不是全局 history。
+- 每个 conversation 对应独立的 text-only chat memory thread；hydration、summary compaction、pinned decisions 和 final-turn memory append 全部按 conversation 隔离。
+- recent conversations 按 `lastActiveAt` 排序并裁剪为 10 条；create blank conversation、switch selected conversation 和 refresh restore 都走服务端校验。
+- UI 继续站在 `instant-mind` 页面壳层、本地 `components/ui`、`shadcn/ui` / `radix-vega` 基线上演进，不依赖 MCP 或 remote UI registry。
+- streaming 期间禁止创建新会话和切换会话，避免 final turn 写错 conversation。
+- 普通 chat、tool / MCP、Tasklist final answer、Delivery final report 仍然只把最终用户可见文本写入 memory，不暴露 raw transcript、GraphState、RuntimeArtifact 或 provider/runtime internals。
+- stream protocol、frontend reducer public shape、Tasklist checkpoint / resume 语义、Delivery run-local 语义保持不变。
 
 本版显式不做：
 
 - 不新增 ChatSession / ChatMessage Prisma 业务表。
-- 不做多会话菜单、历史分页、搜索、编辑/删除持久化。
-- 不做长期记忆、LangGraph Store、pgvector 或 Memory Inspector。
-- 不引入 execution summary、reasoning summary、contextEntries 或 agent run summary。
-- 不把 raw tool-calling transcript、raw MCP transcript、Tasklist GraphState / HITL payload、Delivery RuntimeArtifact / subagent raw result 写入 chat ThreadState。
-- 不修改 Tasklist Agent HITL / checkpoint / resume 语义，只保存 final answer text summary。
-- 不修改 Delivery Chain ControlledDeliveryManager、RuntimeArtifact run-local 边界或 `delivery-chain-manager` transcript suppression，只保存 final report text。
+- 不做账号同步、多端共享、搜索、分页、删除、重命名、归档或完整历史管理。
+- 不兼容或迁移 legacy `chat:${sessionHash}` 单线程 identity。
+- 不把 raw tool / MCP transcript、Tasklist GraphState / HITL payload、Delivery RuntimeArtifact / workflow progress 写入 chat ThreadState。
 
 当前 runtime baseline 保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
-- 普通 text chat / safe final turn：可恢复的 chat memory baseline（recent messages + summary + pinned decisions）
+- 普通 text chat / multi-thread memory：selected conversation 下的可恢复 recent messages + summary + pinned decisions
 
-详细设计见 [v0.4.3 Tool & Agent Final Turn Memory](./docs/versions/v0.4.3-tool-agent-final-turn-memory.md)、[Runtime 边界](./docs/architecture/runtime-boundary.md)、[Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md)、[ADR-0012](./docs/adr/0012-chat-thread-memory-baseline.md) 和 [ADR-0013](./docs/adr/0013-tool-agent-final-turn-memory.md)。
+详细设计见 [v0.4.4 Minimal Multi-thread Chat Sessions](./docs/versions/v0.4.4-minimal-multi-thread-chat-sessions.md)、[v0.4.4 Release Note](./docs/releases/v0.4.4.md)、[specs/044-multi-thread-chat-sessions](./specs/044-multi-thread-chat-sessions/)、[Runtime 边界](./docs/architecture/runtime-boundary.md) 和 [Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md)。
 
 ## 当前能力
 
@@ -561,7 +555,7 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 
 ### Runtime checkpoint 与 chat memory setup
 
-如果要验证 durable Tasklist checkpoint 或 v0.4.3 的 chat memory checkpoint，先准备 `DATABASE_URL`，再执行：
+如果要验证 durable Tasklist checkpoint 或 v0.4.4 的 chat memory checkpoint，先准备 `DATABASE_URL`，再执行：
 
 ```bash
 pnpm db:setup:deploy
@@ -630,36 +624,37 @@ pnpm lint:packages:fix
 
 AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运行时问题。
 
-| Version | Theme                                              | Key Changes                                                                                                                                                                    |
-| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| v0.0.4  | 本地聊天闭环                                       | 完成本地聊天、流式输出与 Streamdown 展示                                                                                                                                       |
-| v0.0.5  | Tool Calling MVP                                   | 接入最小 Tool Calling 能力                                                                                                                                                     |
-| v0.0.6  | Multi-Tool Runtime                                 | 支持多工具运行时与工具结果回传                                                                                                                                                 |
-| v0.0.7  | Skill Runtime                                      | 引入第一层 Skill Runtime，完成 `utility-skill`                                                                                                                                 |
-| v0.0.8  | Reader Skill                                       | 新增 `reader-skill`，支持文件读取与阅读类能力                                                                                                                                  |
-| v0.0.9  | MCP Host MVP                                       | 接入本地 stdio MCP，验证 MCP Tool / Resource                                                                                                                                   |
-| v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                                                                                                            |
-| v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                                                                                                             |
-| v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime                                                                                  |
-| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                                                                       |
-| v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                                                                  |
-| v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary                                             |
-| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                                                               |
-| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                                                                         |
-| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                                                                         |
-| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                                                               |
-| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                                                             |
-| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                                                             |
-| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                                                                 |
-| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                                                                      |
-| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                                                    |
-| v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans                                     |
-| v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                                                       |
-| v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板                                     |
-| v0.4.0  | Controlled Agent-as-tool Delivery Manager MVP      | 用 `ControlledDeliveryManager` 接管 `/delivery-chain`，通过受控 tool-calling 串行委派 `plan/task/review` 子 Agent tool，并保持 RuntimeArtifact 仅在 run-local runtime 内部流转 |
-| v0.4.1  | Parallel Review Subagents + Manager Synthesis      | Review 阶段升级为 3 个 review-class subagent 并行执行，引入 phase-aware DelegationPolicy 和基于规则的 `synthesizeReviewBundle` 综合判断                                        |
-| v0.4.2  | LangGraph Single Thread Memory Baseline            | 为当前单聊天会话引入 LangGraph thread memory、refresh hydration、summary compaction 与 pinned decisions，并保持 Tasklist / Delivery / stream 边界不变                          |
-| v0.4.3  | Tool & Agent Final Turn Memory                     | 把 tool / MCP / Tasklist / Delivery 的最终用户可见问答纳入可恢复 chat memory，同时继续排除 raw transcript、GraphState、RuntimeArtifact 和 protocol / reducer breaking change   |
+| Version | Theme                                              | Key Changes                                                                                                                                                                     |
+| ------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| v0.0.4  | 本地聊天闭环                                       | 完成本地聊天、流式输出与 Streamdown 展示                                                                                                                                        |
+| v0.0.5  | Tool Calling MVP                                   | 接入最小 Tool Calling 能力                                                                                                                                                      |
+| v0.0.6  | Multi-Tool Runtime                                 | 支持多工具运行时与工具结果回传                                                                                                                                                  |
+| v0.0.7  | Skill Runtime                                      | 引入第一层 Skill Runtime，完成 `utility-skill`                                                                                                                                  |
+| v0.0.8  | Reader Skill                                       | 新增 `reader-skill`，支持文件读取与阅读类能力                                                                                                                                   |
+| v0.0.9  | MCP Host MVP                                       | 接入本地 stdio MCP，验证 MCP Tool / Resource                                                                                                                                    |
+| v0.0.10 | Runtime Refactor + Stream Core                     | 收口 chat-service 主链，抽离 `@ai-mind/stream-core`                                                                                                                             |
+| v0.0.11 | Capability Model + Remote MCP                      | 建立 capability model / skill metadata，接入 remote MCP 单服务闭环                                                                                                              |
+| v0.0.12 | Docs Resource + Composer + Capability Tool Runtime | 收紧 docs resource 边界，接入 Tiptap Composer V1，并用 capability selectors 驱动 Tool Runtime                                                                                   |
+| v0.1.0  | Controlled Tasklist Agent                          | 引入受控单 Agent，基于显式 version plan 生成 tasklist 草稿并进行结构校验                                                                                                        |
+| v0.1.1  | 一次受控规划决策                                   | 在受控 Agent 内增加一次白名单 Planning Decision、策略生成、warning 分流、修正效果评估和最终产物 Artifact 展示                                                                   |
+| v0.2.0  | Controlled Agent Graph                             | 将受控 Tasklist Agent 编排层迁移到 LangGraph StateGraph，新增 graph events、Trace timeline、开发态 checkpoint 和脱敏 Debug Summary                                              |
+| v0.2.1  | Online Demo & Model Provider Runtime               | 建立 Model Catalog 与 Ollama / Qwen / DeepSeek Provider Runtime，新增白名单模型选择、错误收口、限流和 usage 观测                                                                |
+| v0.2.2  | Containerized Deployment & GitHub Actions Delivery | 完成容器化部署、生产环境配置和 GitHub Actions 交付链路                                                                                                                          |
+| v0.2.3  | Tasklist Agent Graph Runtime Consolidation         | 删除 legacy runner 与 runtime switch，`/tasklist` 固定走 Graph Runtime                                                                                                          |
+| v0.2.4  | Tasklist Agent Graph Single State Model            | GraphState 成为 Tasklist Agent 内部运行态事实源，旧 AgentState API 退出，graph nodes 返回合并式 GraphState patch                                                                |
+| v0.3.0  | Tasklist Agent HITL Checkpoint Resume              | Strategy 必审、修订前条件式 HITL、最多两轮受控修订，并接入 Prisma AgentRun 与 LangGraph Postgres checkpoint resume                                                              |
+| v0.3.1  | Spec Kit Governance Baseline                       | 新增 constitution、specs、ADR、AI coding workflow 和 PR checklist，把后续 AI coding 开发流程规范化                                                                              |
+| v0.3.2  | Spec Kit CLI + Codex Skills Dual-track Pilot       | 真实试跑官方 CLI，新增项目内 `speckit-*` pilot skills，确认 CLI、skills 和人工等价三条治理路径的边界与协同方式                                                                  |
+| v0.3.3  | Spec Kit Full Skills Default Entry                 | 引入 official full `speckit-*` skills，迁移本地 pilot 规则，建立 Level C / D 默认入口和 converge 收口检查                                                                       |
+| v0.3.4  | Tasklist Agent LangSmith Observability             | 为 Tasklist Agent HITL checkpoint resume 链路接入可选 LangSmith lifecycle tracing，记录脱敏 metadata 并保持主流程 soft fail                                                     |
+| v0.3.5  | Agent Demo Workspace Resource Boundary             | 将 public demo Agent 资源收口到 `examples/agent-demo/`，新增 `@demo://`，迁移 `/tasklist` demo 入口并限制 picker 只展示 demo version-plans                                      |
+| v0.3.6  | Controlled Delivery Chain MVP                      | 新增 `/delivery-chain`，支持 demo scenario 与 inline requirement，在 `@demo://` 边界内输出受控的 Plan、Task、Review 报告                                                        |
+| v0.3.7  | Delivery Chain Workflow Progress Presentation      | 为 `/delivery-chain` 新增 `workflow-progress-*` 过程展示、完成后折叠摘要和报告 section presentation，首版不影响 `/tasklist` 与普通资源面板                                      |
+| v0.4.0  | Controlled Agent-as-tool Delivery Manager MVP      | 用 `ControlledDeliveryManager` 接管 `/delivery-chain`，通过受控 tool-calling 串行委派 `plan/task/review` 子 Agent tool，并保持 RuntimeArtifact 仅在 run-local runtime 内部流转  |
+| v0.4.1  | Parallel Review Subagents + Manager Synthesis      | Review 阶段升级为 3 个 review-class subagent 并行执行，引入 phase-aware DelegationPolicy 和基于规则的 `synthesizeReviewBundle` 综合判断                                         |
+| v0.4.2  | LangGraph Single Thread Memory Baseline            | 为当前单聊天会话引入 LangGraph thread memory、refresh hydration、summary compaction 与 pinned decisions，并保持 Tasklist / Delivery / stream 边界不变                           |
+| v0.4.3  | Tool & Agent Final Turn Memory                     | 把 tool / MCP / Tasklist / Delivery 的最终用户可见问答纳入可恢复 chat memory，同时继续排除 raw transcript、GraphState、RuntimeArtifact 和 protocol / reducer breaking change    |
+| v0.4.4  | Minimal Multi-thread Chat Sessions                 | 把 chat page 扩展为 browser-session scoped recent conversations，保持 conversation 隔离的 memory / hydration / final-turn writes，并继续复用 instant-mind + 本地 shadcn/ui 基线 |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

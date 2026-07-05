@@ -35,10 +35,16 @@ export const HYDRATION_FORBIDDEN_FIELDS = [
     'workflowProgress',
 ]
 
-export function buildThreadHydrationDTO(input: { restored: boolean; state: AiMindThreadState; threadId: string }): ThreadHydrationDTO {
+export function buildThreadHydrationDTO(input: {
+    conversationId?: string
+    restored: boolean
+    state: AiMindThreadState
+    threadId?: string
+}): ThreadHydrationDTO {
     const summaryPreview = input.state.summary.trim().slice(0, CHAT_MEMORY_SUMMARY_PREVIEW_LIMIT)
     const dto = {
-        threadId: input.threadId,
+        ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+        ...(input.threadId ? { threadId: input.threadId } : {}),
         messages: toMindMessages(input.state.messages),
         ...(summaryPreview ? { summaryPreview } : {}),
         pinnedDecisions: input.state.pinnedDecisions.slice(0, CHAT_MEMORY_PINNED_DECISION_LIMIT),

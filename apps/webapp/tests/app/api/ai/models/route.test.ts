@@ -26,6 +26,7 @@ describe('GET /api/ai/models', () => {
         expect(body.models).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
+                    family: 'qwen',
                     id: 'ollama/qwen3-8b',
                     provider: 'ollama',
                 }),
@@ -54,6 +55,7 @@ describe('GET /api/ai/models', () => {
         expect(body.models).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
+                    family: 'qwen',
                     id: 'qwen/qwen3.6-flash',
                     provider: 'qwen',
                 }),

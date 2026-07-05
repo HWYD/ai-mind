@@ -20,7 +20,13 @@ describe('resolveChatModelsInitialState', () => {
         expect(result.models).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
+                    family: 'qwen',
                     id: 'qwen/qwen3.6-flash',
+                    provider: 'qwen',
+                }),
+                expect.objectContaining({
+                    family: 'deepseek',
+                    id: 'deepseek/deepseek-v4-flash',
                     provider: 'qwen',
                 }),
             ])

@@ -116,6 +116,17 @@ AI Mind 的项目约束不写进 official skills 本体，而是放在 adapter l
 - 避免同名 `speckit-*` 同时代表官方和项目内 pilot。
 - 避免小改被 full skills 过度加重。
 
+## Spec Kit Language Policy
+
+AI Mind 的 Spec Kit 文档采用“英文骨架 + 中文正文 + 英文技术名词”的长期策略。`specs/` 下的正文可以中文为主，但 official-compatible 结构必须保持稳定：
+
+- 文件名保持 `spec.md`、`plan.md`、`tasks.md`、`acceptance.md`、`decisions.md`。
+- skill、command 和 script 名保持英文，包括 `speckit-specify`、`speckit-plan`、`speckit-tasks`、`speckit-analyze`、`speckit-converge`、`$speckit-*` 和 `/speckit.*`。
+- 核心 section heading 建议保留英文，例如 `Summary`、`Goals`、`Non-goals`、`Functional Requirements`、`Technical Plan`、`Acceptance Criteria`、`Decisions`。
+- 技术名词保留英文或中英混写，例如 `GraphState`、`AgentRun`、`AgentInterrupt`、`PostgresSaver`、`stream-core`、`checkpoint`、`resume`、`interrupt`、`HITL`、`ADR`、`adapter layer`、`converge`、`public DTO`、`schema`。
+
+official generated / vendored baseline 不因语言策略直接中文化。若需要影响模板输出，先在 `.specify/templates/overrides/` 说明项目策略或新增 override，不直接修改 `.agents/skills/speckit-*`、`.specify/scripts`、core `.specify/templates`、`.specify/integrations` 或 `.specify/extensions/agent-context`。
+
 ## 人工等价
 
 人工等价路径长期保留。

@@ -1,4 +1,4 @@
-import type { ChatRequest } from '@/lib/ai/types/chat'
+import type { ChatRequest, ChatRequestInput } from '@/lib/ai/types/chat'
 
 import type { ModelRouteType } from './types'
 
@@ -8,7 +8,7 @@ import type { ModelRouteType } from './types'
  * - Composer command 是 `/tasklist` 且引用 `demo://version-plans/*.md` 时，视作 tasklist。
  * - 其余请求仍走普通 chat。
  */
-export function resolveRouteType(request: ChatRequest): ModelRouteType {
+export function resolveRouteType(request: ChatRequest | ChatRequestInput): ModelRouteType {
     const command = request.composer?.command?.name
 
     if (command === 'delivery-chain') {

@@ -47,3 +47,10 @@
 - webapp 内部类型优先从本模块公开入口导入。
 - 避免深层导入 `lib/ai/model-provider`、`runtime`、`capabilities` 的内部实现文件，除非该目录没有稳定公开入口。
 - 服务端专用类型不要直接穿到客户端组件。
+
+## Webapp shadcn/ui 规则
+
+- 修改 webapp UI 前，先参考当前 `components.json`、`components/ui`、项目 alias 和 `cn` 工具函数路径。
+- 新增组件前，先确认项目中是否已有可复用的 shadcn/ui 组件或业务组件。
+- 如果需要新增 shadcn/ui 组件，优先通过 shadcn MCP 或 shadcn CLI 获取官方组件，不要手动凭记忆复制。
+- 新增 UI 需要贴合当前所在页面或模块的已有布局、间距、圆角、边框、颜色和交互风格。

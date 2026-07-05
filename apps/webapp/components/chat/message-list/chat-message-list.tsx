@@ -119,6 +119,7 @@ export function ChatMessageList({
     messages,
     status,
     enableReasoning,
+    showEmptyStateSuggestions = true,
     onDeleteUserTurn,
     onRegenerateLastTurn,
     onSelectFollowUpQuestion,
@@ -128,6 +129,7 @@ export function ChatMessageList({
     enableReasoning: boolean
     messages: MindMessage[]
     status: ChatListStatus
+    showEmptyStateSuggestions?: boolean
     onDeleteUserTurn: (userMessageId: string) => boolean
     onRegenerateLastTurn: () => Promise<boolean> | boolean
     onSelectFollowUpQuestion: (question: string) => void
@@ -211,8 +213,10 @@ export function ChatMessageList({
     )
 
     return (
-        <div className="flex min-h-0 flex-col gap-5 px-1 py-2">
-            {messages.length === 0 ? <EmptyStateSuggestions disabled={isBusy} onSelectSuggestion={onSelectSuggestion} /> : null}
+        <div className="flex min-h-0 flex-col gap-5 py-2">
+            {messages.length === 0 && showEmptyStateSuggestions ? (
+                <EmptyStateSuggestions disabled={isBusy} onSelectSuggestion={onSelectSuggestion} />
+            ) : null}
 
             {messageEntries.map(({ message, requestComposer }, messageIndex) => {
                 const isCopied = copiedMessageId === message.id

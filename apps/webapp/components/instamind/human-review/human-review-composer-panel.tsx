@@ -1,11 +1,13 @@
 'use client'
 
-import { Info, Pencil, RotateCcw, X } from 'lucide-react'
+import { CircleAlert, Info, Pencil, RotateCcw, X } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
 
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import type {
     StrategyReviewDecision,
@@ -422,11 +424,13 @@ function TasklistRevisionReviewCard({
 
             <div className="rounded-xl border border-border/70 bg-muted/30 p-3">
                 <div className="mb-2 text-xs font-medium text-muted-foreground">需要处理</div>
-                <ol className="max-h-28 list-decimal space-y-1 overflow-auto pl-5 text-sm">
-                    {payload.data.fixNow.map(item => (
-                        <li key={item}>{item}</li>
-                    ))}
-                </ol>
+                <ScrollArea className="max-h-28">
+                    <ol className="list-decimal space-y-1 pl-5 pr-4 text-sm">
+                        {payload.data.fixNow.map(item => (
+                            <li key={item}>{item}</li>
+                        ))}
+                    </ol>
+                </ScrollArea>
             </div>
 
             {mode === 'edit' ? (
@@ -535,26 +539,33 @@ export function HumanReviewComposerPanel({
     }
 
     return (
-        <Card className="mb-3 max-h-[50vh] overflow-auto rounded-2xl border-border/70 bg-background/95 py-0 shadow-xl shadow-black/[0.06]">
-            <CardContent className="space-y-4 px-5 py-5">
-                {pendingInterrupt.part.interruptKind === 'strategy_review' ? (
-                    <StrategyReviewCard
-                        key={pendingInterrupt.part.interruptId}
-                        interrupt={pendingInterrupt}
-                        disabled={submitting}
-                        onSubmit={submitDecision}
-                    />
-                ) : (
-                    <TasklistRevisionReviewCard
-                        key={pendingInterrupt.part.interruptId}
-                        interrupt={pendingInterrupt}
-                        disabled={submitting}
-                        onSubmit={submitDecision}
-                    />
-                )}
+        <Card className="mb-3 overflow-hidden rounded-2xl border-border/70 bg-background/95 py-0 shadow-xl shadow-black/[0.06]">
+            <ScrollArea className="max-h-[50vh]">
+                <CardContent className="space-y-4 px-5 py-5">
+                    {pendingInterrupt.part.interruptKind === 'strategy_review' ? (
+                        <StrategyReviewCard
+                            key={pendingInterrupt.part.interruptId}
+                            interrupt={pendingInterrupt}
+                            disabled={submitting}
+                            onSubmit={submitDecision}
+                        />
+                    ) : (
+                        <TasklistRevisionReviewCard
+                            key={pendingInterrupt.part.interruptId}
+                            interrupt={pendingInterrupt}
+                            disabled={submitting}
+                            onSubmit={submitDecision}
+                        />
+                    )}
 
-                {error ? <p className="rounded-xl bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</p> : null}
-            </CardContent>
+                    {error ? (
+                        <Alert variant="destructive" className="rounded-xl border-destructive/15 bg-destructive/5">
+                            <CircleAlert className="size-4" />
+                            <AlertDescription>{error}</AlertDescription>
+                        </Alert>
+                    ) : null}
+                </CardContent>
+            </ScrollArea>
         </Card>
     )
 }

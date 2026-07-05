@@ -457,7 +457,7 @@ export function ComposerEditor({
     return (
         <div
             className={cn(
-                'ai-composer-editor min-h-6 text-sm leading-6 text-foreground sm:min-h-12 sm:text-[15px]',
+                'ai-composer-editor min-h-6 text-base leading-6 text-foreground sm:min-h-12 sm:text-[15px]',
                 disabled && 'opacity-60',
                 className
             )}

@@ -2,7 +2,7 @@
 
 ## Current Planning Spec
 
-- [040: Controlled Agent-as-tool Delivery Manager MVP](./040-controlled-agent-as-tool-delivery-manager-mvp)
+- [044: Minimal Multi-thread Chat Sessions](./044-multi-thread-chat-sessions)
 
 `specs/` 是 AI Mind 的正式 AI coding 规格工作区。
 
@@ -208,10 +208,30 @@ specs/<version-topic>/
 - `RuntimeArtifact` 为什么只作为 run-local 内部交接物
 - 为什么本版本不新增 `@artifact://`、DB、HITL、checkpoint、resume、parallel subagents 或 Tasklist Agent HITL Graph 接入
 
+### 044 Minimal Multi-thread Chat Sessions
+
+目录：[044-multi-thread-chat-sessions](./044-multi-thread-chat-sessions)
+
+回答的问题：
+
+- v0.4.4 为什么把 chat memory 从单会话 thread 扩到 browser-session scoped recent conversations，而不是引入 ChatSession / ChatMessage 业务历史
+- Conversation Registry、selected conversation、hydration、summary compaction 和 final-turn memory append 如何保持 conversation 级隔离
+- 为什么这版 UI 必须优先复用 `instant-mind` 页面、本地 `components/ui`、`shadcn/ui` / `radix-vega` 基线，而不是依赖 MCP 或 remote UI registry
+
+## Language Policy for Specs
+
+`specs/` 文档正文可以中文为主，便于项目内讨论和 review；但结构必须保持 official Spec Kit 兼容。
+
+- 目录名使用英文 kebab-case，文件名保持 `spec.md`、`plan.md`、`tasks.md`、`acceptance.md`、`decisions.md`。
+- skill 名、command 名和 script 名保持英文，包括 `speckit-specify`、`speckit-plan`、`speckit-tasks`、`speckit-analyze`、`speckit-converge`、`$speckit-*` 和 `/speckit.*`。
+- 核心 section heading 建议保留英文，例如 `Summary`、`Goals`、`Non-goals`、`Functional Requirements`、`Technical Plan`、`Acceptance Criteria`、`Decisions`；正文可以用中文解释。
+- 技术名词、代码标识符、文件路径、命令、类型名、API 名称和 package 名称保持英文或中英混写，例如 `GraphState`、`AgentRun`、`AgentInterrupt`、`PostgresSaver`、`stream-core`、`checkpoint`、`resume`、`interrupt`、`HITL`、`ADR`、`adapter layer`、`converge`、`public DTO`、`schema`。
+- 中文正文不得削弱 `Non-goals`、安全边界、兼容性边界和 release closing 检查。
+
 ## 后续新增规格时的约定
 
 - 用版本号前缀保持排序稳定，例如 `032-...`
 - 目录名使用英文 kebab-case
-- 文档内容可以优先中文，便于项目内理解
+- 文档语言遵循上面的 `Language Policy for Specs`
 - 小改动不强制新建完整 spec
 - 跨边界改动不要直接只写 `tasks`，要补齐完整规格

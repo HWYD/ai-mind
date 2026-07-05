@@ -18,6 +18,7 @@ const modelProviderMocks = vi.hoisted(() => ({
 
 const chatMemoryMocks = vi.hoisted(() => ({
     appendCompletedTurn: vi.fn(),
+    touchConversation: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/mcp/adapters/project-docs-resource-adapter', () => ({
@@ -54,10 +55,14 @@ vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
             ...actual.chatMemoryService,
             appendCompletedTurn: chatMemoryMocks.appendCompletedTurn,
         },
+        conversationRegistryService: {
+            ...actual.conversationRegistryService,
+            touchConversation: chatMemoryMocks.touchConversation,
+        },
     }
 })
 
-import { buildChatMemoryThreadId } from '@/lib/ai/runtime/chat-memory'
+import { buildChatConversationThreadId } from '@/lib/ai/runtime/chat-memory'
 import { resolveDeliveryChainInvocation, startDeliveryChainRun } from '@/lib/ai/runtime/delivery-chain'
 
 const chatMemoryEnv = {
@@ -76,6 +81,7 @@ const testResolvedModelSelection: ResolvedModelSelection = {
             toolCalling: true,
         },
         enabled: true,
+        family: 'ollama',
         id: 'test-model',
         label: 'Test Model',
         modelKey: 'test-model',
@@ -369,6 +375,8 @@ describe('runtime/delivery-chain', () => {
             truncated: false,
             uri,
         }))
+        chatMemoryMocks.touchConversation.mockReset()
+        chatMemoryMocks.touchConversation.mockResolvedValue(undefined)
     })
 
     it('只在显式 /delivery-chain + scenario requirement 时解析为 ready-scenario', () => {
@@ -766,7 +774,7 @@ describe('runtime/delivery-chain', () => {
         expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('runtimeArtifact')
         expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('chat-memory')
         expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            buildChatMemoryThreadId('delivery-scenario-session', chatMemoryEnv),
+            buildChatConversationThreadId('delivery-scenario-session', 'conversation-1', chatMemoryEnv),
             expect.objectContaining({
                 assistantMessageId: expect.stringContaining('delivery-chain:'),
                 completionStatus: 'completed',
@@ -1070,7 +1078,7 @@ describe('runtime/delivery-chain', () => {
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('inline requirement 较短'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`blocked`'))
         expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            buildChatMemoryThreadId('delivery-inline-session', chatMemoryEnv),
+            buildChatConversationThreadId('delivery-inline-session', 'conversation-1', chatMemoryEnv),
             expect.objectContaining({
                 assistantMessageId: expect.stringContaining('delivery-chain:'),
                 completionStatus: 'blocked',

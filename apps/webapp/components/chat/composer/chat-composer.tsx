@@ -36,6 +36,7 @@ export function ChatComposer({
     placeholder,
     skillMode,
     status,
+    submitDisabled = false,
 }: {
     disabled?: boolean
     enableReasoning: boolean
@@ -52,13 +53,17 @@ export function ChatComposer({
     placeholder?: string
     skillMode: ChatSkillMode
     status: ChatStatus
+    submitDisabled?: boolean
 }) {
     const [editor, setEditor] = useState<Editor | null>(null)
     const [input, setInput] = useState('')
     const [composerDraft, setComposerDraft] = useState<ComposerPayload | undefined>()
     const canSubmit = Boolean(input.trim() || hasComposerSemanticInput(composerDraft))
     const sendDisabled =
-        disabled || status === 'submitted' || (status !== 'streaming' && (!canSubmit || !hasAvailableModels || isModelLoading))
+        disabled ||
+        submitDisabled ||
+        status === 'submitted' ||
+        (status !== 'streaming' && (!canSubmit || !hasAvailableModels || isModelLoading))
     const footerText = disabled
         ? '请先处理上方人工审核，普通输入已锁定。'
         : status === 'streaming'
@@ -82,6 +87,10 @@ export function ChatComposer({
                 return
             }
 
+            if (submitDisabled) {
+                return
+            }
+
             if (status === 'submitted') {
                 return
             }
@@ -102,7 +111,7 @@ export function ChatComposer({
                 editor?.commands.clearContent()
             }
         },
-        [disabled, editor, input, onStop, onSubmit, status]
+        [disabled, editor, input, onStop, onSubmit, status, submitDisabled]
     )
 
     function handleInsertTrigger(trigger: '@' | '/') {

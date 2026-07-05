@@ -4,10 +4,9 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { useEffect, useRef, useState } from 'react'
 
 import { resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
-import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
-import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequest, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequestInput, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
 import type { AgentInterruptPart, MindMessage } from '@/lib/ai/types/message'
 
 import { createMessage, createTextPart } from './chat-stream/message-factory'
@@ -40,6 +39,7 @@ const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
 const PENDING_AGENT_RUN_STORAGE_KEY = 'ai-mind:pending-agent-run-id'
 
 interface ThreadHydrationResponse {
+    conversationId?: string
     messages?: MindMessage[]
     restored?: boolean
 }
@@ -73,9 +73,12 @@ function getResumeAgentRunUserMessage(code: string | null, fallback: string, sta
 }
 
 interface UseChatStreamOptions {
+    conversationId?: string
+    draftMode?: boolean
     skillMode?: ChatSkillMode
     model?: ChatModel
     enableReasoning?: boolean
+    onConversationPromoted?: (conversationId: string) => void | Promise<void>
 }
 
 export interface PendingAgentInterrupt {
@@ -89,6 +92,8 @@ export interface ThreadMemoryStatusHint {
     pinnedDecisionCount?: number
     summaryLength?: number
 }
+
+export type ConversationHydrationStatus = 'idle' | 'loading' | 'ready' | 'failed'
 
 function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterrupt | null {
     for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
@@ -109,6 +114,8 @@ function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterru
 }
 
 export function useChatStream(options: UseChatStreamOptions = {}) {
+    const conversationId = options.conversationId?.trim() || null
+    const draftMode = options.draftMode ?? false
     const skillMode = options.skillMode ?? 'auto'
     const model = options.model ?? defaultChatModel
     const enableReasoning = options.enableReasoning ?? false
@@ -116,11 +123,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [messages, setMessages] = useState<MindMessage[]>([])
     const [status, setStatus] = useState<ChatStatus>('ready')
     const [error, setError] = useState<string | null>(null)
+    const [hydrationError, setHydrationError] = useState<string | null>(null)
+    const [hydrationStatus, setHydrationStatus] = useState<ConversationHydrationStatus>('idle')
     const [threadMemoryStatusHint, setThreadMemoryStatusHint] = useState<ThreadMemoryStatusHint | null>(null)
+    const [hydrationRetryToken, setHydrationRetryToken] = useState(0)
 
     const messagesRef = useRef(messages)
-    const conversationIdRef = useRef(createId())
+    const activeConversationIdRef = useRef<string | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
+    const hydratedConversationIdRef = useRef<string | null>(null)
 
     const streamMessageStateRef = useRef(createStreamMessageState(messages)) //给 stream reducer 用的同步快照，里面有 messages + activeStream。
 
@@ -191,24 +202,57 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     }, [])
 
     useEffect(() => {
-        if (typeof window === 'undefined') {
+        if (typeof window === 'undefined' || status === 'submitted' || status === 'streaming') {
             return
         }
 
         let cancelled = false
 
+        if (!conversationId || draftMode) {
+            hydratedConversationIdRef.current = null
+            setHydrationError(null)
+            setHydrationStatus('idle')
+            setThreadMemoryStatusHint(null)
+            syncMessageSnapshots([])
+            streamMessageStateRef.current = createStreamMessageState([])
+            setMessages([])
+            return () => {
+                cancelled = true
+            }
+        }
+
+        if (hydratedConversationIdRef.current === conversationId) {
+            return () => {
+                cancelled = true
+            }
+        }
+
+        hydratedConversationIdRef.current = conversationId
+        setHydrationError(null)
+        setHydrationStatus('loading')
+        setThreadMemoryStatusHint(null)
+        syncMessageSnapshots([])
+        streamMessageStateRef.current = createStreamMessageState([])
+        setMessages([])
+
         async function hydrateThread() {
             try {
-                const response = await fetch('/api/chat/thread')
+                const response = await fetch(`/api/chat/thread?conversationId=${encodeURIComponent(conversationId)}`)
                 const contentType = response.headers.get('Content-Type') ?? ''
 
                 if (!response.ok || !contentType.includes('application/json')) {
-                    return
+                    throw new Error('Thread hydration request failed.')
                 }
 
                 const data = (await response.json()) as ThreadHydrationResponse
 
-                if (cancelled || !data.restored || !Array.isArray(data.messages) || messagesRef.current.length > 0) {
+                if (cancelled || data.conversationId !== conversationId) {
+                    return
+                }
+
+                if (!data.restored || !Array.isArray(data.messages)) {
+                    setHydrationError(null)
+                    setHydrationStatus('ready')
                     return
                 }
 
@@ -223,8 +267,16 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 syncMessageSnapshots(restoredMessages)
                 streamMessageStateRef.current = createStreamMessageState(restoredMessages)
                 setMessages(restoredMessages)
+                setHydrationError(null)
+                setHydrationStatus('ready')
             } catch {
-                // Hydration 是刷新恢复增强能力，失败时保持空白新会话。
+                if (cancelled) {
+                    return
+                }
+
+                hydratedConversationIdRef.current = null
+                setHydrationStatus('failed')
+                setHydrationError('会话加载失败，请重试。')
             }
         }
 
@@ -233,7 +285,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         return () => {
             cancelled = true
         }
-    }, [])
+    }, [conversationId, draftMode, hydrationRetryToken, status])
 
     /**
      * 重置 active part 指针。
@@ -254,7 +306,9 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         textBuffer.clear()
-        updateMessages(current => removeMessage(current, messageId))
+        const nextMessages = removeMessage(messagesRef.current, messageId)
+        syncMessageSnapshots(nextMessages)
+        setMessages(nextMessages)
         resetActiveStream()
     }
 
@@ -262,7 +316,9 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         // 用户主动中止时，保留已经收到的正文 / 推理 / 工具卡片，只清掉空占位消息，
         // 避免前端把“已看到的半截回答”整条删除。
         textBuffer.clear()
-        updateMessages(current => pruneTransientMessages(current))
+        const nextMessages = pruneTransientMessages(messagesRef.current)
+        syncMessageSnapshots(nextMessages)
+        setMessages(nextMessages)
         resetActiveStream()
     }
 
@@ -368,6 +424,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         displaySegments?: ChatComposerDisplaySegment[]
     ) {
         const text = resolveComposerSubmissionText(input, composer)
+        const requestConversationId = conversationId
+        const shouldCreateConversation = draftMode || !requestConversationId
 
         if (!text || abortControllerRef.current) {
             return false
@@ -393,13 +451,14 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         setError(null)
         setStatus('submitted')
         abortControllerRef.current = controller
+        activeConversationIdRef.current = requestConversationId ?? '__draft__'
 
         try {
             const skill = toRequestSkill(skillMode)
-            const payload: ChatRequest = {
-                conversationId: conversationIdRef.current,
+            const payload: ChatRequestInput = {
                 // composer 是本轮请求的结构化输入补充，后端主输入仍由 messages 中的 plainText 兼容承载。
                 ...(composer ? { composer } : {}),
+                ...(shouldCreateConversation ? { createConversation: true as const } : { conversationId: requestConversationId! }),
                 messages: buildRequestMessages(nextMessages),
                 options: {
                     modelId: model,
@@ -430,6 +489,18 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 throw new Error('响应缺少可读取的流式内容。')
             }
 
+            const promotedConversationId = response.headers.get('X-AI-Mind-Conversation-Id')?.trim() || null
+
+            if (shouldCreateConversation) {
+                if (!promotedConversationId) {
+                    throw new Error('新会话创建失败，请稍后重试。')
+                }
+
+                activeConversationIdRef.current = promotedConversationId
+                hydratedConversationIdRef.current = promotedConversationId
+                void Promise.resolve(options.onConversationPromoted?.(promotedConversationId)).catch(() => undefined)
+            }
+
             setStatus('streaming')
             // consumeNdjsonStream 会持续回调 handleChunk，把协议事件增量转换成前端消息部件。
             await consumeNdjsonStream(response.body, handleChunk)
@@ -456,6 +527,13 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             if (abortControllerRef.current === controller) {
                 abortControllerRef.current = null
             }
+
+            if (
+                activeConversationIdRef.current === requestConversationId ||
+                (shouldCreateConversation && activeConversationIdRef.current !== conversationId)
+            ) {
+                activeConversationIdRef.current = null
+            }
         }
 
         return true
@@ -463,6 +541,16 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
 
     async function sendMessage(input: string, composer?: ChatComposerPayload, displaySegments?: ChatComposerDisplaySegment[]) {
         return submitTurn(messagesRef.current, input, composer, displaySegments)
+    }
+
+    function retryHydration() {
+        if (!conversationId || draftMode || status === 'submitted' || status === 'streaming') {
+            return false
+        }
+
+        hydratedConversationIdRef.current = null
+        setHydrationRetryToken(current => current + 1)
+        return true
     }
 
     async function resumeAgentRun(decision: unknown) {
@@ -581,9 +669,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         messages,
         status,
         error,
+        hydrationError,
+        hydrationStatus,
         threadMemoryStatusHint,
         pendingInterrupt: findPendingAgentInterrupt(messages),
         sendMessage,
+        retryHydration,
         resumeAgentRun,
         cancel,
         deleteUserTurn,

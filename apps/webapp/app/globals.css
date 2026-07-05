@@ -64,6 +64,13 @@
 html {
     color-scheme: light;
     scrollbar-gutter: stable;
+    text-size-adjust: 100%;
+    -webkit-text-size-adjust: 100%;
+}
+
+button,
+[role='button'] {
+    touch-action: manipulation;
 }
 
 @keyframes hero-preview-float {
@@ -93,6 +100,7 @@ html {
 }
 
 .ai-composer-editor .ProseMirror {
+    font-size: 16px;
     min-height: 24px;
     max-height: 180px;
     overflow-y: auto;
@@ -103,7 +111,16 @@ html {
 
 @media (min-width: 640px) {
     .ai-composer-editor .ProseMirror {
+        font-size: 15px;
         min-height: 48px;
+    }
+}
+
+@media (max-width: 639px) {
+    input,
+    textarea,
+    select {
+        font-size: 16px;
     }
 }
 

@@ -4,12 +4,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const streamChatMock = vi.hoisted(() => vi.fn())
 const rateLimitCheckAndIncrementMock = vi.hoisted(() => vi.fn())
 const resolveSessionIdMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'test-session', setCookie: vi.fn() })))
+const createConversationMock = vi.hoisted(() => vi.fn())
+const getConversationMock = vi.hoisted(() => vi.fn())
+const touchConversationMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/ai/chat-service', () => ({
     createChatService: () => ({
         streamChat: streamChatMock,
     }),
 }))
+
+vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/lib/ai/runtime/chat-memory')>()
+
+    return {
+        ...actual,
+        conversationRegistryService: {
+            ...actual.conversationRegistryService,
+            createConversation: createConversationMock,
+            getConversation: getConversationMock,
+            touchConversation: touchConversationMock,
+        },
+    }
+})
 
 vi.mock('@/lib/ai/rate-limit', () => ({
     getRateLimitConfig: () => ({
@@ -38,35 +55,59 @@ function createPostRequest(payload: unknown) {
     })
 }
 
+function createUserPayload(overrides: Record<string, unknown> = {}) {
+    return {
+        conversationId: 'test-conversation',
+        messages: [
+            {
+                role: 'user',
+                parts: [
+                    {
+                        type: 'text',
+                        format: 'markdown',
+                        text: '你好',
+                    },
+                ],
+            },
+        ],
+        ...overrides,
+    }
+}
+
+function createStreamResponse() {
+    return new Response('ok', {
+        headers: {
+            'Content-Type': 'application/x-ndjson; charset=utf-8',
+        },
+    })
+}
+
 describe('POST /api/chat', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        createConversationMock.mockResolvedValue({
+            selectedConversationId: 'draft-created-conversation',
+            conversations: [],
+            updatedAt: '2026-07-05T10:00:00.000Z',
+        })
+        getConversationMock.mockResolvedValue({
+            id: 'test-conversation',
+            title: '已存在会话',
+        })
+        touchConversationMock.mockResolvedValue(undefined)
     })
 
-    it('合法请求会在 route 层解析 resolvedModelSelection 后传给 chat service', async () => {
+    it('passes resolved model selection and validated conversation ownership to chat service', async () => {
         rateLimitCheckAndIncrementMock.mockReturnValueOnce({
             allowed: true,
         })
-        streamChatMock.mockResolvedValueOnce(new Response('ok'))
+        streamChatMock.mockResolvedValueOnce(createStreamResponse())
 
-        const payload = {
-            conversationId: 'test-valid-model',
-            messages: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: '你好',
-                        },
-                    ],
-                },
-            ],
+        const payload = createUserPayload({
             options: {
                 modelId: 'ollama/qwen3-8b',
             },
-        }
+        })
 
         const response = await POST(createPostRequest(payload))
 
@@ -80,114 +121,140 @@ describe('POST /api/chat', () => {
                     providerModel: 'qwen3:8b',
                     routeType: 'chat',
                 }),
+                validatedConversationId: 'test-conversation',
             })
         )
+        expect(getConversationMock).toHaveBeenCalledWith('test-session', 'test-conversation')
+        expect(createConversationMock).not.toHaveBeenCalled()
+        expect(touchConversationMock).toHaveBeenCalledWith(
+            'test-session',
+            'test-conversation',
+            expect.objectContaining({
+                markSelected: true,
+                userText: '你好',
+            })
+        )
+        expect(response.headers.get('X-AI-Mind-Conversation-Id')).toBe('test-conversation')
     })
 
-    it('无效 modelId 会在限流前失败，不会消耗 quota', async () => {
-        const payload = {
-            conversationId: 'test-invalid-model',
-            messages: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: '你好',
-                        },
-                    ],
-                },
-            ],
-            options: {
-                modelId: 'unknown/model',
-            },
-        }
+    it('creates and validates a persisted conversation for the draft-promotion path', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: true,
+        })
+        streamChatMock.mockResolvedValueOnce(createStreamResponse())
 
-        const response = await POST(createPostRequest(payload))
+        const response = await POST(
+            createPostRequest({
+                createConversation: true,
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '你好' }],
+                    },
+                ],
+            })
+        )
+
+        expect(response.status).toBe(200)
+        expect(createConversationMock).toHaveBeenCalledWith(
+            'test-session',
+            expect.objectContaining({
+                hasMessages: true,
+                userText: '你好',
+            })
+        )
+        expect(getConversationMock).not.toHaveBeenCalled()
+        expect(touchConversationMock).not.toHaveBeenCalled()
+        expect(streamChatMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                conversationId: 'draft-created-conversation',
+            }),
+            expect.objectContaining({
+                validatedConversationId: 'draft-created-conversation',
+            })
+        )
+        expect(response.headers.get('X-AI-Mind-Conversation-Id')).toBe('draft-created-conversation')
+    })
+
+    it('fails invalid model selection before rate limit consumption', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    options: {
+                        modelId: 'unknown/model',
+                    },
+                })
+            )
+        )
         const body = await response.json()
 
         expect(response.status).toBe(400)
         expect(body.code).toBe('MODEL_NOT_FOUND')
         expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
+        expect(getConversationMock).not.toHaveBeenCalled()
+        expect(createConversationMock).not.toHaveBeenCalled()
     })
 
-    it('超长输入会在限流前失败，不会消耗 quota', async () => {
-        const payload = {
-            conversationId: 'test-input-length',
-            messages: [
-                {
-                    role: 'user',
-                    parts: [
+    it('fails oversized input before rate limit consumption', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    messages: [
                         {
-                            type: 'text',
-                            format: 'markdown',
-                            text: 'a'.repeat(12001),
+                            role: 'user',
+                            parts: [
+                                {
+                                    type: 'text',
+                                    format: 'markdown',
+                                    text: 'a'.repeat(12001),
+                                },
+                            ],
                         },
                     ],
-                },
-            ],
-            options: {
-                modelId: 'ollama/qwen3-8b',
-            },
-        }
-
-        const response = await POST(createPostRequest(payload))
+                    options: {
+                        modelId: 'ollama/qwen3-8b',
+                    },
+                })
+            )
+        )
         const body = await response.json()
 
         expect(response.status).toBe(400)
         expect(body.code).toBe('MODEL_PROVIDER_INVALID_REQUEST')
         expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
+        expect(getConversationMock).not.toHaveBeenCalled()
+        expect(createConversationMock).not.toHaveBeenCalled()
     })
 
-    it('普通 chat memory 路径只校验最新 user 输入，不因前端历史 payload 过长而拦截', async () => {
+    it('validates only the latest user turn for server-authoritative chat memory requests', async () => {
         rateLimitCheckAndIncrementMock.mockReturnValueOnce({
             allowed: true,
         })
-        streamChatMock.mockResolvedValueOnce(new Response('ok'))
+        streamChatMock.mockResolvedValueOnce(createStreamResponse())
 
-        const payload = {
-            conversationId: 'test-server-authoritative-input-length',
+        const payload = createUserPayload({
+            conversationId: 'test-history-compatible',
             messages: [
                 {
                     role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: 'a'.repeat(8000),
-                        },
-                    ],
+                    parts: [{ type: 'text', format: 'markdown', text: 'a'.repeat(8000) }],
                 },
                 {
                     role: 'assistant',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: 'b'.repeat(8000),
-                        },
-                    ],
+                    parts: [{ type: 'text', format: 'markdown', text: 'b'.repeat(8000) }],
                 },
                 {
                     role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: '当前最新问题',
-                        },
-                    ],
+                    parts: [{ type: 'text', format: 'markdown', text: '当前最新问题' }],
                 },
             ],
             options: {
                 modelId: 'ollama/qwen3-8b',
             },
-        }
+        })
 
-        const response = await POST(createPostRequest(payload))
+        await POST(createPostRequest(payload))
 
-        expect(response.status).toBe(200)
         expect(streamChatMock).toHaveBeenCalledWith(
             payload,
             expect.objectContaining({
@@ -196,9 +263,10 @@ describe('POST /api/chat', () => {
                 }),
             })
         )
+        expect(getConversationMock).toHaveBeenCalledWith('test-session', 'test-history-compatible')
     })
 
-    it('非法请求体会返回 400 + INVALID_CHAT_REQUEST', async () => {
+    it('returns INVALID_CHAT_REQUEST for malformed payloads', async () => {
         const response = await POST(createPostRequest({}))
         const body = await response.json()
 
@@ -206,54 +274,96 @@ describe('POST /api/chat', () => {
         expect(body.code).toBe('INVALID_CHAT_REQUEST')
     })
 
-    it('旧 options.model 会返回 400 + INVALID_CHAT_REQUEST', async () => {
-        const payload = {
-            conversationId: 'test-legacy-model-field',
-            messages: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: '你好',
-                        },
-                    ],
-                },
-            ],
-            options: {
-                model: 'qwen3:8b',
-            },
-        }
-
-        const response = await POST(createPostRequest(payload))
+    it('requires either a non-empty conversationId or createConversation=true and does not spend quota when missing', async () => {
+        const response = await POST(
+            createPostRequest({
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '你好' }],
+                    },
+                ],
+            })
+        )
         const body = await response.json()
 
         expect(response.status).toBe(400)
         expect(body.code).toBe('INVALID_CHAT_REQUEST')
+        expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
     })
 
-    it('非法 skill 会返回 400 + INVALID_SKILL', async () => {
-        const payload = {
-            conversationId: 'test-invalid-skill',
-            messages: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: '你好',
-                        },
-                    ],
-                },
-            ],
-            options: {
-                skill: 'non-existent-skill',
-            },
-        }
+    it('rejects blank conversationId and does not spend quota', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    conversationId: '   ',
+                })
+            )
+        )
+        const body = await response.json()
 
-        const response = await POST(createPostRequest(payload))
+        expect(response.status).toBe(400)
+        expect(body.code).toBe('INVALID_CHAT_REQUEST')
+        expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects conflicting createConversation and conversationId parameters', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    createConversation: true,
+                })
+            )
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(400)
+        expect(body.code).toBe('INVALID_CHAT_REQUEST')
+        expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
+    })
+
+    it('returns 404 when the conversation does not belong to the current browser session registry', async () => {
+        getConversationMock.mockResolvedValueOnce(null)
+
+        const response = await POST(createPostRequest(createUserPayload()))
+        const body = await response.json()
+
+        expect(response.status).toBe(404)
+        expect(body).toEqual({
+            code: 'CONVERSATION_NOT_FOUND',
+            error: 'Conversation was not found in the current browser session registry.',
+        })
+        expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
+        expect(touchConversationMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects the legacy options.model field at the request schema boundary', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    options: {
+                        model: 'qwen3:8b',
+                    },
+                })
+            )
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(400)
+        expect(body.code).toBe('INVALID_CHAT_REQUEST')
+        expect(getConversationMock).not.toHaveBeenCalled()
+    })
+
+    it('returns INVALID_SKILL for unsupported explicit skills', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    options: {
+                        skill: 'non-existent-skill',
+                    },
+                })
+            )
+        )
         const body = await response.json()
 
         expect(response.status).toBe(400)
@@ -261,33 +371,22 @@ describe('POST /api/chat', () => {
         expect(typeof body.error).toBe('string')
     })
 
-    it('限流时返回中文错误文案和 429', async () => {
+    it('returns a localized 429 rate-limit response without touching conversation activity', async () => {
         rateLimitCheckAndIncrementMock.mockReturnValueOnce({
             allowed: false,
             limitKey: 'session',
             limitValue: 2,
         })
 
-        const payload = {
-            conversationId: 'test-rate-limited',
-            messages: [
-                {
-                    role: 'user',
-                    parts: [
-                        {
-                            type: 'text',
-                            format: 'markdown',
-                            text: '你好',
-                        },
-                    ],
-                },
-            ],
-            options: {
-                modelId: 'ollama/qwen3-8b',
-            },
-        }
-
-        const response = await POST(createPostRequest(payload))
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    options: {
+                        modelId: 'ollama/qwen3-8b',
+                    },
+                })
+            )
+        )
         const body = await response.json()
 
         expect(response.status).toBe(429)
@@ -296,5 +395,7 @@ describe('POST /api/chat', () => {
             error: '聊天请求已达到当前会话的当日上限（2 次）。',
             limitKey: 'session',
         })
+        expect(touchConversationMock).not.toHaveBeenCalled()
+        expect(createConversationMock).not.toHaveBeenCalled()
     })
 })

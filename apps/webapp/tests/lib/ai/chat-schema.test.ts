@@ -21,8 +21,48 @@ function createValidChatRequest(overrides: Record<string, unknown> = {}) {
     }
 }
 
-describe('chatRequestSchema options.modelId', () => {
-    it('接受 options.modelId', () => {
+describe('chatRequestSchema', () => {
+    it('accepts the explicit draft-promotion path without conversationId', () => {
+        const result = chatRequestSchema.parse({
+            createConversation: true,
+            messages: createValidChatRequest().messages,
+        })
+
+        expect('createConversation' in result && result.createConversation).toBe(true)
+    })
+
+    it('requires either a non-empty conversationId or createConversation=true', () => {
+        expect(() => chatRequestSchema.parse({ messages: createValidChatRequest().messages })).toThrow()
+
+        expect(() =>
+            chatRequestSchema.parse(
+                createValidChatRequest({
+                    conversationId: '   ',
+                })
+            )
+        ).toThrow()
+    })
+
+    it('rejects conflicting createConversation and conversationId parameters', () => {
+        expect(() =>
+            chatRequestSchema.parse({
+                ...createValidChatRequest(),
+                createConversation: true,
+            })
+        ).toThrow()
+    })
+
+    it('trims conversationId before passing validation', () => {
+        const result = chatRequestSchema.parse(
+            createValidChatRequest({
+                conversationId: '  conv-trimmed  ',
+            })
+        )
+
+        expect('conversationId' in result && result.conversationId).toBe('conv-trimmed')
+    })
+
+    it('accepts options.modelId', () => {
         const result = chatRequestSchema.parse(
             createValidChatRequest({
                 options: {
@@ -34,7 +74,7 @@ describe('chatRequestSchema options.modelId', () => {
         expect(result.options?.modelId).toBe('ollama/qwen3-8b')
     })
 
-    it('拒绝旧 options.model 字段', () => {
+    it('rejects the old options.model field', () => {
         expect(() =>
             chatRequestSchema.parse(
                 createValidChatRequest({
@@ -46,7 +86,7 @@ describe('chatRequestSchema options.modelId', () => {
         ).toThrow()
     })
 
-    it('允许不传 options', () => {
+    it('allows requests without options', () => {
         const result = chatRequestSchema.parse(createValidChatRequest())
 
         expect(result.options).toBeUndefined()

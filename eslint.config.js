@@ -11,6 +11,9 @@ const ignores = [
     'dist',
     '**/dist/**',
     'build',
+    '**/build/**',
+    'coverage',
+    '**/coverage/**',
     '**/*.js',
     '**/*.mjs',
     'eslint.config.js',
@@ -18,7 +21,6 @@ const ignores = [
     '**/.next/**',
     '**/generated/prisma/**',
     '**/out/**',
-    '**/build/**',
     '**/next-env.d.ts',
 ]
 

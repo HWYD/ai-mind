@@ -15,7 +15,12 @@ import {
     PROJECT_DOCS_SERVER_ID,
 } from '@/lib/ai/mcp/adapters/docs-resource-shared'
 import type { AiMindChatModelHandle, ResolvedModelSelection } from '@/lib/ai/model-provider'
-import { buildChatMemoryThreadId, chatMemoryService, type ThreadMemoryStatusEvent } from '@/lib/ai/runtime/chat-memory'
+import {
+    buildChatConversationThreadId,
+    chatMemoryService,
+    conversationRegistryService,
+    type ThreadMemoryStatusEvent,
+} from '@/lib/ai/runtime/chat-memory'
 import type { ChatComposerReference, ChatRequest } from '@/lib/ai/types/chat'
 
 import type { ChatExecutionContext, WriteChunk } from '../types'
@@ -577,6 +582,7 @@ async function loadDeliveryChainContext(input: DeliveryChainInput, options: { wr
 async function appendCompletedDeliveryTurn(options: {
     assistantMessageId?: string
     assistantText: string
+    conversationId: string
     context: ChatExecutionContext
     request: ChatRequest
     status: 'blocked' | 'completed'
@@ -594,7 +600,7 @@ async function appendCompletedDeliveryTurn(options: {
     }
 
     await chatMemoryService.appendCompletedTurn(
-        buildChatMemoryThreadId(options.context.sessionId),
+        buildChatConversationThreadId(options.context.sessionId, options.conversationId),
         {
             assistantMessageId: options.assistantMessageId,
             assistantText: options.assistantText,
@@ -615,6 +621,9 @@ async function appendCompletedDeliveryTurn(options: {
             },
         }
     )
+    await conversationRegistryService.touchConversation(options.context.sessionId, options.conversationId, {
+        hasMessages: true,
+    })
 }
 
 function buildUnexpectedFailureReport(input: DeliveryChainInput, failureMessage: string, warnings: string[] = []) {
@@ -812,6 +821,7 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
                 await appendCompletedDeliveryTurn({
                     assistantMessageId: `${workflowProgress.workflowId}:assistant`,
                     assistantText: result.reportMarkdown,
+                    conversationId: options.request.conversationId,
                     context: options.context,
                     request: options.request,
                     status: result.status,

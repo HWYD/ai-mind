@@ -11,7 +11,7 @@ loadEnv({ path: '.env', quiet: true })
 
 const describeLiveSmoke = process.env.AI_MIND_RUN_CHAT_MEMORY_COMPACTION_SMOKE === '1' ? describe : describe.skip
 const candidateModelIds = (
-    process.env.AI_MIND_CHAT_MEMORY_COMPACTION_SMOKE_MODEL_IDS ?? 'qwen/qwen3.6-flash,qwen/qwen3.7-plus,deepseek/deepseek-v4-pro'
+    process.env.AI_MIND_CHAT_MEMORY_COMPACTION_SMOKE_MODEL_IDS ?? 'qwen/qwen3.6-flash,qwen/qwen3.7-max,deepseek/deepseek-v4-pro'
 )
     .split(',')
     .map(modelId => modelId.trim())

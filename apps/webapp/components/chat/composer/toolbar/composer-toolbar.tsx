@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowUp, AtSign, Brain, ChevronDown, Globe, Monitor, Sparkles, Square, Waves } from 'lucide-react'
+import { ArrowUp, AtSign, Bot, Brain, ChevronDown, Globe, Monitor, MoonStar, Sparkles, Square, Waves } from 'lucide-react'
 import { useSyncExternalStore } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -48,12 +48,18 @@ function ModelGroupIcon({ groupId }: { groupId: ChatModelGroup['id'] }) {
     return <Monitor className="size-4 text-muted-foreground" strokeWidth={2.1} />
 }
 
-function ModelOptionIcon({ model }: { model: PublicChatModel }) {
-    if (model.id.includes('deepseek')) {
-        return <Waves data-model-icon className="size-4" style={{ color: 'var(--color-sky-500)' }} strokeWidth={2.1} />
-    }
+const modelFamilyIconMeta = {
+    deepseek: { color: 'var(--color-sky-500)', icon: Waves, iconKey: 'deepseek' },
+    doubao: { color: 'var(--color-amber-500)', icon: Bot, iconKey: 'doubao' },
+    kimi: { color: 'var(--color-rose-500)', icon: MoonStar, iconKey: 'kimi' },
+    ollama: { color: 'var(--color-emerald-500)', icon: Monitor, iconKey: 'ollama' },
+    qwen: { color: 'var(--color-violet-500)', icon: Sparkles, iconKey: 'qwen' },
+} as const
 
-    return <Sparkles data-model-icon className="size-4" style={{ color: 'var(--color-violet-500)' }} strokeWidth={2.1} />
+function ModelOptionIcon({ model }: { model: PublicChatModel }) {
+    const { color, icon: Icon, iconKey } = modelFamilyIconMeta[model.family]
+
+    return <Icon data-model-icon={iconKey} className="size-4 shrink-0" style={{ color }} strokeWidth={2.1} />
 }
 
 export function ComposerToolbar({

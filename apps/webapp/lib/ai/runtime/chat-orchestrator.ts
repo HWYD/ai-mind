@@ -12,9 +12,10 @@ import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, 
 import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from './authoritative-answer'
 import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
 import {
+    buildChatConversationThreadId,
     buildChatMemoryContextMessages,
-    buildChatMemoryThreadId,
     chatMemoryService,
+    conversationRegistryService,
     type FinalTurnSource,
     isChatMemoryContextEligibleRequest,
     isChatMemoryWriteEligibleRequest,
@@ -144,6 +145,24 @@ export class ChatOrchestrator {
         })
     }
 
+    private resolveValidatedConversationId() {
+        const validatedConversationId = this.context.validatedConversationId?.trim()
+
+        if (validatedConversationId && validatedConversationId !== this.request.conversationId) {
+            throw new Error('Validated conversation ownership does not match the incoming request conversationId.')
+        }
+
+        return validatedConversationId || this.request.conversationId
+    }
+
+    private resolveConversationThreadId() {
+        if (!this.context.sessionId) {
+            return null
+        }
+
+        return buildChatConversationThreadId(this.context.sessionId, this.resolveValidatedConversationId())
+    }
+
     private async appendCompletedChatMemoryTurn(assistantText: string | undefined, source: FinalTurnSource = 'chat') {
         const normalizedAssistantText = assistantText?.trim()
 
@@ -185,9 +204,18 @@ export class ChatOrchestrator {
             return
         }
 
+        const threadId = this.resolveConversationThreadId()
+
+        if (!threadId) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'missing-thread',
+            })
+            return
+        }
+
         try {
             await chatMemoryService.appendCompletedTurn(
-                buildChatMemoryThreadId(this.context.sessionId),
+                threadId,
                 {
                     assistantMessageId: this.assistantMessageId,
                     assistantText: normalizedAssistantText,
@@ -198,6 +226,9 @@ export class ChatOrchestrator {
                     onStatus: event => this.writeThreadMemoryStatus(event),
                 }
             )
+            await conversationRegistryService.touchConversation(this.context.sessionId, this.resolveValidatedConversationId(), {
+                hasMessages: true,
+            })
         } catch (error) {
             logSkillRuntime('chat-memory-append-failed', {
                 errorName: error instanceof Error ? error.name : 'UnknownError',
@@ -211,8 +242,14 @@ export class ChatOrchestrator {
             return []
         }
 
+        const threadId = this.resolveConversationThreadId()
+
+        if (!threadId) {
+            return []
+        }
+
         try {
-            const result = await chatMemoryService.readThreadState(buildChatMemoryThreadId(this.context.sessionId))
+            const result = await chatMemoryService.readThreadState(threadId)
 
             return buildChatMemoryContextMessages(result.state)
         } catch {

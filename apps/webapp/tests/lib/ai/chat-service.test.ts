@@ -40,6 +40,7 @@ function createResolvedTasklistContext(): ResolvedChatExecutionContext {
                 toolCalling: true,
             },
             enabled: true,
+            family: 'ollama',
             id: 'ollama/qwen3-8b',
             label: 'Qwen 3 8B',
             modelKey: 'ollama/qwen3-8b',
@@ -61,6 +62,7 @@ function createResolvedTasklistContext(): ResolvedChatExecutionContext {
 
 function createPreparedResume(runId = 'run-resume-test') {
     return {
+        conversationId: 'conv-resume-test',
         decision: { type: 'approve' },
         interrupt: {
             allowedDecisions: ['approve', 'edit', 'reject', 'respond'],

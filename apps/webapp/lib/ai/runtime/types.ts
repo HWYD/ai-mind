@@ -12,6 +12,7 @@ export interface ChatExecutionContext {
     sessionId?: string
     setCookie?: string | null
     signal?: AbortSignal
+    validatedConversationId?: string
 }
 
 export interface ResolvedChatExecutionContext extends ChatExecutionContext {

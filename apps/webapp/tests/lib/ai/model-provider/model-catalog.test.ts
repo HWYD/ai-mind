@@ -6,17 +6,17 @@ describe('model catalog', () => {
     it('锁定 v0.2.1 的 Qwen 与 DeepSeek 云模型白名单', () => {
         const cloudModels = modelCatalog
             .filter(item => item.provider !== 'ollama')
-            .map(item => ({ id: item.id, providerModel: item.providerModel }))
+            .map(item => ({ family: item.family, id: item.id, provider: item.provider, providerModel: item.providerModel }))
 
         expect(cloudModels).toEqual([
-            { id: 'deepseek/deepseek-v4-flash', providerModel: 'deepseek-v4-flash' },
-            { id: 'deepseek/deepseek-v4-pro', providerModel: 'deepseek-v4-pro' },
-            { id: 'qwen/qwen3.6-flash', providerModel: 'qwen3.6-flash' },
-            { id: 'qwen/qwen3.7-plus', providerModel: 'qwen3.7-plus' },
-            { id: 'doubao/Doubao-Seed-2.0-Code', providerModel: 'Doubao-Seed-2.0-Code' },
-            { id: 'doubao/doubao-seed-2.0-pro', providerModel: 'doubao-seed-2.0-pro' },
-            { id: 'doubao/doubao-seed-2.0-mini', providerModel: 'doubao-seed-2.0-mini' },
-            { id: 'doubao/Kimi-K2.6', providerModel: 'Kimi-K2.6' },
+            { family: 'deepseek', id: 'deepseek/deepseek-v4-flash', provider: 'qwen', providerModel: 'deepseek-v4-flash' },
+            { family: 'deepseek', id: 'deepseek/deepseek-v4-pro', provider: 'qwen', providerModel: 'deepseek-v4-pro' },
+            { family: 'qwen', id: 'qwen/qwen3.6-flash', provider: 'qwen', providerModel: 'qwen3.6-flash' },
+            { family: 'qwen', id: 'qwen/qwen3.7-max', provider: 'qwen', providerModel: 'qwen3.7-max' },
+            { family: 'doubao', id: 'doubao/Doubao-Seed-2.0-Code', provider: 'doubao', providerModel: 'Doubao-Seed-2.0-Code' },
+            { family: 'doubao', id: 'doubao/doubao-seed-2.0-pro', provider: 'doubao', providerModel: 'doubao-seed-2.0-pro' },
+            { family: 'doubao', id: 'doubao/doubao-seed-2.0-mini', provider: 'doubao', providerModel: 'doubao-seed-2.0-mini' },
+            { family: 'kimi', id: 'doubao/Kimi-K2.6', provider: 'doubao', providerModel: 'Kimi-K2.6' },
         ])
     })
 })

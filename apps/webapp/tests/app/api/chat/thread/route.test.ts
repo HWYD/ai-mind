@@ -2,18 +2,20 @@ import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GET } from '@/app/api/chat/thread/route'
-import { buildChatMemoryThreadId, chatMemoryService } from '@/lib/ai/runtime/chat-memory'
+import { buildChatConversationThreadId, chatMemoryService, conversationRegistryService } from '@/lib/ai/runtime/chat-memory'
 import * as chatMemoryCompaction from '@/lib/ai/runtime/chat-memory/compaction'
 
 const env = {
     AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
 }
 
-function createGetRequest(cookie?: string) {
-    return new NextRequest('http://localhost:3000/api/chat/thread', {
-        headers: cookie
+function createGetRequest(options: { conversationId?: string; cookie?: string } = {}) {
+    const query = options.conversationId ? `?conversationId=${encodeURIComponent(options.conversationId)}` : ''
+
+    return new NextRequest(`http://localhost:3000/api/chat/thread${query}`, {
+        headers: options.cookie
             ? {
-                  cookie,
+                  cookie: options.cookie,
               }
             : undefined,
     })
@@ -25,24 +27,38 @@ describe('GET /api/chat/thread', () => {
         vi.stubEnv('AI_MIND_AGENT_RUN_SESSION_SECRET', env.AI_MIND_AGENT_RUN_SESSION_SECRET)
     })
 
-    it('无历史时返回 empty hydration，并为新 session 设置 cookie', async () => {
+    it('缺失 conversationId 时返回 400，不静默 fallback 到 legacy single-thread hydration', async () => {
         const response = await GET(createGetRequest())
         const body = await response.json()
 
-        expect(response.status).toBe(200)
-        expect(response.headers.get('Set-Cookie')).toContain('ai-mind-session-id=')
+        expect(response.status).toBe(400)
         expect(body).toEqual({
-            threadId: expect.stringMatching(/^chat:[a-f0-9]{64}$/),
-            messages: [],
-            pinnedDecisions: [],
-            restored: false,
+            code: 'INVALID_CONVERSATION_ID',
+            error: 'conversationId is required for selected conversation hydration.',
         })
-        expect(JSON.stringify(body)).not.toContain('rawCheckpoint')
     })
 
-    it('同一 session 可恢复 recent messages', async () => {
+    it('无 persisted conversation 时返回 404，由前端在本地维持 blank draft', async () => {
+        const response = await GET(createGetRequest({ conversationId: 'conv-new' }))
+        const body = await response.json()
+
+        expect(response.status).toBe(404)
+        expect(response.headers.get('Set-Cookie')).toBeNull()
+        expect(body).toEqual({
+            code: 'CONVERSATION_NOT_FOUND',
+            error: 'Conversation was not found in the current browser session registry.',
+        })
+    })
+
+    it('同一 session 只恢复 selected conversation 的 recent messages', async () => {
         const sessionId = `route-session-${Date.now()}`
-        const threadId = buildChatMemoryThreadId(sessionId, env)
+        const threadId = buildChatConversationThreadId(sessionId, 'conv-a', env)
+
+        await conversationRegistryService.createConversation(sessionId, {
+            conversationId: 'conv-a',
+            hasMessages: true,
+            now: '2026-07-05T10:00:00.000Z',
+        })
 
         await chatMemoryService.appendCompletedTurn(threadId, {
             assistantMessageId: 'assistant-route',
@@ -51,11 +67,17 @@ describe('GET /api/chat/thread', () => {
             userText: '恢复的问题',
         })
 
-        const response = await GET(createGetRequest(`ai-mind-session-id=${sessionId}`))
+        const response = await GET(
+            createGetRequest({
+                conversationId: 'conv-a',
+                cookie: `ai-mind-session-id=${sessionId}`,
+            })
+        )
         const body = await response.json()
 
         expect(response.headers.get('Set-Cookie')).toBeNull()
         expect(body).toMatchObject({
+            conversationId: 'conv-a',
             threadId,
             restored: true,
         })
@@ -71,9 +93,33 @@ describe('GET /api/chat/thread', () => {
                 status: 'completed',
             }),
         ])
-        expect(Object.keys(body).sort()).toEqual(['messages', 'pinnedDecisions', 'restored', 'threadId'])
+        expect(Object.keys(body).sort()).toEqual(['conversationId', 'messages', 'pinnedDecisions', 'restored', 'threadId'])
         expect(JSON.stringify(body)).not.toContain('graphState')
         expect(JSON.stringify(body)).not.toContain('runtimeArtifact')
+    })
+
+    it('conversation 不属于当前 session registry 时返回 404，不泄露其他会话数据', async () => {
+        const sessionId = `thread-missing-session-${Date.now()}`
+
+        await conversationRegistryService.createConversation(sessionId, {
+            conversationId: 'conv-existing',
+            hasMessages: true,
+            now: '2026-07-05T10:00:00.000Z',
+        })
+
+        const response = await GET(
+            createGetRequest({
+                conversationId: 'conv-missing',
+                cookie: `ai-mind-session-id=${sessionId}`,
+            })
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(404)
+        expect(body).toEqual({
+            code: 'CONVERSATION_NOT_FOUND',
+            error: 'Conversation was not found in the current browser session registry.',
+        })
     })
 
     it('storage error 时返回 sanitized empty hydration，不暴露 raw database error', async () => {
@@ -81,12 +127,24 @@ describe('GET /api/chat/thread', () => {
             new Error('relation "langgraph_chat_memory.checkpoints" does not exist')
         )
 
-        const response = await GET(createGetRequest('ai-mind-session-id=broken-session'))
+        await conversationRegistryService.createConversation('broken-session', {
+            conversationId: 'conv-broken',
+            hasMessages: true,
+            now: '2026-07-05T10:00:00.000Z',
+        })
+
+        const response = await GET(
+            createGetRequest({
+                conversationId: 'conv-broken',
+                cookie: 'ai-mind-session-id=broken-session',
+            })
+        )
         const body = await response.json()
 
         expect(response.status).toBe(200)
         expect(body).toEqual({
-            threadId: expect.stringMatching(/^chat:[a-f0-9]{64}$/),
+            conversationId: 'conv-broken',
+            threadId: expect.stringMatching(/^chat-conversation:[a-f0-9]{64}:[a-f0-9]{64}$/),
             messages: [],
             pinnedDecisions: [],
             restored: false,
@@ -96,7 +154,7 @@ describe('GET /api/chat/thread', () => {
 
     it('hydrates structured final turns as ordinary text messages without metadata leakage', async () => {
         const sessionId = `structured-session-${Date.now()}`
-        const threadId = buildChatMemoryThreadId(sessionId, env)
+        const threadId = buildChatConversationThreadId(sessionId, 'conv-structured', env)
         const longDeliveryReport = `# Delivery Chain Report\n\n${'A'.repeat(8_400)}`
         const compactThreadStateSpy = vi.spyOn(chatMemoryCompaction, 'compactThreadState').mockImplementation(async state => ({
             lastCompactedAt: '2026-07-04T00:00:00.000Z',
@@ -104,6 +162,12 @@ describe('GET /api/chat/thread', () => {
             pinnedDecisions: ['保留结构化 final turn 的文本记忆'],
             summary: '之前的 tool 与 tasklist final turn 已压缩进摘要。',
         }))
+
+        await conversationRegistryService.createConversation(sessionId, {
+            conversationId: 'conv-structured',
+            hasMessages: true,
+            now: '2026-07-05T10:00:00.000Z',
+        })
 
         await chatMemoryService.appendCompletedTurn(threadId, {
             assistantMessageId: 'assistant-tool',
@@ -129,11 +193,17 @@ describe('GET /api/chat/thread', () => {
             userText: '生成交付计划',
         })
 
-        const response = await GET(createGetRequest(`ai-mind-session-id=${sessionId}`))
+        const response = await GET(
+            createGetRequest({
+                conversationId: 'conv-structured',
+                cookie: `ai-mind-session-id=${sessionId}`,
+            })
+        )
         const body = await response.json()
         const serializedBody = JSON.stringify(body)
 
         expect(response.status).toBe(200)
+        expect(body.conversationId).toBe('conv-structured')
         expect(body.threadId).toBe(threadId)
         expect(compactThreadStateSpy).toHaveBeenCalledTimes(1)
         expect(body.messages).toHaveLength(2)

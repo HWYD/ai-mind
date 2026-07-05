@@ -2,7 +2,7 @@
 
 状态：Active
 版本：v0.3.3
-最后更新：2026-06-28
+最后更新：2026-07-04
 
 这份 Constitution 是 AI Mind 的长期治理基线，适用于版本规划、Codex 执行、代码 review、release 收口和后续 Agent / Runtime 扩展。
 
@@ -122,3 +122,15 @@ AI Mind 可以使用 official Spec Kit full skills 降低复杂版本开发成�
 - Level C / D 变更默认使用 official full skills 或人工等价流程；Level A / B 不强制完整 tooling。
 - `speckit-converge` 进入 Level C / D 收口检查；`speckit-taskstoissues` 暂时为 optional。
 - CLI、skills、slash command 或网络不可用时，必须保留人工等价 clarify / checklist / analyze / converge。
+
+## 11. Spec Kit Language Policy
+
+AI Mind 的 `specs/` 文档可以以中文正文为主，但必须保留 official Spec Kit 的英文骨架和可解析结构。
+
+- 规格文件名保持英文：`spec.md`、`plan.md`、`tasks.md`、`acceptance.md`、`decisions.md`。
+- `speckit-*` skill、`$speckit-*`、`/speckit.*`、script 名和 command 名保持英文，不因中文正文改名。
+- 核心 section heading 建议保留英文，例如 `Summary`、`Goals`、`Non-goals`、`Functional Requirements`、`Technical Plan`、`Acceptance Criteria`、`Decisions`；正文可以用中文解释。
+- `GraphState`、`AgentRun`、`AgentInterrupt`、`PostgresSaver`、`stream-core`、`checkpoint`、`resume`、`interrupt`、`HITL`、`ADR`、`adapter layer`、`converge`、`public DTO`、`schema` 等技术名词保留英文或中英混写。
+- 代码标识符必须使用英文；代码注释按现有代码风格处理，不因 specs 中文而强制新增中文注释。
+- Codex 读取中文 specs 时，必须保留原文中的英文技术名词、文件路径、命令、类型名、API 名称和 package 名称，并且不得忽略 `Non-goals`、安全边界、兼容性边界和 release closing 检查。
+- official generated / vendored baseline 不直接中文化；如确需模板策略，先在 `.specify/templates/overrides/` 说明或新增 override，不直接魔改 core templates。

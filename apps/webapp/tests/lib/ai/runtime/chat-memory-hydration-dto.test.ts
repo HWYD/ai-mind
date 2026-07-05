@@ -8,7 +8,24 @@ import {
 } from '@/lib/ai/runtime/chat-memory'
 
 describe('runtime/chat-memory hydration DTO', () => {
-    it('只构造 safe allowlist DTO', () => {
+    it('builds a safe selected-conversation hydration DTO from the public allowlist', () => {
+        expect(
+            buildThreadHydrationDTO({
+                conversationId: 'conv-1',
+                restored: false,
+                state: createEmptyThreadState(),
+                threadId: `chat-conversation:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+            })
+        ).toEqual({
+            conversationId: 'conv-1',
+            threadId: `chat-conversation:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+            messages: [],
+            pinnedDecisions: [],
+            restored: false,
+        })
+    })
+
+    it('keeps compatibility with threadId-only hydration payloads during the foundational phase', () => {
         expect(
             buildThreadHydrationDTO({
                 restored: false,
@@ -23,14 +40,25 @@ describe('runtime/chat-memory hydration DTO', () => {
         })
     })
 
-    it('strict schema 拒绝 unknown raw runtime fields', () => {
+    it('strict schema rejects unknown raw runtime fields', () => {
         expect(() =>
             threadHydrationDtoSchema.parse({
-                threadId: `chat:${'a'.repeat(64)}`,
+                conversationId: 'conv-1',
                 messages: [],
                 pinnedDecisions: [],
                 restored: false,
                 graphState: {},
+            })
+        ).toThrow()
+    })
+
+    it('strict schema rejects registry thread ids in the public hydration payload', () => {
+        expect(() =>
+            threadHydrationDtoSchema.parse({
+                threadId: `chat-registry:${'a'.repeat(64)}`,
+                messages: [],
+                pinnedDecisions: [],
+                restored: false,
             })
         ).toThrow()
     })
@@ -49,7 +77,7 @@ describe('runtime/chat-memory hydration DTO', () => {
         ).toThrow()
     })
 
-    it('forbidden field scanner 能拒绝嵌套 raw runtime 字段', () => {
+    it('forbidden field scanner rejects nested raw runtime fields', () => {
         expect(() =>
             assertNoForbiddenHydrationFields({
                 messages: [
@@ -61,14 +89,14 @@ describe('runtime/chat-memory hydration DTO', () => {
         ).toThrow('rawCheckpoint')
     })
 
-    it('forbidden field scanner 不误伤普通文本值', () => {
+    it('forbidden field scanner does not reject ordinary text values', () => {
         expect(() =>
             assertNoForbiddenHydrationFields({
                 messages: [
                     {
                         parts: [
                             {
-                                text: '用户提到了 "tasklist" 和 runtimeArtifact 这些普通文本。',
+                                text: '用户只是提到了 tasklist 和 runtimeArtifact 这些普通文本。',
                                 type: 'text',
                             },
                         ],

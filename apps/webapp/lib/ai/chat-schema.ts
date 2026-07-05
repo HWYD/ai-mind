@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+export const conversationIdSchema = z.string().trim().min(1).max(120)
+
 export const textPartSchema = z.object({
     type: z.literal('text'),
     text: z.string().min(1),
@@ -38,18 +40,29 @@ export const composerPayloadSchema = z.object({
     references: z.array(composerReferenceSchema).max(1).optional(),
 })
 
-export const chatRequestSchema = z.object({
-    conversationId: z.string().min(1),
-    composer: composerPayloadSchema.optional(),
-    messages: z.array(messageInputSchema).min(1),
-    options: z
-        .object({
-            skill: z.string().min(1).optional(),
-            modelId: z.string().optional(),
-            temperature: z.number().optional(),
-            maxTokens: z.number().int().positive().optional(),
-            enableReasoning: z.boolean().optional(),
-        })
-        .strict()
-        .optional(),
+const chatRequestBaseSchema = z
+    .object({
+        composer: composerPayloadSchema.optional(),
+        messages: z.array(messageInputSchema).min(1),
+        options: z
+            .object({
+                skill: z.string().min(1).optional(),
+                modelId: z.string().optional(),
+                temperature: z.number().optional(),
+                maxTokens: z.number().int().positive().optional(),
+                enableReasoning: z.boolean().optional(),
+            })
+            .strict()
+            .optional(),
+    })
+    .strict()
+
+export const persistedChatRequestSchema = chatRequestBaseSchema.extend({
+    conversationId: conversationIdSchema,
 })
+
+export const draftCreateChatRequestSchema = chatRequestBaseSchema.extend({
+    createConversation: z.literal(true),
+})
+
+export const chatRequestSchema = z.union([persistedChatRequestSchema, draftCreateChatRequestSchema])

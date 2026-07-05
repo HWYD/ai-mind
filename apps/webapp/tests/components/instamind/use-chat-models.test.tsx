@@ -16,10 +16,10 @@ describe('useChatModels', () => {
             defaultModelId: 'qwen/qwen3.6-plus',
             modelError: null,
             models: [
-                { id: 'deepseek/deepseek-v4-flash', label: 'deepseek-v4-flash', provider: 'deepseek' },
-                { id: 'qwen/qwen3.6-plus', label: 'qwen3.6-plus', provider: 'qwen' },
-                { id: 'qwen/qwen3.7-plus', label: 'qwen3.7-plus', provider: 'qwen' },
-                { id: 'ollama/qwen3-8b', label: 'qwen3-8b', provider: 'ollama' },
+                { family: 'deepseek', id: 'deepseek/deepseek-v4-flash', label: 'deepseek-v4-flash', provider: 'qwen' },
+                { family: 'qwen', id: 'qwen/qwen3.6-plus', label: 'qwen3.6-plus', provider: 'qwen' },
+                { family: 'qwen', id: 'qwen/qwen3.7-plus', label: 'qwen3.7-plus', provider: 'qwen' },
+                { family: 'qwen', id: 'ollama/qwen3-8b', label: 'qwen3-8b', provider: 'ollama' },
             ],
         }
 
@@ -31,11 +31,12 @@ describe('useChatModels', () => {
 
         expect(result.current.model).toBe('qwen/qwen3.6-plus')
         expect(result.current.selectedModel?.label).toBe('qwen3.6-plus')
+        expect(result.current.selectedModel?.family).toBe('qwen')
         expect(result.current.modelGroups.map(group => group.label)).toEqual(['线上模型', '本地模型'])
         expect(result.current.modelGroups[0]?.models.map(model => model.id)).toEqual([
+            'deepseek/deepseek-v4-flash',
             'qwen/qwen3.6-plus',
             'qwen/qwen3.7-plus',
-            'deepseek/deepseek-v4-flash',
         ])
         expect(result.current.modelGroups[1]?.models.map(model => model.id)).toEqual(['ollama/qwen3-8b'])
     })

@@ -33,6 +33,7 @@ function createTestSelection(overrides: Partial<ResolvedModelSelection> = {}): R
                 toolCalling: true,
             },
             enabled: true,
+            family: 'ollama',
             id: 'ollama/qwen3-8b',
             label: 'Qwen3 8B Local',
             modelKey: 'qwen3-8b',

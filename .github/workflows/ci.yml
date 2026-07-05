@@ -61,8 +61,8 @@ jobs:
         run: pnpm --filter @ai-mind/database db:generate
       - name: Apply Prisma migrations
         run: pnpm --filter @ai-mind/database db:migrate:deploy
-      - name: Set up LangGraph checkpoint tables
-        run: pnpm --dir apps/webapp db:checkpoint:setup
+      - name: Set up runtime checkpoint tables
+        run: pnpm --dir apps/webapp db:runtime-checkpoints:setup
 
       # database
       - name: database typecheck

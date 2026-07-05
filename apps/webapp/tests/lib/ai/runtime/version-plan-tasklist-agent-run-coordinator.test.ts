@@ -13,6 +13,7 @@ vi.mock('@/lib/ai/mcp/adapters', () => ({
 
 const chatMemoryMocks = vi.hoisted(() => ({
     appendCompletedTurn: vi.fn(),
+    touchConversation: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
@@ -24,11 +25,15 @@ vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
             ...actual.chatMemoryService,
             appendCompletedTurn: chatMemoryMocks.appendCompletedTurn,
         },
+        conversationRegistryService: {
+            ...actual.conversationRegistryService,
+            touchConversation: chatMemoryMocks.touchConversation,
+        },
     }
 })
 
 import type { AgentRunPublicDto } from '@/lib/ai/agent-runs/contracts'
-import { buildChatMemoryThreadId, isChatMemoryThreadId } from '@/lib/ai/runtime/chat-memory'
+import { buildChatConversationThreadId, buildChatMemoryThreadId, isChatMemoryThreadId } from '@/lib/ai/runtime/chat-memory'
 import type { ChatSession } from '@/lib/ai/runtime/types'
 import {
     createNoopTasklistLangSmithObserver,
@@ -194,6 +199,7 @@ function createFakeAgentRunService() {
             currentInterrupt = resumedInterrupt
 
             return {
+                conversationId: 'conversation-coordinator-test',
                 decision: input.decision,
                 interrupt: resumedInterrupt,
                 run: {
@@ -391,6 +397,8 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         resourceMocks.readDocsResource.mockReset()
         mockResources()
         chatMemoryMocks.appendCompletedTurn.mockReset()
+        chatMemoryMocks.touchConversation.mockReset()
+        chatMemoryMocks.touchConversation.mockResolvedValue(undefined)
         vi.stubEnv('AI_MIND_AGENT_RUN_SESSION_SECRET', chatMemoryEnv.AI_MIND_AGENT_RUN_SESSION_SECRET)
     })
 
@@ -506,7 +514,7 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(agentRunService.markRejected).not.toHaveBeenCalled()
         expect(model.invoke).toHaveBeenCalledTimes(1)
         expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            buildChatMemoryThreadId('session-coordinator-test', chatMemoryEnv),
+            buildChatConversationThreadId('session-coordinator-test', 'conversation-coordinator-test', chatMemoryEnv),
             expect.objectContaining({
                 assistantMessageId: 'assistant-coordinator-test',
                 completionStatus: 'final',
@@ -632,7 +640,7 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         expect(completed.graphResult.status).toBe('completed')
         expect(agentRunService.markCompleted).toHaveBeenCalledWith(runId, 'blocked')
         expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenLastCalledWith(
-            buildChatMemoryThreadId('session-coordinator-test', chatMemoryEnv),
+            buildChatConversationThreadId('session-coordinator-test', 'conversation-coordinator-test', chatMemoryEnv),
             expect.objectContaining({
                 completionStatus: 'blocked',
                 source: 'tasklist-agent',

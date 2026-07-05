@@ -43,6 +43,7 @@ const testResolvedModelSelection: ResolvedModelSelection = {
             toolCalling: true,
         },
         enabled: true,
+        family: 'ollama',
         id: 'test-model',
         label: 'Test Model',
         modelKey: 'test-model',

@@ -104,6 +104,19 @@
 
 不要把历史 fixture、mock 数据或旧版本文档中的版本号批量改成当前版本。详细规则见 `.agents/rules/version/artifacts.md`。
 
+## Spec Kit 文档语言策略
+
+- `specs/` 可以中文正文为主，但必须保持 official Spec Kit 兼容：英文文件名、英文 section 骨架、英文 skill / command / script 名和英文代码标识符。
+- 技术名词、路径、命令、类型名、API 名称和 package 名称保持英文或中英混写；读取中文 specs 时不得忽略 `Non-goals`、安全边界、兼容性边界和 release closing 检查。
+- 不直接中文化 official generated / vendored baseline；如需模板策略，优先写入 `.specify/templates/overrides/`。
+
+## shadcn/ui 使用规则
+
+- AI Mind 前端 UI 优先复用项目已有组件和已安装的 shadcn/ui 组件。
+- 如果 shadcn/ui 组件用法、API、variants 或安装方式不确定，必须通过 shadcn MCP、shadcn CLI、官方文档或现有代码确认，不要凭记忆实现。
+- 不要因为单次 UI 需求引入新的 UI 组件库；除非现有组件和 shadcn/ui 明显无法满足需求，并说明原因。
+- 新增 UI 需要适配当前模块和相邻页面的既有视觉风格，不要直接照搬 shadcn/ui 默认 demo 效果。
+
 ## 代码修改
 
 - 优先遵循现有项目的结构、命名和风格，不随意引入新模式。
@@ -160,6 +173,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/043-tool-agent-final-turn-memory/plan.md
+at specs/044-multi-thread-chat-sessions/plan.md
 
 <!-- SPECKIT END -->

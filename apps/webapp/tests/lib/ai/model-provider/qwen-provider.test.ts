@@ -37,6 +37,7 @@ function createTestSelection(): ResolvedModelSelection {
                 toolCalling: true,
             },
             enabled: true,
+            family: 'qwen',
             id: 'qwen/qwen3.6-flash',
             label: 'Qwen 3.6 Flash',
             modelKey: 'qwen3.6-flash',

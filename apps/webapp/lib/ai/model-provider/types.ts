@@ -4,6 +4,9 @@ import type { Runnable } from '@langchain/core/runnables'
 export const aiMindLlmProviders = ['ollama', 'deepseek', 'qwen', 'doubao'] as const
 
 export type AiMindLlmProvider = (typeof aiMindLlmProviders)[number]
+export const aiMindModelFamilies = [...aiMindLlmProviders, 'kimi'] as const
+
+export type AiMindModelFamily = (typeof aiMindModelFamilies)[number]
 
 export type ModelRouteType = 'chat' | 'delivery-chain' | 'tasklist'
 
@@ -20,6 +23,7 @@ export interface AiMindModelCatalogItem {
         toolCalling: boolean
     }
     enabled: boolean
+    family: AiMindModelFamily
     id: string
     label: string
     modelKey: string
@@ -30,10 +34,14 @@ export interface AiMindModelCatalogItem {
 /**
  * 面向前端模型选择器的稳定公开契约。
  *
+ * `family` 表示前端展示家族，用于 icon / 分组等 UI 语义，
+ * 可以与实际路由到的 `provider` 不同。
+ *
  * Provider 实际模型名、环境范围和能力矩阵属于服务端运行时实现细节，
  * 不通过 `/api/ai/models` 暴露，避免前端与外部供应商配置产生耦合。
  */
 export interface PublicChatModel {
+    family: AiMindModelFamily
     id: string
     label: string
     provider: AiMindLlmProvider

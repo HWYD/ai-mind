@@ -1,7 +1,12 @@
 import { AgentRunService } from '@/lib/ai/agent-runs'
 import type { AgentInterruptPublicDto, AgentRunPublicDto, AgentRunResultStatus } from '@/lib/ai/agent-runs/contracts'
 import { createId } from '@/lib/ai/create-id'
-import { buildChatMemoryThreadId, chatMemoryService, type ThreadMemoryStatusEvent } from '@/lib/ai/runtime/chat-memory'
+import {
+    buildChatConversationThreadId,
+    chatMemoryService,
+    conversationRegistryService,
+    type ThreadMemoryStatusEvent,
+} from '@/lib/ai/runtime/chat-memory'
 import type { ChatComposerReference } from '@/lib/ai/types/chat'
 
 import type { ChatExecutionContext, WriteChunk } from '../types'
@@ -64,6 +69,7 @@ export interface VersionPlanTasklistAgentRunCoordinatorResult {
 }
 
 export interface PreparedVersionPlanTasklistAgentResume {
+    conversationId: string
     decision: unknown
     interrupt: AgentInterruptPublicDto
     run: AgentRunPublicDto
@@ -72,6 +78,7 @@ export interface PreparedVersionPlanTasklistAgentResume {
 
 interface AgentRunCoordinatorService {
     beginResume(input: { decision: unknown; interruptId: string; runId: string; sessionId: string }): Promise<{
+        conversationId: string
         decision: unknown
         interrupt: AgentInterruptPublicDto
         run: AgentRunPublicDto
@@ -121,6 +128,7 @@ function writeThreadMemoryStatus(writeChunk: WriteChunk, event: ThreadMemoryStat
 
 async function appendTasklistFinalTurn(options: {
     assistantMessageId: string
+    conversationId: string
     graphResult: Extract<RunVersionPlanTasklistGraphResult, { status: 'completed' }>
     sessionId: string
     userGoal: string
@@ -135,7 +143,7 @@ async function appendTasklistFinalTurn(options: {
     }
 
     await chatMemoryService.appendCompletedTurn(
-        buildChatMemoryThreadId(options.sessionId),
+        buildChatConversationThreadId(options.sessionId, options.conversationId),
         {
             assistantMessageId: options.assistantMessageId,
             assistantText,
@@ -147,6 +155,9 @@ async function appendTasklistFinalTurn(options: {
             onStatus: event => writeThreadMemoryStatus(options.writeChunk, event),
         }
     )
+    await conversationRegistryService.touchConversation(options.sessionId, options.conversationId, {
+        hasMessages: true,
+    })
 }
 
 async function persistGraphResult(options: {
@@ -160,6 +171,7 @@ async function persistGraphResult(options: {
     stage: 'initial' | 'resume'
     userGoal: string
     writeChunk: WriteChunk
+    conversationId: string
 }) {
     const { agentRunService, graphResult, langSmithObserver, runId, writeChunk } = options
 
@@ -210,6 +222,7 @@ async function persistGraphResult(options: {
             try {
                 await appendTasklistFinalTurn({
                     assistantMessageId: options.assistantMessageId,
+                    conversationId: options.conversationId,
                     graphResult,
                     sessionId: options.sessionId,
                     userGoal: options.userGoal,
@@ -314,6 +327,7 @@ export async function startVersionPlanTasklistAgentRun(
             stage: 'initial',
             userGoal: options.userGoal,
             writeChunk: options.writeChunk,
+            conversationId: options.conversationId,
         })
 
         return {
@@ -412,6 +426,7 @@ export async function resumeVersionPlanTasklistAgentRun(
             stage: 'resume',
             userGoal: options.userGoal,
             writeChunk: options.writeChunk,
+            conversationId: resume.conversationId,
         })
 
         return {

@@ -56,6 +56,7 @@ const resolvedModelSelection: ResolvedModelSelection = {
             toolCalling: true,
         },
         enabled: true,
+        family: 'ollama',
         id: 'ollama/qwen3-8b',
         label: 'qwen3-8b',
         modelKey: 'qwen3-8b',

@@ -11,14 +11,16 @@ const modelGroups: ChatModelGroup[] = [
         id: 'online',
         label: '线上模型',
         models: [
-            { id: 'qwen/qwen3.6-plus', label: 'qwen3.6-plus', provider: 'qwen' },
-            { id: 'deepseek/deepseek-v4-pro', label: 'deepseek-v4-pro', provider: 'deepseek' },
+            { family: 'qwen', id: 'qwen/qwen3.6-plus', label: 'qwen3.6-plus', provider: 'qwen' },
+            { family: 'deepseek', id: 'proxy/routed-deepseek', label: 'deepseek-v4-pro', provider: 'qwen' },
+            { family: 'doubao', id: 'doubao/doubao-seed-2.0-pro', label: 'doubao-seed-2.0-pro', provider: 'doubao' },
+            { family: 'kimi', id: 'doubao/Kimi-K2.6', label: 'Kimi-K2.6', provider: 'doubao' },
         ],
     },
     {
         id: 'local',
         label: '本地模型',
-        models: [{ id: 'ollama/qwen3-8b', label: 'qwen3-8b', provider: 'ollama' }],
+        models: [{ family: 'qwen', id: 'ollama/qwen3-8b', label: 'qwen3-8b', provider: 'ollama' }],
     },
 ]
 
@@ -70,22 +72,73 @@ describe('ComposerToolbar model selector', () => {
         })
 
         const menu = await waitFor(() => screen.getByRole('menu'))
+        const onlineQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3.6-plus' })
+        const deepseekItem = within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-pro' })
+        const doubaoItem = within(menu).getByRole('menuitemradio', { name: 'doubao-seed-2.0-pro' })
+        const kimiItem = within(menu).getByRole('menuitemradio', { name: 'Kimi-K2.6' })
+        const localQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3-8b' })
+        const onlineQwenIcon = onlineQwenItem.querySelector<SVGElement>('[data-model-icon]')
+        const deepseekIcon = deepseekItem.querySelector<SVGElement>('[data-model-icon]')
+        const doubaoIcon = doubaoItem.querySelector<SVGElement>('[data-model-icon]')
+        const kimiIcon = kimiItem.querySelector<SVGElement>('[data-model-icon]')
+        const localQwenIcon = localQwenItem.querySelector<SVGElement>('[data-model-icon]')
 
         expect(within(menu).getByText('线上模型')).toBeTruthy()
         expect(within(menu).getByText('本地模型')).toBeTruthy()
-        expect(within(menu).getByRole('menuitemradio', { name: 'qwen3.6-plus' })).toBeTruthy()
-        expect(within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-pro' })).toBeTruthy()
-        expect(within(menu).getByRole('menuitemradio', { name: 'qwen3-8b' })).toBeTruthy()
-        expect(
-            within(menu).getByRole('menuitemradio', { name: 'qwen3.6-plus' }).querySelector<SVGElement>('[data-model-icon]')?.style.color
-        ).toBe('var(--color-violet-500)')
-        expect(
-            within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-pro' }).querySelector<SVGElement>('[data-model-icon]')?.style.color
-        ).toBe('var(--color-sky-500)')
+        expect(onlineQwenItem).toBeTruthy()
+        expect(deepseekItem).toBeTruthy()
+        expect(doubaoItem).toBeTruthy()
+        expect(kimiItem).toBeTruthy()
+        expect(localQwenItem).toBeTruthy()
+        expect(onlineQwenIcon?.style.color).toBe('var(--color-violet-500)')
+        expect(onlineQwenIcon?.dataset.modelIcon).toBe('qwen')
+        expect(deepseekIcon?.style.color).toBe('var(--color-sky-500)')
+        expect(localQwenIcon?.style.color).toBe('var(--color-violet-500)')
+        expect(localQwenIcon?.dataset.modelIcon).toBe('qwen')
+        expect(doubaoIcon?.dataset.modelIcon).toBe('doubao')
+        expect(kimiIcon?.dataset.modelIcon).toBe('kimi')
+        expect(doubaoIcon?.style.color).toBe('var(--color-amber-500)')
+        expect(kimiIcon?.style.color).toBe('var(--color-rose-500)')
 
-        fireEvent.click(within(menu).getByRole('menuitemradio', { name: 'qwen3-8b' }))
+        fireEvent.click(localQwenItem)
 
         expect(onModelChange).toHaveBeenCalledWith('ollama/qwen3-8b')
+    })
+
+    it('图标颜色在 hover 时保持固定，不跟随菜单项文字变色', async () => {
+        render(
+            <ComposerToolbar
+                enableReasoning
+                isModelLoading={false}
+                model="doubao/Kimi-K2.6"
+                modelGroups={modelGroups}
+                onEnableReasoningChange={vi.fn()}
+                onInsertTrigger={vi.fn()}
+                onModelChange={vi.fn()}
+                onSkillModeChange={vi.fn()}
+                onStop={vi.fn()}
+                onSubmit={vi.fn()}
+                sendDisabled={false}
+                skillMode="auto"
+                status="ready"
+            />
+        )
+
+        fireEvent.pointerDown(screen.getByRole('button', { name: '选择模型' }), {
+            button: 0,
+            ctrlKey: false,
+            pointerType: 'mouse',
+        })
+
+        const menu = await waitFor(() => screen.getByRole('menu'))
+        const kimiItem = within(menu).getByRole('menuitemradio', { name: 'Kimi-K2.6' })
+        const kimiIcon = kimiItem.querySelector<SVGElement>('[data-model-icon]')
+
+        expect(kimiIcon?.style.color).toBe('var(--color-rose-500)')
+
+        fireEvent.mouseEnter(kimiItem)
+
+        expect(kimiIcon?.style.color).toBe('var(--color-rose-500)')
     })
 
     it('打开模型选择器时不锁住 body 滚动，避免页面滚动条抖动', async () => {
@@ -93,7 +146,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-plus"
+                model="proxy/routed-deepseek"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -114,6 +167,10 @@ describe('ComposerToolbar model selector', () => {
         })
 
         await waitFor(() => screen.getByRole('menu'))
+
+        expect(screen.getByRole('button', { name: '选择模型' }).querySelector<SVGElement>('[data-model-icon]')?.style.color).toBe(
+            'var(--color-sky-500)'
+        )
 
         expect(document.body.hasAttribute('data-scroll-locked')).toBe(false)
     })

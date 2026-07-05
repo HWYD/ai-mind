@@ -37,6 +37,7 @@ export function resolvePublicModelList(
     return {
         defaultModelId: defaultModel.id,
         models: visibleCatalogItems.map(item => ({
+            family: item.family,
             id: item.id,
             label: item.label,
             provider: item.provider,

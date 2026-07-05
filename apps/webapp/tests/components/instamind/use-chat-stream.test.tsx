@@ -4,7 +4,9 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { useChatStream } from '@/components/instamind/use-chat-stream'
+import { useChatStream as useChatStreamBase } from '@/components/instamind/use-chat-stream'
+
+const TEST_CONVERSATION_ID = 'conv-current'
 
 function createNdjsonResponse(chunks: ChatStreamChunk[], status = 200) {
     const encoder = new TextEncoder()
@@ -28,7 +30,50 @@ function createNdjsonResponse(chunks: ChatStreamChunk[], status = 200) {
 }
 
 function getChatFetchCalls(fetchMock: ReturnType<typeof vi.fn>) {
-    return fetchMock.mock.calls.filter(call => String(call[0]) !== '/api/chat/thread')
+    return fetchMock.mock.calls.filter(call => !String(call[0]).startsWith('/api/chat/thread'))
+}
+
+function createThreadHydrationResponse(conversationId = TEST_CONVERSATION_ID) {
+    return Response.json({
+        conversationId,
+        threadId: `chat-conversation:${'a'.repeat(64)}:${'b'.repeat(64)}`,
+        messages: [],
+        pinnedDecisions: [],
+        restored: false,
+    })
+}
+
+function withThreadHydration(
+    chatResponse: Response | Promise<Response> | ((input: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>)
+) {
+    return vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).startsWith('/api/chat/thread')) {
+            const url = new URL(String(input), 'http://localhost')
+            return Promise.resolve(createThreadHydrationResponse(url.searchParams.get('conversationId') ?? TEST_CONVERSATION_ID))
+        }
+
+        if (typeof chatResponse === 'function') {
+            return Promise.resolve(chatResponse(input, init))
+        }
+
+        return Promise.resolve(chatResponse)
+    })
+}
+
+function useChatStream(options: Parameters<typeof useChatStreamBase>[0] = {}) {
+    return useChatStreamBase({
+        conversationId: TEST_CONVERSATION_ID,
+        enableReasoning: false,
+        ...options,
+    })
+}
+
+function renderChatStreamHook(options: Parameters<typeof useChatStreamBase>[0] = {}) {
+    return renderHook(() =>
+        useChatStream({
+            ...options,
+        })
+    )
 }
 
 function createStrategyInterruptResponse(runId = 'run-resume-error', interruptId = 'interrupt-strategy-error') {
@@ -74,7 +119,7 @@ describe('useChatStream', () => {
     it('模型提供方限流时会在当前轮次追加 assistant 错误消息，不进入顶部错误态', async () => {
         vi.stubGlobal(
             'fetch',
-            vi.fn().mockResolvedValue(
+            withThreadHydration(
                 Response.json(
                     {
                         error: '聊天请求已达到当前 IP 的当日上限（2 次）。',
@@ -86,7 +131,7 @@ describe('useChatStream', () => {
             )
         )
 
-        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+        const { result } = renderChatStreamHook()
 
         await act(async () => {
             await result.current.sendMessage('你好')
@@ -112,7 +157,7 @@ describe('useChatStream', () => {
             .fn()
             .mockResolvedValue(createNdjsonResponse([{ type: 'start', messageId: 'assistant-model' }, { type: 'finish' }]))
 
-        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
         const { result } = renderHook(() => useChatStream({ model: 'qwen/qwen3.6-plus', enableReasoning: false }))
 
         await act(async () => {
@@ -124,6 +169,83 @@ describe('useChatStream', () => {
 
         expect(requestBody?.options?.modelId).toBe('qwen/qwen3.6-plus')
         expect(requestBody?.options?.enableReasoning).toBe(false)
+    })
+
+    it('captures the active conversation at request start even if the hook props change mid-stream', async () => {
+        const encoder = new TextEncoder()
+        const fetchMock = vi.fn().mockImplementation((_input: RequestInfo | URL, init?: RequestInit) => {
+            const signal = init?.signal
+
+            const body = new ReadableStream<Uint8Array>({
+                start(controller) {
+                    controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'start', messageId: 'assistant-ownership' })}\n`))
+                    controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'text-start', partId: 'text-ownership' })}\n`))
+                    controller.enqueue(
+                        encoder.encode(`${JSON.stringify({ type: 'text-delta', partId: 'text-ownership', delta: '正在输出' })}\n`)
+                    )
+
+                    const finishTimer = window.setTimeout(() => {
+                        controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'finish' })}\n`))
+                        controller.close()
+                    }, 30)
+
+                    signal?.addEventListener(
+                        'abort',
+                        () => {
+                            window.clearTimeout(finishTimer)
+                            controller.error(new DOMException('Request aborted', 'AbortError'))
+                        },
+                        { once: true }
+                    )
+                },
+            })
+
+            return Promise.resolve(
+                new Response(body, {
+                    status: 200,
+                    headers: {
+                        'Content-Type': 'application/x-ndjson; charset=utf-8',
+                    },
+                })
+            )
+        })
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result, rerender } = renderHook(
+            ({ conversationId }) =>
+                useChatStreamBase({
+                    conversationId,
+                    enableReasoning: false,
+                }),
+            {
+                initialProps: {
+                    conversationId: 'conv-a',
+                },
+            }
+        )
+
+        let sendPromise!: Promise<boolean>
+
+        await act(async () => {
+            sendPromise = result.current.sendMessage('开始流式输出')
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('streaming')
+        })
+
+        rerender({
+            conversationId: 'conv-b',
+        })
+
+        await act(async () => {
+            await sendPromise
+        })
+
+        const chatRequest = fetchMock.mock.calls.find(call => String(call[0]) === '/api/chat')
+        const requestBody = JSON.parse(String((chatRequest?.[1] as RequestInit | undefined)?.body))
+
+        expect(requestBody.conversationId).toBe('conv-a')
     })
 
     it('用户中止流式请求后会保留已收到的 assistant 内容', async () => {
@@ -172,7 +294,7 @@ describe('useChatStream', () => {
             )
         })
 
-        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         let sendPromise!: Promise<boolean>
@@ -528,7 +650,7 @@ describe('useChatStream', () => {
             ])
         )
 
-        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -560,7 +682,7 @@ describe('useChatStream', () => {
             expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
         })
 
-        expect(fetchMock).toHaveBeenCalledWith('/api/chat/thread')
+        expect(fetchMock).toHaveBeenCalledWith(`/api/chat/thread?conversationId=${TEST_CONVERSATION_ID}`)
         expect(result.current.pendingInterrupt).toBeNull()
         expect(result.current.messages).toHaveLength(0)
     })
@@ -632,7 +754,7 @@ describe('useChatStream', () => {
             )
         })
 
-        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -692,7 +814,7 @@ describe('useChatStream', () => {
             return Promise.resolve(createStrategyInterruptResponse())
         })
 
-        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -789,7 +911,7 @@ describe('useChatStream', () => {
             )
         })
 
-        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
