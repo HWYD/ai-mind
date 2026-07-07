@@ -10,15 +10,18 @@ const runtimeMocks = vi.hoisted(() => {
         appendCompletedTurn: vi.fn(),
         readThreadState: vi.fn(),
         buildChatMemoryContextMessages: vi.fn(),
+        buildUserMemoryContextMessages: vi.fn(),
         touchConversation: vi.fn(),
         createChatSession: vi.fn(),
         decideAuthoritativeToolAnswer: vi.fn(),
         executeComposerContextInvocation: vi.fn(),
+        processCompletedTurnForMemory: vi.fn(),
         executeToolCall: vi.fn(),
         formatToolInput: vi.fn(),
         hasVisibleAssistantText: vi.fn(),
         normalizeAndValidateToolCalls: vi.fn(),
         resolveComposerContextInvocation: vi.fn(),
+        retrieveRelevantMemories: vi.fn(),
         shouldBypassAuthoritativeAnswer: vi.fn(),
         startDeliveryChainRun: vi.fn(),
         streamAssistantParts: vi.fn(),
@@ -94,6 +97,14 @@ vi.mock('@/lib/ai/runtime/chat-memory', () => ({
 vi.mock('@/lib/ai/runtime/composer-context', () => ({
     executeComposerContextInvocation: runtimeMocks.executeComposerContextInvocation,
     resolveComposerContextInvocation: runtimeMocks.resolveComposerContextInvocation,
+}))
+
+vi.mock('@/lib/ai/runtime/user-memory', () => ({
+    buildUserMemoryContextMessages: runtimeMocks.buildUserMemoryContextMessages,
+    processCompletedTurnForMemory: runtimeMocks.processCompletedTurnForMemory,
+    userMemoryService: {
+        retrieveRelevantMemories: runtimeMocks.retrieveRelevantMemories,
+    },
 }))
 
 vi.mock('@/lib/ai/runtime/delivery-chain', () => ({
@@ -336,6 +347,7 @@ describe('runtime/chat-orchestrator', () => {
 
         runtimeMocks.buildSystemMessages.mockReturnValue([])
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([])
+        runtimeMocks.buildUserMemoryContextMessages.mockReturnValue([])
         runtimeMocks.touchConversation.mockResolvedValue(undefined)
         runtimeMocks.readThreadState.mockResolvedValue({
             restored: false,
@@ -347,6 +359,15 @@ describe('runtime/chat-orchestrator', () => {
         })
         runtimeMocks.resolveComposerContextInvocation.mockReturnValue(null)
         runtimeMocks.executeComposerContextInvocation.mockResolvedValue([])
+        runtimeMocks.processCompletedTurnForMemory.mockResolvedValue({
+            candidates: 0,
+            rejected: 0,
+            status: 'processed',
+            suppressed: 0,
+            updated: 0,
+            written: 0,
+        })
+        runtimeMocks.retrieveRelevantMemories.mockResolvedValue([])
         runtimeMocks.hasVisibleAssistantText.mockReturnValue(false)
         runtimeMocks.stripMessageText.mockImplementation((message: AIMessage) => message)
         runtimeMocks.writeToolValidationErrors.mockReturnValue([])

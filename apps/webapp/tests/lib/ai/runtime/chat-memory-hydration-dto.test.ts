@@ -52,6 +52,18 @@ describe('runtime/chat-memory hydration DTO', () => {
         ).toThrow()
     })
 
+    it('strict schema rejects UserMemory fields in hydration payload', () => {
+        expect(() =>
+            threadHydrationDtoSchema.parse({
+                conversationId: 'conv-1',
+                messages: [],
+                pinnedDecisions: [],
+                restored: false,
+                userMemory: [],
+            })
+        ).toThrow()
+    })
+
     it('strict schema rejects registry thread ids in the public hydration payload', () => {
         expect(() =>
             threadHydrationDtoSchema.parse({

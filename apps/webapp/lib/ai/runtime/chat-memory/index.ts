@@ -27,9 +27,11 @@ export {
     CHAT_MEMORY_COMPACTION_PROMPT,
     CHAT_MEMORY_COMPACTION_MODEL_ID,
     compactThreadState,
+    compactThreadStateWithResult,
     generateStructuredCompaction,
     type ChatMemoryCompactionGenerator,
     type ChatMemoryCompactionInput,
+    type ChatMemoryCompactionResult,
 } from './compaction'
 export { buildChatMemoryContextMessages } from './context-builder'
 export { isChatMemoryContextEligibleRequest, isChatMemoryEligibleRequest, isChatMemoryWriteEligibleRequest } from './eligibility'

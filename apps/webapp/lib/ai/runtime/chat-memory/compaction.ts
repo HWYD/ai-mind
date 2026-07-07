@@ -37,6 +37,12 @@ export interface ChatMemoryCompactionInput {
 
 export type ChatMemoryCompactionGenerator = (input: ChatMemoryCompactionInput) => Promise<unknown>
 
+export interface ChatMemoryCompactionResult {
+    nextPinnedDecisions: string[]
+    previousPinnedDecisions: string[]
+    state: AiMindThreadState
+}
+
 function logCompactionEvent(event: string, meta: Record<string, unknown>): void {
     // eslint-disable-next-line no-console
     console.info('[chat-memory-compaction]', JSON.stringify({ event, ...meta }))
@@ -101,12 +107,16 @@ export async function generateStructuredCompaction(input: ChatMemoryCompactionIn
     return runnable.invoke(buildCompactionMessages(input))
 }
 
-export async function compactThreadState(
+export async function compactThreadStateWithResult(
     state: AiMindThreadState,
     generator: ChatMemoryCompactionGenerator = generateStructuredCompaction
-): Promise<AiMindThreadState | null> {
+): Promise<ChatMemoryCompactionResult | null> {
     if (state.messages.length <= CHAT_MEMORY_RECENT_MESSAGE_LIMIT) {
-        return state
+        return {
+            nextPinnedDecisions: state.pinnedDecisions,
+            previousPinnedDecisions: state.pinnedDecisions,
+            state,
+        }
     }
 
     const recentMessages = state.messages.slice(-CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT)
@@ -136,10 +146,14 @@ export async function compactThreadState(
         })
 
         return {
-            lastCompactedAt: new Date().toISOString(),
-            messages: recentMessages,
-            pinnedDecisions: result.pinnedDecisions,
-            summary: result.summary,
+            nextPinnedDecisions: result.pinnedDecisions,
+            previousPinnedDecisions: state.pinnedDecisions,
+            state: {
+                lastCompactedAt: new Date().toISOString(),
+                messages: recentMessages,
+                pinnedDecisions: result.pinnedDecisions,
+                summary: result.summary,
+            },
         }
     } catch (error) {
         if (error instanceof ZodError) {
@@ -160,4 +174,13 @@ export async function compactThreadState(
 
         return null
     }
+}
+
+export async function compactThreadState(
+    state: AiMindThreadState,
+    generator: ChatMemoryCompactionGenerator = generateStructuredCompaction
+): Promise<AiMindThreadState | null> {
+    const result = await compactThreadStateWithResult(state, generator)
+
+    return result?.state ?? null
 }

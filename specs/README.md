@@ -2,7 +2,7 @@
 
 ## Current Planning Spec
 
-- [044: Minimal Multi-thread Chat Sessions](./044-multi-thread-chat-sessions)
+- [045: Long-term User Memory Store Baseline](./045-long-term-user-memory-store)
 
 `specs/` 是 AI Mind 的正式 AI coding 规格工作区。
 
@@ -217,6 +217,17 @@ specs/<version-topic>/
 - v0.4.4 为什么把 chat memory 从单会话 thread 扩到 browser-session scoped recent conversations，而不是引入 ChatSession / ChatMessage 业务历史
 - Conversation Registry、selected conversation、hydration、summary compaction 和 final-turn memory append 如何保持 conversation 级隔离
 - 为什么这版 UI 必须优先复用 `instant-mind` 页面、本地 `components/ui`、`shadcn/ui` / `radix-vega` 基线，而不是依赖 MCP 或 remote UI registry
+
+### 045 Long-term User Memory Store Baseline
+
+目录：[045-long-term-user-memory-store](./045-long-term-user-memory-store)
+
+回答的问题：
+
+- v0.4.5 为什么把长期记忆定义为 browser-session scoped `UserMemory Store`，而不是完整聊天历史、账号级画像或 `ThreadState` 扩展
+- 为什么长期记忆写入采用 post-final-turn background extract-then-validate pipeline，而不是主 assistant memory-write tool
+- `UserMemory` 如何与 `ThreadState`、Conversation Registry、hydration payload、stream chunk、Tasklist / Delivery 边界保持分离
+- 为什么 retrieval 只接 ordinary text chat 和 tool-assisted ordinary chat，并且要做 type-aware bounded injection
 
 ## Language Policy for Specs
 

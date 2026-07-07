@@ -35,6 +35,7 @@ import type {
     ToolValidationResult,
     WriteChunk,
 } from './types'
+import { buildUserMemoryContextMessages, processCompletedTurnForMemory, userMemoryService } from './user-memory'
 import {
     createTasklistAgentModelSet,
     createVersionPlanTasklistAgentSkeleton,
@@ -113,6 +114,20 @@ function getLastUserMessageText(request: ChatRequest) {
     }
 
     return ''
+}
+
+function isUserMemoryContextEligibleRequest(request: ChatRequest): boolean {
+    return !request.composer?.command
+}
+
+function isUserMemoryWriteEligibleRequest(request: ChatRequest, source: FinalTurnSource): boolean {
+    return !request.composer?.command && (source === 'chat' || source === 'tool')
+}
+
+function isDraftConversationIdentity(conversationId: string | undefined): boolean {
+    const normalized = conversationId?.trim()
+
+    return normalized === '__draft__' || normalized?.startsWith('__draft__:') === true
 }
 
 export class ChatOrchestrator {
@@ -204,7 +219,19 @@ export class ChatOrchestrator {
             return
         }
 
-        const threadId = this.resolveConversationThreadId()
+        let sourceConversationId: string
+        let threadId: string | null
+
+        try {
+            sourceConversationId = this.resolveValidatedConversationId()
+            threadId = buildChatConversationThreadId(this.context.sessionId, sourceConversationId)
+        } catch (error) {
+            logSkillRuntime('chat-memory-append-failed', {
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+                stage: 'conversation-resolution',
+            })
+            return
+        }
 
         if (!threadId) {
             logSkillRuntime('chat-memory-append-skipped', {
@@ -224,16 +251,116 @@ export class ChatOrchestrator {
                 },
                 {
                     onStatus: event => this.writeThreadMemoryStatus(event),
+                    promotionContext: {
+                        sessionId: this.context.sessionId,
+                        sourceConversationId,
+                    },
                 }
             )
-            await conversationRegistryService.touchConversation(this.context.sessionId, this.resolveValidatedConversationId(), {
+        } catch (error) {
+            logSkillRuntime('chat-memory-append-failed', {
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+                stage: 'append-turn',
+            })
+            // Chat memory 是可降级能力，失败不影响已经完成的用户回答。
+        }
+
+        try {
+            await conversationRegistryService.touchConversation(this.context.sessionId, sourceConversationId, {
                 hasMessages: true,
             })
         } catch (error) {
             logSkillRuntime('chat-memory-append-failed', {
                 errorName: error instanceof Error ? error.name : 'UnknownError',
+                stage: 'touch-conversation',
             })
-            // Chat memory 是可降级能力，失败不影响已经完成的用户回答。
+        }
+
+        void this.enqueueCompletedUserMemoryExtraction({
+            assistantText: normalizedAssistantText,
+            source,
+            userText,
+        })
+    }
+
+    private async enqueueCompletedUserMemoryExtraction(input: { assistantText: string; source: FinalTurnSource; userText: string }) {
+        try {
+            if (!this.context.sessionId) {
+                return
+            }
+
+            if (!isUserMemoryWriteEligibleRequest(this.request, input.source)) {
+                return
+            }
+
+            const sourceConversationId = this.resolveValidatedConversationId()?.trim()
+
+            if (!sourceConversationId || isDraftConversationIdentity(sourceConversationId)) {
+                return
+            }
+
+            let safeShortTermContext:
+                | {
+                      pinnedDecisions?: string[]
+                      summary?: string
+                  }
+                | undefined
+
+            try {
+                const threadId = this.resolveConversationThreadId()
+
+                if (threadId) {
+                    const threadState = await chatMemoryService.readThreadState(threadId)
+                    safeShortTermContext = {
+                        pinnedDecisions: threadState.state.pinnedDecisions,
+                        summary: threadState.state.summary,
+                    }
+                }
+            } catch {
+                safeShortTermContext = undefined
+            }
+
+            const result = await processCompletedTurnForMemory({
+                assistantFinalText: input.assistantText,
+                latestUserText: input.userText,
+                path: input.source === 'tool' ? 'tool_assisted_ordinary_chat' : 'ordinary_chat',
+                safeShortTermContext,
+                sessionId: this.context.sessionId,
+                sourceConversationId,
+            })
+
+            logSkillRuntime('user-memory-post-turn-processed', {
+                resultStatus: result.status,
+                source: input.source,
+            })
+        } catch (error) {
+            logSkillRuntime('user-memory-post-turn-failed', {
+                errorName: error instanceof Error ? error.name : 'UnknownError',
+                source: input.source,
+            })
+        }
+    }
+
+    private async resolveUserMemoryContextMessages() {
+        if (!this.context.sessionId || !isUserMemoryContextEligibleRequest(this.request)) {
+            return []
+        }
+
+        const latestUserText = getLastUserMessageText(this.request)
+
+        if (!latestUserText) {
+            return []
+        }
+
+        try {
+            const selectedUserMemories = await userMemoryService.retrieveRelevantMemories({
+                latestUserText,
+                sessionId: this.context.sessionId,
+            })
+
+            return buildUserMemoryContextMessages(selectedUserMemories)
+        } catch {
+            return []
         }
     }
 
@@ -255,6 +382,15 @@ export class ChatOrchestrator {
         } catch {
             return []
         }
+    }
+
+    private async resolveConversationMemoryContextMessages() {
+        const [userMemoryContextMessages, chatMemoryContextMessages] = await Promise.all([
+            this.resolveUserMemoryContextMessages(),
+            this.resolveChatMemoryContextMessages(),
+        ])
+
+        return [...userMemoryContextMessages, ...chatMemoryContextMessages]
     }
 
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
@@ -645,7 +781,7 @@ export class ChatOrchestrator {
             const session = await createChatSession(this.request, this.context.resolvedModelSelection)
 
             this.modelHandle = session.modelHandle
-            this.memoryContextMessages = await this.resolveChatMemoryContextMessages()
+            this.memoryContextMessages = await this.resolveConversationMemoryContextMessages()
 
             throwIfAborted(this.context.signal)
 

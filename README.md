@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.4.4：Minimal Multi-thread Chat Sessions。在 v0.4.2 / v0.4.3 chat memory 基线上，把当前 browser session 从“单会话 thread”扩展为“最多 10 个最近 conversations”，同时保持 final-turn memory、stream protocol、Tasklist / Delivery 边界不变。
+> v0.4.5：Long-term User Memory Store Baseline。在 v0.4.4 多会话短期记忆容器基础上，引入 browser-session scoped `UserMemory Store`，让同一 browser session 下的多个 conversations 可以按相关性复用长期用户偏好、稳定用户背景、稳定指令和工作流偏好，同时保持 ThreadState、stream protocol、Tasklist / Delivery 边界不变。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.4`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.5`。
 
 已经验证：
 
@@ -217,6 +217,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - LangGraph 单会话 chat memory baseline。
 - Tool & Agent final-turn memory。
 - Minimal multi-thread chat sessions。
+- browser-session scoped long-term UserMemory baseline。
 
 当前非目标：
 
@@ -251,34 +252,34 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.4
+## 当前版本：v0.4.5
 
-这版的主线是 `Minimal Multi-thread Chat Sessions`：在 v0.4.2 单会话 memory baseline 和 v0.4.3 final-turn memory 基线上，把当前 browser session 的 chat page 扩展为“最多 10 个最近 conversations”的最小多会话形态。
+这版的主线是 `Long-term User Memory Store Baseline`：在 v0.4.4 多会话短期 `ThreadState` 容器基础上，引入 browser-session scoped 的长期 `UserMemory Store`。同一个 browser session 下，conversation A 中保存的长期用户偏好、稳定用户背景、稳定指令和工作流偏好，现在可以在 conversation B 的相关问题中按相关性召回。
 
-v0.4.4 的边界非常明确：
+v0.4.5 的边界非常明确：
 
-- Conversation Registry 只属于当前 browser session，不是账号级历史，也不是全局 history。
-- 每个 conversation 对应独立的 text-only chat memory thread；hydration、summary compaction、pinned decisions 和 final-turn memory append 全部按 conversation 隔离。
-- recent conversations 按 `lastActiveAt` 排序并裁剪为 10 条；create blank conversation、switch selected conversation 和 refresh restore 都走服务端校验。
-- UI 继续站在 `instant-mind` 页面壳层、本地 `components/ui`、`shadcn/ui` / `radix-vega` 基线上演进，不依赖 MCP 或 remote UI registry。
-- streaming 期间禁止创建新会话和切换会话，避免 final turn 写错 conversation。
-- 普通 chat、tool / MCP、Tasklist final answer、Delivery final report 仍然只把最终用户可见文本写入 memory，不暴露 raw transcript、GraphState、RuntimeArtifact 或 provider/runtime internals。
-- stream protocol、frontend reducer public shape、Tasklist checkpoint / resume 语义、Delivery run-local 语义保持不变。
+- `UserMemory` 与 conversation-scoped `ThreadState` 严格分离；`ThreadState` 仍然是当前 selected conversation 的短期事实源。
+- 长期记忆只接入 ordinary text chat 和 tool-assisted ordinary chat；Tasklist / Delivery 不读取、不写入 UserMemory。
+- 每个 eligible ordinary completed turn 只在 assistant final turn 完成后，后台 enqueue 一个 in-process best-effort extraction job。
+- 模型只负责结构化输出 `0..N` candidates；程序负责 deterministic validation、stable key、dedupe、suppression 和最终写入。
+- retrieval 只在当前 browser session scope 内进行，最多注入 3 条，每条最多 300 字，总注入不超过 900 字。
+- `UserMemory` 不进入 hydration payload、Conversation Registry、ThreadState.messages、pinnedDecisions、stream chunk、frontend reducer、GraphState 或 RuntimeArtifact。
+- `PostgresStore` 使用独立 `langgraph_user_memory` schema，setup 独立于 checkpoint setup 和 Prisma migration。
 
 本版显式不做：
 
-- 不新增 ChatSession / ChatMessage Prisma 业务表。
-- 不做账号同步、多端共享、搜索、分页、删除、重命名、归档或完整历史管理。
-- 不兼容或迁移 legacy `chat:${sessionHash}` 单线程 identity。
-- 不把 raw tool / MCP transcript、Tasklist GraphState / HITL payload、Delivery RuntimeArtifact / workflow progress 写入 chat ThreadState。
+- 不做完整聊天历史系统、账号级用户画像、跨设备同步。
+- 不做 Memory Inspector、memory edit/delete UI、memory management backend。
+- 不做 embedding retrieval、pgvector、历史搜索、消息分页。
+- 不把 raw tool / MCP transcript、Tasklist GraphState / HITL payload、Delivery RuntimeArtifact / workflow progress 写入长期记忆。
 
 当前 runtime baseline 保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
-- 普通 text chat / multi-thread memory：selected conversation 下的可恢复 recent messages + summary + pinned decisions
+- 普通 text chat / tool-assisted ordinary chat：selected conversation 的短期 ThreadState + 当前 browser session 的相关 UserMemory
 
-详细设计见 [v0.4.4 Minimal Multi-thread Chat Sessions](./docs/versions/v0.4.4-minimal-multi-thread-chat-sessions.md)、[v0.4.4 Release Note](./docs/releases/v0.4.4.md)、[specs/044-multi-thread-chat-sessions](./specs/044-multi-thread-chat-sessions/)、[Runtime 边界](./docs/architecture/runtime-boundary.md) 和 [Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md)。
+详细设计见 [AI Mind v0.4.5: Long-term User Memory Store Baseline](./docs/versions/v0.4.5-long-term-user-memory-store-baseline.md)、[v0.4.5 Release Note](./docs/releases/v0.4.5.md)、[specs/045-long-term-user-memory-store](./specs/045-long-term-user-memory-store/)、[Runtime 边界](./docs/architecture/runtime-boundary.md) 和 [Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md)。
 
 ## 当前能力
 
@@ -291,7 +292,9 @@ v0.4.4 的边界非常明确：
 - 统一 `error` chunk 语义。
 - `authoritative answer`：在单工具确定性结果场景下支持工具结果直出，减少模型二次改写带来的偏差。
 - 普通 chat 采用 server-authoritative memory：前端 payload 可继续携带本地历史用于 UI 兼容，后端模型上下文只取当前 user turn，并从 ThreadState 注入 recent messages + summary + pinned decisions。
+- browser-session scoped `UserMemory`：普通 text chat 和 tool-assisted ordinary chat 可按相关性注入长期用户偏好、稳定用户背景、稳定指令和工作流偏好。
 - safe final-turn memory：tool / MCP / Tasklist / Delivery 的最终用户可见问答可在刷新后恢复，但中间执行态仍不进入 memory。
+- post-final-turn background memory extraction：每个 eligible ordinary completed turn 在 final turn 后 best-effort 抽取 `0..N` 长期记忆候选，并经过 deterministic validation / dedupe / suppression 后入库。
 - Capability-driven Tool Runtime。
 - Composer payload hint 消费。
 - Runtime-controlled Agent path。
@@ -553,9 +556,9 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 
 当前限流状态只保存在单个 Node.js 进程内存中，服务重启后会清空，也不能在多实例之间共享。多实例公开访问需要接入 Redis / KV 等集中式存储；这不属于 v0.2.1 的实现范围。
 
-### Runtime checkpoint 与 chat memory setup
+### Runtime checkpoint / chat memory / user memory setup
 
-如果要验证 durable Tasklist checkpoint 或 v0.4.4 的 chat memory checkpoint，先准备 `DATABASE_URL`，再执行：
+如果要验证 durable Tasklist checkpoint、chat memory checkpoint 或 v0.4.5 的 UserMemory Store，先准备 `DATABASE_URL`，再执行：
 
 ```bash
 pnpm db:setup:deploy
@@ -566,6 +569,7 @@ pnpm db:setup:deploy
 - Prisma 业务表 deploy migration
 - Tasklist Agent `langgraph_checkpoint` schema/setup
 - chat memory `langgraph_chat_memory` schema/setup
+- user memory `langgraph_user_memory` schema/setup
 
 如果只想单独初始化 chat memory checkpoint，也可以运行：
 
@@ -573,11 +577,20 @@ pnpm db:setup:deploy
 pnpm db:chat-memory:setup
 ```
 
+如果只想单独初始化 UserMemory Store，也可以运行：
+
+```bash
+pnpm db:user-memory:setup
+```
+
 ## 可以试试这些问题
 
 启动项目后，可以从下面几类问题开始验证当前能力：
 
 - `现在广州天气怎么样？`
+- `记住我喜欢吃桃子。`
+- 新开一个会话后输入：`给我推荐几种水果。`
+- `以后解释技术问题时，先用大白话，再补充专业说法。`
 - 选择 `/summary`，引用 `@demo://README.md`，输入：`帮我总结这个 demo workspace 的边界设计`
 - 选择 `/tasklist`，引用 `@demo://version-plans/v034-langsmith-observability.md`，输入：`基于这个版本方案生成 tasklist 草稿`
 - 选择 `/delivery-chain`，引用 `@demo://scenarios/request-limit-banner/requirement.md`，输入：`基于这个 demo scenario 生成交付计划报告`
@@ -655,6 +668,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.2  | LangGraph Single Thread Memory Baseline            | 为当前单聊天会话引入 LangGraph thread memory、refresh hydration、summary compaction 与 pinned decisions，并保持 Tasklist / Delivery / stream 边界不变                           |
 | v0.4.3  | Tool & Agent Final Turn Memory                     | 把 tool / MCP / Tasklist / Delivery 的最终用户可见问答纳入可恢复 chat memory，同时继续排除 raw transcript、GraphState、RuntimeArtifact 和 protocol / reducer breaking change    |
 | v0.4.4  | Minimal Multi-thread Chat Sessions                 | 把 chat page 扩展为 browser-session scoped recent conversations，保持 conversation 隔离的 memory / hydration / final-turn writes，并继续复用 instant-mind + 本地 shadcn/ui 基线 |
+| v0.4.5  | Long-term User Memory Store Baseline               | 引入 browser-session scoped `UserMemory Store`，为 ordinary text chat 和 tool-assisted ordinary chat 提供后台抽取、严格校验、相关性召回和有界注入的长期用户记忆基线             |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -691,6 +705,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Tasklist Agent LangSmith Observability
 - [x] LangGraph 单会话 chat memory baseline
 - [x] Tool & Agent final-turn memory
+- [x] Browser-session scoped long-term UserMemory baseline
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

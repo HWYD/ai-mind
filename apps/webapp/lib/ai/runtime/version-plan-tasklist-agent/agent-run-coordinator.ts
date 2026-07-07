@@ -153,6 +153,10 @@ async function appendTasklistFinalTurn(options: {
         },
         {
             onStatus: event => writeThreadMemoryStatus(options.writeChunk, event),
+            promotionContext: {
+                sessionId: options.sessionId,
+                sourceConversationId: options.conversationId,
+            },
         }
     )
     await conversationRegistryService.touchConversation(options.sessionId, options.conversationId, {

@@ -1,6 +1,6 @@
 {
     "name": "ai-mind",
-    "version": "0.4.4",
+    "version": "0.4.5",
     "main": "index.js",
     "scripts": {
         "dev": "next dev",
@@ -12,7 +12,8 @@
         "db:migrate:deploy": "pnpm --filter @ai-mind/database db:migrate:deploy",
         "db:checkpoint:setup": "node scripts/setup-langgraph-checkpointer.mjs",
         "db:chat-memory:setup": "node scripts/setup-chat-memory-checkpointer.mjs",
-        "db:runtime-checkpoints:setup": "pnpm run db:checkpoint:setup && pnpm run db:chat-memory:setup",
+        "db:user-memory:setup": "node scripts/setup-user-memory-store.mjs",
+        "db:runtime-checkpoints:setup": "pnpm run db:checkpoint:setup && pnpm run db:chat-memory:setup && pnpm run db:user-memory:setup",
         "start": "next start",
         "typecheck": "tsc --noEmit",
         "lint": "eslint .",

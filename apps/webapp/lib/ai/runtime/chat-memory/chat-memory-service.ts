@@ -1,7 +1,8 @@
 import { Annotation, type BaseCheckpointSaver, END, START, StateGraph } from '@langchain/langgraph'
 
+import { type UserMemoryService, userMemoryService } from '../user-memory'
 import { getChatMemoryCheckpointer } from './checkpointer-provider'
-import { type ChatMemoryCompactionGenerator, compactThreadState } from './compaction'
+import { type ChatMemoryCompactionGenerator, compactThreadStateWithResult } from './compaction'
 import { adaptFinalTurnCandidate, type FinalTurnCompletionStatus, type FinalTurnSource, hasDuplicateFinalTurn } from './final-turn-adapter'
 import { createChatThreadMessage } from './message-adapter'
 import { type ChatMemoryRuntimeConfig, getChatMemoryRuntimeConfig } from './runtime-config'
@@ -92,6 +93,10 @@ export interface ThreadMemoryStatusEvent {
 
 export interface AppendCompletedTurnOptions {
     onStatus?: (event: ThreadMemoryStatusEvent) => void
+    promotionContext?: {
+        sessionId: string
+        sourceConversationId: string
+    }
 }
 
 export interface ChatMemoryService {
@@ -102,6 +107,7 @@ export interface ChatMemoryService {
 
 interface CreateChatMemoryServiceOptions {
     compactionGenerator?: ChatMemoryCompactionGenerator
+    userMemoryService?: Pick<UserMemoryService, 'promotePinnedDecisionDiff'>
 }
 
 let sharedChatMemoryService: ChatMemoryService | undefined
@@ -118,6 +124,7 @@ export function createChatMemoryService(
 ): ChatMemoryService {
     const checkpointer = getChatMemoryCheckpointer(config.checkpointMode, env)
     const graph = checkpointer ? createChatMemoryGraph(checkpointer) : null
+    const pinnedDecisionPromotionService = options.userMemoryService ?? userMemoryService
 
     const getConfig = (threadId: string) => ({
         configurable: {
@@ -228,9 +235,9 @@ export function createChatMemoryService(
                 })
 
                 try {
-                    const compactedState = await compactThreadState(nextState, options.compactionGenerator)
+                    const compactionResult = await compactThreadStateWithResult(nextState, options.compactionGenerator)
 
-                    if (!compactedState) {
+                    if (!compactionResult) {
                         appendOptions.onStatus?.({
                             status: 'failed',
                             message: '上下文自动压缩失败',
@@ -242,19 +249,38 @@ export function createChatMemoryService(
                         return
                     }
 
-                    await this.writeThreadState(threadId, compactedState)
+                    await this.writeThreadState(threadId, compactionResult.state)
                     appendOptions.onStatus?.({
                         status: 'succeeded',
                         message: '上下文已自动压缩',
-                        pinnedDecisionCount: compactedState.pinnedDecisions.length,
-                        summaryLength: compactedState.summary.length,
+                        pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
+                        summaryLength: compactionResult.state.summary.length,
                     })
                     logChatMemoryServiceEvent('compaction-write-succeeded', {
-                        messageCount: compactedState.messages.length,
-                        pinnedDecisionCount: compactedState.pinnedDecisions.length,
-                        summaryLength: compactedState.summary.length,
+                        messageCount: compactionResult.state.messages.length,
+                        pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
+                        summaryLength: compactionResult.state.summary.length,
                         threadId,
                     })
+
+                    const promotionContext = appendOptions.promotionContext
+
+                    if (promotionContext?.sessionId && promotionContext.sourceConversationId) {
+                        try {
+                            await pinnedDecisionPromotionService.promotePinnedDecisionDiff({
+                                nextPinnedDecisions: compactionResult.nextPinnedDecisions,
+                                previousPinnedDecisions: compactionResult.previousPinnedDecisions,
+                                sessionId: promotionContext.sessionId,
+                                sourceConversationId: promotionContext.sourceConversationId,
+                            })
+                        } catch (error) {
+                            logChatMemoryServiceEvent('pinned-decision-promotion-failed', {
+                                errorName: error instanceof Error ? error.name : 'UnknownError',
+                                threadId,
+                            })
+                        }
+                    }
+
                     return
                 } catch (error) {
                     appendOptions.onStatus?.({

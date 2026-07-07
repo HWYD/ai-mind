@@ -114,6 +114,10 @@ export async function POST(request: NextRequest) {
             validatedConversationId = payload.conversationId
         }
 
+        if (!validatedConversationId.trim()) {
+            throw new Error('Persisted conversation promotion did not return a valid conversationId.')
+        }
+
         const normalizedPayload: ChatRequest = {
             composer: payload.composer,
             conversationId: validatedConversationId,

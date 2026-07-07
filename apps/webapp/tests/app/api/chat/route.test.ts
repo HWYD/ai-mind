@@ -176,6 +176,131 @@ describe('POST /api/chat', () => {
         expect(response.headers.get('X-AI-Mind-Conversation-Id')).toBe('draft-created-conversation')
     })
 
+    it('draft 首条记忆请求只把 persisted conversationId 传给 runtime', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: true,
+        })
+        streamChatMock.mockResolvedValueOnce(createStreamResponse())
+
+        const response = await POST(
+            createPostRequest({
+                createConversation: true,
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '记住我不吃香菜。' }],
+                    },
+                ],
+            })
+        )
+
+        expect(response.status).toBe(200)
+        expect(createConversationMock.mock.invocationCallOrder[0]).toBeLessThan(streamChatMock.mock.invocationCallOrder[0])
+        expect(streamChatMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                conversationId: 'draft-created-conversation',
+            }),
+            expect.objectContaining({
+                sessionId: 'test-session',
+                validatedConversationId: 'draft-created-conversation',
+            })
+        )
+        expect(streamChatMock).not.toHaveBeenCalledWith(
+            expect.objectContaining({
+                conversationId: '__draft__',
+            }),
+            expect.anything()
+        )
+    })
+
+    it('draft promotion 没有返回 persisted conversationId 时不会继续调用 runtime', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: true,
+        })
+        createConversationMock.mockResolvedValueOnce({
+            selectedConversationId: '',
+            conversations: [],
+            updatedAt: '2026-07-05T10:00:00.000Z',
+        })
+
+        const response = await POST(
+            createPostRequest({
+                createConversation: true,
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '记住我喜欢吃桃子。' }],
+                    },
+                ],
+            })
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(500)
+        expect(body).toEqual({
+            code: 'RUNTIME_INVARIANT_FAILED',
+            error: 'Internal server error',
+        })
+        expect(streamChatMock).not.toHaveBeenCalled()
+    })
+
+    it('draft 首条请求在前置校验被拒绝时不会创建 conversation 或进入 runtime', async () => {
+        const response = await POST(
+            createPostRequest({
+                createConversation: true,
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '记住我喜欢吃桃子。' }],
+                    },
+                ],
+                options: {
+                    modelId: 'unknown/model',
+                },
+            })
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(400)
+        expect(body.code).toBe('MODEL_NOT_FOUND')
+        expect(createConversationMock).not.toHaveBeenCalled()
+        expect(streamChatMock).not.toHaveBeenCalled()
+    })
+
+    it('draft 首条请求被取消时返回 499，并保持 persisted conversationId 边界', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: true,
+        })
+        streamChatMock.mockRejectedValueOnce(Object.assign(new Error('Request cancelled'), { name: 'AbortError' }))
+
+        const response = await POST(
+            createPostRequest({
+                createConversation: true,
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '记住我不吃香菜。' }],
+                    },
+                ],
+            })
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(499)
+        expect(body).toEqual({
+            code: 'REQUEST_ABORTED',
+            error: 'Request cancelled',
+        })
+        expect(streamChatMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                conversationId: 'draft-created-conversation',
+            }),
+            expect.objectContaining({
+                validatedConversationId: 'draft-created-conversation',
+            })
+        )
+    })
+
     it('fails invalid model selection before rate limit consumption', async () => {
         const response = await POST(
             createPostRequest(

@@ -619,6 +619,10 @@ async function appendCompletedDeliveryTurn(options: {
                     ...(typeof event.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: event.pinnedDecisionCount } : {}),
                 })
             },
+            promotionContext: {
+                sessionId: options.context.sessionId,
+                sourceConversationId: options.conversationId,
+            },
         }
     )
     await conversationRegistryService.touchConversation(options.context.sessionId, options.conversationId, {

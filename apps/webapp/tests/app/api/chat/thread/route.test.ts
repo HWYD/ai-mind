@@ -156,11 +156,15 @@ describe('GET /api/chat/thread', () => {
         const sessionId = `structured-session-${Date.now()}`
         const threadId = buildChatConversationThreadId(sessionId, 'conv-structured', env)
         const longDeliveryReport = `# Delivery Chain Report\n\n${'A'.repeat(8_400)}`
-        const compactThreadStateSpy = vi.spyOn(chatMemoryCompaction, 'compactThreadState').mockImplementation(async state => ({
-            lastCompactedAt: '2026-07-04T00:00:00.000Z',
-            messages: state.messages.slice(-2),
-            pinnedDecisions: ['保留结构化 final turn 的文本记忆'],
-            summary: '之前的 tool 与 tasklist final turn 已压缩进摘要。',
+        const compactThreadStateSpy = vi.spyOn(chatMemoryCompaction, 'compactThreadStateWithResult').mockImplementation(async state => ({
+            nextPinnedDecisions: ['保留结构化 final turn 的文本记忆'],
+            previousPinnedDecisions: state.pinnedDecisions,
+            state: {
+                lastCompactedAt: '2026-07-04T00:00:00.000Z',
+                messages: state.messages.slice(-2),
+                pinnedDecisions: ['保留结构化 final turn 的文本记忆'],
+                summary: '之前的 tool 与 tasklist final turn 已压缩进摘要。',
+            },
         }))
 
         await conversationRegistryService.createConversation(sessionId, {

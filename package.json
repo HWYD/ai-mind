@@ -1,6 +1,6 @@
 {
     "name": "ai-mind",
-    "version": "0.4.4",
+    "version": "0.4.5",
     "packageManager": "pnpm@10.18.3",
     "main": "index.js",
     "scripts": {
@@ -15,6 +15,7 @@
         "db:migrate:deploy": "pnpm --filter @ai-mind/database db:migrate:deploy",
         "db:checkpoint:setup": "pnpm --dir apps/webapp db:checkpoint:setup",
         "db:chat-memory:setup": "pnpm --dir apps/webapp db:chat-memory:setup",
+        "db:user-memory:setup": "pnpm --dir apps/webapp db:user-memory:setup",
         "db:runtime-checkpoints:setup": "pnpm --dir apps/webapp db:runtime-checkpoints:setup",
         "db:setup:deploy": "pnpm db:migrate:deploy && pnpm db:runtime-checkpoints:setup",
         "start": "pnpm --dir apps/webapp start",
