@@ -3,6 +3,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { emptyStateSuggestions } from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
 import { EmptyStateSuggestions } from '@/components/chat/message-list/suggestions/empty-state-suggestions'
 
 describe('EmptyStateSuggestions', () => {
@@ -22,7 +23,7 @@ describe('EmptyStateSuggestions', () => {
         const suggestionButtons = screen.getAllByRole('button')
 
         expect(screen.queryByText('换一个？')).toBeNull()
-        expect(suggestionButtons).toHaveLength(7)
+        expect(suggestionButtons).toHaveLength(emptyStateSuggestions.length)
         expect(suggestionButtons.at(-1)).toBeTruthy()
         expect(container.querySelector('.empty-state-suggestions-grid')).toBeTruthy()
     })
