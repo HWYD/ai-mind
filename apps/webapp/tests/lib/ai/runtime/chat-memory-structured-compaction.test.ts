@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { modelCatalog } from '@/lib/ai/model-provider/catalog/model-catalog'
 import { CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT } from '@/lib/ai/runtime/chat-memory'
 import { CHAT_MEMORY_COMPACTION_MODEL_ID, generateStructuredCompaction } from '@/lib/ai/runtime/chat-memory/compaction'
 
@@ -15,12 +16,7 @@ const modelProviderMocks = vi.hoisted(() => {
         })),
         getModelProviderConfig: vi.fn(() => ({ marker: 'config' })),
         invoke,
-        resolveModelSelection: vi.fn(() => ({
-            modelId: 'deepseek/deepseek-v4-pro',
-            provider: 'qwen',
-            providerModel: 'deepseek-v4-pro',
-            routeType: 'chat',
-        })),
+        resolveModelSelection: vi.fn(),
         withStructuredOutput,
     }
 })
@@ -31,9 +27,27 @@ vi.mock('@/lib/ai/model-provider', () => ({
     resolveModelSelection: modelProviderMocks.resolveModelSelection,
 }))
 
+function createCompactionModelSelection() {
+    const item = modelCatalog.find(candidate => candidate.id === CHAT_MEMORY_COMPACTION_MODEL_ID)
+
+    if (!item) {
+        throw new Error(`Model catalog item not found in test: ${CHAT_MEMORY_COMPACTION_MODEL_ID}`)
+    }
+
+    return {
+        modelId: item.id,
+        provider: item.provider,
+        providerModel: item.providerModel,
+        routeType: 'chat' as const,
+    }
+}
+
 describe('runtime/chat-memory structured compaction', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        // 注意：内部压缩模型允许在 catalog 中切换 provider，测试只验证行为，
+        // 不把 deepseek family 固定到某个供应商。
+        modelProviderMocks.resolveModelSelection.mockReturnValue(createCompactionModelSelection())
     })
 
     it('使用固定 internal model id、关闭 reasoning、非流式 structured output', async () => {

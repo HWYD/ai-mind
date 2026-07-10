@@ -4,23 +4,40 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { ComposerToolbar } from '@/components/chat/composer/toolbar/composer-toolbar'
+import { modelCatalog } from '@/lib/ai/model-provider/catalog/model-catalog'
 import type { ChatModelGroup } from '@/lib/ai/models'
+
+function createPublicModel(modelId: string) {
+    const item = modelCatalog.find(candidate => candidate.id === modelId)
+
+    if (!item) {
+        throw new Error(`Model catalog item not found in test: ${modelId}`)
+    }
+
+    return {
+        family: item.family,
+        id: item.id,
+        label: item.label,
+        provider: item.provider,
+    }
+}
 
 const modelGroups: ChatModelGroup[] = [
     {
         id: 'online',
         label: '线上模型',
         models: [
-            { family: 'qwen', id: 'qwen/qwen3.6-plus', label: 'qwen3.6-plus', provider: 'qwen' },
-            { family: 'deepseek', id: 'proxy/routed-deepseek', label: 'deepseek-v4-pro', provider: 'qwen' },
-            { family: 'doubao', id: 'doubao/doubao-seed-2.0-pro', label: 'doubao-seed-2.0-pro', provider: 'doubao' },
-            { family: 'kimi', id: 'doubao/Kimi-K2.6', label: 'Kimi-K2.6', provider: 'doubao' },
+            // 注意：这里从当前 catalog 派生 provider，避免把 deepseek family 固定绑到某个供应商。
+            createPublicModel('qwen/qwen3.6-flash'),
+            createPublicModel('deepseek/deepseek-v4-pro'),
+            createPublicModel('doubao/doubao-seed-2.0-pro'),
+            createPublicModel('doubao/Kimi-K2.6'),
         ],
     },
     {
         id: 'local',
         label: '本地模型',
-        models: [{ family: 'qwen', id: 'ollama/qwen3-8b', label: 'qwen3-8b', provider: 'ollama' }],
+        models: [createPublicModel('ollama/qwen3-8b')],
     },
 ]
 
@@ -51,7 +68,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-plus"
+                model="qwen/qwen3.6-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -72,7 +89,7 @@ describe('ComposerToolbar model selector', () => {
         })
 
         const menu = await waitFor(() => screen.getByRole('menu'))
-        const onlineQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3.6-plus' })
+        const onlineQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3.6-flash' })
         const deepseekItem = within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-pro' })
         const doubaoItem = within(menu).getByRole('menuitemradio', { name: 'doubao-seed-2.0-pro' })
         const kimiItem = within(menu).getByRole('menuitemradio', { name: 'Kimi-K2.6' })
@@ -146,7 +163,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="proxy/routed-deepseek"
+                model="deepseek/deepseek-v4-pro"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -181,7 +198,7 @@ describe('ComposerToolbar model selector', () => {
                 disabled
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-plus"
+                model="qwen/qwen3.6-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -206,7 +223,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-plus"
+                model="qwen/qwen3.6-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}

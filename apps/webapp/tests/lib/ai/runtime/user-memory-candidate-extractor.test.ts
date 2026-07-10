@@ -1,30 +1,13 @@
-﻿import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { modelCatalog } from '@/lib/ai/model-provider/catalog/model-catalog'
 
 const modelProviderMocks = vi.hoisted(() => ({
     createChatModel: vi.fn(),
     getModelProviderConfig: vi.fn(() => ({ providerConfig: true })),
     invoke: vi.fn(),
     logProviderError: vi.fn(),
-    resolveModelSelection: vi.fn(() => ({
-        catalogItem: {
-            capabilities: {
-                chat: true,
-                embedding: false,
-                jsonOutput: true,
-                streaming: true,
-                tasklist: true,
-                toolCalling: true,
-            },
-            enabled: true,
-            id: 'deepseek/deepseek-v4-pro',
-            provider: 'qwen',
-            providerModel: 'deepseek-v4-pro',
-        },
-        modelId: 'deepseek/deepseek-v4-pro',
-        provider: 'qwen',
-        providerModel: 'deepseek-v4-pro',
-        routeType: 'chat',
-    })),
+    resolveModelSelection: vi.fn(),
     withStructuredOutput: vi.fn(),
 }))
 
@@ -37,9 +20,28 @@ vi.mock('@/lib/ai/model-provider', () => ({
 
 import { extractUserMemoryCandidates, USER_MEMORY_EXTRACTION_MODEL_ID, USER_MEMORY_EXTRACTION_PROMPT } from '@/lib/ai/runtime/user-memory'
 
+function createExtractionModelSelection() {
+    const item = modelCatalog.find(candidate => candidate.id === USER_MEMORY_EXTRACTION_MODEL_ID)
+
+    if (!item) {
+        throw new Error(`Model catalog item not found in test: ${USER_MEMORY_EXTRACTION_MODEL_ID}`)
+    }
+
+    return {
+        catalogItem: item,
+        modelId: item.id,
+        provider: item.provider,
+        providerModel: item.providerModel,
+        routeType: 'chat' as const,
+    }
+}
+
 describe('runtime/user-memory candidate extractor', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        // 注意：内部结构化输出模型允许在 catalog 中切换 provider，测试只跟随当前 catalog，
+        // 不把 deepseek family 写死到某一个供应商。
+        modelProviderMocks.resolveModelSelection.mockReturnValue(createExtractionModelSelection())
 
         modelProviderMocks.invoke.mockResolvedValue({
             candidates: [
