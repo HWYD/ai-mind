@@ -104,7 +104,7 @@ export const modelCatalog = [
         id: 'deepseek/deepseek-v4-flash',
         label: 'deepseek-v4-flash',
         modelKey: 'deepseek-v4-flash',
-        provider: 'qwen',
+        provider: 'doubao',
         providerModel: 'deepseek-v4-flash',
     },
     {
@@ -122,7 +122,7 @@ export const modelCatalog = [
         id: 'deepseek/deepseek-v4-pro',
         label: 'deepseek-v4-pro',
         modelKey: 'deepseek-v4-pro',
-        provider: 'qwen',
+        provider: 'doubao',
         providerModel: 'deepseek-v4-pro',
     },
     {
