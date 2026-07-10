@@ -1,16 +1,22 @@
-﻿import { InMemoryStore } from '@langchain/langgraph'
 import { describe, expect, it } from 'vitest'
 
-import { createUserMemoryService, getUserMemoryRuntimeConfig } from '@/lib/ai/runtime/user-memory'
+import { createUserMemoryService, getUserMemoryRuntimeConfig, USER_MEMORY_NAMESPACE_PREFIX } from '@/lib/ai/runtime/user-memory'
+
+import { createFakeBaseStore, type FakeBaseStoreController } from './fake-base-store'
 
 const TEST_ENV = {
     AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-test-secret-test-secret-1234',
 }
 
+function getStoredItems(store: FakeBaseStoreController) {
+    return store.getItems([...USER_MEMORY_NAMESPACE_PREFIX])
+}
+
 describe('runtime/user-memory service', () => {
     it('missing session 返回 skipped', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await expect(
@@ -39,8 +45,9 @@ describe('runtime/user-memory service', () => {
     })
 
     it('missing source conversation 返回 skipped', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await expect(
@@ -69,8 +76,9 @@ describe('runtime/user-memory service', () => {
     })
 
     it('draft source conversation id 返回 skipped', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await expect(
@@ -98,9 +106,10 @@ describe('runtime/user-memory service', () => {
         })
     })
 
-    it('putCandidate 会写入并允许后续检索', async () => {
+    it('putCandidate 会写入 active UserMemory document，并可通过显式 scored search 检索', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await expect(
@@ -127,6 +136,23 @@ describe('runtime/user-memory service', () => {
             status: 'written',
         })
 
+        const [storedItem] = getStoredItems(store)
+        expect(storedItem?.value).toEqual(
+            expect.objectContaining({
+                semantic: expect.objectContaining({
+                    embeddingModelId: 'doubao-embedding-vision',
+                    embeddingProviderKind: 'volcengine-ark-doubao-openai-compatible',
+                    semanticIndexFields: ['text', 'tags'],
+                    semanticIndexVersion: 'user-memory-semantic.v3',
+                }),
+                stableKey: 'user_preference:prefer-桃子',
+                text: '用户喜欢吃桃子。',
+                type: 'user_preference',
+            })
+        )
+
+        store.setSearchHandler(({ items }) => items.map(item => ({ ...item, score: 0.92 })))
+
         await expect(
             service.retrieveRelevantMemories({
                 latestUserText: '给我推荐几种水果。',
@@ -142,10 +168,10 @@ describe('runtime/user-memory service', () => {
     })
 
     it('相同 stable key 会更新而不是重复创建', async () => {
-        const store = new InMemoryStore()
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
             now: () => new Date('2026-07-06T00:00:00.000Z'),
-            store,
+            store: store.store,
         })
 
         await service.putCandidate({
@@ -191,13 +217,13 @@ describe('runtime/user-memory service', () => {
             status: 'updated',
         })
 
-        const items = await store.search(['ai-mind', 'user-memory', 'v1'], { limit: 10 })
-        expect(items).toHaveLength(1)
+        expect(getStoredItems(store)).toHaveLength(1)
     })
 
     it('完全重复的 candidate 返回 duplicate rejected', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await service.putCandidate({
@@ -255,7 +281,7 @@ describe('runtime/user-memory service', () => {
             search: async () => [],
         }
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: failingStore as unknown as InMemoryStore,
+            store: failingStore as never,
         })
 
         await expect(
@@ -295,8 +321,9 @@ describe('runtime/user-memory service', () => {
     })
 
     it('会拒绝 oversized / temporary / speculative / irrelevant / unsupported / untrusted candidates', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await expect(
@@ -444,9 +471,9 @@ describe('runtime/user-memory service', () => {
     })
 
     it('不会把 sourceText 或原始模型字段持久化到 UserMemory document', async () => {
-        const store = new InMemoryStore()
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store,
+            store: store.store,
         })
 
         await service.putCandidate({
@@ -469,24 +496,23 @@ describe('runtime/user-memory service', () => {
             sessionId: 'session-1',
         })
 
-        const items = await store.search(['ai-mind', 'user-memory', 'v1'], { limit: 10 })
-        expect(items).toHaveLength(1)
-        expect(items[0]?.value).toEqual(
+        const [item] = getStoredItems(store)
+        expect(item?.value).toEqual(
             expect.objectContaining({
                 reason: '用户明确要求记住',
                 sourceConversationId: 'conversation-1',
                 text: '用户喜欢吃桃子。',
             })
         )
-        expect(items[0]?.value).not.toHaveProperty('sourceText')
-        expect(items[0]?.value).not.toHaveProperty('rawModelOutput')
-        expect(items[0]?.value).not.toHaveProperty('validationDiagnostics')
+        expect(item?.value).not.toHaveProperty('sourceText')
+        expect(item?.value).not.toHaveProperty('rawModelOutput')
+        expect(item?.value).not.toHaveProperty('validationDiagnostics')
     })
 
     it('unsafe reason 不会持久化到 UserMemory document', async () => {
-        const store = new InMemoryStore()
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store,
+            store: store.store,
         })
 
         await service.putCandidate({
@@ -509,20 +535,20 @@ describe('runtime/user-memory service', () => {
             sessionId: 'session-1',
         })
 
-        const items = await store.search(['ai-mind', 'user-memory', 'v1'], { limit: 10 })
-        expect(items).toHaveLength(1)
-        expect(items[0]?.value).toEqual(
+        const [item] = getStoredItems(store)
+        expect(item?.value).toEqual(
             expect.objectContaining({
                 sourceConversationId: 'conversation-1',
                 text: '用户喜欢吃桃子。',
             })
         )
-        expect(items[0]?.value).not.toHaveProperty('reason')
+        expect(item?.value).not.toHaveProperty('reason')
     })
 
-    it('suppress candidate 会持久压制旧 memory', async () => {
+    it('suppress candidate 会持久压制旧 memory，并在 scored retrieval 中被过滤', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, TEST_ENV, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await service.putCandidate({
@@ -568,6 +594,8 @@ describe('runtime/user-memory service', () => {
             stableKey: 'user_preference:prefer-桃子',
             status: 'suppressed',
         })
+
+        store.setSearchHandler(({ items }) => items.map(item => ({ ...item, score: 0.93 })))
 
         await expect(
             service.retrieveRelevantMemories({

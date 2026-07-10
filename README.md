@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
 
-> v0.4.5：Long-term User Memory Store Baseline。在 v0.4.4 多会话短期记忆容器基础上，引入 browser-session scoped `UserMemory Store`，让同一 browser session 下的多个 conversations 可以按相关性复用长期用户偏好、稳定用户背景、稳定指令和工作流偏好，同时保持 ThreadState、stream protocol、Tasklist / Delivery 边界不变。
+> v0.4.6：UserMemory Semantic Retrieval Baseline。在 v0.4.5 长期 UserMemory Store 基线之上，使用 `PostgresStore` vector search 为同一 browser session 的长期偏好提供语义召回；检索仍只作为 ordinary chat 的有界补充上下文，不改变 ThreadState、stream protocol、Tasklist / Delivery 边界。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.5`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.6`。
 
 已经验证：
 
@@ -252,34 +252,27 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.5
+## 当前版本：v0.4.6
 
-这版的主线是 `Long-term User Memory Store Baseline`：在 v0.4.4 多会话短期 `ThreadState` 容器基础上，引入 browser-session scoped 的长期 `UserMemory Store`。同一个 browser session 下，conversation A 中保存的长期用户偏好、稳定用户背景、稳定指令和工作流偏好，现在可以在 conversation B 的相关问题中按相关性召回。
+这版的主线是 `UserMemory Semantic Retrieval Baseline`：在 browser-session scoped `UserMemory Store` 上补齐真实语义召回。用户换一种说法提出相关问题时，runtime 可以从同一 browser session 的长期 UserMemory 中选出少量相关内容，作为当前回答的补充上下文。
 
-v0.4.5 的边界非常明确：
+v0.4.6 的边界非常明确：
 
-- `UserMemory` 与 conversation-scoped `ThreadState` 严格分离；`ThreadState` 仍然是当前 selected conversation 的短期事实源。
-- 长期记忆只接入 ordinary text chat 和 tool-assisted ordinary chat；Tasklist / Delivery 不读取、不写入 UserMemory。
-- 每个 eligible ordinary completed turn 只在 assistant final turn 完成后，后台 enqueue 一个 in-process best-effort extraction job。
-- 模型只负责结构化输出 `0..N` candidates；程序负责 deterministic validation、stable key、dedupe、suppression 和最终写入。
-- retrieval 只在当前 browser session scope 内进行，最多注入 3 条，每条最多 300 字，总注入不超过 900 字。
-- `UserMemory` 不进入 hydration payload、Conversation Registry、ThreadState.messages、pinnedDecisions、stream chunk、frontend reducer、GraphState 或 RuntimeArtifact。
-- `PostgresStore` 使用独立 `langgraph_user_memory` schema，setup 独立于 checkpoint setup 和 Prisma migration。
-
-本版显式不做：
-
-- 不做完整聊天历史系统、账号级用户画像、跨设备同步。
-- 不做 Memory Inspector、memory edit/delete UI、memory management backend。
-- 不做 embedding retrieval、pgvector、历史搜索、消息分页。
-- 不把 raw tool / MCP transcript、Tasklist GraphState / HITL payload、Delivery RuntimeArtifact / workflow progress 写入长期记忆。
+- 正式检索路径只使用 `PostgresStore` 的 vector search；embedding 固定走独立的火山引擎 Ark OpenAI-compatible 配置和 `doubao-embedding-vision`，不跟随聊天模型选择器。
+- semantic index 只允许 `UserMemory.text` 与 `UserMemory.tags`；不索引完整文档、聊天记录、ThreadState、工具/MCP 原始结果、GraphState 或 RuntimeArtifact。
+- 检索只接入 ordinary text chat、tool-assisted ordinary chat，以及仍处于 ordinary chat 边界内的受控 capability-context final answer；Tasklist、Delivery、HITL 与原始 Tool/MCP 输入路径不触发检索。
+- query 直接来自本轮最新用户输入，只做 trim、空白折叠与最多 800 字符裁剪；不做 LLM query rewrite、HyDE 或 query expansion。
+- 初始候选 `topK = 8`，最终只注入 semantic score `>= 0.32`、active、未抑制且 confidence `>= 0.7` 的记忆；仍保持最多 3 条、每条最多 300 个中文字符、总计最多 900 个中文字符。
+- 检索、embedding 或 Store 失败时安全降级为 0 条 UserMemory 注入，ordinary chat 与 streaming 继续完成；向量、分数、原始 query 和 provider/store 错误不进入任何公开 DTO。
+- 不引入 RAG、聊天历史语义搜索、账号级画像、跨设备同步、Memory Inspector、记忆编辑 UI 或独立向量数据库产品路线。
 
 当前 runtime baseline 保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
-- 普通 text chat / tool-assisted ordinary chat：selected conversation 的短期 ThreadState + 当前 browser session 的相关 UserMemory
+- 普通 text chat / tool-assisted ordinary chat：selected conversation 的短期 ThreadState + 当前 browser session 的语义相关 UserMemory
 
-详细设计见 [AI Mind v0.4.5: Long-term User Memory Store Baseline](./docs/versions/v0.4.5-long-term-user-memory-store-baseline.md)、[v0.4.5 Release Note](./docs/releases/v0.4.5.md)、[specs/045-long-term-user-memory-store](./specs/045-long-term-user-memory-store/)、[Runtime 边界](./docs/architecture/runtime-boundary.md) 和 [Agent Runtime Roadmap](./docs/architecture/agent-runtime-roadmap.md)。
+详细设计见 [AI Mind v0.4.6: UserMemory Semantic Retrieval Baseline](./docs/versions/v0.4.6-usermemory-semantic-retrieval-baseline.md)、[v0.4.6 Release Note](./docs/releases/v0.4.6.md)、[specs/046-usermemory-semantic-retrieval](./specs/046-usermemory-semantic-retrieval/)、[ADR-0014](./docs/adr/0014-usermemory-semantic-retrieval-baseline.md) 和 [Runtime 边界](./docs/architecture/runtime-boundary.md)。
 
 ## 当前能力
 
@@ -558,7 +551,7 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 
 ### Runtime checkpoint / chat memory / user memory setup
 
-如果要验证 durable Tasklist checkpoint、chat memory checkpoint 或 v0.4.5 的 UserMemory Store，先准备 `DATABASE_URL`，再执行：
+如果要验证 durable Tasklist checkpoint、chat memory checkpoint 或 v0.4.6 的 UserMemory semantic retrieval，先准备 `DATABASE_URL`，再执行：
 
 ```bash
 pnpm db:setup:deploy
@@ -570,6 +563,8 @@ pnpm db:setup:deploy
 - Tasklist Agent `langgraph_checkpoint` schema/setup
 - chat memory `langgraph_chat_memory` schema/setup
 - user memory `langgraph_user_memory` schema/setup
+
+v0.4.6 的真实 UserMemory semantic retrieval 还需要服务端配置 `AI_MIND_DOUBAO_API_KEY` 和 `AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS`。它固定使用 `doubao-embedding-vision` 与 `PostgresStore` vector search；embedding dimensions 不在项目文档中写死，应按该模型当前官方规格配置。
 
 如果只想单独初始化 chat memory checkpoint，也可以运行：
 
@@ -669,6 +664,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.3  | Tool & Agent Final Turn Memory                     | 把 tool / MCP / Tasklist / Delivery 的最终用户可见问答纳入可恢复 chat memory，同时继续排除 raw transcript、GraphState、RuntimeArtifact 和 protocol / reducer breaking change    |
 | v0.4.4  | Minimal Multi-thread Chat Sessions                 | 把 chat page 扩展为 browser-session scoped recent conversations，保持 conversation 隔离的 memory / hydration / final-turn writes，并继续复用 instant-mind + 本地 shadcn/ui 基线 |
 | v0.4.5  | Long-term User Memory Store Baseline               | 引入 browser-session scoped `UserMemory Store`，为 ordinary text chat 和 tool-assisted ordinary chat 提供后台抽取、严格校验、相关性召回和有界注入的长期用户记忆基线             |
+| v0.4.6  | UserMemory Semantic Retrieval Baseline             | 使用 `PostgresStore` vector search 与独立 embedding 配置，为 eligible ordinary chat 提供 vector-only 的长期 UserMemory 语义召回，并保持公开状态与 Agent/Workflow 边界不变       |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -706,6 +702,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] LangGraph 单会话 chat memory baseline
 - [x] Tool & Agent final-turn memory
 - [x] Browser-session scoped long-term UserMemory baseline
+- [x] UserMemory vector semantic retrieval baseline
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

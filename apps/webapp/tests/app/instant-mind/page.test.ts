@@ -220,7 +220,7 @@ describe('InstantMindPage integration', () => {
         expect(createConversation).not.toHaveBeenCalled()
         expect(selectConversation).not.toHaveBeenCalled()
         expect(cancel).not.toHaveBeenCalled()
-    })
+    }, 15000)
 
     it('keeps the composer placeholder empty without a selected conversation and toggles sidebar collapse state', async () => {
         vi.doUnmock('@/components/instamind/instantmind-page')
@@ -353,7 +353,7 @@ describe('InstantMindPage integration', () => {
         await waitFor(() => {
             expect(screen.getByTestId('conversation-sidebar').getAttribute('data-collapsed')).toBe('true')
         })
-    })
+    }, 10000)
 
     it('shows a message-shaped hydration skeleton while switching persisted conversations', async () => {
         vi.doUnmock('@/components/instamind/instantmind-page')

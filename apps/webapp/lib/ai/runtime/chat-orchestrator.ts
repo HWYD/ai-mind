@@ -136,7 +136,8 @@ export class ChatOrchestrator {
     private readonly request: ChatRequest
     private readonly writeChunk: WriteChunk
     private readonly assistantMessageId = createId()
-    private memoryContextMessages: BaseMessage[] = []
+    private chatMemoryContextMessages: BaseMessage[] = []
+    private userMemoryContextMessages: BaseMessage[] = []
     private modelHandle: AiMindChatModelHandle | null = null
 
     constructor(options: ChatOrchestratorOptions) {
@@ -341,7 +342,7 @@ export class ChatOrchestrator {
         }
     }
 
-    private async resolveUserMemoryContextMessages() {
+    private async resolveUserMemoryContextMessages(path: 'ordinary_chat' | 'tool_assisted_ordinary_chat') {
         if (!this.context.sessionId || !isUserMemoryContextEligibleRequest(this.request)) {
             return []
         }
@@ -355,6 +356,7 @@ export class ChatOrchestrator {
         try {
             const selectedUserMemories = await userMemoryService.retrieveRelevantMemories({
                 latestUserText,
+                path,
                 sessionId: this.context.sessionId,
             })
 
@@ -384,13 +386,12 @@ export class ChatOrchestrator {
         }
     }
 
-    private async resolveConversationMemoryContextMessages() {
-        const [userMemoryContextMessages, chatMemoryContextMessages] = await Promise.all([
-            this.resolveUserMemoryContextMessages(),
-            this.resolveChatMemoryContextMessages(),
-        ])
+    private buildRuntimeContextMessages(includeUserMemory: boolean) {
+        if (!includeUserMemory || this.userMemoryContextMessages.length === 0) {
+            return this.chatMemoryContextMessages
+        }
 
-        return [...userMemoryContextMessages, ...chatMemoryContextMessages]
+        return [...this.userMemoryContextMessages, ...this.chatMemoryContextMessages]
     }
 
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
@@ -405,7 +406,7 @@ export class ChatOrchestrator {
                 ),
                 ...session.langChainMessages,
             ],
-            this.memoryContextMessages
+            this.chatMemoryContextMessages
         )
     }
 
@@ -593,7 +594,7 @@ export class ChatOrchestrator {
                 ...toolMessages,
                 ...promptContextMessages,
             ],
-            this.memoryContextMessages
+            this.buildRuntimeContextMessages(true)
         )
         validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
@@ -628,7 +629,7 @@ export class ChatOrchestrator {
                 ...session.langChainMessages,
                 ...capabilityContextMessages,
             ],
-            this.memoryContextMessages
+            this.chatMemoryContextMessages
         )
         validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
@@ -661,7 +662,7 @@ export class ChatOrchestrator {
                 ...session.langChainMessages,
                 ...composerContextMessages,
             ],
-            this.memoryContextMessages
+            this.chatMemoryContextMessages
         )
         validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
@@ -781,7 +782,10 @@ export class ChatOrchestrator {
             const session = await createChatSession(this.request, this.context.resolvedModelSelection)
 
             this.modelHandle = session.modelHandle
-            this.memoryContextMessages = await this.resolveConversationMemoryContextMessages()
+            this.chatMemoryContextMessages = await this.resolveChatMemoryContextMessages()
+            this.userMemoryContextMessages = isUserMemoryContextEligibleRequest(this.request)
+                ? await this.resolveUserMemoryContextMessages(session.toolBoundModel ? 'tool_assisted_ordinary_chat' : 'ordinary_chat')
+                : []
 
             throwIfAborted(this.context.signal)
 
@@ -836,7 +840,7 @@ export class ChatOrchestrator {
             if (!session.toolBoundModel) {
                 const assistantText = await streamDirectAnswer(
                     session.baseModel,
-                    withChatMemoryContextMessages(session.directAnswerMessages, this.memoryContextMessages),
+                    withChatMemoryContextMessages(session.directAnswerMessages, this.buildRuntimeContextMessages(true)),
                     this.context,
                     this.writeChunk,
                     this.isClosed,
@@ -852,7 +856,7 @@ export class ChatOrchestrator {
             if (planningStage.kind === 'direct-fallback') {
                 const assistantText = await streamDirectAnswer(
                     session.baseModel,
-                    withChatMemoryContextMessages(session.directAnswerMessages, this.memoryContextMessages),
+                    withChatMemoryContextMessages(session.directAnswerMessages, this.buildRuntimeContextMessages(true)),
                     this.context,
                     this.writeChunk,
                     this.isClosed,

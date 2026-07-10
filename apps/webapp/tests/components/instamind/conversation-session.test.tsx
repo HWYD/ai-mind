@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConversationMobileSelector } from '@/components/instamind/conversation-session/conversation-mobile-selector'
@@ -64,6 +65,30 @@ describe('useConversationSessions', () => {
         expect(result.current.selectedConversationId).toBe('conv-b')
         expect(result.current.isDraft).toBe(false)
         expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBe('conv-b')
+    })
+
+    it('keeps registry hydration active after Strict Mode remounts', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(
+            Response.json(
+                createRegistryPayload({
+                    selectedConversationId: 'conv-a',
+                    conversations: [createConversation('conv-a', 'Conversation A', true)],
+                })
+            )
+        )
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions(), {
+            wrapper: StrictMode,
+        })
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.selectedConversationId).toBe('conv-a')
+        expect(result.current.conversations).toHaveLength(1)
     })
 
     it('enters blank draft state locally without creating a persisted conversation', async () => {

@@ -2,7 +2,10 @@ name: ai-mind-local
 
 services:
   postgres:
-    image: postgres:16-bookworm
+    build:
+      context: ..
+      dockerfile: deploy/postgres-pgvector.local.Dockerfile
+    image: ai-mind-postgres-pgvector:local
     environment:
       POSTGRES_DB: ai_mind
       POSTGRES_PASSWORD: ai_mind

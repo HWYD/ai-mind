@@ -1,252 +1,282 @@
-import { getUserMemoryRuntimeConfig, type UserMemoryRuntimeConfig } from './runtime-config'
-import type { SelectedUserMemory, UserMemoryDocument, UserMemoryType } from './state-schema'
-import { clipUserMemoryText } from './validation'
+import { type BaseStore } from '@langchain/langgraph'
+import type { SearchItem } from '@langchain/langgraph-checkpoint-postgres/store'
 
-const DIRECT_OVERLAP_ONLY_TYPES = new Set<UserMemoryType>(['project_context', 'risk_preference', 'stable_user_context'])
-const ALLOWED_SINGLE_CHAR_TAGS = new Set(['吃', '穿', '用', '做'])
-const LOW_SIGNAL_TAGS = new Set(['喜欢', '不喜欢', '偏好', '爱好', '习惯', '用户', '记住'])
-const LOW_SIGNAL_CJK_PHRASES = new Set(['用户', '记住', '以后', '这个', '那个', '一下', '怎么', '什么', '喜欢', '不喜'])
-const MIN_RELEVANCE_SCORE = 1.5
-const PARTIAL_TEXT_OVERLAP_WEIGHTS: Partial<Record<UserMemoryType, number>> = {
-    communication_preference: 1,
-    recurring_constraint: 1,
-    stable_user_context: 1.5,
-    standing_instruction: 1,
-    workflow_preference: 1,
+import { getUserMemoryRuntimeConfig, type UserMemoryRuntimeConfig } from './runtime-config'
+import type {
+    SelectedUserMemory,
+    UserMemoryDocument,
+    UserMemoryPath,
+    UserMemorySemanticCandidate,
+    UserMemorySemanticRetrievalRequest,
+    UserMemorySemanticSearchItem,
+} from './state-schema'
+import { buildUserMemoryNamespace, clipUserMemoryText, isUserMemorySemanticEligible, readUserMemoryDocumentValue } from './validation'
+
+const USER_MEMORY_NEGATION_TOKENS = ['不吃', '不要', '别', '不想', '别按这个', '别推荐']
+const USER_MEMORY_POSITIVE_TOKENS = ['想吃', '可以吃', '喜欢吃', '想要']
+
+interface VectorSearchCapableStore extends BaseStore {
+    search(
+        namespace: string[],
+        options: {
+            limit?: number
+            mode?: 'vector'
+            query?: string
+        }
+    ): Promise<SearchItem[]>
 }
 
-function normalizeQueryText(text: string): string {
-    return text
-        .normalize('NFKC')
+function logUserMemoryRetrievalEvent(event: string, meta: Record<string, unknown>): void {
+    // eslint-disable-next-line no-console
+    console.info('[user-memory-retrieval]', JSON.stringify({ event, ...meta }))
+}
+
+function normalizeWhitespace(text: string): string {
+    return text.normalize('NFKC').replace(/\s+/g, ' ').trim()
+}
+
+function normalizeSemanticText(text: string): string {
+    return normalizeWhitespace(text)
         .toLowerCase()
         .replace(/[^\p{L}\p{N}\u4e00-\u9fff]+/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim()
 }
 
-function extractTokens(text: string): string[] {
-    return normalizeQueryText(text).split(' ').filter(Boolean)
+function normalizeSemanticQuery(latestUserText: string, config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig()): string {
+    const normalized = normalizeWhitespace(latestUserText)
+
+    if (normalized.length <= config.semanticQueryMaxChars) {
+        return normalized
+    }
+
+    const head = normalized.slice(0, config.semanticQueryHeadChars)
+    const tail = normalized.slice(-config.semanticQueryTailChars)
+
+    return `${head}${tail}`.slice(0, config.semanticQueryMaxChars)
 }
 
-function extractAsciiTokens(text: string): string[] {
-    return extractTokens(text).filter(token => /[a-z0-9]/i.test(token) && token.length >= 2)
+function hasAnyToken(text: string, tokens: string[]): boolean {
+    return tokens.some(token => text.includes(token))
 }
 
-function extractCjkPhrases(text: string): string[] {
-    const normalizedText = normalizeQueryText(text)
-    const segments = normalizedText.match(/[\u4e00-\u9fff]+/gu) ?? []
-    const phrases = new Set<string>()
+function hasCurrentInputConflict(document: UserMemoryDocument, normalizedQuery: string): boolean {
+    const subject = normalizeSemanticText(document.identity.subject)
 
-    for (const segment of segments) {
-        const maxLength = Math.min(4, segment.length)
+    if (!subject || !normalizedQuery.includes(subject) || document.type !== 'user_preference') {
+        return false
+    }
 
-        for (let length = 2; length <= maxLength; length += 1) {
-            for (let index = 0; index <= segment.length - length; index += 1) {
-                const phrase = segment.slice(index, index + length)
+    if (document.identity.polarity === 'prefer') {
+        return hasAnyToken(normalizedQuery, USER_MEMORY_NEGATION_TOKENS)
+    }
 
-                if (!LOW_SIGNAL_CJK_PHRASES.has(phrase)) {
-                    phrases.add(phrase)
-                }
+    if (document.identity.polarity === 'avoid') {
+        return hasAnyToken(normalizedQuery, USER_MEMORY_POSITIVE_TOKENS)
+    }
+
+    return false
+}
+
+function toSemanticSearchItems(items: SearchItem[]): UserMemorySemanticSearchItem[] {
+    return items
+        .map(item => {
+            const document = readUserMemoryDocumentValue(item)
+
+            if (!document) {
+                return null
             }
+
+            return {
+                document,
+                key: item.key,
+                namespace: item.namespace,
+                score: item.score,
+            }
+        })
+        .filter(Boolean) as UserMemorySemanticSearchItem[]
+}
+
+function dedupeByStableKey(candidates: UserMemorySemanticCandidate[]): UserMemorySemanticCandidate[] {
+    const deduped = new Map<string, UserMemorySemanticCandidate>()
+
+    for (const candidate of candidates) {
+        const existing = deduped.get(candidate.stableKey)
+
+        if (!existing) {
+            deduped.set(candidate.stableKey, candidate)
+            continue
+        }
+
+        if (candidate.score > existing.score || candidate.document.updatedAt > existing.document.updatedAt) {
+            deduped.set(candidate.stableKey, candidate)
         }
     }
 
-    return [...phrases]
+    return [...deduped.values()]
 }
 
-function normalizeStructuredTags(tags: string[]): string[] {
-    return [...new Set(tags.map(normalizeQueryText).filter(Boolean))].filter(tag => {
-        if (LOW_SIGNAL_TAGS.has(tag)) {
-            return false
+function applyConflictHandling(candidates: UserMemorySemanticCandidate[]): UserMemorySemanticCandidate[] {
+    const resolved = new Map<string, UserMemorySemanticCandidate>()
+
+    for (const candidate of candidates) {
+        const conflictKey = [
+            candidate.document.type,
+            normalizeSemanticText(candidate.document.identity.subject),
+            normalizeSemanticText(candidate.document.identity.facet ?? ''),
+        ].join(':')
+        const existing = resolved.get(conflictKey)
+
+        if (!existing) {
+            resolved.set(conflictKey, candidate)
+            continue
         }
 
-        if (tag.length === 1) {
-            return ALLOWED_SINGLE_CHAR_TAGS.has(tag)
-        }
-
-        return true
-    })
-}
-
-function scoreStructuredTagOverlap(tags: string[], queryText: string): number {
-    return normalizeStructuredTags(tags).reduce((score, tag) => {
-        if (!queryText.includes(tag)) {
-            return score
-        }
-
-        return score + (tag.length === 1 ? 2 : 3)
-    }, 0)
-}
-
-function scoreWholeTextOverlap(text: string, queryText: string): number {
-    const normalizedText = normalizeQueryText(text)
-
-    if (!normalizedText) {
-        return 0
-    }
-
-    return queryText.includes(normalizedText) ? 2 : 0
-}
-
-function scorePartialTextOverlap(document: UserMemoryDocument, queryText: string): number {
-    const weight = PARTIAL_TEXT_OVERLAP_WEIGHTS[document.type]
-
-    if (!weight) {
-        return 0
-    }
-
-    const queryPhrases = extractCjkPhrases(queryText)
-
-    if (queryPhrases.length === 0) {
-        return 0
-    }
-
-    const documentPhrases = new Set(extractCjkPhrases(document.text))
-    let matches = 0
-
-    for (const phrase of queryPhrases) {
-        if (documentPhrases.has(phrase)) {
-            matches += 1
+        if (candidate.document.updatedAt > existing.document.updatedAt || candidate.score > existing.score) {
+            resolved.set(conflictKey, candidate)
         }
     }
 
-    return Math.min(matches * weight, document.type === 'stable_user_context' ? 3 : 2)
+    return [...resolved.values()]
 }
 
-function scoreIdentityOverlap(document: UserMemoryDocument, queryText: string): number {
-    const normalizedIdentityValues = [document.identity.subject, document.identity.facet]
-        .filter((value): value is string => typeof value === 'string' && value.length > 0)
-        .map(normalizeQueryText)
-        .filter(Boolean)
-
-    if (normalizedIdentityValues.length === 0) {
-        return 0
-    }
-
-    let score = 0
-
-    for (const value of normalizedIdentityValues) {
-        if (queryText.includes(value)) {
-            score += 2
-        }
-    }
-
-    const queryPhrases = extractCjkPhrases(queryText)
-    const identityPhrases = new Set(normalizedIdentityValues.flatMap(extractCjkPhrases))
-
-    for (const phrase of queryPhrases) {
-        if (identityPhrases.has(phrase)) {
-            score += 1
-        }
-    }
-
-    const queryTokens = extractAsciiTokens(queryText)
-    const identityTokens = new Set(normalizedIdentityValues.flatMap(extractAsciiTokens))
-
-    for (const token of queryTokens) {
-        if (identityTokens.has(token)) {
-            score += 1.5
-        }
-    }
-
-    return Math.min(score, 4)
-}
-
-function scoreAsciiTokenOverlap(document: UserMemoryDocument, queryText: string): number {
-    const queryTokens = extractAsciiTokens(queryText)
-
-    if (queryTokens.length === 0) {
-        return 0
-    }
-
-    const memoryTokens = new Set([
-        ...extractAsciiTokens(document.text),
-        ...normalizeStructuredTags(document.tags).flatMap(extractAsciiTokens),
-    ])
-
-    let score = 0
-
-    for (const token of queryTokens) {
-        if (memoryTokens.has(token)) {
-            score += 1.5
-        }
-    }
-
-    return score
-}
-
-function scoreRelevantUserMemory(document: UserMemoryDocument, latestUserText: string): number {
-    const queryText = normalizeQueryText(latestUserText)
-
-    if (!queryText) {
-        return 0
-    }
-
-    const lexicalScore =
-        scoreStructuredTagOverlap(document.tags, queryText) +
-        scoreIdentityOverlap(document, queryText) +
-        scoreWholeTextOverlap(document.text, queryText) +
-        scorePartialTextOverlap(document, queryText) +
-        scoreAsciiTokenOverlap(document, queryText)
-
-    if (lexicalScore === 0 && DIRECT_OVERLAP_ONLY_TYPES.has(document.type)) {
-        return 0
-    }
-
-    return lexicalScore
-}
-
-export function scoreUserMemory(document: UserMemoryDocument, latestUserText: string): number {
-    return scoreRelevantUserMemory(document, latestUserText)
-}
-
-export function selectRelevantUserMemories(
-    documents: UserMemoryDocument[],
-    latestUserText: string,
+function selectFromSemanticCandidates(
+    candidates: UserMemorySemanticCandidate[],
     config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig()
 ): SelectedUserMemory[] {
-    const sorted = documents
-        .filter(document => document.status === 'active' && document.confidence >= config.minConfidence)
-        .map(document => ({
-            document,
-            score: scoreRelevantUserMemory(document, latestUserText),
-        }))
-        .filter(item => item.score >= MIN_RELEVANCE_SCORE)
-        .sort((left, right) => {
-            if (right.score !== left.score) {
-                return right.score - left.score
-            }
-
-            return right.document.updatedAt.localeCompare(left.document.updatedAt)
-        })
-
     const selected: SelectedUserMemory[] = []
     let totalChars = 0
 
-    for (const item of sorted) {
+    for (const candidate of candidates) {
         if (selected.length >= config.maxSelectedMemories || totalChars >= config.maxTotalChars) {
             break
         }
 
-        const clippedText = clipUserMemoryText(item.document.text, config.maxMemoryChars)
+        const text = clipUserMemoryText(candidate.document.text, config.maxMemoryChars)
 
-        if (!clippedText) {
-            continue
-        }
-
-        if (totalChars + clippedText.length > config.maxTotalChars) {
+        if (!text || totalChars + text.length > config.maxTotalChars) {
             continue
         }
 
         selected.push({
-            stableKey: item.document.stableKey,
-            type: item.document.type,
-            text: clippedText,
-            tags: item.document.tags,
-            score: item.score,
+            score: candidate.score,
+            stableKey: candidate.stableKey,
+            tags: candidate.document.tags,
+            text,
+            type: candidate.document.type,
         })
-        totalChars += clippedText.length
+        totalChars += text.length
     }
 
     return selected
+}
+
+function toVectorSemanticCandidates(
+    searchItems: UserMemorySemanticSearchItem[],
+    latestUserText: string,
+    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig()
+): UserMemorySemanticCandidate[] {
+    return applyConflictHandling(
+        dedupeByStableKey(
+            searchItems
+                .filter(item => isUserMemorySemanticEligible(item.document, config))
+                .filter(item => typeof item.score === 'number' && Number.isFinite(item.score) && item.score >= 0 && item.score <= 1)
+                .filter(item => (item.score ?? 0) >= config.semanticScoreThreshold)
+                .filter(item => !hasCurrentInputConflict(item.document, normalizeSemanticText(latestUserText)))
+                .map(item => ({
+                    document: item.document,
+                    score: item.score ?? 0,
+                    stableKey: item.document.stableKey,
+                }))
+                .sort((left, right) => {
+                    if (right.score !== left.score) {
+                        return right.score - left.score
+                    }
+
+                    return right.document.updatedAt.localeCompare(left.document.updatedAt)
+                })
+        )
+    )
+}
+
+async function vectorSemanticSearch(
+    store: BaseStore,
+    namespace: string[],
+    normalizedQuery: string,
+    limit: number
+): Promise<UserMemorySemanticSearchItem[]> {
+    const items = await (store as VectorSearchCapableStore).search(namespace, {
+        limit,
+        mode: 'vector',
+        query: normalizedQuery,
+    })
+
+    return toSemanticSearchItems(items)
+}
+
+function withSemanticTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timeoutId = setTimeout(() => {
+            reject(new Error('USER_MEMORY_SEMANTIC_TIMEOUT'))
+        }, timeoutMs)
+
+        void promise.then(
+            value => {
+                clearTimeout(timeoutId)
+                resolve(value)
+            },
+            error => {
+                clearTimeout(timeoutId)
+                reject(error)
+            }
+        )
+    })
+}
+
+function isSemanticEligiblePath(path: UserMemoryPath): boolean {
+    return path === 'ordinary_chat' || path === 'tool_assisted_ordinary_chat'
+}
+
+export function normalizeUserMemorySemanticQuery(
+    latestUserText: string,
+    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig()
+): string {
+    return normalizeSemanticQuery(latestUserText, config)
+}
+
+export async function retrieveRelevantUserMemories(
+    store: BaseStore,
+    input: UserMemorySemanticRetrievalRequest,
+    env: Record<string, string | undefined> = process.env,
+    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig(env)
+): Promise<SelectedUserMemory[]> {
+    if (!input.sessionId?.trim() || !input.latestUserText.trim() || !isSemanticEligiblePath(input.path)) {
+        return []
+    }
+
+    const normalizedQuery = normalizeSemanticQuery(input.latestUserText, config)
+
+    if (!normalizedQuery) {
+        return []
+    }
+
+    const namespace = buildUserMemoryNamespace(input.sessionId, env)
+
+    try {
+        const searchItems = await withSemanticTimeout(vectorSemanticSearch(store, namespace, normalizedQuery, input.limit), input.timeoutMs)
+
+        const candidates = toVectorSemanticCandidates(searchItems, input.latestUserText, config)
+
+        return selectFromSemanticCandidates(candidates, config)
+    } catch (error) {
+        logUserMemoryRetrievalEvent('semantic-retrieval-degraded', {
+            degradationKind: error instanceof Error && error.message === 'USER_MEMORY_SEMANTIC_TIMEOUT' ? 'timeout' : 'failure',
+            elapsedBudgetMs: input.timeoutMs,
+            providerKind: config.semanticEmbeddingProviderKind,
+            searchMode: 'vector',
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+        })
+
+        return []
+    }
 }

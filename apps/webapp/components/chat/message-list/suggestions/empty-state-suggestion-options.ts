@@ -127,23 +127,23 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
         description: '触发 datetime，检查日期类工具链路。',
         text: '今天是星期几？',
     },
-    {
-        composer: {
-            plainText: '检查这份边界说明是否清晰',
-            command: { name: 'check', label: '检查文档一致性' },
-            references: [deliveryBoundaryReference],
-        },
-        displaySegments: [
-            { type: 'command', command: { name: 'check', label: '检查文档一致性' } },
-            { type: 'text', text: ' ' },
-            { type: 'resource', reference: deliveryBoundaryReference },
-        ],
-        icon: ShieldCheck,
-        tag: '检查',
-        label: '检查资源边界',
-        description: '基于公开 demo 的边界说明做轻量检查。',
-        text: '检查这份边界说明是否清晰',
-    },
+    // {
+    //     composer: {
+    //         plainText: '检查这份边界说明是否清晰',
+    //         command: { name: 'check', label: '检查文档一致性' },
+    //         references: [deliveryBoundaryReference],
+    //     },
+    //     displaySegments: [
+    //         { type: 'command', command: { name: 'check', label: '检查文档一致性' } },
+    //         { type: 'text', text: ' ' },
+    //         { type: 'resource', reference: deliveryBoundaryReference },
+    //     ],
+    //     icon: ShieldCheck,
+    //     tag: '检查',
+    //     label: '检查资源边界',
+    //     description: '基于公开 demo 的边界说明做轻量检查。',
+    //     text: '检查这份边界说明是否清晰',
+    // },
     {
         composer: {
             plainText: '总结当前项目状态',

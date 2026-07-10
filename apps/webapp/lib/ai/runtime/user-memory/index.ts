@@ -12,17 +12,29 @@ export {
     type ProcessCompletedTurnForMemoryInput,
 } from './extraction-pipeline'
 export { closeUserMemoryPostgresStore, createPostgresUserMemoryStore, getUserMemoryStore, resetUserMemoryStoreForTests } from './provider'
-export { scoreUserMemory, selectRelevantUserMemories } from './retrieval'
+export { normalizeUserMemorySemanticQuery, retrieveRelevantUserMemories } from './retrieval'
 export {
     getUserMemoryRuntimeConfig,
     type UserMemoryRuntimeConfig,
+    type UserMemorySemanticProviderKind,
     type UserMemoryStoreMode,
+    USER_MEMORY_EMBEDDING_DIMENSIONS_ENV,
+    USER_MEMORY_EMBEDDING_MODEL_ID,
     USER_MEMORY_MAX_SELECTED_MEMORIES,
     USER_MEMORY_MAX_TEXT_CHARS,
     USER_MEMORY_MAX_TOTAL_CHARS,
     USER_MEMORY_MIN_CONFIDENCE,
     USER_MEMORY_POSTGRES_SCHEMA,
     USER_MEMORY_SCHEMA_VERSION,
+    USER_MEMORY_SEMANTIC_INDEX_FIELDS,
+    USER_MEMORY_SEMANTIC_INDEX_VERSION,
+    USER_MEMORY_SEMANTIC_PROVIDER_KIND_REAL,
+    USER_MEMORY_SEMANTIC_QUERY_HEAD_CHARS,
+    USER_MEMORY_SEMANTIC_QUERY_MAX_CHARS,
+    USER_MEMORY_SEMANTIC_QUERY_TAIL_CHARS,
+    USER_MEMORY_SEMANTIC_SCORE_THRESHOLD,
+    USER_MEMORY_SEMANTIC_TIMEOUT_MS,
+    USER_MEMORY_SEMANTIC_TOP_K,
 } from './runtime-config'
 export {
     type SelectedUserMemory,
@@ -36,6 +48,12 @@ export {
     type UserMemoryPath,
     type UserMemoryPromotionResult,
     type UserMemoryRejectionReason,
+    type UserMemorySemanticCandidate,
+    type UserMemorySemanticIndexField,
+    type UserMemorySemanticMetadata,
+    type UserMemorySemanticProviderKind as UserMemorySemanticProviderKindFromSchema,
+    type UserMemorySemanticRetrievalRequest,
+    type UserMemorySemanticSearchItem,
     type UserMemorySafeShortTermContext,
     type UserMemorySource,
     type UserMemorySourceSignal,
@@ -52,6 +70,12 @@ export {
     userMemoryIdentityPolaritySchema,
     userMemoryIdentitySchema,
     userMemoryPathSchema,
+    userMemorySemanticCandidateSchema,
+    userMemorySemanticIndexFieldSchema,
+    userMemorySemanticMetadataSchema,
+    userMemorySemanticProviderKindSchema,
+    userMemorySemanticRetrievalRequestSchema,
+    userMemorySemanticSearchItemSchema,
     userMemorySafeShortTermContextSchema,
     userMemorySourceSchema,
     userMemorySourceSignalSchema,
@@ -65,9 +89,11 @@ export {
 export { createUserMemoryService, getUserMemoryService, userMemoryService, type UserMemoryService } from './user-memory-service'
 export {
     buildUserMemoryNamespace,
+    buildUserMemorySemanticMetadata,
     buildUserMemoryStableKey,
     clipUserMemoryText,
     createUserMemoryDocument,
+    isUserMemorySemanticEligible,
     normalizeUserMemoryStableKey,
     normalizeUserMemoryTag,
     normalizeUserMemoryTags,

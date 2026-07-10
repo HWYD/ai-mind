@@ -1,7 +1,7 @@
 import { type BaseStore } from '@langchain/langgraph'
 
 import { getUserMemoryStore } from './provider'
-import { selectRelevantUserMemories } from './retrieval'
+import { retrieveRelevantUserMemories } from './retrieval'
 import { getUserMemoryRuntimeConfig, type UserMemoryRuntimeConfig } from './runtime-config'
 import type {
     SelectedUserMemory,
@@ -11,7 +11,13 @@ import type {
     UserMemoryPromotionResult,
     UserMemoryWriteResult,
 } from './state-schema'
-import { buildUserMemoryNamespace, createUserMemoryDocument, readUserMemoryDocumentValue, validateUserMemoryCandidate } from './validation'
+import {
+    buildUserMemoryNamespace,
+    buildUserMemorySemanticMetadata,
+    createUserMemoryDocument,
+    readUserMemoryDocumentValue,
+    validateUserMemoryCandidate,
+} from './validation'
 
 function logUserMemoryServiceEvent(event: string, meta: Record<string, unknown>): void {
     // eslint-disable-next-line no-console
@@ -26,7 +32,11 @@ export interface UserMemoryService {
         sourceConversationId: string
     }): Promise<UserMemoryPromotionResult>
     putCandidate(input: { candidate: UserMemoryCandidate; sessionId: string }): Promise<UserMemoryWriteResult>
-    retrieveRelevantMemories(input: { latestUserText: string; sessionId: string }): Promise<SelectedUserMemory[]>
+    retrieveRelevantMemories(input: {
+        latestUserText: string
+        path?: 'ordinary_chat' | 'tool_assisted_ordinary_chat'
+        sessionId: string
+    }): Promise<SelectedUserMemory[]>
 }
 
 interface CreateUserMemoryServiceOptions {
@@ -38,7 +48,25 @@ let sharedUserMemoryService: UserMemoryService | undefined
 let sharedUserMemoryServiceKey: string | undefined
 
 function buildUserMemoryServiceKey(config: UserMemoryRuntimeConfig, env: Record<string, string | undefined>): string {
-    return [config.storeMode, config.postgresSchema, env.NODE_ENV ?? '', env.DATABASE_URL?.trim() ?? ''].join('|')
+    return [
+        config.storeMode,
+        config.postgresSchema,
+        env.NODE_ENV ?? '',
+        env.DATABASE_URL?.trim() ?? '',
+        config.semanticEmbeddingDimensions ?? '',
+        config.semanticEmbeddingModelId,
+        config.semanticEmbeddingProviderKind,
+        config.semanticIndexVersion,
+        config.semanticIndexFields.join(','),
+        env.AI_MIND_DOUBAO_BASE_URL?.trim() ?? '',
+    ].join('|')
+}
+
+function resolveUserMemoryServiceConfig(
+    config: UserMemoryRuntimeConfig | undefined,
+    env: Record<string, string | undefined>
+): UserMemoryRuntimeConfig {
+    return config ?? getUserMemoryRuntimeConfig(env)
 }
 
 function toStoredValue(document: UserMemoryDocument): Record<string, unknown> {
@@ -80,26 +108,19 @@ async function readExistingDocument(store: BaseStore, namespace: string[], stabl
     return readUserMemoryDocumentValue(item)
 }
 
-async function readNamespaceDocuments(store: BaseStore, namespace: string[]): Promise<UserMemoryDocument[]> {
-    const items = await store.search(namespace, {
-        limit: 100,
-    })
-
-    return items.map(item => readUserMemoryDocumentValue(item)).filter((document): document is UserMemoryDocument => document !== null)
-}
-
 export function createUserMemoryService(
-    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig(),
+    config: UserMemoryRuntimeConfig | undefined = undefined,
     env: Record<string, string | undefined> = process.env,
     options: CreateUserMemoryServiceOptions = {}
 ): UserMemoryService {
+    const resolvedConfig = resolveUserMemoryServiceConfig(config, env)
     const now = options.now ?? (() => new Date())
     const getStore = () => {
         if (options.store) {
             return options.store
         }
 
-        return getUserMemoryStore(config, env)
+        return getUserMemoryStore(resolvedConfig, env)
     }
 
     return {
@@ -118,17 +139,23 @@ export function createUserMemoryService(
                 }
             }
 
-            const validation = validateUserMemoryCandidate(candidate, config)
+            const validatedCandidate = validateUserMemoryCandidate(candidate, resolvedConfig)
 
-            if (validation.status === 'rejected') {
-                return validation
+            if (validatedCandidate.status === 'rejected') {
+                return validatedCandidate
             }
 
             try {
                 const store = getStore()
                 const namespace = buildUserMemoryNamespace(sessionId, env)
-                const existing = await readExistingDocument(store, namespace, validation.candidate.stableKey)
-                const nextDocument = createUserMemoryDocument(validation.candidate, now().toISOString(), existing)
+                const existing = await readExistingDocument(store, namespace, validatedCandidate.candidate.stableKey)
+                const nowIso = now().toISOString()
+                const nextDocument = createUserMemoryDocument(
+                    validatedCandidate.candidate,
+                    nowIso,
+                    existing,
+                    buildUserMemorySemanticMetadata(resolvedConfig, nowIso)
+                )
 
                 if (isDuplicateDocument(existing, nextDocument)) {
                     return {
@@ -137,24 +164,29 @@ export function createUserMemoryService(
                     }
                 }
 
-                await store.put(namespace, validation.candidate.stableKey, toStoredValue(nextDocument), false)
+                await store.put(
+                    namespace,
+                    validatedCandidate.candidate.stableKey,
+                    toStoredValue(nextDocument),
+                    nextDocument.status === 'active' ? [...resolvedConfig.semanticIndexFields] : false
+                )
 
                 if (nextDocument.status === 'suppressed') {
                     return {
-                        stableKey: validation.candidate.stableKey,
+                        stableKey: validatedCandidate.candidate.stableKey,
                         status: 'suppressed',
                     }
                 }
 
                 if (existing) {
                     return {
-                        stableKey: validation.candidate.stableKey,
+                        stableKey: validatedCandidate.candidate.stableKey,
                         status: 'updated',
                     }
                 }
 
                 return {
-                    stableKey: validation.candidate.stableKey,
+                    stableKey: validatedCandidate.candidate.stableKey,
                     status: 'written',
                 }
             } catch (error) {
@@ -169,17 +201,25 @@ export function createUserMemoryService(
             }
         },
 
-        async retrieveRelevantMemories({ latestUserText, sessionId }) {
+        async retrieveRelevantMemories({ latestUserText, path = 'ordinary_chat', sessionId }) {
             if (!sessionId?.trim() || !latestUserText.trim()) {
                 return []
             }
 
             try {
                 const store = getStore()
-                const namespace = buildUserMemoryNamespace(sessionId, env)
-                const documents = await readNamespaceDocuments(store, namespace)
-
-                return selectRelevantUserMemories(documents, latestUserText, config)
+                return await retrieveRelevantUserMemories(
+                    store,
+                    {
+                        latestUserText,
+                        limit: resolvedConfig.semanticTopK,
+                        path,
+                        sessionId,
+                        timeoutMs: resolvedConfig.semanticTimeoutMs,
+                    },
+                    env,
+                    resolvedConfig
+                )
             } catch (error) {
                 logUserMemoryServiceEvent('retrieve-failed', {
                     errorName: error instanceof Error ? error.name : 'UnknownError',
@@ -274,7 +314,7 @@ export function createUserMemoryService(
 }
 
 export function getUserMemoryService(
-    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig(),
+    config: UserMemoryRuntimeConfig | undefined = undefined,
     env: Record<string, string | undefined> = process.env,
     options: CreateUserMemoryServiceOptions = {}
 ): UserMemoryService {
@@ -282,10 +322,11 @@ export function getUserMemoryService(
         return createUserMemoryService(config, env, options)
     }
 
-    const serviceKey = buildUserMemoryServiceKey(config, env)
+    const resolvedConfig = resolveUserMemoryServiceConfig(config, env)
+    const serviceKey = buildUserMemoryServiceKey(resolvedConfig, env)
 
     if (!sharedUserMemoryService || sharedUserMemoryServiceKey !== serviceKey) {
-        sharedUserMemoryService = createUserMemoryService(config, env)
+        sharedUserMemoryService = createUserMemoryService(resolvedConfig, env)
         sharedUserMemoryServiceKey = serviceKey
     }
 

@@ -4,6 +4,7 @@ import {
     getUserMemoryRuntimeConfig,
     USER_MEMORY_MAX_TEXT_CHARS,
     USER_MEMORY_SCHEMA_VERSION,
+    USER_MEMORY_SEMANTIC_INDEX_VERSION,
     type UserMemoryRuntimeConfig,
 } from './runtime-config'
 import {
@@ -15,6 +16,7 @@ import {
     type UserMemoryDocument,
     type UserMemoryIdentity,
     type UserMemoryRejectionReason,
+    type UserMemorySemanticMetadata,
     type UserMemoryType,
 } from './state-schema'
 
@@ -180,6 +182,20 @@ export function sanitizeUserMemoryReason(reason: string | undefined, maxChars = 
     return normalized
 }
 
+export function buildUserMemorySemanticMetadata(
+    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig(),
+    nowIso: string
+): UserMemorySemanticMetadata {
+    return {
+        ...(typeof config.semanticEmbeddingDimensions === 'number' ? { embeddingDimensions: config.semanticEmbeddingDimensions } : {}),
+        embeddingModelId: config.semanticEmbeddingModelId,
+        embeddingProviderKind: config.semanticEmbeddingProviderKind,
+        semanticIndexFields: [...config.semanticIndexFields],
+        semanticIndexedAt: nowIso,
+        semanticIndexVersion: USER_MEMORY_SEMANTIC_INDEX_VERSION,
+    }
+}
+
 export function buildUserMemoryNamespace(sessionId: string, env: Record<string, string | undefined> = process.env): string[] {
     const normalizedSessionId = sessionId.trim()
 
@@ -327,13 +343,15 @@ export function validateUserMemoryCandidate(
 export function createUserMemoryDocument(
     candidate: ValidatedUserMemoryCandidate,
     nowIso: string,
-    existing?: UserMemoryDocument | null
+    existing?: UserMemoryDocument | null,
+    semanticMetadata?: UserMemorySemanticMetadata
 ): UserMemoryDocument {
     const sanitizedReason = sanitizeUserMemoryReason(candidate.reason)
     const status = candidate.action === 'suppress' || candidate.conflictSignal ? 'suppressed' : 'active'
     const suppressedAt = status === 'suppressed' ? nowIso : existing?.suppressedAt
     const suppressedByConversationId = status === 'suppressed' ? candidate.sourceConversationId : existing?.suppressedByConversationId
     const persistedReason = typeof candidate.reason === 'string' ? sanitizedReason : existing?.reason
+    const semantic = status === 'active' ? (semanticMetadata ?? existing?.semantic) : existing?.semantic
 
     return {
         schemaVersion: USER_MEMORY_SCHEMA_VERSION,
@@ -350,10 +368,24 @@ export function createUserMemoryDocument(
         createdAt: existing?.createdAt ?? nowIso,
         updatedAt: nowIso,
         ...(existing?.lastUsedAt ? { lastUsedAt: existing.lastUsedAt } : {}),
+        ...(semantic ? { semantic } : {}),
         ...(suppressedAt ? { suppressedAt } : {}),
         ...(suppressedByConversationId ? { suppressedByConversationId } : {}),
         ...(persistedReason ? { reason: persistedReason } : {}),
     }
+}
+
+export function isUserMemorySemanticEligible(
+    document: UserMemoryDocument,
+    config: UserMemoryRuntimeConfig = getUserMemoryRuntimeConfig()
+): boolean {
+    return (
+        document.status === 'active' &&
+        document.confidence >= config.minConfidence &&
+        document.semantic?.embeddingModelId === config.semanticEmbeddingModelId &&
+        document.semantic?.embeddingProviderKind === config.semanticEmbeddingProviderKind &&
+        document.semantic?.semanticIndexVersion === config.semanticIndexVersion
+    )
 }
 
 export function readUserMemoryDocumentValue(value: unknown): UserMemoryDocument | null {

@@ -92,6 +92,27 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 
 长期规则是：chat memory checkpoint 只是普通聊天 runtime 的 bounded memory state，不是产品历史表，也不是 Agent checkpoint 的复用层。
 
+## Long-term UserMemory Semantic Retrieval
+
+`v0.4.5` 的 `UserMemory Store` 与 conversation-scoped `ThreadState` 分离；`v0.4.6` 只在该 Store 边界内增加 semantic retrieval。它是 runtime-controlled supplemental context，不是聊天历史搜索、RAG、主 assistant tool 或新的业务数据层。
+
+它负责：
+
+- 只从当前 browser session namespace 的 active UserMemory 中检索。
+- 只对 `text` 与 `tags` 建立 semantic index，并使用 `PostgresStore` vector search 作为唯一正式 candidate source。
+- 使用独立的 embedding 配置，固定模型为 `doubao-embedding-vision`；不跟随聊天模型选择器。
+- 在 ordinary text chat、tool-assisted ordinary chat，及仍位于 ordinary chat boundary 的 capability-context final answer 中，以最多 3 条、总计最多 900 字符的补充上下文注入。
+- 在 Store、embedding、timeout、score 异常或边界无法确认时，安全返回 0 条注入，不阻断 ordinary chat。
+
+它不负责：
+
+- 索引或检索完整 conversation transcript、ThreadState、原始 user/assistant text、Tool/MCP 原始结果、GraphState、RuntimeArtifact、workflow progress、prompt、provider response 或配置密钥。
+- 修改 hydration DTO、Conversation Registry、stream-core chunk、frontend reducer public shape 或 selected conversation 的 ThreadState 事实源。
+- 为 Tasklist、Delivery、HITL、原始 Tool/MCP fetch/input path 提供 retrieval；这些路径必须在 embedding query 和 Store search 前被排除。
+- 提供 `semantic-memory-search` 或 memory-write assistant tool，或扩展为独立 vector database / RAG 平台。
+
+正式过滤顺序固定为：runtime eligibility → query 轻量规范化与长度裁剪 → browser-session namespace → vector search → active/confidence/suppression 与 score 过滤 → `stableKey` 去重 → conflict handling → context budget。latest user input 始终高于 selected UserMemory，后者不覆盖 ThreadState 的 summary、pinned decisions 或 recent messages。
+
 ## Controlled Agent Runtime
 
 `v0.1.0` 后，Runtime 可以承接受控单 Agent。

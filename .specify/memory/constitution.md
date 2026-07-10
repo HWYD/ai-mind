@@ -75,6 +75,8 @@ AI Mind 优先选择可读、局部、可验证的实现，不为了“看起来
 - 只有真实复用、明确业务规则、逻辑复杂、需要隔离副作用或具备独立测试价值时，才提取抽象。
 - 一两行、只调用一次的映射逻辑通常应就近内联。
 - 每个新增 `toXxx`、`resolveXxx`、`buildXxx` 都必须能说明业务语义、边界价值、类型收窄或真实复用价值。
+- 不得为了测试在正式实现中加入 test-only runtime branch、测试专用 provider/store mode、deterministic helper、隐藏开关或只服务测试的回退逻辑。测试替身、fake、mock 和 fixture adapter 必须停留在测试侧或明确的测试装配边界。
+- 如果某个新增参数、分支、抽象或配置项的主要价值只是“方便测试”，而不服务真实产品语义、运行时边界、类型收窄或副作用隔离，则该实现不应进入生产代码。
 
 ## 8. Tests Before Broad Integration
 

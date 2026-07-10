@@ -4,6 +4,20 @@ import { loadSetupDatabaseUrlFromEnvFiles } from './load-setup-env.mjs'
 
 export const USER_MEMORY_SETUP_SUCCESS_MESSAGE = 'UserMemory LangGraph PostgresStore schema is ready.'
 const USER_MEMORY_SETUP_SCHEMA = 'langgraph_user_memory'
+const USER_MEMORY_EMBEDDING_DIMENSIONS_ENV = 'AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS'
+const USER_MEMORY_SEMANTIC_INDEX_FIELDS = ['text', 'tags']
+
+function createDeterministicSetupEmbeddings(dimensions) {
+    return {
+        async embedDocuments(texts) {
+            return texts.map(() => new Array(dimensions).fill(0))
+        },
+
+        async embedQuery() {
+            return new Array(dimensions).fill(0)
+        },
+    }
+}
 
 function toSetupFailure(error) {
     const errorName = error instanceof Error ? error.name : 'UnknownError'
@@ -15,12 +29,6 @@ export async function runUserMemoryStoreSetup(options = {}) {
     const env = options.env ?? process.env
     const loadEnv = options.loadEnv ?? (() => loadSetupDatabaseUrlFromEnvFiles())
     const log = options.log ?? console.log
-    const createStore =
-        options.createStore ??
-        ((connectionString, schema) =>
-            PostgresStore.fromConnString(connectionString, {
-                schema,
-            }))
 
     loadEnv()
 
@@ -29,6 +37,25 @@ export async function runUserMemoryStoreSetup(options = {}) {
     if (!connectionString) {
         throw new Error('DATABASE_URL is required to set up the UserMemory LangGraph Postgres store.')
     }
+
+    const dimensions = Number(env[USER_MEMORY_EMBEDDING_DIMENSIONS_ENV]?.trim())
+
+    if (!Number.isInteger(dimensions) || dimensions <= 0) {
+        throw new Error(`${USER_MEMORY_EMBEDDING_DIMENSIONS_ENV} is required to set up the UserMemory LangGraph Postgres store.`)
+    }
+
+    const createStore =
+        options.createStore ??
+        ((resolvedConnectionString, schema) =>
+            PostgresStore.fromConnString(resolvedConnectionString, {
+                index: {
+                    dims: dimensions,
+                    distanceMetric: 'cosine',
+                    embed: createDeterministicSetupEmbeddings(dimensions),
+                    fields: USER_MEMORY_SEMANTIC_INDEX_FIELDS,
+                },
+                schema,
+            }))
 
     let store
     let setupError = null
@@ -52,4 +79,14 @@ export async function runUserMemoryStoreSetup(options = {}) {
     if (setupError) {
         throw toSetupFailure(setupError)
     }
+}
+
+export function resolveUserMemorySetupDimensions(env = process.env) {
+    const dimensions = Number(env[USER_MEMORY_EMBEDDING_DIMENSIONS_ENV]?.trim())
+
+    if (!Number.isInteger(dimensions) || dimensions <= 0) {
+        throw new Error(`${USER_MEMORY_EMBEDDING_DIMENSIONS_ENV} is required to set up the UserMemory LangGraph Postgres store.`)
+    }
+
+    return dimensions
 }

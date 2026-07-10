@@ -118,20 +118,23 @@ export function ConversationSidebar({
                             <SidebarSeparator className="my-3" />
                             <SidebarGroup className="min-h-0 flex-1 px-0">
                                 <SidebarGroupLabel className="px-3 pb-2">最近</SidebarGroupLabel>
-                                <SidebarGroupContent className="min-h-0 flex-1 px-2">
-                                    <ScrollArea className="h-full pr-1">
-                                        <SidebarMenu>
+                                <SidebarGroupContent className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden px-0">
+                                    <ScrollArea className="h-full min-w-0 max-w-full overflow-hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
+                                        <SidebarMenu className="box-border w-full min-w-0 max-w-full gap-1 overflow-hidden px-2 pr-3">
                                             {recentConversations.map(conversation => (
-                                                <SidebarMenuItem key={conversation.id}>
+                                                <SidebarMenuItem key={conversation.id} className="min-w-0 max-w-full">
                                                     <SidebarMenuButton
                                                         type="button"
                                                         aria-current={conversation.selected ? 'page' : undefined}
                                                         isActive={conversation.selected}
                                                         disabled={disabled}
                                                         onClick={() => onSelectConversation(conversation.id)}
-                                                        className="justify-start"
+                                                        className={cn(
+                                                            'h-11 min-w-0 max-w-full justify-start rounded-2xl px-4 text-[15px] font-normal data-[active=true]:font-normal',
+                                                            conversation.selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
+                                                        )}
                                                     >
-                                                        <span>{conversation.title}</span>
+                                                        <span className="block min-w-0 flex-1 truncate">{conversation.title}</span>
                                                     </SidebarMenuButton>
                                                 </SidebarMenuItem>
                                             ))}

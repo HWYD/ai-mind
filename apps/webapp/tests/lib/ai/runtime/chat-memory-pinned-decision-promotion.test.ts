@@ -1,8 +1,9 @@
-import { InMemoryStore } from '@langchain/langgraph'
 import { describe, expect, it, vi } from 'vitest'
 
 import { CHAT_MEMORY_RECENT_TURN_LIMIT, createChatMemoryService } from '@/lib/ai/runtime/chat-memory'
 import { createUserMemoryService } from '@/lib/ai/runtime/user-memory'
+
+import { createFakeBaseStore } from './fake-base-store'
 
 const env = {
     AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
@@ -10,8 +11,9 @@ const env = {
 
 describe('runtime/chat-memory pinned decision promotion', () => {
     it('promotePinnedDecisionDiff 只处理新增或变化的 pinnedDecision', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, env, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         const result = await service.promotePinnedDecisionDiff({
@@ -29,6 +31,14 @@ describe('runtime/chat-memory pinned decision promotion', () => {
             updated: 0,
             written: 1,
         })
+
+        store.setSearchHandler(({ items }) =>
+            items.map(item => ({
+                ...item,
+                score: 0.95,
+            }))
+        )
+
         await expect(
             service.retrieveRelevantMemories({
                 latestUserText: '以后解释技术问题怎么说？',
@@ -42,8 +52,9 @@ describe('runtime/chat-memory pinned decision promotion', () => {
     })
 
     it('没有新增或变化时跳过 promotion', async () => {
+        const store = createFakeBaseStore()
         const service = createUserMemoryService(undefined, env, {
-            store: new InMemoryStore(),
+            store: store.store,
         })
 
         await expect(
