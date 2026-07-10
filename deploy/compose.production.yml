@@ -7,7 +7,7 @@ name: ai-mind-production
 
 services:
   postgres:
-    image: postgres:16-bookworm
+    image: ${AI_MIND_POSTGRES_IMAGE?AI_MIND_POSTGRES_IMAGE is required}:${AI_MIND_POSTGRES_IMAGE_TAG?AI_MIND_POSTGRES_IMAGE_TAG is required}
     env_file:
       - ./env/postgres.production.env
     environment:

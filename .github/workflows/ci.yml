@@ -25,7 +25,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-bookworm
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: ai_mind
           POSTGRES_PASSWORD: ai_mind
@@ -41,6 +41,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://ai_mind:ai_mind@127.0.0.1:5432/ai_mind
       AI_MIND_AGENT_RUN_SESSION_SECRET: ci-agent-run-session-secret-at-least-32-chars
+      AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS: "1024"
 
     steps:
       - uses: actions/checkout@v4
@@ -106,6 +107,16 @@ jobs:
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Build postgres pgvector (linux/amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/postgres-pgvector.Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=postgres-pgvector
+          cache-to: type=gha,scope=postgres-pgvector,mode=max
 
       - name: Build webapp-runner (linux/amd64)
         uses: docker/build-push-action@v6

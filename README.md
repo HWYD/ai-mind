@@ -249,6 +249,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [Constitution](./.specify/memory/constitution.md)：AI Mind 长期工程原则。
 - [AI Coding Workflow](./docs/architecture/ai-coding-workflow.md)：Change Level、Codex 执行规则和 release closing checklist。
 - [Spec-driven Development](./docs/architecture/spec-driven-development.md)：spec / plan / tasks / acceptance / decisions 的使用方式。
+- [Production Deployment](./docs/architecture/production-deployment.md)：生产部署、TCR、Docker Compose、pgvector、env 和部署脚本的事实源。
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
@@ -564,7 +565,7 @@ pnpm db:setup:deploy
 - chat memory `langgraph_chat_memory` schema/setup
 - user memory `langgraph_user_memory` schema/setup
 
-v0.4.6 的真实 UserMemory semantic retrieval 还需要服务端配置 `AI_MIND_DOUBAO_API_KEY` 和 `AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS`。它固定使用 `doubao-embedding-vision` 与 `PostgresStore` vector search；embedding dimensions 不在项目文档中写死，应按该模型当前官方规格配置。
+v0.4.6 的真实 UserMemory semantic retrieval 还需要服务端配置 `AI_MIND_DOUBAO_API_KEY` 和 `AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS=1024`。它固定使用 `doubao-embedding-vision` 与 `PostgresStore` vector search；模型或维度变更时，需要同步调整 Store setup 与部署配置。
 
 如果只想单独初始化 chat memory checkpoint，也可以运行：
 

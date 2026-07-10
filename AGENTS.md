@@ -104,6 +104,8 @@
 
 不要把历史 fixture、mock 数据或旧版本文档中的版本号批量改成当前版本。详细规则见 `.agents/rules/version/artifacts.md`。
 
+涉及生产部署、GitHub Actions、TCR、Docker Compose、服务器 env、pgvector、数据库 setup、部署脚本或 secrets sync 时，必须遵循 `.agents/rules/version/deployment.md`，并以 `docs/architecture/production-deployment.md` 作为生产部署事实源。
+
 ## Spec Kit 文档语言策略
 
 - `specs/` 可以中文正文为主，但必须保持 official Spec Kit 兼容：英文文件名、英文 section 骨架、英文 skill / command / script 名和英文代码标识符。

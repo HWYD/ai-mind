@@ -4,7 +4,7 @@ services:
   postgres:
     build:
       context: ..
-      dockerfile: deploy/postgres-pgvector.local.Dockerfile
+      dockerfile: deploy/postgres-pgvector.Dockerfile
     image: ai-mind-postgres-pgvector:local
     environment:
       POSTGRES_DB: ai_mind

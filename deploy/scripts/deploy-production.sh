@@ -71,6 +71,7 @@ run_database_setup() {
 restore_previous_release_env() {
     if [ -f "$RELEASE_ENV_PREVIOUS_FILE" ]; then
         cp "$RELEASE_ENV_PREVIOUS_FILE" "$RELEASE_ENV_FILE"
+        ensure_postgres_release_env "$RELEASE_ENV_FILE"
         log "restored previous release metadata after database setup failure"
     fi
 }
@@ -120,6 +121,8 @@ read_required_token() {
 
 write_release_env() {
     cat > "$RELEASE_ENV_FILE" <<EOF
+AI_MIND_POSTGRES_IMAGE=ccr.ccs.tencentyun.com/${TCR_NAMESPACE}/ai-mind-postgres-pgvector
+AI_MIND_POSTGRES_IMAGE_TAG=${TAG}
 AI_MIND_WEBAPP_IMAGE=ccr.ccs.tencentyun.com/${TCR_NAMESPACE}/ai-mind-webapp
 AI_MIND_PROJECT_ASSISTANT_SERVICE_IMAGE=ccr.ccs.tencentyun.com/${TCR_NAMESPACE}/ai-mind-project-assistant-service
 AI_MIND_IMAGE_TAG=${TAG}
@@ -127,10 +130,23 @@ EOF
     chmod 644 "$RELEASE_ENV_FILE"
 }
 
+ensure_postgres_release_env() {
+    local env_file="$1"
+
+    if ! grep -Eq '^AI_MIND_POSTGRES_IMAGE=' "$env_file"; then
+        printf '\nAI_MIND_POSTGRES_IMAGE=ccr.ccs.tencentyun.com/%s/ai-mind-postgres-pgvector\n' "$TCR_NAMESPACE" >> "$env_file"
+    fi
+
+    if ! grep -Eq '^AI_MIND_POSTGRES_IMAGE_TAG=' "$env_file"; then
+        printf 'AI_MIND_POSTGRES_IMAGE_TAG=production\n' >> "$env_file"
+    fi
+}
+
 rollback() {
     [ -f "$RELEASE_ENV_PREVIOUS_FILE" ] || fail "没有可用的 .release.env.previous，无法回滚。"
 
     cp "$RELEASE_ENV_PREVIOUS_FILE" "$RELEASE_ENV_FILE"
+    ensure_postgres_release_env "$RELEASE_ENV_FILE"
     compose config > /dev/null
     compose pull
     compose up -d --remove-orphans
@@ -150,7 +166,7 @@ rollback() {
 [ -f "$POSTGRES_ENV_FILE" ] || fail "找不到生产 env：$POSTGRES_ENV_FILE"
 [ -f "$WEBAPP_ENV_FILE" ] || fail "找不到生产 env：$WEBAPP_ENV_FILE"
 [ -f "$PAS_ENV_FILE" ] || fail "找不到生产 env：$PAS_ENV_FILE"
-[ -x "${DEPLOY_ROOT}/scripts/verify-production.sh" ] || fail "找不到可执行的 verify-production.sh"
+[ -f "${DEPLOY_ROOT}/scripts/verify-production.sh" ] || fail "找不到 verify-production.sh"
 [ -n "$TCR_NAMESPACE" ] || fail "缺少 TCR_NAMESPACE。"
 [ -n "$TAG" ] || fail "缺少 AI_MIND_IMAGE_TAG，例如 sha-ef58cb8。"
 
@@ -171,10 +187,16 @@ if [ -f "$RELEASE_ENV_FILE" ]; then
 fi
 
 write_release_env
-compose config > /dev/null
+if ! compose config > /dev/null; then
+    restore_previous_release_env
+    fail "docker compose config failed; deployment stopped before pulling images."
+fi
 
 log "开始拉取镜像并启动容器"
-compose pull
+if ! compose pull; then
+    restore_previous_release_env
+    fail "compose pull failed; deployment stopped before database setup."
+fi
 if ! run_database_setup; then
     restore_previous_release_env
     fail "database setup failed; deployment stopped before starting the new containers."

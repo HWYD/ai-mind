@@ -46,6 +46,8 @@ CONFIG_OUTPUT="$(compose config 2>/dev/null)" || {
 
 check "docker compose config 成功" ok
 check "渲染后的镜像包含 ccr.ccs.tencentyun.com" "$(printf '%s\n' "$CONFIG_OUTPUT" | grep -q 'ccr.ccs.tencentyun.com' && echo ok || echo fail)"
+check "渲染后的 postgres 镜像使用 ai-mind-postgres-pgvector" "$(printf '%s\n' "$CONFIG_OUTPUT" | grep -q 'ai-mind-postgres-pgvector' && echo ok || echo fail)"
+check "渲染后的 postgres 镜像不再使用 postgres:16-bookworm" "$(printf '%s\n' "$CONFIG_OUTPUT" | grep -q 'postgres:16-bookworm' && echo fail || echo ok)"
 check "渲染后的镜像不包含旧 registry 前缀" "$(printf '%s\n' "$CONFIG_OUTPUT" | grep -q "$LEGACY_REGISTRY_PATTERN" && echo fail || echo ok)"
 check "渲染后的镜像不是 image: :sha-xxx" "$(printf '%s\n' "$CONFIG_OUTPUT" | grep -Eq 'image:[[:space:]]*:sha-' && echo fail || echo ok)"
 
