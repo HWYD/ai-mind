@@ -77,6 +77,49 @@ function Invoke-NativeCommand {
   }
 }
 
+function Write-ReleaseEnvFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Registry,
+    [Parameter(Mandatory = $true)][string]$Namespace
+  )
+
+  $releaseEnv = @(
+    "AI_MIND_POSTGRES_IMAGE=$Registry/$Namespace/ai-mind-postgres-pgvector",
+    "AI_MIND_POSTGRES_IMAGE_TAG=production",
+    "AI_MIND_WEBAPP_IMAGE=$Registry/$Namespace/ai-mind-webapp",
+    "AI_MIND_PROJECT_ASSISTANT_SERVICE_IMAGE=$Registry/$Namespace/ai-mind-project-assistant-service",
+    "AI_MIND_IMAGE_TAG=production"
+  )
+
+  $directory = Split-Path -Parent $Path
+  if (!(Test-Path -LiteralPath $directory -PathType Container)) {
+    New-Item -ItemType Directory -Path $directory | Out-Null
+  }
+
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllLines($Path, $releaseEnv, $utf8NoBom)
+}
+
+function Read-RepoPackageVersion {
+  param([Parameter(Mandatory = $true)][string]$RepoRoot)
+
+  $packageJsonPath = Join-Path $RepoRoot "package.json"
+
+  if (!(Test-Path -LiteralPath $packageJsonPath -PathType Leaf)) {
+    throw "package.json not found: $packageJsonPath"
+  }
+
+  $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
+  $version = [string]$packageJson.version
+
+  if ([string]::IsNullOrWhiteSpace($version)) {
+    throw "package.json version is missing."
+  }
+
+  return $version.Trim()
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $deployScriptPath = Join-Path $PSScriptRoot "deploy-production.ps1"
 
@@ -179,19 +222,18 @@ try {
   }
   else {
     if ($versionTags.Count -eq 0) {
-      throw (
-        "Current commit has no release tag matching v*.*.*. " +
-        "Create a stable tag or pass a prerelease -Version such as 0.2.5-local.1."
-      )
+      $releaseMode = "package-version-fallback"
+      $versionTag = "none"
+      $releaseVersion = Read-RepoPackageVersion -RepoRoot $repoRoot
     }
-
-    if ($versionTags.Count -gt 1) {
+    elseif ($versionTags.Count -gt 1) {
       throw "Current commit has multiple semantic version tags: $($versionTags -join ', '). Keep exactly one release tag."
     }
-
-    $releaseMode = "tag"
-    $versionTag = $versionTags[0]
-    $releaseVersion = $versionTag.Substring(1)
+    else {
+      $releaseMode = "tag"
+      $versionTag = $versionTags[0]
+      $releaseVersion = $versionTag.Substring(1)
+    }
   }
 
   $commitSha = (& git rev-parse HEAD).Trim()
@@ -238,8 +280,32 @@ try {
     [System.Globalization.CultureInfo]::InvariantCulture
   )
   $ociSource = "https://github.com/HWYD/ai-mind"
+  $postgresImage = "$tcrRegistry/$tcrNamespace/ai-mind-postgres-pgvector:production"
   $webappImage = "$tcrRegistry/$tcrNamespace/ai-mind-webapp:production"
   $projectAssistantServiceImage = "$tcrRegistry/$tcrNamespace/ai-mind-project-assistant-service:production"
+
+  Write-Stage "Write local release metadata"
+  $releaseEnvPath = Join-Path $SecretsDir ".release.env"
+  Write-ReleaseEnvFile -Path $releaseEnvPath -Registry $tcrRegistry -Namespace $tcrNamespace
+  Write-Host "Release env updated: $releaseEnvPath"
+
+  Write-Stage "Build postgres pgvector"
+  $postgresBuildArguments = @(
+    "buildx",
+    "build",
+    "--file",
+    "deploy/postgres-pgvector.Dockerfile",
+    "--platform",
+    "linux/amd64",
+    "--provenance=false",
+    "--sbom=false",
+    "--load",
+    "--tag",
+    $postgresImage,
+    "."
+  )
+  Invoke-NativeCommand -FilePath "docker" -Arguments $postgresBuildArguments -FailureMessage "Postgres pgvector image build failed."
+
   $commonBuildArguments = @(
     "buildx",
     "build",
@@ -283,6 +349,12 @@ try {
     -Arguments $projectAssistantServiceBuildArguments `
     -FailureMessage "Project Assistant Service image build failed."
 
+  Write-Stage "Push postgres pgvector"
+  Invoke-NativeCommand `
+    -FilePath "docker" `
+    -Arguments @("push", $postgresImage) `
+    -FailureMessage "Postgres pgvector image push failed."
+
   Write-Stage "Push webapp"
   Invoke-NativeCommand -FilePath "docker" -Arguments @("push", $webappImage) -FailureMessage "Webapp image push failed."
 
@@ -312,6 +384,7 @@ try {
   Write-Host "Git tag: $versionTag"
   Write-Host "Version: $releaseVersion"
   Write-Host "Commit: $commitShaShort"
+  Write-Host "Postgres image: $postgresImage"
   Write-Host "Webapp image: $webappImage"
   Write-Host "Project Assistant Service image: $projectAssistantServiceImage"
   Write-Host "Deploy executed: $([bool]$Deploy)"

@@ -124,7 +124,7 @@ ai-mind-webapp:sha-xxxxxxx
 ai-mind-project-assistant-service:sha-xxxxxxx
 ```
 
-`production` tag 可以保留用于人工查看和旧 metadata 兼容，但正式部署必须使用 `sha-xxxxxxx` 作为不可变发布 tag。
+`production` tag 可以保留用于人工查看、旧 metadata 兼容和本地手动部署路径。GitHub Actions 正式 release 推荐使用 `sha-xxxxxxx` 作为不可变发布 tag；本地 PowerShell 手动部署路径可以继续使用 `production` tag，但必须同时构建并推送三个生产镜像。
 
 ## GitHub Actions Build Contract
 
@@ -183,7 +183,9 @@ UserMemory PostgresStore setup
 
 ## Release Metadata
 
-服务器 `.release.env` 由 `deploy-production.sh` 生成，不建议手工维护。
+GitHub Actions 正式 release 路径中，服务器 `.release.env` 由 `deploy-production.sh` 生成，不建议手工维护。
+
+本地 PowerShell 手动部署路径中，`scripts/ops/release-production-local.ps1` 会在本地生产 secrets 目录生成 `.release.env`，并通过 `scripts/ops/sync-production-env.ps1` 上传到服务器。该路径继续使用 `production` tag，但 `.release.env` 必须包含 pgvector Postgres、webapp 和 project-assistant-service 三个镜像。
 
 当前 `.release.env` 形态：
 
@@ -242,6 +244,8 @@ D:\secrets\ai-mind\production
 
 ## Two Deployment Flows
 
+后续如果没有用户明确批准，生产部署只允许在下面两条正式链路内修改和演进，不能脱离现有事实单独新开第三条部署路线，也不能通过破坏性改造把其中一条链路静默废掉。
+
 ### Recommended Flow
 
 推荐主流程：
@@ -266,19 +270,26 @@ scripts/ops/sync-production-env.ps1
 
 当前状态：
 
-- `scripts/ops/sync-production-env.ps1` 仍可作为生产 env 同步工具。
-- `scripts/ops/release-production-local.ps1` 仍包含旧的本地构建 / 推送 `production` tag 双镜像逻辑，没有完全对齐 v0.4.6 的三镜像 sha tag 和 pgvector 发布路径。
-- `scripts/ops/deploy-production.ps1` 内嵌一份远程 bash 部署逻辑，容易与 `deploy/scripts/deploy-production.sh` 分裂。
+- `scripts/ops/release-production-local.ps1 -Deploy -SyncEnv` 是允许的本地手动部署路径。
+- 本地手动部署路径继续使用 `production` tag，保持 v0.4.5 之前的使用习惯。
+- `scripts/ops/release-production-local.ps1` 必须构建并推送 `ai-mind-postgres-pgvector:production`、`ai-mind-webapp:production` 和 `ai-mind-project-assistant-service:production` 三个镜像。
+- `scripts/ops/release-production-local.ps1` 会写入本地生产 secrets 目录下的 `.release.env`，内容必须包含三镜像 release metadata。
+- `scripts/ops/deploy-production.ps1` 在远程部署前必须同步最新 `deploy/` 资产到 `/srv/ai-mind`，避免服务器继续使用旧 compose 或旧 verify 脚本。
+- `scripts/ops/sync-production-env.ps1` 继续作为生产 env 同步工具。
 
-因此，在完成重新收口前，`scripts/ops/release-production-local.ps1` 和 `scripts/ops/deploy-production.ps1` 不应作为 v0.4.6 的正式发布路径。后续建议将它们改成薄 wrapper：
+本地手动部署路径适合单人维护、快速生产更新和保留旧操作习惯。它不提供 `sha-xxxxxxx` 不可变发布的追溯能力；需要严格 release 可追溯时，使用 GitHub Actions 正式 release 路径。
 
-```text
-optional sync env
-optional sync deploy assets
-remote call /srv/ai-mind/scripts/deploy-production.sh
-```
+## Deployment Evolution Boundary
 
-不要在 PowerShell ops 脚本中继续维护第二份完整部署逻辑。
+后续部署相关修改必须遵守：
+
+- 只能修改和增强现有两条正式链路：
+    - GitHub Actions Release (TCR) 路径
+    - Local PowerShell Ops 路径
+- 不能在未获明确批准时新增第三条正式部署链路。
+- 不能因为某次版本功能改动，绕开现有 `deploy/`、`scripts/ops/`、GitHub Actions、TCR、server deploy 这些既有事实源，另外拼出一套临时发布方案。
+- 不能在没有明确说明的情况下，对其中任一正式链路做破坏性改造，导致旧的正式操作方式失效。
+- 如果必须引入新步骤，应优先作为这两条链路中的最小增量变更，而不是重做整条流程。
 
 ## Verification
 

@@ -10,6 +10,66 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Install-RemoteFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$LocalPath,
+    [Parameter(Mandatory = $true)][string]$RemotePath,
+    [Parameter(Mandatory = $true)][string]$Mode
+  )
+
+  if (!(Test-Path -LiteralPath $LocalPath -PathType Leaf)) {
+    throw "Missing deploy asset: $LocalPath"
+  }
+
+  $tmpName = [System.IO.Path]::GetFileName($RemotePath)
+  $tmpPath = "/tmp/ai-mind-deploy-$tmpName"
+
+  Write-Host "Uploading deploy asset $LocalPath -> $RemotePath"
+
+  scp -P $Port -i $Key $LocalPath "${User}@${ServerHost}:${tmpPath}"
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to upload deploy asset: $LocalPath"
+  }
+
+  $remoteCommand = "set -e; install -m $Mode '$tmpPath' '$RemotePath'; sed -i 's/\r`$//' '$RemotePath'; rm -f '$tmpPath'; ls -l '$RemotePath'"
+
+  ssh -p $Port -i $Key "${User}@${ServerHost}" $remoteCommand
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to install deploy asset: $RemotePath"
+  }
+}
+
+function Sync-DeployAssets {
+  $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+
+  Write-Host "Syncing deploy assets..."
+
+  ssh -p $Port -i $Key "${User}@${ServerHost}" "mkdir -p '$RemoteRoot/scripts' '$RemoteRoot/env'"
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Failed to ensure remote deploy directories."
+  }
+
+  Install-RemoteFile `
+    -LocalPath (Join-Path $repoRoot "deploy\compose.production.yml") `
+    -RemotePath "$RemoteRoot/compose.production.yml" `
+    -Mode "644"
+
+  Install-RemoteFile `
+    -LocalPath (Join-Path $repoRoot "deploy\scripts\deploy-production.sh") `
+    -RemotePath "$RemoteRoot/scripts/deploy-production.sh" `
+    -Mode "755"
+
+  Install-RemoteFile `
+    -LocalPath (Join-Path $repoRoot "deploy\scripts\verify-production.sh") `
+    -RemotePath "$RemoteRoot/scripts/verify-production.sh" `
+    -Mode "755"
+}
+
+Sync-DeployAssets
+
 if ($SyncEnv) {
   Write-Host "SyncEnv enabled. Syncing production env files..."
 

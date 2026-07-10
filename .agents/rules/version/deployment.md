@@ -55,9 +55,24 @@ docs/architecture/production-deployment.md
 
 - 生产 Postgres 必须使用 pgvector-capable PostgreSQL 16 镜像。
 - `Release (TCR)` 必须构建并推送 `ai-mind-postgres-pgvector`、`ai-mind-webapp` 和 `ai-mind-project-assistant-service` 三个镜像。
-- 正式部署使用 `sha-xxxxxxx` tag；`production` tag 只作为兼容或人工查看，不作为主要不可变发布依据。
+- GitHub Actions 正式 release 推荐使用 `sha-xxxxxxx` tag；本地 PowerShell 手动部署路径可以继续使用 `production` tag。
+- 本地 PowerShell 手动部署路径必须构建并推送 `ai-mind-postgres-pgvector`、`ai-mind-webapp` 和 `ai-mind-project-assistant-service` 三个 `production` 镜像。
 - `UserMemory` semantic retrieval 的生产 env 必须包含 `AI_MIND_DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3` 和 `AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS=1024`，除非后续版本明确重新设计。
 - `db:setup:deploy` 必须覆盖 Prisma migration、Tasklist checkpoint、chat memory 和 UserMemory Store setup。
+
+## 两条正式链路约束
+
+如果用户没有明确批准，后续部署相关改动只能发生在下面两条正式链路内：
+
+- GitHub Actions Release (TCR) -> server deploy
+- Local PowerShell Ops -> TCR -> server deploy
+
+约束：
+
+- 不得绕开这两条链路，额外新增第三条正式部署路径。
+- 不得把某条现有正式链路静默改废，导致既有正式操作方式失效。
+- 不得因为某个版本功能需要，就直接脱离当前部署事实源另写一套发布流程。
+- 需要补步骤时，优先作为这两条链路中的最小增量修改处理。
 
 ## Secrets 边界
 
@@ -78,14 +93,16 @@ D:\secrets\ai-mind\production
 
 `scripts/ops/sync-production-env.ps1` 可以继续作为 env 同步工具。
 
-`scripts/ops/release-production-local.ps1` 和 `scripts/ops/deploy-production.ps1` 在重新收口前，不应被当作 v0.4.6 的正式发布路径，因为它们可能与当前三镜像 sha tag、pgvector Postgres 和 `deploy/scripts/deploy-production.sh` 主流程分裂。
+`scripts/ops/release-production-local.ps1 -Deploy -SyncEnv` 是允许的本地手动部署路径。该路径保留 v0.4.5 之前的本地一键发布习惯，但必须补齐 v0.4.6 的 pgvector Postgres 镜像、三镜像 `.release.env` 和 deploy 资产同步。
 
-如果后续继续保留 PowerShell ops，优先把它们改成薄 wrapper：
+如果后续继续调整 PowerShell ops，优先保持它们围绕下面步骤组织：
 
 ```text
-optional sync env
-optional sync deploy assets
-remote call /srv/ai-mind/scripts/deploy-production.sh
+build and push three production images
+write local .release.env
+sync deploy assets
+sync env when -SyncEnv is enabled
+remote deploy
 ```
 
-不要在 PowerShell 脚本里长期维护第二份完整生产部署逻辑。
+不要让 PowerShell 本地部署路径重新退化成双镜像、缺少 pgvector Postgres 或不同步 deploy 资产的旧状态。

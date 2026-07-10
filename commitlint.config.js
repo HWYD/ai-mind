@@ -38,8 +38,8 @@ module.exports = {
             },
             {
                 value: 'perf',
-                name: 'perf:     🚀  A code change that improves performance',
-                emoji: '🚀 ',
+                name: 'perf:     ⚡️  A code change that improves performance',
+                emoji: '⚡️ ',
             },
             {
                 value: 'test',
@@ -55,6 +55,11 @@ module.exports = {
                 value: 'ci',
                 name: 'ci:       🎡  Changes to our CI configuration files and scripts',
                 emoji: '🎡 ',
+            },
+            {
+                value: 'deploy',
+                name: 'deploy:   🚀   Changes to our deployment scripts',
+                emoji: '🚀 ',
             },
             {
                 value: 'chore',
