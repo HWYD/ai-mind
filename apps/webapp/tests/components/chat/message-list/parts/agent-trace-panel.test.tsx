@@ -1,13 +1,14 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentTracePanel } from '@/components/chat/message-list/parts/agent-trace-panel'
 import type { AgentStepPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
 
 afterEach(() => {
     cleanup()
+    vi.useRealTimers()
 })
 
 function createGraphAgentStepPart(overrides?: Partial<AgentStepPart>): AgentStepPart {
@@ -316,5 +317,69 @@ describe('AgentTracePanel', () => {
         expect(screen.getByText('strategyRegenerations / maxStrategyRegenerations')).toBeTruthy()
         expect(screen.getByText('8 / 12')).toBeTruthy()
         expect(screen.getByText('memory')).toBeTruthy()
+    })
+
+    /*
+    it('auto collapses when final answer starts streaming', () => {
+        const tracePart = createGraphAgentStepPart({
+            graph: {
+                nodes: [
+                    {
+                        nodeId: 'readVersionPlan',
+                        partId: 'graph-read',
+                        patchSummaries: [],
+                        status: 'completed',
+                        stepIndex: 1,
+                        summary: '宸茶鍙?version plan锛岀洰鏍囩増鏈?v0.2.0銆?,
+                        title: '璇诲彇鐗堟湰鏂规',
+                    },
+                ],
+                routes: [],
+                runtime: 'LangGraph',
+            },
+        })
+
+        const { rerender } = render(<AgentTracePanel part={tracePart} />)
+
+        expect(screen.getByText('璇诲彇鐗堟湰鏂规')).toBeTruthy()
+
+        rerender(<AgentTracePanel part={tracePart} collapseWhenFinalAnswerStarts />)
+
+        expect(screen.queryByText('璇诲彇鐗堟湰鏂规')).toBeNull()
+    })
+    */
+})
+
+describe('AgentTracePanel auto collapse', () => {
+    it('collapses the timeline when final answer streaming begins', () => {
+        vi.useFakeTimers()
+        const tracePart = createGraphAgentStepPart({
+            graph: {
+                nodes: [
+                    {
+                        nodeId: 'readVersionPlan',
+                        partId: 'graph-read',
+                        patchSummaries: [],
+                        status: 'completed',
+                        stepIndex: 1,
+                        summary: 'Read version plan for v0.2.0.',
+                        title: 'Read Version Plan',
+                    },
+                ],
+                routes: [],
+                runtime: 'LangGraph',
+            },
+        })
+
+        const { rerender } = render(<AgentTracePanel part={tracePart} />)
+
+        expect(screen.getByText('Read Version Plan')).toBeTruthy()
+
+        rerender(<AgentTracePanel part={tracePart} collapseWhenFinalAnswerStarts />)
+        act(() => {
+            vi.runAllTimers()
+        })
+
+        expect(screen.queryByText('Read Version Plan')).toBeNull()
     })
 })

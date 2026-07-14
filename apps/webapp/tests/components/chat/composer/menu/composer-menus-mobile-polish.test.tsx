@@ -14,20 +14,30 @@ describe('Composer popup mobile polish', () => {
         })
     })
 
-    it('keeps the slash command popup title and description on the compact mobile classes', () => {
+    it('keeps the slash command popup title, badge, and description on the compact mobile classes', () => {
         const { container } = render(
             <ComposerCommandMenu
                 command={vi.fn()}
                 items={[
                     {
+                        name: 'delivery-chain',
+                        label: '生成交付计划',
+                        badgeLabel: 'Multi-Agent',
+                        description: '基于需求生成方案、任务拆解和并行评审报告',
+                    },
+                    {
                         name: 'tasklist',
                         label: '生成任务清单',
+                        badgeLabel: 'Agent',
                         description: '基于 demo version 生成 tasklist 草稿',
                     },
                 ]}
             />
         )
 
+        expect(screen.getByText('Multi-Agent')).toBeTruthy()
+        expect(screen.getByText('Agent')).toBeTruthy()
+        expect(screen.getByText('基于需求生成方案、任务拆解和并行评审报告')).toBeTruthy()
         expect(screen.getByText('生成任务清单').className).toContain('text-sm')
         expect(screen.getByText('生成任务清单').className).toContain('sm:text-base')
         expect(screen.getByText('基于 demo version 生成 tasklist 草稿').className).toContain('text-[11px]')

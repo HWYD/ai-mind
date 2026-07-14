@@ -1,6 +1,6 @@
 'use client'
 
-import { CircleAlert, Info, Pencil, RotateCcw, X } from 'lucide-react'
+import { CircleAlert, Info, LoaderCircle, Pencil, RotateCcw, X } from 'lucide-react'
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import type { PendingAgentInterrupt } from '../use-chat-stream'
 
 type ReviewDecision = StrategyReviewDecision | TasklistRevisionReviewDecision
+type ReviewDecisionType = ReviewDecision['type']
 
 const granularityOptions: TasklistStrategyGranularity[] = ['coarse', 'medium', 'detailed']
 const stepCountRangeOptions: TasklistStrategyStepCountRange[] = ['3-5', '5-8', '8-12']
@@ -210,10 +211,12 @@ function StrategyReviewCard({
     disabled,
     interrupt,
     onSubmit,
+    submittingDecisionType,
 }: {
     disabled?: boolean
     interrupt: PendingAgentInterrupt
     onSubmit: (decision: StrategyReviewDecision) => void
+    submittingDecisionType?: ReviewDecisionType | null
 }) {
     const payload = interrupt.part.payload
     const [mode, setMode] = useState<'idle' | 'respond'>('idle')
@@ -229,6 +232,7 @@ function StrategyReviewCard({
     const strategy = payload.data.strategy
     const canRespond = payload.allowedDecisions.includes('respond')
     const isDirty = !areStrategiesEqual(draftStrategy, strategy)
+    const isSubmittingStrategy = disabled && (submittingDecisionType === 'approve' || submittingDecisionType === 'edit')
 
     function togglePriorityFocus(option: TasklistStrategyPriorityFocus) {
         setDraftStrategy(current => {
@@ -352,9 +356,11 @@ function StrategyReviewCard({
                     type="button"
                     size="sm"
                     disabled={disabled || draftStrategy.priorityFocus.length === 0}
+                    aria-busy={isSubmittingStrategy}
                     onClick={submitStrategy}
                     className={primaryReviewActionClass}
                 >
+                    {isSubmittingStrategy ? <LoaderCircle data-icon="inline-start" className="animate-spin" strokeWidth={2.2} /> : null}
                     按当前策略继续
                 </Button>
                 {canRespond ? (
@@ -515,10 +521,12 @@ export function HumanReviewComposerPanel({
 }) {
     const [error, setError] = useState<string | null>(null)
     const [submitting, setSubmitting] = useState(false)
+    const [submittingDecisionType, setSubmittingDecisionType] = useState<ReviewDecisionType | null>(null)
 
     useEffect(() => {
         setError(null)
         setSubmitting(false)
+        setSubmittingDecisionType(null)
     }, [pendingInterrupt?.part.interruptId])
 
     if (!pendingInterrupt) {
@@ -527,6 +535,7 @@ export function HumanReviewComposerPanel({
 
     async function submitDecision(decision: ReviewDecision) {
         setSubmitting(true)
+        setSubmittingDecisionType(decision.type)
         setError(null)
 
         try {
@@ -535,6 +544,7 @@ export function HumanReviewComposerPanel({
             setError(submitError instanceof Error ? submitError.message : '提交审核决策失败。')
         } finally {
             setSubmitting(false)
+            setSubmittingDecisionType(null)
         }
     }
 
@@ -548,6 +558,7 @@ export function HumanReviewComposerPanel({
                             interrupt={pendingInterrupt}
                             disabled={submitting}
                             onSubmit={submitDecision}
+                            submittingDecisionType={submittingDecisionType}
                         />
                     ) : (
                         <TasklistRevisionReviewCard

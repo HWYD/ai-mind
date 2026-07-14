@@ -14,7 +14,7 @@ import {
     Wrench,
     XCircle,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -286,15 +286,38 @@ function renderGraphDebugSummary(summary: GraphDebugSummary) {
     )
 }
 
-export function AgentTracePanel({ detailParts = [], part }: { detailParts?: AgentDetailPart[]; part: AgentStepPart }) {
+export function AgentTracePanel({
+    collapseWhenFinalAnswerStarts = false,
+    detailParts = [],
+    part,
+}: {
+    collapseWhenFinalAnswerStarts?: boolean
+    detailParts?: AgentDetailPart[]
+    part: AgentStepPart
+}) {
     const [isExpanded, setIsExpanded] = useState(true)
     const [isDebugExpanded, setIsDebugExpanded] = useState(false)
+    const previousCollapseRequestRef = useRef(collapseWhenFinalAnswerStarts)
     const graphDebugSummary = part.graph.debugSummary
     const hasGraphTimeline = part.graph.nodes.length > 0 || part.graph.routes.length > 0
     const hasGraph = hasGraphTimeline || Boolean(graphDebugSummary)
     const revisionCount = getGraphRevisionCount(part.graph)
     const skillBadge = detailParts.find((detailPart): detailPart is SkillPart => detailPart.type === 'skill')?.skillId
     const graphNodeInlineDetails = buildGraphNodeInlineDetails(part.graph.nodes, detailParts)
+
+    useEffect(() => {
+        if (collapseWhenFinalAnswerStarts && !previousCollapseRequestRef.current) {
+            const collapseTimer = window.setTimeout(() => {
+                setIsExpanded(false)
+            }, 0)
+
+            previousCollapseRequestRef.current = true
+
+            return () => window.clearTimeout(collapseTimer)
+        }
+
+        previousCollapseRequestRef.current = collapseWhenFinalAnswerStarts
+    }, [collapseWhenFinalAnswerStarts])
 
     if (!hasGraph) {
         return null

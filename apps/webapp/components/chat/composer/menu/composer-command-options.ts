@@ -1,6 +1,7 @@
 import type { ComposerCommand } from '../composer-types'
 
 export interface ComposerCommandOption extends ComposerCommand {
+    badgeLabel?: 'Agent' | 'Multi-Agent'
     description: string
 }
 
@@ -8,11 +9,13 @@ export const composerCommandOptions: ComposerCommandOption[] = [
     {
         name: 'delivery-chain',
         label: '生成交付计划',
-        description: '基于需求生成方案、任务拆解和评审报告',
+        badgeLabel: 'Multi-Agent',
+        description: '基于需求生成方案、任务拆解和并行评审报告',
     },
     {
         name: 'tasklist',
         label: '生成任务清单',
+        badgeLabel: 'Agent',
         description: '基于当前目标生成版本 tasklist 草稿',
     },
     {

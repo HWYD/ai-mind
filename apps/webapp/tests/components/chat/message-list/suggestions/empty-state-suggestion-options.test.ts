@@ -1,36 +1,41 @@
 import { describe, expect, it } from 'vitest'
 
-import { emptyStateSuggestions } from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
+import {
+    deliveryChainDemoSuggestion,
+    emptyStateSuggestions,
+    tasklistDemoSuggestion,
+} from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
 
 describe('emptyStateSuggestions', () => {
-    it('includes the Tasklist Agent demo quick access entry with the v034 demo version', () => {
-        const tasklistDemo = emptyStateSuggestions.find(suggestion => suggestion.label === 'Tasklist Agent Demo')
-
-        expect(tasklistDemo).toBeTruthy()
-        expect(tasklistDemo?.composer?.command?.name).toBe('tasklist')
-        expect(tasklistDemo?.composer?.references).toEqual([
+    it('keeps the Tasklist example payload stable as a named suggestion export', () => {
+        expect(emptyStateSuggestions).toContain(tasklistDemoSuggestion)
+        expect(tasklistDemoSuggestion.composer?.command?.name).toBe('tasklist')
+        expect(tasklistDemoSuggestion.composer?.references).toEqual([
             expect.objectContaining({
                 label: 'v034-langsmith-observability.md',
                 uri: 'demo://version-plans/v034-langsmith-observability.md',
             }),
         ])
-        expect(JSON.stringify(tasklistDemo)).not.toContain('v035')
-        expect(JSON.stringify(tasklistDemo)).not.toContain('v036')
+        expect(tasklistDemoSuggestion.displaySegments).toEqual(
+            expect.arrayContaining([expect.objectContaining({ type: 'command' }), expect.objectContaining({ type: 'resource' })])
+        )
+        expect(tasklistDemoSuggestion.text).toBe('基于这个 demo 版本方案生成 tasklist 草稿')
     })
 
-    it('includes the Delivery Chain demo quick access entry with the request-limit-banner scenario', () => {
-        const deliveryChainDemo = emptyStateSuggestions.find(suggestion => suggestion.label === 'Delivery Chain Demo')
-
-        expect(deliveryChainDemo).toBeTruthy()
-        expect(deliveryChainDemo?.composer?.command?.name).toBe('delivery-chain')
-        expect(deliveryChainDemo?.composer?.command?.label).toBe('生成交付计划')
-        expect(deliveryChainDemo?.text).toBe('')
-        expect(deliveryChainDemo?.composer?.plainText).toBe('')
-        expect(deliveryChainDemo?.composer?.references).toEqual([
+    it('keeps the Delivery example payload stable as a named suggestion export', () => {
+        expect(emptyStateSuggestions).toContain(deliveryChainDemoSuggestion)
+        expect(deliveryChainDemoSuggestion.composer?.command?.name).toBe('delivery-chain')
+        expect(deliveryChainDemoSuggestion.composer?.command?.label).toBe('生成交付计划')
+        expect(deliveryChainDemoSuggestion.text).toBe('')
+        expect(deliveryChainDemoSuggestion.composer?.plainText).toBe('')
+        expect(deliveryChainDemoSuggestion.composer?.references).toEqual([
             expect.objectContaining({
                 label: 'request-limit-banner/requirement.md',
                 uri: 'demo://scenarios/request-limit-banner/requirement.md',
             }),
         ])
+        expect(deliveryChainDemoSuggestion.displaySegments).toEqual(
+            expect.arrayContaining([expect.objectContaining({ type: 'command' }), expect.objectContaining({ type: 'resource' })])
+        )
     })
 })

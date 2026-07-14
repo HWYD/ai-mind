@@ -3,6 +3,7 @@
 import { FileText, GitBranchPlus, ListChecks, ShieldCheck } from 'lucide-react'
 import { forwardRef, useCallback, useImperativeHandle, useState } from 'react'
 
+import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 
 import type { ComposerCommandName } from '../composer-types'
@@ -107,7 +108,14 @@ export const ComposerCommandMenu = forwardRef<
                                 <Icon className="size-4 sm:size-5" strokeWidth={2.2} />
                             </span>
                             <span className="min-w-0">
-                                <span className="block text-sm font-semibold text-foreground sm:text-base">{item.label}</span>
+                                <span className="flex min-w-0 items-center gap-2">
+                                    <span className="block text-sm font-semibold text-foreground sm:text-base">{item.label}</span>
+                                    {item.badgeLabel ? (
+                                        <Badge variant="outline" className="shrink-0 rounded-full px-2 py-0 text-[10px] sm:text-[11px]">
+                                            {item.badgeLabel}
+                                        </Badge>
+                                    ) : null}
+                                </span>
                                 <span className="mt-0.5 block truncate text-[11px] text-muted-foreground sm:text-sm">
                                     {item.description}
                                 </span>

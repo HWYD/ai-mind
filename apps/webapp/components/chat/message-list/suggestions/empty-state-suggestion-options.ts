@@ -53,6 +53,43 @@ const latestContextReference = {
     serverId: 'project-assistant-service',
 } as const
 
+export const tasklistDemoSuggestion: EmptyStateSuggestion = {
+    composer: {
+        plainText: '基于这个 demo 版本方案生成 tasklist 草稿',
+        command: { name: 'tasklist', label: '生成任务清单' },
+        references: [tasklistDemoReference],
+    },
+    displaySegments: [
+        { type: 'command', command: { name: 'tasklist', label: '生成任务清单' } },
+        { type: 'text', text: ' ' },
+        { type: 'resource', reference: tasklistDemoReference },
+        { type: 'text', text: ' 基于这个 demo 版本方案生成 tasklist 草稿' },
+    ],
+    icon: ListChecks,
+    tag: 'Agent',
+    label: 'Tasklist Agent Demo',
+    description: '快速填入 public demo 的 Tasklist Agent 示例入口。',
+    text: '基于这个 demo 版本方案生成 tasklist 草稿',
+}
+
+export const deliveryChainDemoSuggestion: EmptyStateSuggestion = {
+    composer: {
+        plainText: '',
+        command: { name: 'delivery-chain', label: '生成交付计划' },
+        references: [deliveryChainScenarioReference],
+    },
+    displaySegments: [
+        { type: 'command', command: { name: 'delivery-chain', label: '生成交付计划' } },
+        { type: 'text', text: ' ' },
+        { type: 'resource', reference: deliveryChainScenarioReference },
+    ],
+    icon: GitBranchPlus,
+    tag: 'Agent',
+    label: 'Delivery Chain Demo',
+    description: '快速填入 public demo 的交付计划示例入口。',
+    text: '',
+}
+
 export const emptyStateSuggestions: EmptyStateSuggestion[] = [
     // {
     //     icon: Layers3,
@@ -61,41 +98,8 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
     //     description: '解释 AI 应用 Runtime、Skill、MCP、Tool 的边界。',
     //     text: '解释一个 AI 应用里 Runtime、Skill、MCP、Tool 是怎么分层的？',
     // },
-    {
-        composer: {
-            plainText: '基于这个 demo 版本方案生成 tasklist 草稿',
-            command: { name: 'tasklist', label: '生成任务清单' },
-            references: [tasklistDemoReference],
-        },
-        displaySegments: [
-            { type: 'command', command: { name: 'tasklist', label: '生成任务清单' } },
-            { type: 'text', text: ' ' },
-            { type: 'resource', reference: tasklistDemoReference },
-            { type: 'text', text: ' 基于这个 demo 版本方案生成 tasklist 草稿' },
-        ],
-        icon: ListChecks,
-        tag: 'Agent',
-        label: 'Tasklist Agent Demo',
-        description: '快速填入 public demo 的 Tasklist Agent 示例入口。',
-        text: '基于这个 demo 版本方案生成 tasklist 草稿',
-    },
-    {
-        composer: {
-            plainText: '',
-            command: { name: 'delivery-chain', label: '生成交付计划' },
-            references: [deliveryChainScenarioReference],
-        },
-        displaySegments: [
-            { type: 'command', command: { name: 'delivery-chain', label: '生成交付计划' } },
-            { type: 'text', text: ' ' },
-            { type: 'resource', reference: deliveryChainScenarioReference },
-        ],
-        icon: GitBranchPlus,
-        tag: 'Agent',
-        label: 'Delivery Chain Demo',
-        description: '快速填入 public demo 的交付计划示例入口。',
-        text: '',
-    },
+    tasklistDemoSuggestion,
+    deliveryChainDemoSuggestion,
     {
         composer: {
             plainText: '总结这份 demo 说明',

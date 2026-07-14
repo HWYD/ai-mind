@@ -43,6 +43,7 @@ const DELIVERY_CHAIN_CONTEXT_RESOURCE_PATTERN = /^demo:\/\/scenarios\/([^/\\]+)\
 const DELIVERY_CHAIN_REQUIREMENT_RESOURCE_PATTERN = /^demo:\/\/scenarios\/([^/\\]+)\/requirement\.md$/i
 const DELIVERY_CHAIN_GOVERNANCE_RESOURCE_PATTERN = /^demo:\/\/governance\/([^/\\]+\.md)$/i
 const DELIVERY_CHAIN_RUBRIC_RESOURCE_PATTERN = /^demo:\/\/rubrics\/([^/\\]+\.md)$/i
+const TASKLIST_AGENT_NAME = 'version-plan-to-tasklist-agent'
 
 function isAgentDetailPart(part: MindMessagePart): part is AgentDetailPart {
     return part.type === 'prompt' || part.type === 'resource' || part.type === 'skill' || part.type === 'tool'
@@ -242,6 +243,7 @@ export function AssistantMessage({
     showFollowUpSuggestions: boolean
 }) {
     const agentMessage = contentParts.some(part => part.type === 'agent-step')
+    const hasStartedFinalAnswer = contentParts.some(part => part.type === 'text')
     const agentDetailParts = agentMessage ? contentParts.filter(isAgentDetailPart) : []
     const artifacts = message.artifacts ?? []
     const isRateLimitNotice = isRateLimitNoticeMessage(message)
@@ -355,7 +357,11 @@ export function AssistantMessage({
                     if (part.type === 'agent-step') {
                         return (
                             <div key={`${message.id}:agent-step:${part.runId}`}>
-                                <AgentTracePanel part={part} detailParts={agentDetailParts} />
+                                <AgentTracePanel
+                                    part={part}
+                                    detailParts={agentDetailParts}
+                                    collapseWhenFinalAnswerStarts={part.agentName === TASKLIST_AGENT_NAME && hasStartedFinalAnswer}
+                                />
                                 {artifacts.map(artifact => (
                                     <AgentTextArtifactPanel key={`${message.id}:artifact:${artifact.artifactId}`} artifact={artifact} />
                                 ))}

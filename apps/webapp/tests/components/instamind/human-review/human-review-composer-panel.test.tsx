@@ -23,6 +23,71 @@ beforeAll(() => {
         configurable: true,
         value: () => undefined,
     })
+    /*
+    it('Strategy Review current strategy submit shows loading state', async () => {
+        let resolveDecision: ((value: boolean) => void) | null = null
+        const onResumeDecision = vi.fn().mockImplementation(
+            () =>
+                new Promise<boolean>(resolve => {
+                    resolveDecision = resolve
+                })
+        )
+
+        const { container } = render(
+            <HumanReviewComposerPanel pendingInterrupt={createStrategyPendingInterrupt()} onResumeDecision={onResumeDecision} />
+        )
+        const continueButton = container.querySelector('button[class*="bg-[var(--composer-focus)]"]')
+
+        expect(continueButton).toBeTruthy()
+
+        fireEvent.click(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).getAttribute('aria-busy')).toBe('true')
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).querySelector('svg.animate-spin')).toBeTruthy()
+        })
+
+        resolveDecision?.(true)
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).getAttribute('aria-busy')).toBeNull()
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).querySelector('svg.animate-spin')).toBeNull()
+        })
+    })
+    */
+})
+
+describe('HumanReviewComposerPanel loading state', () => {
+    it('shows loading state on the primary strategy submit button', async () => {
+        let resolveDecision: ((value: boolean) => void) | null = null
+        const onResumeDecision = vi.fn().mockImplementation(
+            () =>
+                new Promise<boolean>(resolve => {
+                    resolveDecision = resolve
+                })
+        )
+
+        const { container } = render(
+            <HumanReviewComposerPanel pendingInterrupt={createStrategyPendingInterrupt()} onResumeDecision={onResumeDecision} />
+        )
+        const continueButton = container.querySelector('button[class*="bg-[var(--composer-focus)]"]')
+
+        expect(continueButton).toBeTruthy()
+
+        fireEvent.click(continueButton!)
+
+        await waitFor(() => {
+            expect(continueButton?.getAttribute('aria-busy')).toBe('true')
+            expect(continueButton?.querySelector('svg.animate-spin')).toBeTruthy()
+        })
+
+        resolveDecision?.(true)
+
+        await waitFor(() => {
+            expect(continueButton?.getAttribute('aria-busy')).toBe('false')
+            expect(continueButton?.querySelector('svg.animate-spin')).toBeNull()
+        })
+    })
 })
 
 afterEach(() => {
@@ -288,4 +353,32 @@ describe('HumanReviewComposerPanel', () => {
             expect(onResumeDecision).toHaveBeenCalledWith({ type: 'reject' })
         })
     })
+
+    /*
+    it('Strategy Review current strategy submit shows loading state', async () => {
+        let resolveDecision: ((value: boolean) => void) | null = null
+        const onResumeDecision = vi.fn().mockImplementation(
+            () =>
+                new Promise<boolean>(resolve => {
+                    resolveDecision = resolve
+                })
+        )
+
+        render(<HumanReviewComposerPanel pendingInterrupt={createStrategyPendingInterrupt()} onResumeDecision={onResumeDecision} />)
+
+        fireEvent.click(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }))
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).getAttribute('aria-busy')).toBe('true')
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).querySelector('svg.animate-spin')).toBeTruthy()
+        })
+
+        resolveDecision?.(true)
+
+        await waitFor(() => {
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).getAttribute('aria-busy')).toBeNull()
+            expect(screen.getByRole('button', { name: /鎸夊綋鍓嶇瓥鐣ョ户缁?/ }).querySelector('svg.animate-spin')).toBeNull()
+        })
+    })
+    */
 })
