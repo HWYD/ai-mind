@@ -80,6 +80,7 @@ describe('InstantMindPage integration', () => {
                 },
             ],
             createConversation,
+            deleteConversation: vi.fn(),
             error: 'Conversation registry is unavailable.',
             handleConversationPromoted: vi.fn(),
             interactionDisabled: false,
@@ -131,6 +132,7 @@ describe('InstantMindPage integration', () => {
                         'data-testid': 'conversation-sidebar',
                         'data-collapsed': String(props.collapsed),
                         'data-disabled': String(props.disabled),
+                        'data-has-delete': String(typeof props.onDeleteConversation === 'function'),
                     }),
                     React.createElement(
                         'button',
@@ -211,6 +213,7 @@ describe('InstantMindPage integration', () => {
         expect(screen.getByText('会话列表暂时不可用').textContent).toBe('会话列表暂时不可用')
         expect(screen.getByText('Conversation registry is unavailable.').textContent).toBe('Conversation registry is unavailable.')
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-disabled')).toBe('true')
+        expect(screen.getByTestId('conversation-sidebar').getAttribute('data-has-delete')).toBe('true')
         expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-disabled')).toBe('true')
         expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-title')).toBe('Conversation A')
         expect(screen.getByTestId('chat-composer').getAttribute('data-disabled')).toBe('false')
@@ -570,6 +573,139 @@ describe('InstantMindPage integration', () => {
 
         fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
 
+        expect(retryHydration).toHaveBeenCalledTimes(1)
+    })
+
+    it('shows read-only local cache notice and disables interactive actions', async () => {
+        const retryHydration = vi.fn()
+        const retryRecovery = vi.fn()
+
+        vi.doUnmock('@/components/instamind/instantmind-page')
+        vi.doMock('next/image', () => ({
+            default: (props: Record<string, unknown>) => React.createElement('img', props),
+        }))
+        vi.doMock('next/link', () => ({
+            default: ({ children, ...props }: Record<string, unknown>) => React.createElement('a', props, children as React.ReactNode),
+        }))
+        vi.doMock('@/components/chat/composer/chat-composer', () => ({
+            ChatComposer: (props: Record<string, unknown>) =>
+                React.createElement('div', {
+                    'data-testid': 'chat-composer',
+                    'data-submit-disabled': String(props.submitDisabled),
+                }),
+        }))
+        vi.doMock('@/components/chat/message-list/chat-message-list', () => ({
+            ChatMessageList: () => React.createElement('div', { 'data-testid': 'chat-message-list' }),
+        }))
+        vi.doMock('@/components/instamind/conversation-session/conversation-sidebar', () => ({
+            ConversationSidebar: (props: Record<string, unknown>) =>
+                React.createElement('div', {
+                    'data-testid': 'conversation-sidebar',
+                    'data-disabled': String(props.disabled),
+                }),
+        }))
+        vi.doMock('@/components/instamind/conversation-session/conversation-mobile-selector', () => ({
+            ConversationMobileSelector: (props: Record<string, unknown>) =>
+                React.createElement('div', {
+                    'data-testid': 'conversation-mobile-selector',
+                    'data-disabled': String(props.disabled),
+                }),
+        }))
+        vi.doMock('@/components/instamind/human-review/human-review-composer-panel', () => ({
+            HumanReviewComposerPanel: () => React.createElement('div'),
+        }))
+        vi.doMock('@/components/instamind/thread-memory-status-hint', () => ({
+            ThreadMemoryStatusHint: () => React.createElement('div'),
+        }))
+        vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
+            useChatAutoScroll: () => ({
+                inputContainerRef: { current: null },
+                bottomSpacing: 24,
+                showScrollToBottom: false,
+                resetAutoScrollForNewTurn: vi.fn(),
+                restoreAutoFollowAndScrollToBottom: vi.fn(),
+            }),
+        }))
+        vi.doMock('@/components/instamind/use-chat-models', () => ({
+            useChatModels: () => ({
+                hasAvailableModels: true,
+                isLoading: false,
+                model: 'qwen/qwen3.6-flash',
+                modelError: null,
+                modelGroups: [],
+                setModel: vi.fn(),
+            }),
+        }))
+        vi.doMock('@/components/instamind/use-chat-stream', () => ({
+            useChatStream: () => ({
+                messages: [],
+                status: 'ready',
+                hydrationStatus: 'ready',
+                readOnlyCacheMessage: '当前显示的是浏览器本地只读缓存，服务端会话上下文暂时不可用。',
+                threadMemoryStatusHint: null,
+                pendingInterrupt: null,
+                sendMessage: vi.fn(),
+                retryHydration,
+                resumeAgentRun: vi.fn(),
+                cancel: vi.fn(),
+                deleteUserTurn: vi.fn(),
+                regenerateLastTurn: vi.fn(),
+            }),
+        }))
+        vi.doMock('@/components/instamind/conversation-session/use-conversation-sessions', () => ({
+            useConversationSessions: () => ({
+                conversations: [
+                    {
+                        id: 'conv-a',
+                        title: 'Conversation A',
+                        selected: true,
+                        hasMessages: true,
+                        createdAt: '2026-07-05T10:00:00.000Z',
+                        lastActiveAt: '2026-07-05T10:00:00.000Z',
+                    },
+                ],
+                createConversation: vi.fn(),
+                error: null,
+                handleConversationPromoted: vi.fn(),
+                interactionDisabled: false,
+                isDraft: false,
+                isLoading: false,
+                isMutating: false,
+                isReadOnlyCache: false,
+                readOnlyCacheMessage: null,
+                retryRecovery,
+                selectedConversation: {
+                    id: 'conv-a',
+                    title: 'Conversation A',
+                    selected: true,
+                    hasMessages: true,
+                    createdAt: '2026-07-05T10:00:00.000Z',
+                    lastActiveAt: '2026-07-05T10:00:00.000Z',
+                },
+                selectedConversationId: 'conv-a',
+                selectConversation: vi.fn(),
+            }),
+        }))
+
+        const { default: InstantMindPage } = await import('@/components/instamind/instantmind-page')
+
+        render(React.createElement(InstantMindPage, { initialChatModelsState }))
+
+        expect(screen.getByText('本地只读缓存').textContent).toBe('本地只读缓存')
+        expect(screen.getByText('当前显示的是浏览器本地只读缓存，服务端会话上下文暂时不可用。').textContent).toContain(
+            '服务端会话上下文暂时不可用'
+        )
+        expect(screen.getByTestId('conversation-sidebar').getAttribute('data-disabled')).toBe('true')
+        expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-disabled')).toBe('true')
+        expect(screen.getByTestId('chat-composer').getAttribute('data-submit-disabled')).toBe('true')
+        expect(screen.getByRole('button', { name: '重试连接服务端' })).toBeTruthy()
+        expect(screen.getByRole('button', { name: '重试连接服务端' }).getAttribute('aria-describedby')).toBe(
+            'instamind-readonly-cache-description'
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: '重试连接服务端' }))
+
+        expect(retryRecovery).toHaveBeenCalledTimes(1)
         expect(retryHydration).toHaveBeenCalledTimes(1)
     })
 })

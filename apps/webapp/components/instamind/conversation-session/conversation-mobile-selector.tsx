@@ -9,12 +9,17 @@ import { Separator } from '@/components/ui/separator'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 
+import { ConversationRowActions } from './conversation-row-actions'
+import { truncateConversationTitle } from './truncate-conversation-title'
 import type { ConversationListItem as ConversationListItemValue } from './types'
+
+const MOBILE_CONVERSATION_TITLE_MAX_UNITS = 28
 
 interface ConversationMobileSelectorProps {
     conversations: ConversationListItemValue[]
     disabled?: boolean
     onCreateConversation: () => Promise<boolean> | boolean
+    onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
     onSelectConversation: (conversationId: string) => Promise<boolean> | boolean
     selectedConversationTitle: string
 }
@@ -23,6 +28,7 @@ export function ConversationMobileSelector({
     conversations,
     disabled = false,
     onCreateConversation,
+    onDeleteConversation = () => false,
     onSelectConversation,
     selectedConversationTitle,
 }: ConversationMobileSelectorProps) {
@@ -80,10 +86,10 @@ export function ConversationMobileSelector({
                         <SheetTitle>会话抽屉</SheetTitle>
                         <SheetDescription>选择最近会话或创建一个新聊天。</SheetDescription>
                     </SheetHeader>
-                    <div className="pr-10">
+                    <div>
                         <a
                             href="/"
-                            className="mx-3 mb-3 mt-1 flex min-w-0 items-center gap-3 rounded-xl px-1 py-1 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                            className="mx-3 mb-3 mr-10 mt-1 flex min-w-0 items-center gap-3 rounded-xl px-1 py-1 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                         >
                             <img src="/brand/ai-mind-icon.webp" alt="" aria-hidden="true" className="size-6 shrink-0 rounded-lg" />
                             <span className="truncate text-lg font-semibold tracking-tight">AI Mind</span>
@@ -103,24 +109,44 @@ export function ConversationMobileSelector({
                         <Separator className="my-3 bg-sidebar-border" />
 
                         <div className="px-3 pb-2 text-xs font-medium text-sidebar-foreground/60">最近</div>
-                        <ScrollArea className="max-h-[calc(100vh-9.5rem)] pr-1">
-                            <div className="flex flex-col gap-1">
+                        <ScrollArea className="max-h-[calc(100vh-9.5rem)] min-w-0 max-w-full overflow-hidden pr-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
+                            <div className="flex w-full min-w-0 max-w-full flex-col gap-1 overflow-hidden">
                                 {recentConversations.map(conversation => (
-                                    <Button
-                                        key={conversation.id}
-                                        type="button"
-                                        variant="ghost"
-                                        size="sm"
-                                        aria-current={conversation.selected ? 'page' : undefined}
-                                        className={cn(
-                                            'h-9 w-full justify-start rounded-[10px] px-3 text-sm font-normal text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                                            conversation.selected && 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-                                        )}
-                                        disabled={disabled}
-                                        onClick={() => void handleSelectConversation(conversation.id)}
-                                    >
-                                        <span className="truncate">{conversation.title}</span>
-                                    </Button>
+                                    <div key={conversation.id} className="group relative min-w-0">
+                                        <Button
+                                            type="button"
+                                            variant="ghost"
+                                            size="sm"
+                                            aria-current={conversation.selected ? 'page' : undefined}
+                                            aria-label={conversation.title}
+                                            className={cn(
+                                                'h-9 w-full cursor-pointer justify-start rounded-[10px] px-3 pr-9 text-sm font-normal text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                                                !disabled &&
+                                                    'group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground group-focus-within:bg-sidebar-accent group-focus-within:text-sidebar-accent-foreground group-has-[[data-state=open]]:bg-sidebar-accent group-has-[[data-state=open]]:text-sidebar-accent-foreground',
+                                                conversation.selected && 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+                                            )}
+                                            disabled={disabled}
+                                            onClick={() => void handleSelectConversation(conversation.id)}
+                                        >
+                                            <span className="block min-w-0 overflow-hidden whitespace-nowrap [text-overflow:clip]">
+                                                {truncateConversationTitle(conversation.title, MOBILE_CONVERSATION_TITLE_MAX_UNITS)}
+                                            </span>
+                                        </Button>
+                                        <span
+                                            aria-hidden="true"
+                                            className={cn(
+                                                'pointer-events-none absolute inset-y-0.5 right-1 z-[1] w-9 rounded-r-[10px] bg-gradient-to-r from-transparent to-sidebar opacity-100',
+                                                conversation.selected && 'to-sidebar-accent'
+                                            )}
+                                        />
+                                        <ConversationRowActions
+                                            conversationId={conversation.id}
+                                            disabled={disabled}
+                                            mobile
+                                            onDelete={onDeleteConversation}
+                                            title={conversation.title}
+                                        />
+                                    </div>
                                 ))}
                             </div>
                         </ScrollArea>

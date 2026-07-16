@@ -122,7 +122,7 @@ describe('GET /api/chat/thread', () => {
         })
     })
 
-    it('storage error 时返回 sanitized empty hydration，不暴露 raw database error', async () => {
+    it('storage error 时返回 sanitized hydration unavailable error，不暴露 raw database error', async () => {
         vi.spyOn(chatMemoryService, 'readThreadState').mockRejectedValueOnce(
             new Error('relation "langgraph_chat_memory.checkpoints" does not exist')
         )
@@ -141,13 +141,10 @@ describe('GET /api/chat/thread', () => {
         )
         const body = await response.json()
 
-        expect(response.status).toBe(200)
+        expect(response.status).toBe(503)
         expect(body).toEqual({
-            conversationId: 'conv-broken',
-            threadId: expect.stringMatching(/^chat-conversation:[a-f0-9]{64}:[a-f0-9]{64}$/),
-            messages: [],
-            pinnedDecisions: [],
-            restored: false,
+            code: 'CHAT_THREAD_HYDRATION_UNAVAILABLE',
+            error: 'Conversation thread hydration is temporarily unavailable.',
         })
         expect(JSON.stringify(body)).not.toContain('langgraph_chat_memory')
     })

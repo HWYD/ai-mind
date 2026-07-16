@@ -11,6 +11,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/h
 import { Separator } from '@/components/ui/separator'
 
 import { deliveryChainDemoSuggestion, type EmptyStateSuggestion, tasklistDemoSuggestion } from './empty-state-suggestion-options'
+import { FollowUpSuggestions } from './follow-up-suggestions'
 
 const tasklistSteps = [
     { icon: FileText, label: '读取方案' },
@@ -21,24 +22,38 @@ const tasklistSteps = [
 
 const memorySteps = ['发送“记住我喜欢吃桃子。”', '新建或切换对话。', '发送“给我推荐几种水果。”']
 const finePointerQuery = '(hover: hover) and (pointer: fine)'
+const desktopRecommendationQuery = '(min-width: 768px)'
+const desktopRecommendationSeed = `empty-state-desktop-${Math.random().toString(36).slice(2)}`
 
-function subscribeToFinePointerPreference(onStoreChange: () => void) {
+function subscribeToMediaQuery(mediaQueryText: string, onStoreChange: () => void) {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
         return () => undefined
     }
 
-    const mediaQuery = window.matchMedia(finePointerQuery)
+    const mediaQuery = window.matchMedia(mediaQueryText)
     mediaQuery.addEventListener('change', onStoreChange)
 
     return () => mediaQuery.removeEventListener('change', onStoreChange)
 }
 
-function getFinePointerPreference() {
-    return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(finePointerQuery).matches
+function getMediaQueryPreference(mediaQueryText: string) {
+    return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(mediaQueryText).matches
+}
+
+function useMediaQueryPreference(mediaQueryText: string) {
+    return useSyncExternalStore(
+        onStoreChange => subscribeToMediaQuery(mediaQueryText, onStoreChange),
+        () => getMediaQueryPreference(mediaQueryText),
+        () => false
+    )
 }
 
 function useSupportsFinePointer() {
-    return useSyncExternalStore(subscribeToFinePointerPreference, getFinePointerPreference, () => false)
+    return useMediaQueryPreference(finePointerQuery)
+}
+
+function useSupportsDesktopRecommendations() {
+    return useMediaQueryPreference(desktopRecommendationQuery)
 }
 
 function CaseIcon({ children, tone = 'agent' }: { children: ReactNode; tone?: 'agent' | 'memory' }) {
@@ -89,15 +104,18 @@ function ExecutableCardOverlay({ ariaLabel, disabled, onClick }: { ariaLabel: st
 
 export function EmptyStateSuggestions({
     disabled,
+    onSelectQuestion,
     onSelectSuggestion,
 }: {
     disabled?: boolean
+    onSelectQuestion: (question: string) => void
     onSelectSuggestion: (suggestion: EmptyStateSuggestion) => void
 }) {
     const [memoryStepsOpen, setMemoryStepsOpen] = useState(false)
     const [memoryHoverCardOpen, setMemoryHoverCardOpen] = useState(false)
     const memoryStepsId = `memory-experience-steps-${useId().replace(/:/g, '')}`
     const supportsFinePointer = useSupportsFinePointer()
+    const supportsDesktopRecommendations = useSupportsDesktopRecommendations()
 
     return (
         <section className="mx-auto flex w-full max-w-[var(--chat-content-column-width)] flex-col items-center text-center md:pt-8">
@@ -342,6 +360,12 @@ export function EmptyStateSuggestions({
                             </Collapsible>
                         </Card>
                     </article>
+
+                    {supportsDesktopRecommendations ? (
+                        <div role="group" aria-label="推荐问题" className="hidden min-w-0 md:block">
+                            <FollowUpSuggestions seed={desktopRecommendationSeed} className="mt-0" onSelectQuestion={onSelectQuestion} />
+                        </div>
+                    ) : null}
                 </div>
             </div>
         </section>

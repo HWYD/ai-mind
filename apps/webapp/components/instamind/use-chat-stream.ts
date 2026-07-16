@@ -30,6 +30,9 @@ import {
 } from './chat-stream/stream-message-reducer'
 import { consumeNdjsonStream } from './chat-stream/stream-reader'
 import { useStreamTextBuffer } from './chat-stream/use-stream-text-buffer'
+import type { LocalConversationMetadata } from './local-chat-persistence/schema'
+import { createLocalConversationSnapshot } from './local-chat-persistence/stable-snapshot'
+import { readLocalConversationSnapshot, writeLocalConversationSnapshot } from './local-chat-persistence/store'
 
 // 文本/推理 delta 的批量刷新窗口。流式 token 先进入 buffer，再按约 40ms + rAF 合并写入 React state。
 // 调大：Markdown 解析和 DOM 更新更少但打字感更钝；调小：更实时但更容易触发渲染/滚动抖动。
@@ -42,6 +45,11 @@ interface ThreadHydrationResponse {
     conversationId?: string
     messages?: MindMessage[]
     restored?: boolean
+}
+
+interface ThreadHydrationErrorResponse {
+    code?: string
+    error?: string
 }
 
 type ChatRequestError = Error & {
@@ -74,6 +82,7 @@ function getResumeAgentRunUserMessage(code: string | null, fallback: string, sta
 
 interface UseChatStreamOptions {
     conversationId?: string
+    conversationMetadata?: LocalConversationMetadata | null
     draftMode?: boolean
     skillMode?: ChatSkillMode
     model?: ChatModel
@@ -115,6 +124,7 @@ function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterru
 
 export function useChatStream(options: UseChatStreamOptions = {}) {
     const conversationId = options.conversationId?.trim() || null
+    const conversationMetadata = options.conversationMetadata ?? null
     const draftMode = options.draftMode ?? false
     const skillMode = options.skillMode ?? 'auto'
     const model = options.model ?? defaultChatModel
@@ -125,6 +135,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [error, setError] = useState<string | null>(null)
     const [hydrationError, setHydrationError] = useState<string | null>(null)
     const [hydrationStatus, setHydrationStatus] = useState<ConversationHydrationStatus>('idle')
+    const [readOnlyCacheMessage, setReadOnlyCacheMessage] = useState<string | null>(null)
     const [threadMemoryStatusHint, setThreadMemoryStatusHint] = useState<ThreadMemoryStatusHint | null>(null)
     const [hydrationRetryToken, setHydrationRetryToken] = useState(0)
 
@@ -132,6 +143,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const activeConversationIdRef = useRef<string | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     const hydratedConversationIdRef = useRef<string | null>(null)
+    const localSnapshotRevisionRef = useRef(0)
 
     const streamMessageStateRef = useRef(createStreamMessageState(messages)) //给 stream reducer 用的同步快照，里面有 messages + activeStream。
 
@@ -181,6 +193,46 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         })
     }
 
+    function commitStableLocalSnapshot(nextMessages: MindMessage[], committedConversationId = conversationId) {
+        const targetConversationId = committedConversationId?.trim()
+
+        if (!targetConversationId) {
+            return
+        }
+
+        const now = new Date().toISOString()
+        const metadata =
+            conversationMetadata && conversationMetadata.id === targetConversationId
+                ? conversationMetadata
+                : {
+                      createdAt: now,
+                      hasMessages: nextMessages.length > 0,
+                      id: targetConversationId,
+                      lastActiveAt: now,
+                      title: '新会话',
+                  }
+        const snapshot = createLocalConversationSnapshot({
+            conversation: {
+                ...metadata,
+                hasMessages: nextMessages.length > 0,
+                lastActiveAt: now,
+            },
+            messages: nextMessages,
+            previousRevision: localSnapshotRevisionRef.current,
+            snapshotAt: now,
+        })
+
+        if (!snapshot) {
+            return
+        }
+
+        void writeLocalConversationSnapshot(snapshot).then(result => {
+            if (result.status === 'written') {
+                localSnapshotRevisionRef.current = result.revision
+            }
+        })
+    }
+
     const textBuffer = useStreamTextBuffer({
         flushIntervalMs: STREAM_TEXT_FLUSH_INTERVAL_MS,
         flushTextDeltas: pendingTextDeltas => {
@@ -212,6 +264,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             hydratedConversationIdRef.current = null
             setHydrationError(null)
             setHydrationStatus('idle')
+            setReadOnlyCacheMessage(null)
+            localSnapshotRevisionRef.current = 0
             setThreadMemoryStatusHint(null)
             syncMessageSnapshots([])
             streamMessageStateRef.current = createStreamMessageState([])
@@ -230,17 +284,46 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         hydratedConversationIdRef.current = conversationId
         setHydrationError(null)
         setHydrationStatus('loading')
+        setReadOnlyCacheMessage(null)
+        localSnapshotRevisionRef.current = 0
         setThreadMemoryStatusHint(null)
         syncMessageSnapshots([])
         streamMessageStateRef.current = createStreamMessageState([])
         setMessages([])
 
         async function hydrateThread() {
+            let hasLocalSnapshot = false
+
             try {
+                const localSnapshot = await readLocalConversationSnapshot(conversationId)
+
+                if (cancelled) {
+                    return
+                }
+
+                if (localSnapshot.status === 'valid') {
+                    hasLocalSnapshot = true
+                    localSnapshotRevisionRef.current = localSnapshot.data.revision
+                    syncMessageSnapshots(localSnapshot.data.messages)
+                    streamMessageStateRef.current = createStreamMessageState(localSnapshot.data.messages)
+                    setMessages(localSnapshot.data.messages)
+                }
+
                 const response = await fetch(`/api/chat/thread?conversationId=${encodeURIComponent(conversationId)}`)
                 const contentType = response.headers.get('Content-Type') ?? ''
 
                 if (!response.ok || !contentType.includes('application/json')) {
+                    const errorData = contentType.includes('application/json')
+                        ? ((await response.json().catch(() => null)) as ThreadHydrationErrorResponse | null)
+                        : null
+
+                    if (hasLocalSnapshot && errorData?.code === 'CHAT_THREAD_HYDRATION_UNAVAILABLE') {
+                        setHydrationError(null)
+                        setHydrationStatus('ready')
+                        setReadOnlyCacheMessage('当前显示的是浏览器本地只读缓存，服务端会话上下文暂时不可用。')
+                        return
+                    }
+
                     throw new Error('Thread hydration request failed.')
                 }
 
@@ -251,6 +334,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
 
                 if (!data.restored || !Array.isArray(data.messages)) {
+                    setHydrationError(null)
+                    setHydrationStatus('ready')
+                    return
+                }
+
+                if (hasLocalSnapshot) {
                     setHydrationError(null)
                     setHydrationStatus('ready')
                     return
@@ -275,8 +364,14 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
 
                 hydratedConversationIdRef.current = null
-                setHydrationStatus('failed')
-                setHydrationError('会话加载失败，请重试。')
+                if (hasLocalSnapshot) {
+                    setHydrationStatus('ready')
+                    setHydrationError(null)
+                    setReadOnlyCacheMessage('当前显示的是浏览器本地只读缓存，服务端会话暂未确认。')
+                } else {
+                    setHydrationStatus('failed')
+                    setHydrationError('会话加载失败，请重试。')
+                }
             }
         }
 
@@ -507,6 +602,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
 
             if (!controller.signal.aborted) {
                 setStatus('ready')
+                commitStableLocalSnapshot(messagesRef.current, activeConversationIdRef.current ?? requestConversationId)
             }
         } catch (requestError) {
             // 异常前先 flush，避免最后一批已经收到的文本还停留在 buffer 中。
@@ -602,6 +698,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
 
             if (!controller.signal.aborted) {
                 setStatus('ready')
+                commitStableLocalSnapshot(messagesRef.current)
             }
 
             return true
@@ -646,7 +743,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         // 删除一轮用户消息时，同时删除它后面对应的 assistant 回答，保持回合结构完整。
-        updateMessages(current => removeUserTurnPair(pruneTransientMessages(current), userMessageId))
+        updateMessages(current => {
+            const nextMessages = removeUserTurnPair(pruneTransientMessages(current), userMessageId)
+
+            commitStableLocalSnapshot(nextMessages)
+            return nextMessages
+        })
         return true
     }
 
@@ -671,6 +773,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         error,
         hydrationError,
         hydrationStatus,
+        readOnlyCacheMessage,
         threadMemoryStatusHint,
         pendingInterrupt: findPendingAgentInterrupt(messages),
         sendMessage,

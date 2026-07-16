@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
+    buildChatConversationThreadId,
     CHAT_CONVERSATION_REGISTRY_LIMIT,
     ConversationRegistryNotFoundError,
+    createChatMemoryService,
     createConversationRegistryService,
     DEFAULT_CHAT_CONVERSATION_TITLE,
 } from '@/lib/ai/runtime/chat-memory'
@@ -254,5 +256,77 @@ describe('runtime/chat-memory conversation registry', () => {
             conversations: [],
             updatedAt: expect.any(String),
         })
+    })
+
+    it('deletes the conversation ThreadState before removing the Registry entry and selects a fallback', async () => {
+        const service = createConversationRegistryService({ checkpointMode: 'memory' }, env)
+        const memory = createChatMemoryService({ checkpointMode: 'memory' }, env)
+        const sessionId = 'registry-delete-session'
+
+        await service.createConversation(sessionId, {
+            conversationId: 'conv-a',
+            hasMessages: true,
+            now: '2026-07-04T08:00:00.000Z',
+        })
+        await service.createConversation(sessionId, {
+            conversationId: 'conv-b',
+            hasMessages: true,
+            now: '2026-07-04T08:01:00.000Z',
+        })
+        await memory.writeThreadState(buildChatConversationThreadId(sessionId, 'conv-b', env), {
+            messages: [],
+            pinnedDecisions: [],
+            summary: 'to be deleted',
+        })
+
+        const registry = await service.deleteConversation(sessionId, 'conv-b', {
+            now: '2026-07-04T08:02:00.000Z',
+        })
+
+        expect(registry.selectedConversationId).toBe('conv-a')
+        expect(registry.conversations.map(conversation => conversation.id)).toEqual(['conv-a'])
+        await expect(memory.readThreadState(buildChatConversationThreadId(sessionId, 'conv-b', env))).resolves.toMatchObject({
+            restored: false,
+        })
+        await expect(service.getConversation(sessionId, 'conv-b')).resolves.toBeNull()
+    })
+
+    it('enters an empty draft after deleting the last conversation', async () => {
+        const service = createConversationRegistryService({ checkpointMode: 'memory' }, env)
+        const sessionId = 'registry-delete-last-session'
+
+        await service.createConversation(sessionId, {
+            conversationId: 'conv-only',
+            hasMessages: true,
+            now: '2026-07-04T08:00:00.000Z',
+        })
+
+        await expect(service.deleteConversation(sessionId, 'conv-only')).resolves.toMatchObject({
+            conversations: [],
+            selectedConversationId: null,
+        })
+    })
+
+    it('keeps the Registry entry when the Registry write fails after ThreadState cleanup', async () => {
+        const service = createConversationRegistryService({ checkpointMode: 'memory' }, env)
+        const memory = createChatMemoryService({ checkpointMode: 'memory' }, env)
+        const sessionId = 'registry-delete-partial-failure-session'
+        const threadId = buildChatConversationThreadId(sessionId, 'conv-partial', env)
+
+        await service.createConversation(sessionId, {
+            conversationId: 'conv-partial',
+            hasMessages: true,
+            now: '2026-07-04T08:00:00.000Z',
+        })
+        await memory.writeThreadState(threadId, {
+            messages: [],
+            pinnedDecisions: [],
+            summary: 'partial failure',
+        })
+        vi.spyOn(service, 'writeRegistry').mockRejectedValue(new Error('registry write failed'))
+
+        await expect(service.deleteConversation(sessionId, 'conv-partial')).rejects.toThrow('registry write failed')
+        await expect(service.getConversation(sessionId, 'conv-partial')).resolves.toMatchObject({ id: 'conv-partial' })
+        await expect(memory.readThreadState(threadId)).resolves.toMatchObject({ restored: false })
     })
 })

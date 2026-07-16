@@ -2,6 +2,7 @@ import { Annotation, type BaseCheckpointSaver, END, START, StateGraph } from '@l
 
 import { createId } from '@/lib/ai/create-id'
 
+import { getChatMemoryService } from './chat-memory-service'
 import { getChatMemoryCheckpointer } from './checkpointer-provider'
 import { type ChatMemoryRuntimeConfig, getChatMemoryRuntimeConfig } from './runtime-config'
 import {
@@ -18,7 +19,7 @@ import {
     normalizeConversationRegistryCheckpointState,
     normalizeConversationRegistryState,
 } from './state-schema'
-import { buildChatConversationRegistryThreadId } from './thread-id'
+import { buildChatConversationRegistryThreadId, buildChatConversationThreadId } from './thread-id'
 
 const replaceValue = <T>(_left: T, right: T): T => right
 
@@ -189,6 +190,7 @@ export interface TouchConversationOptions {
 
 export interface ConversationRegistryService {
     createConversation(sessionId: string, options?: CreateConversationOptions): Promise<ConversationRegistryState>
+    deleteConversation(sessionId: string, conversationId: string, options?: SelectConversationOptions): Promise<ConversationRegistryState>
     ensureRegistry(sessionId: string, options?: EnsureConversationRegistryOptions): Promise<ConversationRegistryState>
     getConversation(sessionId: string, conversationId: string): Promise<ChatConversation | null>
     readRegistry(sessionId: string): Promise<ConversationRegistryReadResult>
@@ -216,6 +218,7 @@ export function createConversationRegistryService(
 ): ConversationRegistryService {
     const checkpointer = getChatMemoryCheckpointer(config.checkpointMode, env)
     const graph = checkpointer ? createConversationRegistryGraph(checkpointer) : null
+    const chatMemory = getChatMemoryService(config, env)
     const getNow = options.now ?? (() => new Date().toISOString())
 
     const getConfig = (sessionId: string) => ({
@@ -258,6 +261,30 @@ export function createConversationRegistryService(
                         ),
                     ],
                     selectedConversationId: conversationId,
+                    updatedAt: now,
+                },
+                { now }
+            )
+
+            await this.writeRegistry(sessionId, nextRegistry)
+            return nextRegistry
+        },
+
+        async deleteConversation(sessionId, conversationId, deleteOptions = {}) {
+            const now = deleteOptions.now ?? getNow()
+            const registry = await this.ensureRegistry(sessionId)
+            const existingConversation = registry.conversations.find(conversation => conversation.id === conversationId)
+
+            if (!existingConversation) {
+                throw new ConversationRegistryNotFoundError(conversationId)
+            }
+
+            await chatMemory.deleteThreadState(buildChatConversationThreadId(sessionId, conversationId, env))
+
+            const nextRegistry = finalizeRegistryState(
+                {
+                    conversations: registry.conversations.filter(conversation => conversation.id !== conversationId),
+                    selectedConversationId: registry.selectedConversationId,
                     updatedAt: now,
                 },
                 { now }
@@ -432,6 +459,9 @@ export function getConversationRegistryService(
 export const conversationRegistryService: ConversationRegistryService = {
     createConversation(sessionId, options) {
         return getConversationRegistryService().createConversation(sessionId, options)
+    },
+    deleteConversation(sessionId, conversationId, options) {
+        return getConversationRegistryService().deleteConversation(sessionId, conversationId, options)
     },
     ensureRegistry(sessionId, options) {
         return getConversationRegistryService().ensureRegistry(sessionId, options)

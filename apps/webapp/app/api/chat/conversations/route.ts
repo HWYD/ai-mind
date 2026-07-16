@@ -96,3 +96,43 @@ export async function POST(request: NextRequest) {
         )
     }
 }
+
+export async function DELETE(request: NextRequest) {
+    try {
+        const json = await request.json().catch(() => ({}))
+        const payload = selectConversationRequestSchema.parse(json)
+        const { sessionId, setCookie } = resolveSessionId(request.cookies)
+        const registry = await conversationRegistryService.deleteConversation(sessionId, payload.conversationId)
+
+        return toConversationRegistryResponse(registry, setCookie)
+    } catch (error) {
+        if (error instanceof ZodError) {
+            return Response.json(
+                {
+                    code: 'INVALID_CONVERSATION_REQUEST',
+                    error: 'Invalid conversation request.',
+                    issues: error.issues,
+                },
+                { status: 400 }
+            )
+        }
+
+        if (error instanceof ConversationRegistryNotFoundError) {
+            return Response.json(
+                {
+                    code: 'CONVERSATION_NOT_FOUND',
+                    error: 'Conversation was not found in the current browser session registry.',
+                },
+                { status: 404 }
+            )
+        }
+
+        return Response.json(
+            {
+                code: 'CONVERSATION_REGISTRY_UNAVAILABLE',
+                error: 'Conversation registry is temporarily unavailable.',
+            },
+            { status: 500 }
+        )
+    }
+}

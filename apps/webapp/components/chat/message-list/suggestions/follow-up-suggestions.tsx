@@ -2,6 +2,7 @@ import { ArrowRight } from 'lucide-react'
 import { useMemo } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 const GENERAL_QUESTION_OPTIONS = [
     'Vue 3 的响应式系统为什么要用 Proxy？',
@@ -63,11 +64,21 @@ function shuffleQuestions(sourceQuestions: string[], initialSeed: number) {
     return questions
 }
 
-export function FollowUpSuggestions({ seed, onSelectQuestion }: { seed: string; onSelectQuestion: (question: string) => void }) {
-    const questions = useMemo(() => pickStableQuestions(seed), [seed])
+export function FollowUpSuggestions({
+    seed,
+    questions: explicitQuestions,
+    className,
+    onSelectQuestion,
+}: {
+    seed: string
+    questions?: readonly string[]
+    className?: string
+    onSelectQuestion: (question: string) => void
+}) {
+    const questions = useMemo(() => explicitQuestions ?? pickStableQuestions(seed), [explicitQuestions, seed])
 
     return (
-        <div className="mt-4 flex flex-col items-start gap-2.5">
+        <div className={cn('mt-4 flex flex-col items-start gap-2.5', className)}>
             {questions.map(question => (
                 <Button
                     key={question}

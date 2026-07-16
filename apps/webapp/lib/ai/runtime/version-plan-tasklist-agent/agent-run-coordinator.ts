@@ -196,7 +196,7 @@ async function persistGraphResult(options: {
                 threadId: interrupt.threadId,
                 type: 'agent-interrupt',
             })
-            await observeTasklistLangSmith(() =>
+            void observeTasklistLangSmith(() =>
                 langSmithObserver.observeInterrupt({
                     assistantMessageId: options.assistantMessageId,
                     metadata: buildTasklistLangSmithHitlMetadataFromInterruptPayload({

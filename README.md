@@ -6,9 +6,9 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 当前项目处于 **Runtime Skeleton / MVP** 阶段，适合作为 AI 应用前端、AI Runtime、MCP 接入、结构化流式协议和执行过程可视化的技术探索样例。
 
-![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.1.1-controlled-planner-overview.gif)
+![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> v0.4.6：UserMemory Semantic Retrieval Baseline。在 v0.4.5 长期 UserMemory Store 基线之上，使用 `PostgresStore` vector search 为同一 browser session 的长期偏好提供语义召回；检索仍只作为 ordinary chat 的有界补充上下文，不改变 ThreadState、stream protocol、Tasklist / Delivery 边界。
+> v0.4.7：Browser-local Chat Session Persistence。在不引入 PG 完整聊天历史、账号体系或跨设备同步的前提下，为 AI Mind 增加浏览器本地最近会话与完整用户可见消息快照；刷新后先从本地恢复，再由服务端会话列表校准，会话展示、会话归属和 AI 运行时上下文继续保持分层边界。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.6`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.7`。
 
 已经验证：
 
@@ -218,6 +218,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Tool & Agent final-turn memory。
 - Minimal multi-thread chat sessions。
 - browser-session scoped long-term UserMemory baseline。
+- browser-local recent conversation restore、rich UI snapshot persistence 与单会话删除。
 
 当前非目标：
 
@@ -253,27 +254,26 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.6
+## 当前版本：v0.4.7
 
-这版的主线是 `UserMemory Semantic Retrieval Baseline`：在 browser-session scoped `UserMemory Store` 上补齐真实语义召回。用户换一种说法提出相关问题时，runtime 可以从同一 browser session 的长期 UserMemory 中选出少量相关内容，作为当前回答的补充上下文。
+这版的主线是 `Browser-local Chat Session Persistence`：在不引入 PG 完整聊天历史、账号体系或跨设备同步的前提下，为 AI Mind 增加浏览器本地最近会话列表与完整用户可见消息快照。页面刷新后，客户端先从本地恢复，再由服务端会话列表校准；同一会话的完整 UI 历史仍只保存在浏览器本地。
 
-v0.4.6 的边界非常明确：
+v0.4.7 的边界非常明确：
 
-- 正式检索路径只使用 `PostgresStore` 的 vector search；embedding 固定走独立的火山引擎 Ark OpenAI-compatible 配置和 `doubao-embedding-vision`，不跟随聊天模型选择器。
-- semantic index 只允许 `UserMemory.text` 与 `UserMemory.tags`；不索引完整文档、聊天记录、ThreadState、工具/MCP 原始结果、GraphState 或 RuntimeArtifact。
-- 检索只接入 ordinary text chat、tool-assisted ordinary chat，以及仍处于 ordinary chat 边界内的受控 capability-context final answer；Tasklist、Delivery、HITL 与原始 Tool/MCP 输入路径不触发检索。
-- query 直接来自本轮最新用户输入，只做 trim、空白折叠与最多 800 字符裁剪；不做 LLM query rewrite、HyDE 或 query expansion。
-- 初始候选 `topK = 8`，最终只注入 semantic score `>= 0.32`、active、未抑制且 confidence `>= 0.7` 的记忆；仍保持最多 3 条、每条最多 300 个中文字符、总计最多 900 个中文字符。
-- 检索、embedding 或 Store 失败时安全降级为 0 条 UserMemory 注入，ordinary chat 与 streaming 继续完成；向量、分数、原始 query 和 provider/store 错误不进入任何公开 DTO。
-- 不引入 RAG、聊天历史语义搜索、账号级画像、跨设备同步、Memory Inspector、记忆编辑 UI 或独立向量数据库产品路线。
+- 本地 IndexedDB 快照只负责最近会话列表、当前会话展示和完整用户可见 UI 历史恢复，不升级为服务端完整聊天历史。
+- Server Conversation Registry 继续是会话身份、归属、最近会话保留与交互合法性的唯一权威；有效的服务端列表返回后，会清理本地已失效旧会话。
+- Server ThreadState 继续只负责 AI 运行时短期上下文；本地完整 UI 历史不会静默覆盖、补写或合并成新的模型上下文契约。
+- 当本地快照存在但服务端暂时不可用时，页面进入明确的只读缓存态，保留展示与重试入口，但禁用发送、新建会话和会话切换。
+- 桌面端与移动端都提供单会话删除入口；确认删除后，同时删除当前 browser session 的服务端会话登记、对应 ThreadState/checkpoint，以及本地索引与快照。
+- 不引入 PG 完整 chat-history business table、账号体系、跨设备同步、历史搜索、导出、分享或新的 stream protocol 字段。
 
 当前 runtime baseline 保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
-- 普通 text chat / tool-assisted ordinary chat：selected conversation 的短期 ThreadState + 当前 browser session 的语义相关 UserMemory
+- 普通 text chat / tool-assisted ordinary chat：selected conversation 的浏览器本地完整 UI 历史展示 + 服务端短期 ThreadState + 当前 browser session 的语义相关 UserMemory
 
-详细设计见 [AI Mind v0.4.6: UserMemory Semantic Retrieval Baseline](./docs/versions/v0.4.6-usermemory-semantic-retrieval-baseline.md)、[v0.4.6 Release Note](./docs/releases/v0.4.6.md)、[specs/046-usermemory-semantic-retrieval](./specs/046-usermemory-semantic-retrieval/)、[ADR-0014](./docs/adr/0014-usermemory-semantic-retrieval-baseline.md) 和 [Runtime 边界](./docs/architecture/runtime-boundary.md)。
+详细设计见 [AI Mind v0.4.7: Browser-local Chat Session Persistence](./docs/versions/v0.4.7-browser-local-chat-session-persistence.md)、[v0.4.7 Release Note](./docs/releases/v0.4.7.md)、[specs/047-browser-local-chat-persistence](./specs/047-browser-local-chat-persistence/)、[AI Mind v0.4.6: UserMemory Semantic Retrieval Baseline](./docs/versions/v0.4.6-usermemory-semantic-retrieval-baseline.md)、[ADR-0014](./docs/adr/0014-usermemory-semantic-retrieval-baseline.md) 和 [Runtime 边界](./docs/architecture/runtime-boundary.md)。
 
 ## 当前能力
 
@@ -552,7 +552,7 @@ AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION=20
 
 ### Runtime checkpoint / chat memory / user memory setup
 
-如果要验证 durable Tasklist checkpoint、chat memory checkpoint 或 v0.4.6 的 UserMemory semantic retrieval，先准备 `DATABASE_URL`，再执行：
+如果要验证 durable Tasklist checkpoint、chat memory checkpoint 或 UserMemory semantic retrieval，先准备 `DATABASE_URL`，再执行：
 
 ```bash
 pnpm db:setup:deploy
@@ -565,7 +565,7 @@ pnpm db:setup:deploy
 - chat memory `langgraph_chat_memory` schema/setup
 - user memory `langgraph_user_memory` schema/setup
 
-v0.4.6 的真实 UserMemory semantic retrieval 还需要服务端配置 `AI_MIND_DOUBAO_API_KEY` 和 `AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS=1024`。它固定使用 `doubao-embedding-vision` 与 `PostgresStore` vector search；模型或维度变更时，需要同步调整 Store setup 与部署配置。
+v0.4.6 起引入的真实 UserMemory semantic retrieval 还需要服务端配置 `AI_MIND_DOUBAO_API_KEY` 和 `AI_MIND_USER_MEMORY_EMBEDDING_DIMENSIONS=1024`。它固定使用 `doubao-embedding-vision` 与 `PostgresStore` vector search；模型或维度变更时，需要同步调整 Store setup 与部署配置。
 
 如果只想单独初始化 chat memory checkpoint，也可以运行：
 
@@ -666,6 +666,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.4  | Minimal Multi-thread Chat Sessions                 | 把 chat page 扩展为 browser-session scoped recent conversations，保持 conversation 隔离的 memory / hydration / final-turn writes，并继续复用 instant-mind + 本地 shadcn/ui 基线 |
 | v0.4.5  | Long-term User Memory Store Baseline               | 引入 browser-session scoped `UserMemory Store`，为 ordinary text chat 和 tool-assisted ordinary chat 提供后台抽取、严格校验、相关性召回和有界注入的长期用户记忆基线             |
 | v0.4.6  | UserMemory Semantic Retrieval Baseline             | 使用 `PostgresStore` vector search 与独立 embedding 配置，为 eligible ordinary chat 提供 vector-only 的长期 UserMemory 语义召回，并保持公开状态与 Agent/Workflow 边界不变       |
+| v0.4.7  | Browser-local Chat Session Persistence             | 引入浏览器本地最近会话与完整用户可见消息快照恢复，采用本地优先展示 + 服务端会话列表校准，并保持 Server Registry / ThreadState / UserMemory 的权威边界不变                       |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

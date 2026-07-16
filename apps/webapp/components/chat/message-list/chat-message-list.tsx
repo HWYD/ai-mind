@@ -215,7 +215,11 @@ export function ChatMessageList({
     return (
         <div className="flex min-h-0 flex-col gap-5 py-2">
             {messages.length === 0 && showEmptyStateSuggestions ? (
-                <EmptyStateSuggestions disabled={isBusy} onSelectSuggestion={onSelectSuggestion} />
+                <EmptyStateSuggestions
+                    disabled={isBusy}
+                    onSelectQuestion={handleSelectFollowUpQuestion}
+                    onSelectSuggestion={onSelectSuggestion}
+                />
             ) : null}
 
             {messageEntries.map(({ message, requestComposer }, messageIndex) => {

@@ -57,12 +57,20 @@ export async function GET(request: NextRequest) {
             threadId,
         })
     } catch {
-        dto = buildThreadHydrationDTO({
-            conversationId,
-            restored: false,
-            state: createEmptyThreadState(),
-            threadId,
-        })
+        return Response.json(
+            {
+                code: 'CHAT_THREAD_HYDRATION_UNAVAILABLE',
+                error: 'Conversation thread hydration is temporarily unavailable.',
+            },
+            {
+                headers: setCookie
+                    ? {
+                          'Set-Cookie': setCookie,
+                      }
+                    : undefined,
+                status: 503,
+            }
+        )
     }
 
     assertNoForbiddenHydrationFields(dto)

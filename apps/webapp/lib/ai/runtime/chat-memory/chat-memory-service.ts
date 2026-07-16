@@ -101,6 +101,7 @@ export interface AppendCompletedTurnOptions {
 
 export interface ChatMemoryService {
     appendCompletedTurn(threadId: string, input: AppendCompletedTurnInput, options?: AppendCompletedTurnOptions): Promise<void>
+    deleteThreadState(threadId: string): Promise<void>
     readThreadState(threadId: string): Promise<ChatMemoryReadResult>
     writeThreadState(threadId: string, state: AiMindThreadState): Promise<void>
 }
@@ -147,6 +148,20 @@ export function createChatMemoryService(
     }
 
     return {
+        async deleteThreadState(threadId) {
+            if (!checkpointer) {
+                return
+            }
+
+            const deleteThread = (checkpointer as BaseCheckpointSaver & { deleteThread?: (id: string) => Promise<void> }).deleteThread
+
+            if (!deleteThread) {
+                throw new Error('The configured chat memory checkpointer does not support thread deletion.')
+            }
+
+            await deleteThread.call(checkpointer, threadId)
+        },
+
         async readThreadState(threadId) {
             if (!graph) {
                 return {
@@ -319,6 +334,9 @@ export function getChatMemoryService(
 export const chatMemoryService: ChatMemoryService = {
     appendCompletedTurn(threadId, input, options) {
         return getChatMemoryService().appendCompletedTurn(threadId, input, options)
+    },
+    deleteThreadState(threadId) {
+        return getChatMemoryService().deleteThreadState(threadId)
     },
     readThreadState(threadId) {
         return getChatMemoryService().readThreadState(threadId)

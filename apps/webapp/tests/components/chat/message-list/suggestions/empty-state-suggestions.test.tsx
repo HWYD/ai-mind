@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -33,7 +33,7 @@ describe('EmptyStateSuggestions', () => {
     })
 
     it('renders the quick start heading, three cases, and current technical evidence', () => {
-        render(<EmptyStateSuggestions onSelectSuggestion={vi.fn()} />)
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
 
         expect(screen.getByRole('heading', { name: '试试这些能力' })).toBeTruthy()
         expect(screen.getByText('选择一个场景，查看执行过程、控制边界与最终产物。')).toBeTruthy()
@@ -48,7 +48,7 @@ describe('EmptyStateSuggestions', () => {
 
     it('runs the original Tasklist suggestion once through the card interaction without a second footer button', () => {
         const onSelectSuggestion = vi.fn()
-        render(<EmptyStateSuggestions onSelectSuggestion={onSelectSuggestion} />)
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
         expect(screen.getAllByRole('button')).toHaveLength(3)
         expect(screen.queryByRole('button', { name: '运行示例' })).toBeNull()
@@ -63,7 +63,7 @@ describe('EmptyStateSuggestions', () => {
 
     it('runs the original Delivery suggestion once through the card interaction', () => {
         const onSelectSuggestion = vi.fn()
-        render(<EmptyStateSuggestions onSelectSuggestion={onSelectSuggestion} />)
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
         fireEvent.click(screen.getByRole('button', { name: '运行受控交付评审示例' }))
 
@@ -76,7 +76,7 @@ describe('EmptyStateSuggestions', () => {
 
     it('keeps Memory non-submitting and expands the shared steps on touch devices', () => {
         const onSelectSuggestion = vi.fn()
-        render(<EmptyStateSuggestions onSelectSuggestion={onSelectSuggestion} />)
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
         fireEvent.click(screen.getByRole('article', { name: '跨对话偏好记忆' }))
         expect(onSelectSuggestion).not.toHaveBeenCalled()
@@ -102,7 +102,7 @@ describe('EmptyStateSuggestions', () => {
     it('uses a focusable Hover Card trigger with the same steps for fine pointers', () => {
         vi.stubGlobal('matchMedia', mockMatchMedia(true))
         vi.useFakeTimers()
-        render(<EmptyStateSuggestions onSelectSuggestion={vi.fn()} />)
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
 
         expect(screen.queryByRole('button', { name: '查看体验步骤' })).toBeNull()
         const hoverCardTrigger = screen.getByRole('button', { name: '查看跨对话偏好记忆体验步骤' })
@@ -120,7 +120,7 @@ describe('EmptyStateSuggestions', () => {
 
     it('opens the fine-pointer Hover Card from a click', () => {
         vi.stubGlobal('matchMedia', mockMatchMedia(true))
-        render(<EmptyStateSuggestions onSelectSuggestion={vi.fn()} />)
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
 
         fireEvent.click(screen.getByRole('button', { name: '查看跨对话偏好记忆体验步骤' }))
 
@@ -128,9 +128,27 @@ describe('EmptyStateSuggestions', () => {
         expect(screen.getByText('请在同一浏览器不同会话内完成体验。')).toBeTruthy()
     })
 
+    it('shows desktop recommendation questions only for desktop-sized layouts and reuses the shared follow-up interactions', () => {
+        vi.stubGlobal('matchMedia', mockMatchMedia(true))
+        const onSelectQuestion = vi.fn()
+        render(<EmptyStateSuggestions onSelectQuestion={onSelectQuestion} onSelectSuggestion={vi.fn()} />)
+
+        const recommendationGroup = screen.getByRole('group', { name: '推荐问题' })
+        const recommendationButtons = within(recommendationGroup).getAllByRole('button')
+        const firstQuestion = recommendationButtons[0].textContent ?? ''
+
+        expect(recommendationButtons).toHaveLength(3)
+
+        fireEvent.click(recommendationButtons[0])
+
+        expect(firstQuestion.length).toBeGreaterThan(0)
+        expect(onSelectQuestion).toHaveBeenCalledTimes(1)
+        expect(onSelectQuestion).toHaveBeenCalledWith(firstQuestion)
+    })
+
     it('disables every quick start operation without submitting a suggestion', () => {
         const onSelectSuggestion = vi.fn()
-        render(<EmptyStateSuggestions disabled onSelectSuggestion={onSelectSuggestion} />)
+        render(<EmptyStateSuggestions disabled onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
         for (const button of screen.getAllByRole('button')) {
             expect(button.hasAttribute('disabled')).toBe(true)

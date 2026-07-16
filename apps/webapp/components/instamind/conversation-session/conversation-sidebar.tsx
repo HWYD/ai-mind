@@ -19,13 +19,19 @@ import {
 } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
 
+import { ConversationRowActions } from './conversation-row-actions'
+import { truncateConversationTitle } from './truncate-conversation-title'
 import type { ConversationListItem as ConversationListItemValue } from './types'
+
+const DESKTOP_CONVERSATION_TITLE_MAX_UNITS = 26
+const DESKTOP_CONVERSATION_TITLE_ACTION_MAX_UNITS = 24
 
 interface ConversationSidebarProps {
     collapsed?: boolean
     conversations: ConversationListItemValue[]
     disabled?: boolean
     onCreateConversation: () => void
+    onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
     onSelectConversation: (conversationId: string) => void
     onToggleCollapsed?: () => void
 }
@@ -35,6 +41,7 @@ export function ConversationSidebar({
     conversations,
     disabled = false,
     onCreateConversation,
+    onDeleteConversation = () => false,
     onSelectConversation,
     onToggleCollapsed,
 }: ConversationSidebarProps) {
@@ -92,7 +99,7 @@ export function ConversationSidebar({
                                     aria-label="新聊天"
                                     disabled={disabled}
                                     onClick={onCreateConversation}
-                                    className={cn('text-sidebar-foreground', collapsed ? 'justify-center' : 'justify-start')}
+                                    className={cn('text-sidebar-foreground cursor-pointer', collapsed ? 'justify-center' : 'justify-start')}
                                 >
                                     <MessageSquarePlus className="size-4" />
                                     <span className={cn(collapsed && 'sr-only')}>新聊天</span>
@@ -122,20 +129,51 @@ export function ConversationSidebar({
                                     <ScrollArea className="h-full min-w-0 max-w-full overflow-hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
                                         <SidebarMenu className="box-border w-full min-w-0 max-w-full gap-1 overflow-hidden px-2 pr-3">
                                             {recentConversations.map(conversation => (
-                                                <SidebarMenuItem key={conversation.id} className="min-w-0 max-w-full">
+                                                <SidebarMenuItem key={conversation.id} className="group relative min-w-0 max-w-full">
                                                     <SidebarMenuButton
                                                         type="button"
                                                         aria-current={conversation.selected ? 'page' : undefined}
+                                                        aria-label={conversation.title}
                                                         isActive={conversation.selected}
                                                         disabled={disabled}
                                                         onClick={() => onSelectConversation(conversation.id)}
                                                         className={cn(
-                                                            'h-11 min-w-0 max-w-full justify-start rounded-2xl px-4 text-[15px] font-normal data-[active=true]:font-normal',
+                                                            'h-11 min-w-0 max-w-full cursor-pointer justify-start rounded-2xl px-4 pr-4 text-[15px] font-normal transition-[padding] data-[active=true]:font-normal',
+                                                            !disabled &&
+                                                                'group-hover:bg-sidebar-accent group-hover:pr-11 group-hover:text-sidebar-accent-foreground group-focus-within:bg-sidebar-accent group-focus-within:pr-11 group-focus-within:text-sidebar-accent-foreground group-has-[[data-state=open]]:bg-sidebar-accent group-has-[[data-state=open]]:pr-11 group-has-[[data-state=open]]:text-sidebar-accent-foreground',
                                                             conversation.selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
                                                         )}
                                                     >
-                                                        <span className="block min-w-0 flex-1 truncate">{conversation.title}</span>
+                                                        <span className="block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left [text-overflow:clip] group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden">
+                                                            {truncateConversationTitle(
+                                                                conversation.title,
+                                                                DESKTOP_CONVERSATION_TITLE_MAX_UNITS
+                                                            )}
+                                                        </span>
+                                                        <span className="hidden min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left [text-overflow:clip] group-hover:block group-focus-within:block group-has-[[data-state=open]]:block">
+                                                            {truncateConversationTitle(
+                                                                conversation.title,
+                                                                DESKTOP_CONVERSATION_TITLE_ACTION_MAX_UNITS
+                                                            )}
+                                                        </span>
                                                     </SidebarMenuButton>
+                                                    {!disabled ? (
+                                                        <>
+                                                            <span
+                                                                aria-hidden="true"
+                                                                className={cn(
+                                                                    'pointer-events-none absolute inset-y-1 right-1 z-[1] w-12 rounded-r-2xl bg-gradient-to-r from-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 group-has-[[data-state=open]]:opacity-100',
+                                                                    conversation.selected ? 'to-sidebar-accent' : 'to-sidebar'
+                                                                )}
+                                                            />
+                                                            <ConversationRowActions
+                                                                conversationId={conversation.id}
+                                                                disabled={disabled}
+                                                                onDelete={onDeleteConversation}
+                                                                title={conversation.title}
+                                                            />
+                                                        </>
+                                                    ) : null}
                                                 </SidebarMenuItem>
                                             ))}
                                         </SidebarMenu>

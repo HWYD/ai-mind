@@ -1,9 +1,17 @@
 /** @vitest-environment jsdom */
 
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useChatStream } from '@/components/instamind/use-chat-stream'
+import type { MindMessage } from '@/lib/ai/types/message'
+
+const localStoreMocks = vi.hoisted(() => ({
+    readLocalConversationSnapshot: vi.fn(),
+    writeLocalConversationSnapshot: vi.fn(),
+}))
+
+vi.mock('@/components/instamind/local-chat-persistence/store', () => localStoreMocks)
 
 function createThreadHydrationResponse(options: { conversationId: string; messages?: unknown[]; restored?: boolean }) {
     return Response.json({
@@ -35,12 +43,148 @@ function createNdjsonResponse(headers: Record<string, string> = {}) {
     )
 }
 
+function createResumeNdjsonResponse() {
+    const encoder = new TextEncoder()
+
+    return new Response(
+        new ReadableStream<Uint8Array>({
+            start(controller) {
+                controller.enqueue(
+                    encoder.encode(`${JSON.stringify({ type: 'text-start', messageId: 'assistant-resumed', partId: 'text-1' })}\n`)
+                )
+                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'text-delta', partId: 'text-1', delta: '已继续完成' })}\n`))
+                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'text-end', partId: 'text-1' })}\n`))
+                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'finish' })}\n`))
+                controller.close()
+            },
+        }),
+        {
+            headers: {
+                'Content-Type': 'application/x-ndjson; charset=utf-8',
+            },
+        }
+    )
+}
+
 afterEach(() => {
     vi.unstubAllGlobals()
     cleanup()
 })
 
+beforeEach(() => {
+    vi.clearAllMocks()
+    localStoreMocks.readLocalConversationSnapshot.mockResolvedValue({ status: 'missing' })
+    localStoreMocks.writeLocalConversationSnapshot.mockResolvedValue({ revision: 1, status: 'written' })
+})
+
 describe('useChatStream hydration', () => {
+    it('restores local rich UI snapshot before bounded server hydration and keeps it as display source', async () => {
+        const localMessages: MindMessage[] = [
+            {
+                createdAt: '2026-07-02T10:00:00.000Z',
+                id: 'local-user',
+                parts: [{ format: 'markdown', text: '本地问题', type: 'text' }],
+                role: 'user',
+                status: 'completed',
+            },
+            {
+                createdAt: '2026-07-02T10:00:01.000Z',
+                id: 'local-assistant',
+                parts: [
+                    { format: 'markdown', text: '本地富回答', type: 'text' },
+                    { input: '{}', output: '{}', status: 'completed', toolName: 'reader', type: 'tool' },
+                ],
+                role: 'assistant',
+                status: 'completed',
+            },
+        ]
+        const fetchMock = vi.fn().mockResolvedValue(
+            createThreadHydrationResponse({
+                conversationId: 'conv-local',
+                restored: true,
+                messages: [
+                    {
+                        createdAt: '2026-07-02T10:00:02.000Z',
+                        id: 'server-user',
+                        parts: [{ format: 'markdown', text: '服务端 bounded 文本', type: 'text' }],
+                        role: 'user',
+                        status: 'completed',
+                    },
+                ],
+            })
+        )
+
+        localStoreMocks.readLocalConversationSnapshot.mockResolvedValueOnce({
+            data: {
+                conversationId: 'conv-local',
+                createdAt: '2026-07-02T10:00:00.000Z',
+                lastActiveAt: '2026-07-02T10:00:01.000Z',
+                messages: localMessages,
+                revision: 7,
+                schemaVersion: 1,
+                snapshotAt: '2026-07-02T10:00:01.000Z',
+                title: 'Local',
+            },
+            status: 'valid',
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useChatStream({ conversationId: 'conv-local', enableReasoning: false }))
+
+        await waitFor(() => {
+            expect(result.current.hydrationStatus).toBe('ready')
+        })
+
+        expect(result.current.messages.map(message => message.id)).toEqual(['local-user', 'local-assistant'])
+        expect(result.current.messages[1]?.parts.map(part => part.type)).toEqual(['text', 'tool'])
+        expect(result.current.readOnlyCacheMessage).toBeNull()
+    })
+
+    it('shows read-only local cache when ThreadState is unavailable but local snapshot exists', async () => {
+        localStoreMocks.readLocalConversationSnapshot.mockResolvedValueOnce({
+            data: {
+                conversationId: 'conv-readonly',
+                createdAt: '2026-07-02T10:00:00.000Z',
+                lastActiveAt: '2026-07-02T10:00:01.000Z',
+                messages: [
+                    {
+                        createdAt: '2026-07-02T10:00:00.000Z',
+                        id: 'local-user',
+                        parts: [{ format: 'markdown', text: '本地问题', type: 'text' }],
+                        role: 'user',
+                        status: 'completed',
+                    },
+                ],
+                revision: 3,
+                schemaVersion: 1,
+                snapshotAt: '2026-07-02T10:00:01.000Z',
+                title: 'Local',
+            },
+            status: 'valid',
+        })
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue(
+                Response.json(
+                    {
+                        code: 'CHAT_THREAD_HYDRATION_UNAVAILABLE',
+                        error: 'unavailable',
+                    },
+                    { status: 503 }
+                )
+            )
+        )
+
+        const { result } = renderHook(() => useChatStream({ conversationId: 'conv-readonly', enableReasoning: false }))
+
+        await waitFor(() => {
+            expect(result.current.readOnlyCacheMessage).toContain('本地只读缓存')
+        })
+
+        expect(result.current.hydrationStatus).toBe('ready')
+        expect(result.current.messages[0]?.id).toBe('local-user')
+    })
+
     it('restores only selected-conversation text messages and reuses them in the next request', async () => {
         const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
             const url = String(input)
@@ -296,5 +440,94 @@ describe('useChatStream hydration', () => {
             ['/api/chat/thread?conversationId=conv-retry'],
             ['/api/chat/thread?conversationId=conv-retry'],
         ])
+    })
+
+    it('commits a stable local snapshot after a resumed AgentRun completes successfully', async () => {
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url === '/api/chat/thread?conversationId=conv-review') {
+                return Promise.resolve(
+                    createThreadHydrationResponse({
+                        conversationId: 'conv-review',
+                        restored: false,
+                    })
+                )
+            }
+
+            if (url === '/api/agent-runs/run-review/resume') {
+                return Promise.resolve(createResumeNdjsonResponse())
+            }
+
+            throw new Error(`Unexpected fetch: ${url}`)
+        })
+
+        localStoreMocks.readLocalConversationSnapshot.mockResolvedValueOnce({
+            data: {
+                conversationId: 'conv-review',
+                createdAt: '2026-07-02T10:00:00.000Z',
+                lastActiveAt: '2026-07-02T10:00:01.000Z',
+                messages: [
+                    {
+                        createdAt: '2026-07-02T10:00:00.000Z',
+                        id: 'user-review',
+                        parts: [{ format: 'markdown', text: '请继续', type: 'text' }],
+                        role: 'user',
+                        status: 'completed',
+                    },
+                    {
+                        createdAt: '2026-07-02T10:00:01.000Z',
+                        id: 'assistant-review',
+                        parts: [
+                            {
+                                interruptId: 'interrupt-review',
+                                interruptKind: 'strategy_review',
+                                payload: {
+                                    message: '请确认策略',
+                                    options: [],
+                                    reviewType: 'strategy_review',
+                                    schemaVersion: 1,
+                                },
+                                runId: 'run-review',
+                                status: 'pending',
+                                threadId: 'thread-review',
+                                type: 'agent-interrupt',
+                            },
+                        ],
+                        role: 'assistant',
+                        status: 'paused',
+                    },
+                ],
+                revision: 4,
+                schemaVersion: 1,
+                snapshotAt: '2026-07-02T10:00:01.000Z',
+                title: 'Review',
+            },
+            status: 'valid',
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() =>
+            useChatStream({
+                conversationId: 'conv-review',
+                enableReasoning: false,
+            })
+        )
+
+        await waitFor(() => {
+            expect(result.current.pendingInterrupt?.part.runId).toBe('run-review')
+        })
+
+        await act(async () => {
+            await result.current.resumeAgentRun({
+                approved: true,
+            })
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        expect(localStoreMocks.writeLocalConversationSnapshot).toHaveBeenCalledTimes(1)
     })
 })

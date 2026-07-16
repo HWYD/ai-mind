@@ -92,12 +92,16 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const {
         conversations,
         createConversation,
+        deleteConversation,
         error: conversationError,
         handleConversationPromoted,
         interactionDisabled,
         isDraft,
         isLoading: isConversationLoading,
         isMutating: isConversationMutating,
+        isReadOnlyCache: isConversationReadOnlyCache,
+        readOnlyCacheMessage: conversationReadOnlyCacheMessage,
+        retryRecovery: retryConversationRecovery,
         selectedConversation,
         selectedConversationId,
         selectConversation,
@@ -108,6 +112,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         messages,
         status,
         hydrationStatus,
+        readOnlyCacheMessage: threadReadOnlyCacheMessage,
         threadMemoryStatusHint,
         pendingInterrupt,
         sendMessage,
@@ -122,6 +127,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         skillMode,
         model,
         enableReasoning,
+        conversationMetadata: selectedConversation,
         onConversationPromoted: handleConversationPromoted,
     })
     const hasPendingReview = Boolean(pendingInterrupt)
@@ -131,9 +137,14 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const conversationTransitionPending = isConversationLoading || isConversationMutating
     const conversationHydrationPending = !isDraft && hydrationStatus === 'loading'
     const conversationHydrationFailed = !isDraft && hydrationStatus === 'failed'
+    const readOnlyCacheMessage = conversationReadOnlyCacheMessage ?? threadReadOnlyCacheMessage
+    const isReadOnlyCache = isConversationReadOnlyCache || Boolean(threadReadOnlyCacheMessage)
     const composerDisabled = hasPendingReview
-    const composerSubmitDisabled = conversationTransitionPending || conversationHydrationPending || conversationHydrationFailed
+    const composerSubmitDisabled =
+        conversationTransitionPending || conversationHydrationPending || conversationHydrationFailed || isReadOnlyCache
     const selectedConversationTitle = selectedConversation?.title ?? '新会话'
+    const readOnlyCacheRetryDisabled = conversationTransitionPending || conversationHydrationPending || isStreamingOutput
+    const readOnlyCacheDescriptionId = 'instamind-readonly-cache-description'
     const { inputContainerRef, bottomSpacing, showScrollToBottom, resetAutoScrollForNewTurn, restoreAutoFollowAndScrollToBottom } =
         useChatAutoScroll({
             isStreamingOutput,
@@ -145,7 +156,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }, [nextInteractionLocked])
 
     async function handleSubmit(value: string, composer?: ChatComposerPayload, displaySegments?: ChatComposerDisplaySegment[]) {
-        if (hasPendingReview) {
+        if (hasPendingReview || isReadOnlyCache) {
             return false
         }
 
@@ -157,7 +168,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleSelectSuggestion(suggestion: EmptyStateSuggestion) {
-        if (status === 'submitted' || status === 'streaming' || hasPendingReview) {
+        if (status === 'submitted' || status === 'streaming' || hasPendingReview || isReadOnlyCache) {
             return
         }
 
@@ -165,7 +176,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleSelectFollowUpQuestion(question: string) {
-        if (status === 'submitted' || status === 'streaming' || hasPendingReview) {
+        if (status === 'submitted' || status === 'streaming' || hasPendingReview || isReadOnlyCache) {
             return
         }
 
@@ -189,7 +200,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleCreateConversation() {
-        if (nextInteractionLocked) {
+        if (nextInteractionLocked || isReadOnlyCache) {
             return false
         }
 
@@ -197,14 +208,29 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleSelectConversation(conversationId: string) {
-        if (nextInteractionLocked) {
+        if (nextInteractionLocked || isReadOnlyCache) {
             return false
         }
 
         return selectConversation(conversationId)
     }
 
-    const conversationControlsDisabled = nextInteractionLocked || interactionDisabled
+    function handleDeleteConversation(conversationId: string) {
+        if (nextInteractionLocked || isReadOnlyCache) {
+            return false
+        }
+
+        return deleteConversation(conversationId)
+    }
+
+    function handleRetryReadOnlyCache() {
+        const registryRetryAccepted = retryConversationRecovery()
+        const hydrationRetryAccepted = retryHydration()
+
+        return registryRetryAccepted || hydrationRetryAccepted
+    }
+
+    const conversationControlsDisabled = nextInteractionLocked || interactionDisabled || isReadOnlyCache
 
     return (
         <main
@@ -222,6 +248,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                 onCreateConversation={() => {
                     void handleCreateConversation()
                 }}
+                onDeleteConversation={handleDeleteConversation}
                 onSelectConversation={handleSelectConversation}
                 onToggleCollapsed={() => setSidebarCollapsed(current => !current)}
             />
@@ -239,6 +266,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                             conversations={conversations}
                             disabled={conversationControlsDisabled}
                             onCreateConversation={handleCreateConversation}
+                            onDeleteConversation={handleDeleteConversation}
                             onSelectConversation={selectConversation}
                             selectedConversationTitle={selectedConversationTitle}
                         />
@@ -247,6 +275,31 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                                 <CircleAlert className="size-4" />
                                 <AlertTitle>会话列表暂时不可用</AlertTitle>
                                 <AlertDescription>{conversationError}</AlertDescription>
+                            </Alert>
+                        ) : null}
+                        {readOnlyCacheMessage ? (
+                            <Alert
+                                className="mb-4 rounded-2xl border-amber-200/80 bg-amber-50/80 text-amber-950"
+                                aria-describedby={readOnlyCacheDescriptionId}
+                            >
+                                <CircleAlert className="size-4" />
+                                <AlertTitle>本地只读缓存</AlertTitle>
+                                <AlertDescription id={readOnlyCacheDescriptionId}>
+                                    {readOnlyCacheMessage}
+                                    <p className="mt-3">要恢复发送、新建或切换会话，请重试连接服务端。</p>
+                                </AlertDescription>
+                                <div className="col-start-2 mt-3 flex flex-wrap gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={handleRetryReadOnlyCache}
+                                        disabled={readOnlyCacheRetryDisabled}
+                                        aria-describedby={readOnlyCacheDescriptionId}
+                                    >
+                                        重试连接服务端
+                                    </Button>
+                                </div>
                             </Alert>
                         ) : null}
                         {conversationHydrationPending ? <ConversationHydrationSkeleton /> : null}

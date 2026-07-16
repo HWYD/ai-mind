@@ -1,8 +1,13 @@
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { GET, POST } from '@/app/api/chat/conversations/route'
-import { conversationRegistryService, DEFAULT_CHAT_CONVERSATION_TITLE } from '@/lib/ai/runtime/chat-memory'
+import { DELETE, GET, POST } from '@/app/api/chat/conversations/route'
+import {
+    buildChatConversationThreadId,
+    chatMemoryService,
+    conversationRegistryService,
+    DEFAULT_CHAT_CONVERSATION_TITLE,
+} from '@/lib/ai/runtime/chat-memory'
 
 const env = {
     AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
@@ -23,6 +28,17 @@ function createGetRequest(options: { conversationId?: string; cookie?: string } 
 function createPostRequest(body: unknown, cookie?: string) {
     return new NextRequest('http://localhost:3000/api/chat/conversations', {
         method: 'POST',
+        body: JSON.stringify(body),
+        headers: {
+            ...(cookie ? { cookie } : {}),
+            'Content-Type': 'application/json',
+        },
+    })
+}
+
+function createDeleteRequest(body: unknown, cookie?: string) {
+    return new NextRequest('http://localhost:3000/api/chat/conversations', {
+        method: 'DELETE',
         body: JSON.stringify(body),
         headers: {
             ...(cookie ? { cookie } : {}),
@@ -154,5 +170,76 @@ describe('POST /api/chat/conversations', () => {
             id: 'conv-title',
             title: DEFAULT_CHAT_CONVERSATION_TITLE,
         })
+    })
+})
+
+describe('DELETE /api/chat/conversations', () => {
+    beforeEach(() => {
+        vi.restoreAllMocks()
+        vi.stubEnv('AI_MIND_AGENT_RUN_SESSION_SECRET', env.AI_MIND_AGENT_RUN_SESSION_SECRET)
+    })
+
+    it('rejects an invalid deletion body', async () => {
+        const response = await DELETE(createDeleteRequest({}, 'ai-mind-session-id=delete-invalid-session'))
+        const body = await response.json()
+
+        expect(response.status).toBe(400)
+        expect(body.code).toBe('INVALID_CONVERSATION_REQUEST')
+    })
+
+    it('deletes the owned conversation and returns the server-selected fallback', async () => {
+        const sessionId = `conversation-delete-session-${Date.now()}`
+
+        await conversationRegistryService.createConversation(sessionId, {
+            conversationId: 'conv-delete-a',
+            hasMessages: true,
+            now: '2026-01-05T10:00:00.000Z',
+        })
+        await conversationRegistryService.createConversation(sessionId, {
+            conversationId: 'conv-delete-b',
+            hasMessages: true,
+            now: '2026-01-05T10:01:00.000Z',
+        })
+        await chatMemoryService.writeThreadState(buildChatConversationThreadId(sessionId, 'conv-delete-b'), {
+            messages: [],
+            pinnedDecisions: [],
+            summary: 'delete me',
+        })
+
+        const response = await DELETE(createDeleteRequest({ conversationId: 'conv-delete-b' }, `ai-mind-session-id=${sessionId}`))
+        const body = await response.json()
+
+        expect(response.status).toBe(200)
+        expect(body.selectedConversationId).toBe('conv-delete-a')
+        expect(body.conversations.map((conversation: { id: string }) => conversation.id)).toEqual(['conv-delete-a'])
+        await expect(chatMemoryService.readThreadState(buildChatConversationThreadId(sessionId, 'conv-delete-b'))).resolves.toMatchObject({
+            restored: false,
+        })
+    })
+
+    it('returns not found without changing another browser session', async () => {
+        const response = await DELETE(
+            createDeleteRequest({ conversationId: 'conv-owned-by-other-session' }, 'ai-mind-session-id=delete-owner-session')
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(404)
+        expect(body.code).toBe('CONVERSATION_NOT_FOUND')
+    })
+
+    it('returns a recoverable server error when deletion cannot complete', async () => {
+        const deleteSpy = vi.spyOn(conversationRegistryService, 'deleteConversation').mockRejectedValue(new Error('delete unavailable'))
+
+        try {
+            const response = await DELETE(
+                createDeleteRequest({ conversationId: 'conv-delete-failure' }, 'ai-mind-session-id=delete-failure-session')
+            )
+            const body = await response.json()
+
+            expect(response.status).toBe(500)
+            expect(body.code).toBe('CONVERSATION_REGISTRY_UNAVAILABLE')
+        } finally {
+            deleteSpy.mockRestore()
+        }
     })
 })

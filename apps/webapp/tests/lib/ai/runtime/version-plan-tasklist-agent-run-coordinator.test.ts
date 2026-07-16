@@ -496,6 +496,27 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
         })
     })
 
+    it('initial interrupt LangSmith 上报挂起时不阻塞 AgentRun pause 返回', async () => {
+        const agentRunService = createFakeAgentRunService()
+        const langSmithObserver: TasklistLangSmithObserver = {
+            ...createFakeLangSmithObserver(),
+            observeInterrupt: vi.fn(() => new Promise<void>(() => undefined)),
+        }
+        const { options, writtenChunks } = createStartOptions(agentRunService, proceedPlanningOutput)
+        const result = await startVersionPlanTasklistAgentRun({
+            ...options,
+            langSmithObserver,
+        })
+
+        expect(result.graphResult.status).toBe('interrupted')
+        expect(writtenChunks).toContainEqual(
+            expect.objectContaining({
+                type: 'agent-interrupt',
+            })
+        )
+        expect(langSmithObserver.observeInterrupt).toHaveBeenCalledTimes(1)
+    })
+
     it('resume 到 final 时把 AgentRun 标记为 completed', async () => {
         const agentRunService = createFakeAgentRunService()
         const started = await startVersionPlanTasklistAgentRun(createStartOptions(agentRunService, proceedPlanningOutput).options)
