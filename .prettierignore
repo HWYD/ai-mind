@@ -5,6 +5,7 @@ build
 **/build
 coverage
 **/coverage
+**/.turbo
 node_modules
 **/node_modules
 .next

@@ -114,8 +114,8 @@ export function useStreamTextBuffer({ flushIntervalMs, flushTextDeltas }: UseStr
 
         scheduleFlushByTimer()
 
-        if (delta.includes('\n') || delta.includes('```')) {
-            // 换行和代码块会影响 Markdown 结构，提前到最近一帧 flush，让结构成型不要明显滞后。
+        if (delta.includes('```')) {
+            // 代码围栏会改变 Markdown 块结构，提前到最近一帧 flush；普通换行继续交给时间窗口合并。
             scheduleFlushByAnimationFrame()
         }
     }

@@ -26,9 +26,8 @@ const AUTO_SCROLL_MIN_INTERVAL_MS = 64
 // 调大：自动滚动更少、更稳；调小：更贴底但滚动更频繁。
 const AUTO_SCROLL_DISTANCE_THRESHOLD = 64
 
-// 自动跟随到底部的短缓动时长。这里保持很短，避免和持续增高的流式内容互相“追逐”造成卡顿。
-// 调大：更柔和但可能拖泥带水；调小或 0：更干脆但动画感更弱。
-const AUTO_SCROLL_ANIMATION_DURATION_MS = 48
+// 流式自动跟随直接对齐底部，避免内容持续增高时反复取消、重启缓动动画。
+const AUTO_SCROLL_ANIMATION_DURATION_MS = 0
 
 // 用户点击“回到底部”按钮时的缓动时长，比自动跟随略长，让主动操作有更清楚的反馈。
 const SCROLL_TO_BOTTOM_CLICK_ANIMATION_DURATION_MS = 180

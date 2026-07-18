@@ -14,6 +14,8 @@ const ignores = [
     '**/build/**',
     'coverage',
     '**/coverage/**',
+    '**/.turbo/**',
+    'private-folder/**',
     '**/*.js',
     '**/*.mjs',
     'eslint.config.js',

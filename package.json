@@ -1,15 +1,21 @@
 {
     "name": "ai-mind",
-    "version": "0.4.7",
-    "packageManager": "pnpm@10.18.3",
+    "version": "0.4.8",
+    "packageManager": "pnpm@10.34.0",
+    "engines": {
+        "node": ">=22.0.0 <23.0.0"
+    },
     "main": "index.js",
     "scripts": {
-        "dev": "run-p build:watch dev:webapp",
+        "preinstall": "node scripts/validate/validate-workspace-boundaries.mjs",
+        "validate:workspace-boundaries": "node scripts/validate/validate-workspace-boundaries.mjs",
+        "test:workspace-boundaries": "node --test scripts/validate/validate-workspace-boundaries.test.mjs",
+        "dev": "turbo run dev build:watch --filter=ai-mind...",
         "dev:webapp": "pnpm --dir apps/webapp dev",
         "dev:pas": "pnpm --dir apps/project-assistant-service dev",
-        "build": "pnpm --dir apps/webapp build",
+        "build": "turbo run build",
         "build:pas": "pnpm --dir apps/project-assistant-service build",
-        "build:watch": "pnpm --filter @ai-mind/* build:watch",
+        "build:watch": "turbo run build:watch --filter=@ai-mind/*",
         "db:generate": "pnpm --filter @ai-mind/database db:generate",
         "db:validate": "pnpm --filter @ai-mind/database db:validate",
         "db:migrate:deploy": "pnpm --filter @ai-mind/database db:migrate:deploy",
@@ -19,16 +25,17 @@
         "db:runtime-checkpoints:setup": "pnpm --dir apps/webapp db:runtime-checkpoints:setup",
         "db:setup:deploy": "pnpm db:migrate:deploy && pnpm db:runtime-checkpoints:setup",
         "start": "pnpm --dir apps/webapp start",
-        "typecheck": "pnpm --dir apps/webapp typecheck",
+        "typecheck": "turbo run typecheck",
         "typecheck:pas": "pnpm --dir apps/project-assistant-service typecheck",
-        "test": "pnpm --dir apps/webapp test",
+        "test": "turbo run test",
         "docker:local:build": "docker compose -f deploy/compose.local.yml build",
         "docker:local:up": "docker compose -f deploy/compose.local.yml up -d",
         "docker:local:down": "docker compose -f deploy/compose.local.yml down",
         "docker:local:logs": "docker compose -f deploy/compose.local.yml logs -f",
         "commit": "git-cz",
         "prepare": "husky",
-        "lint": "eslint .",
+        "lint": "turbo run lint",
+        "lint:root": "eslint .",
         "lint:fix": "eslint . --fix",
         "lint:webapp": "pnpm --dir apps/webapp lint",
         "lint:webapp:fix": "pnpm --dir apps/webapp lint:fix",
@@ -59,8 +66,13 @@
             "prettier --cache --parser=typescript --write"
         ]
     },
+    "pnpm": {
+        "overrides": {
+            "@types/node": "$@types/node"
+        }
+    },
     "devDependencies": {
-        "@types/node": "22.15.0",
+        "@types/node": "catalog:",
         "eslint": "9.39.1",
         "@eslint/js": "9.39.1",
         "eslint-config-next": "16.0.5",
@@ -68,7 +80,7 @@
         "eslint-plugin-react-refresh": "0.4.24",
         "eslint-plugin-react-hooks": "^7.0.1",
         "globals": "16.5.0",
-        "typescript": "5.9.3",
+        "typescript": "catalog:",
         "eslint-plugin-prettier": "5.5.4",
         "eslint-plugin-simple-import-sort": "12.1.1",
         "lint-staged": "16.2.7",

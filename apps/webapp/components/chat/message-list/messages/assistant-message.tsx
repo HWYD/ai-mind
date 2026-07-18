@@ -310,7 +310,13 @@ export function AssistantMessage({
                             return <DeliveryChainReportView key={`${message.id}:text:${part.id ?? index}`} markdown={part.text} />
                         }
 
-                        return <TextPartView key={`${message.id}:text:${part.id ?? index}`} part={part} />
+                        return (
+                            <TextPartView
+                                key={`${message.id}:text:${part.id ?? index}`}
+                                part={part}
+                                isStreaming={isLatestAssistantMessage && !isAssistantReplyCompleted}
+                            />
+                        )
                     }
 
                     if (part.type === 'tool') {

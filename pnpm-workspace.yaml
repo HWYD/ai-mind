@@ -1,11 +1,18 @@
 packages:
   - "packages/*"
   - "apps/*"
+catalog:
+  '@types/node': 22.20.1
+  '@modelcontextprotocol/sdk': ^1.29.0
+  dotenv: 17.2.3
+  typescript: 5.9.3
+  vitest: ^4.1.4
+  zod: ^4.3.6
 allowBuilds:
-  '@nestjs/core': set this to true or false
-  '@prisma/engines': set this to true or false
-  esbuild: set this to true or false
-  msw: set this to true or false
-  prisma: set this to true or false
-  sharp: set this to true or false
-  unrs-resolver: set this to true or false
+  '@nestjs/core': false
+  '@prisma/engines': true
+  esbuild: true
+  msw: false
+  prisma: false
+  sharp: true
+  unrs-resolver: true

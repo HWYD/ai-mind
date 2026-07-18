@@ -8,7 +8,15 @@ import type { TextPart } from '@/lib/ai/types/message'
 
 import { getRateLimitNoticeViewModel } from '../shared/message-list-utils'
 
-export const TextPartView = memo(function TextPartView({ part }: { part: TextPart }) {
+const streamAnimation = {
+    animation: 'fadeIn',
+    duration: 90,
+    easing: 'ease-out',
+    sep: 'word',
+    stagger: 0,
+} as const
+
+export const TextPartView = memo(function TextPartView({ part, isStreaming = false }: { part: TextPart; isStreaming?: boolean }) {
     const rateLimitNotice = getRateLimitNoticeViewModel(part.text)
 
     if (rateLimitNotice) {
@@ -33,7 +41,13 @@ export const TextPartView = memo(function TextPartView({ part }: { part: TextPar
 
     return (
         <div className="ai-message-markdown text-[15px] leading-7 text-inherit">
-            <Streamdown mode="streaming">{part.text}</Streamdown>
+            <Streamdown
+                mode={isStreaming ? 'streaming' : 'static'}
+                isAnimating={isStreaming}
+                animated={isStreaming ? streamAnimation : false}
+            >
+                {part.text}
+            </Streamdown>
         </div>
     )
 })

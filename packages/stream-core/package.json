@@ -1,6 +1,6 @@
 {
     "name": "@ai-mind/stream-core",
-    "version": "0.3.5",
+    "version": "0.4.8",
     "private": true,
     "sideEffects": false,
     "main": "./build/cjs/index.js",
@@ -41,6 +41,6 @@
         "test:watch": "vitest"
     },
     "devDependencies": {
-        "vitest": "^4.1.4"
+        "vitest": "catalog:"
     }
 }

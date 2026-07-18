@@ -1,0 +1,57 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "globalDependencies": ["pnpm-lock.yaml", "pnpm-workspace.yaml", "eslint.config.js", "tsconfig*.json"],
+    "globalEnv": ["CI", "NODE_ENV"],
+    "tasks": {
+        "build": {
+            "dependsOn": ["^build"],
+            "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**"],
+            "env": ["AI_MIND_*", "DATABASE_URL", "NEXT_PUBLIC_*", "PROJECT_ASSISTANT_SERVICE_*"]
+        },
+        "typecheck": {
+            "dependsOn": ["^build", "^typecheck"],
+            "outputs": []
+        },
+        "test": {
+            "dependsOn": ["^build"],
+            "outputs": [],
+            "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"]
+        },
+        "lint": {
+            "outputs": []
+        },
+        "dev": {
+            "cache": false,
+            "persistent": true
+        },
+        "build:watch": {
+            "cache": false,
+            "persistent": true
+        },
+        "@ai-mind/database#build": {
+            "cache": false,
+            "outputs": []
+        },
+        "@ai-mind/database#build:watch": {
+            "cache": false,
+            "persistent": false,
+            "outputs": []
+        },
+        "@ai-mind/database#typecheck": {
+            "dependsOn": ["build"],
+            "outputs": []
+        },
+        "@ai-mind/database#test": {
+            "dependsOn": ["build"],
+            "cache": false,
+            "outputs": [],
+            "env": ["DATABASE_URL"]
+        },
+        "ai-mind#test": {
+            "dependsOn": ["^build"],
+            "cache": false,
+            "outputs": [],
+            "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"]
+        }
+    }
+}

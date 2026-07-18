@@ -8,13 +8,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/* \
     && corepack enable \
-    && corepack prepare pnpm@10.18.3 --activate
+    && corepack prepare pnpm@10.34.0 --activate
 
 WORKDIR /app
 
 FROM base AS workspace-deps
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scripts/validate/validate-workspace-boundaries.mjs scripts/validate/validate-workspace-boundaries.mjs
 COPY apps/webapp/package.json apps/webapp/package.json
 COPY apps/project-assistant-service/package.json apps/project-assistant-service/package.json
 COPY packages/database/package.json packages/database/package.json
@@ -26,10 +27,7 @@ FROM workspace-deps AS workspace-builder
 
 COPY . .
 
-RUN pnpm --filter @ai-mind/stream-core build
-RUN pnpm --dir apps/project-assistant-service build
-RUN pnpm --filter @ai-mind/database db:generate
-RUN pnpm --dir apps/webapp build
+RUN pnpm build
 # 将 next.config.ts 预编译为纯 JS/.mjs，避免生产容器运行期动态安装 TypeScript
 RUN node -e "const ts=require('typescript');const src=require('fs').readFileSync('apps/webapp/next.config.ts','utf8');const r=ts.transpileModule(src,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ESNext}});require('fs').writeFileSync('apps/webapp/next.config.mjs',r.outputText)"
 
@@ -38,6 +36,7 @@ FROM base AS workspace-production-deps
 ENV NODE_ENV=production
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY scripts/validate/validate-workspace-boundaries.mjs scripts/validate/validate-workspace-boundaries.mjs
 COPY apps/webapp/package.json apps/webapp/package.json
 COPY apps/project-assistant-service/package.json apps/project-assistant-service/package.json
 COPY packages/database/package.json packages/database/package.json

@@ -183,6 +183,25 @@ describe('useChatAutoScroll', () => {
         expect(window.scrollTo).not.toHaveBeenCalled()
     })
 
+    it('流式自动跟随直接对齐底部，不启动中间缓动滚动', () => {
+        render(<HookHarness isStreamingOutput contentSignal="initial" />)
+
+        act(() => {
+            vi.advanceTimersByTime(80)
+        })
+
+        const scrollTops = vi.mocked(window.scrollTo).mock.calls.map(([options]) => {
+            if (typeof options !== 'object' || options === null) {
+                return undefined
+            }
+
+            return (options as ScrollToOptions).top
+        })
+
+        expect(scrollTops).toContain(600)
+        expect(scrollTops.every(top => top === 600)).toBe(true)
+    })
+
     it('输入框内滚动不会锁住本轮自动跟随', () => {
         const page = setupPageScrollMetrics()
         const { rerender } = render(<HookHarness isStreamingOutput contentSignal="initial" />)

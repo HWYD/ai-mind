@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> v0.4.7：Browser-local Chat Session Persistence。在不引入 PG 完整聊天历史、账号体系或跨设备同步的前提下，为 AI Mind 增加浏览器本地最近会话与完整用户可见消息快照；刷新后先从本地恢复，再由服务端会话列表校准，会话展示、会话归属和 AI 运行时上下文继续保持分层边界。
+> v0.4.8：Monorepo pnpm / Turborepo Governance。统一 Node.js、pnpm、workspace 依赖边界、Catalog、依赖安装脚本权限和跨 package 任务图，让本地、CI 与 Docker 使用同一套可复现工程入口，同时保持业务 Runtime 与生产部署契约不变。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.7`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.8`。
 
 已经验证：
 
@@ -250,30 +250,31 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [Constitution](./.specify/memory/constitution.md)：AI Mind 长期工程原则。
 - [AI Coding Workflow](./docs/architecture/ai-coding-workflow.md)：Change Level、Codex 执行规则和 release closing checklist。
 - [Spec-driven Development](./docs/architecture/spec-driven-development.md)：spec / plan / tasks / acceptance / decisions 的使用方式。
+- [Monorepo pnpm / Turborepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md)：workspace 依赖边界、统一命令、Catalog、安装脚本权限和任务缓存策略。
 - [Production Deployment](./docs/architecture/production-deployment.md)：生产部署、TCR、Docker Compose、pgvector、env 和部署脚本的事实源。
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.7
+## 当前版本：v0.4.8
 
-这版的主线是 `Browser-local Chat Session Persistence`：在不引入 PG 完整聊天历史、账号体系或跨设备同步的前提下，为 AI Mind 增加浏览器本地最近会话列表与完整用户可见消息快照。页面刷新后，客户端先从本地恢复，再由服务端会话列表校准；同一会话的完整 UI 历史仍只保存在浏览器本地。
+这版的主线是 `Monorepo pnpm / Turborepo Governance`：把已有四个 workspace 从分散脚本管理收口为可复现安装、明确依赖边界和统一任务图。Node.js 固定为 22.x，根 metadata、CI 与 Docker 统一使用 `pnpm@10.34.0`；pnpm 负责 workspace、lockfile、Catalog 和 dependency build-script policy，Turborepo 负责任务依赖、并行执行和有限缓存。
 
-v0.4.7 的边界非常明确：
+v0.4.8 的边界非常明确：
 
-- 本地 IndexedDB 快照只负责最近会话列表、当前会话展示和完整用户可见 UI 历史恢复，不升级为服务端完整聊天历史。
-- Server Conversation Registry 继续是会话身份、归属、最近会话保留与交互合法性的唯一权威；有效的服务端列表返回后，会清理本地已失效旧会话。
-- Server ThreadState 继续只负责 AI 运行时短期上下文；本地完整 UI 历史不会静默覆盖、补写或合并成新的模型上下文契约。
-- 当本地快照存在但服务端暂时不可用时，页面进入明确的只读缓存态，保留展示与重试入口，但禁用发送、新建会话和会话切换。
-- 桌面端与移动端都提供单会话删除入口；确认删除后，同时删除当前 browser session 的服务端会话登记、对应 ThreadState/checkpoint，以及本地索引与快照。
-- 不引入 PG 完整 chat-history business table、账号体系、跨设备同步、历史搜索、导出、分享或新的 stream protocol 字段。
+- 内部 `@ai-mind/*` 依赖必须使用 `workspace:`，根 `preinstall` 会拒绝缺失 provider、普通 semver 内部依赖和 `packages -> apps` 反向依赖。
+- `@types/node@22.20.1`、TypeScript、Vitest、Zod、MCP SDK 和 dotenv 使用选择性 Catalog；Webapp-only 依赖继续保留在各自 manifest。
+- `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 成为本地与 CI 的 canonical root commands；package-level scripts 继续用于诊断。
+- Prisma generation、migration 和 checkpoint setup 保持显式、有序且不可缓存，数据库状态不会被隐藏到普通 Turbo task cache 中。
+- 不引入 `--affected`、remote cache、Changesets、npm publishing、`pnpm deploy`、Nx 迁移或大规模 package extraction。
+- 不修改业务 Runtime、API、数据库 schema、stream protocol、前端交互或生产部署步骤。
 
-当前 runtime baseline 保留三条明确路径：
+业务 runtime baseline 继续保留三条明确路径：
 
 - `/tasklist + @demo://version-plans/*.md`：Tasklist Agent Graph Runtime + HITL + LangSmith observability
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
 - 普通 text chat / tool-assisted ordinary chat：selected conversation 的浏览器本地完整 UI 历史展示 + 服务端短期 ThreadState + 当前 browser session 的语义相关 UserMemory
 
-详细设计见 [AI Mind v0.4.7: Browser-local Chat Session Persistence](./docs/versions/v0.4.7-browser-local-chat-session-persistence.md)、[v0.4.7 Release Note](./docs/releases/v0.4.7.md)、[specs/047-browser-local-chat-persistence](./specs/047-browser-local-chat-persistence/)、[AI Mind v0.4.6: UserMemory Semantic Retrieval Baseline](./docs/versions/v0.4.6-usermemory-semantic-retrieval-baseline.md)、[ADR-0014](./docs/adr/0014-usermemory-semantic-retrieval-baseline.md) 和 [Runtime 边界](./docs/architecture/runtime-boundary.md)。
+详细设计见 [AI Mind v0.4.8: Monorepo pnpm / Turborepo Governance](./docs/versions/v0.4.8-monorepo-pnpm-turborepo-governance.md)、[v0.4.8 Release Note](./docs/releases/v0.4.8.md)、[specs/048-monorepo-pnpm-turborepo-governance](./specs/048-monorepo-pnpm-turborepo-governance/)、[Monorepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md) 和 [Production Deployment](./docs/architecture/production-deployment.md)。
 
 ## 当前能力
 
@@ -464,8 +465,8 @@ v0.4.7 的边界非常明确：
 
 本项目支持本地 Ollama 和服务端配置的 DeepSeek / Qwen，启动前建议准备：
 
-- Node.js：建议 `20+`。
-- pnpm：项目声明为 `pnpm@10.18.3`。
+- Node.js：要求 `22.x`。
+- pnpm：项目声明为 `pnpm@10.34.0`。
 - Ollama：使用本地模型时安装；默认模型为 `qwen3:8b`，本机资源有限时可选择 `qwen3:4b`。
 - DeepSeek / Qwen：使用云模型时，由开发者在对应平台自行创建 API Key，并仅配置在服务端环境中。
 - remote MCP 验证：如果要测试 `project://latest-context` 或 remote Tool，需要同时启动 `project-assistant-service`。
@@ -481,8 +482,11 @@ ollama pull qwen3:8b
 安装依赖：
 
 ```bash
-pnpm install
+corepack prepare pnpm@10.34.0 --activate
+pnpm install --frozen-lockfile
 ```
+
+仓库要求 Node.js 22.x，并由根 `packageManager` 固定 pnpm 10.34.0。
 
 启动开发环境：
 
@@ -597,6 +601,17 @@ pnpm db:user-memory:setup
 
 ## 常用验证
 
+日常开发和 CI 使用同一组根命令，由 Turborepo 根据 workspace 依赖图安排执行顺序：
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+包级命令保留用于缩小故障范围，不作为第二套编排入口。完整规则见 [Monorepo pnpm / Turborepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md)。
+
 ### Webapp
 
 ```bash
@@ -667,6 +682,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.5  | Long-term User Memory Store Baseline               | 引入 browser-session scoped `UserMemory Store`，为 ordinary text chat 和 tool-assisted ordinary chat 提供后台抽取、严格校验、相关性召回和有界注入的长期用户记忆基线             |
 | v0.4.6  | UserMemory Semantic Retrieval Baseline             | 使用 `PostgresStore` vector search 与独立 embedding 配置，为 eligible ordinary chat 提供 vector-only 的长期 UserMemory 语义召回，并保持公开状态与 Agent/Workflow 边界不变       |
 | v0.4.7  | Browser-local Chat Session Persistence             | 引入浏览器本地最近会话与完整用户可见消息快照恢复，采用本地优先展示 + 服务端会话列表校准，并保持 Server Registry / ThreadState / UserMemory 的权威边界不变                       |
+| v0.4.8  | Monorepo pnpm / Turborepo Governance               | 统一 Node 22、pnpm 10.34.0、workspace/Catalog/安装脚本策略与 Turbo 根任务图，使本地、CI、Docker 共享可复现工程入口，并保持业务 Runtime 与部署契约不变                           |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -705,6 +721,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Tool & Agent final-turn memory
 - [x] Browser-session scoped long-term UserMemory baseline
 - [x] UserMemory vector semantic retrieval baseline
+- [x] pnpm / Turborepo Monorepo 工程治理
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化
