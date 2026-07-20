@@ -1,6 +1,6 @@
 {
     "name": "@ai-mind/stream-core",
-    "version": "0.4.8",
+    "version": "0.4.9",
     "private": true,
     "sideEffects": false,
     "main": "./build/cjs/index.js",
@@ -28,19 +28,21 @@
         "./package.json": "./package.json"
     },
     "scripts": {
-        "build": "run-s build:transpile build:types",
+        "build": "tsup && tsc -p tsconfig.types.json",
         "build:transpile": "tsup",
         "build:types": "tsc -p tsconfig.types.json",
-        "build:watch": "run-p build:watch:transpile build:watch:types",
         "build:watch:transpile": "tsup --watch",
         "build:watch:types": "tsc -p tsconfig.types.json --watch",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "typecheck": "tsc -p tsconfig.json --noEmit",
-        "test": "vitest run",
+        "test": "pnpm run test:stable",
+        "test:stable": "vitest run",
         "test:watch": "vitest"
     },
     "devDependencies": {
+        "esbuild": "0.27.7",
+        "tsup": "8.3.5",
         "vitest": "catalog:"
     }
 }

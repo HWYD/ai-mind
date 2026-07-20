@@ -1,6 +1,9 @@
 packages:
   - "packages/*"
   - "apps/*"
+saveWorkspaceProtocol: rolling
+disallowWorkspaceCycles: true
+failIfNoMatch: true
 catalog:
   '@types/node': 22.20.1
   '@modelcontextprotocol/sdk': ^1.29.0

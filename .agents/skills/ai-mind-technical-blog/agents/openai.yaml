@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Mind 技术博客"
+  short_description: "基于真实实现完成 AI Mind 版本技术博客写作与优化"
+  default_prompt: "使用 $ai-mind-technical-blog 基于 AI Mind 的真实实现，为我分析选题、设计大纲、撰写或优化技术博客。"

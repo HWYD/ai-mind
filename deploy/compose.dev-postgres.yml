@@ -1,0 +1,28 @@
+name: ai-mind-local
+
+services:
+  postgres:
+    build:
+      context: ..
+      dockerfile: deploy/postgres-pgvector.Dockerfile
+    image: ai-mind-postgres-pgvector:local
+    environment:
+      POSTGRES_DB: ai_mind
+      POSTGRES_PASSWORD: ai_mind
+      POSTGRES_USER: ai_mind
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - ai-mind-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ai_mind -d ai_mind
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+volumes:
+  ai-mind-postgres-data:

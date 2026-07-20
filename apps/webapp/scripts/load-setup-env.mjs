@@ -23,11 +23,7 @@ function loadOptionalDotenvConfig() {
     }
 }
 
-export function loadSetupDatabaseUrlFromEnvFiles(projectRoot = DEFAULT_PROJECT_ROOT) {
-    if (process.env.DATABASE_URL?.trim()) {
-        return
-    }
-
+export function loadSetupEnvFiles(projectRoot = DEFAULT_PROJECT_ROOT) {
     let loadEnv
 
     for (const fileName of ['.env.local', '.env']) {
@@ -48,9 +44,5 @@ export function loadSetupDatabaseUrlFromEnvFiles(projectRoot = DEFAULT_PROJECT_R
             path: envPath,
             quiet: true,
         })
-
-        if (process.env.DATABASE_URL?.trim()) {
-            return
-        }
     }
 }

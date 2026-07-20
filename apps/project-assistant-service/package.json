@@ -1,6 +1,6 @@
 {
-    "name": "project-assistant-service",
-    "version": "0.4.8",
+    "name": "@ai-mind/project-assistant-service",
+    "version": "0.4.9",
     "private": true,
     "type": "module",
     "scripts": {
@@ -8,7 +8,8 @@
         "dev": "tsx watch src/main.ts",
         "lint": "eslint .",
         "start": "node dist/main.js",
-        "test": "node --import tsx --test test/*.test.ts",
+        "test": "pnpm run test:stable",
+        "test:stable": "node --import tsx --test test/*.test.ts",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {

@@ -9,7 +9,10 @@ import { type ChatThreadMessage, compactionOutputSchema } from '@/lib/ai/runtime
 loadEnv({ path: '.env.local', quiet: true })
 loadEnv({ path: '.env', quiet: true })
 
-const describeLiveSmoke = process.env.AI_MIND_RUN_CHAT_MEMORY_COMPACTION_SMOKE === '1' ? describe : describe.skip
+const describeLiveSmoke =
+    process.env.AI_MIND_RUN_EXTERNAL_TESTS === '1' || process.env.AI_MIND_RUN_CHAT_MEMORY_COMPACTION_SMOKE === '1'
+        ? describe
+        : describe.skip
 const candidateModelIds = (
     process.env.AI_MIND_CHAT_MEMORY_COMPACTION_SMOKE_MODEL_IDS ?? 'qwen/qwen3.6-flash,qwen/qwen3.7-max,deepseek/deepseek-v4-pro'
 )

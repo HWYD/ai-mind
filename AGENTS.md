@@ -177,6 +177,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/048-monorepo-pnpm-turborepo-governance/plan.md
+at specs/049-monorepo-boundary-ci/plan.md
 
 <!-- SPECKIT END -->

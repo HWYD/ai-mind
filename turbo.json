@@ -12,42 +12,54 @@
             "dependsOn": ["^build", "^typecheck"],
             "outputs": []
         },
-        "test": {
+        "test:stable": {
             "dependsOn": ["^build"],
+            "outputs": []
+        },
+        "test:integration": {
+            "dependsOn": ["^build"],
+            "cache": false,
             "outputs": [],
             "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"]
+        },
+        "test:external": {
+            "cache": false,
+            "outputs": [],
+            "env": ["AI_MIND_RUN_EXTERNAL_TESTS", "AI_MIND_RUN_CLOUD_USAGE_SMOKE", "AI_MIND_RUN_CHAT_MEMORY_COMPACTION_SMOKE", "AI_MIND_*"]
         },
         "lint": {
             "outputs": []
         },
         "dev": {
             "cache": false,
-            "persistent": true
-        },
-        "build:watch": {
-            "cache": false,
-            "persistent": true
+            "persistent": true,
+            "env": ["AI_MIND_*", "DATABASE_URL", "NEXT_PUBLIC_*", "PROJECT_ASSISTANT_SERVICE_*"]
         },
         "@ai-mind/database#build": {
             "cache": false,
             "outputs": []
         },
-        "@ai-mind/database#build:watch": {
+        "@ai-mind/stream-core#build:watch:transpile": {
             "cache": false,
-            "persistent": false,
+            "persistent": true,
+            "outputs": []
+        },
+        "@ai-mind/stream-core#build:watch:types": {
+            "cache": false,
+            "persistent": true,
             "outputs": []
         },
         "@ai-mind/database#typecheck": {
             "dependsOn": ["build"],
             "outputs": []
         },
-        "@ai-mind/database#test": {
+        "@ai-mind/database#test:integration": {
             "dependsOn": ["build"],
             "cache": false,
             "outputs": [],
             "env": ["DATABASE_URL"]
         },
-        "ai-mind#test": {
+        "@ai-mind/webapp#test:integration": {
             "dependsOn": ["^build"],
             "cache": false,
             "outputs": [],

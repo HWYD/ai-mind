@@ -1,6 +1,6 @@
 import { PostgresStore } from '@langchain/langgraph-checkpoint-postgres/store'
 
-import { loadSetupDatabaseUrlFromEnvFiles } from './load-setup-env.mjs'
+import { loadSetupEnvFiles } from './load-setup-env.mjs'
 
 export const USER_MEMORY_SETUP_SUCCESS_MESSAGE = 'UserMemory LangGraph PostgresStore schema is ready.'
 const USER_MEMORY_SETUP_SCHEMA = 'langgraph_user_memory'
@@ -27,7 +27,7 @@ function toSetupFailure(error) {
 
 export async function runUserMemoryStoreSetup(options = {}) {
     const env = options.env ?? process.env
-    const loadEnv = options.loadEnv ?? (() => loadSetupDatabaseUrlFromEnvFiles())
+    const loadEnv = options.loadEnv ?? (() => loadSetupEnvFiles())
     const log = options.log ?? console.log
 
     loadEnv()

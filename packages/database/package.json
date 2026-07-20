@@ -1,6 +1,6 @@
 {
     "name": "@ai-mind/database",
-    "version": "0.4.8",
+    "version": "0.4.9",
     "private": true,
     "type": "module",
     "sideEffects": false,
@@ -15,7 +15,6 @@
     },
     "scripts": {
         "build": "pnpm db:generate",
-        "build:watch": "pnpm db:generate",
         "db:generate": "prisma generate",
         "db:format": "prisma format",
         "db:validate": "prisma validate",
@@ -23,7 +22,8 @@
         "db:migrate:deploy": "prisma migrate deploy",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
-        "test": "vitest run",
+        "test": "pnpm run test:integration",
+        "test:integration": "node ../../scripts/validate/validate-integration-test-env.mjs && vitest run tests/prisma.integration.test.ts",
         "typecheck": "tsc -p tsconfig.json --noEmit"
     },
     "dependencies": {

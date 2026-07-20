@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> v0.4.8：Monorepo pnpm / Turborepo Governance。统一 Node.js、pnpm、workspace 依赖边界、Catalog、依赖安装脚本权限和跨 package 任务图，让本地、CI 与 Docker 使用同一套可复现工程入口，同时保持业务 Runtime 与生产部署契约不变。
+> v0.4.9：Monorepo Boundary and CI Validation Governance。在 v0.4.8 工程基线上，把 workspace 依赖/导入边界、稳定/集成/外部测试分层和 CI 先稳定后有状态的顺序固化为可执行约束，同时保持业务 Runtime 与生产部署契约不变。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.8`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.9`。
 
 已经验证：
 
@@ -255,15 +255,16 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.8
+## 当前版本：v0.4.9
 
-这版的主线是 `Monorepo pnpm / Turborepo Governance`：把已有四个 workspace 从分散脚本管理收口为可复现安装、明确依赖边界和统一任务图。Node.js 固定为 22.x，根 metadata、CI 与 Docker 统一使用 `pnpm@10.34.0`；pnpm 负责 workspace、lockfile、Catalog 和 dependency build-script policy，Turborepo 负责任务依赖、并行执行和有限缓存。
+这版的主线是 `Monorepo Boundary and CI Validation Governance`：在 pnpm/Turbo 基线上，把 workspace 身份、依赖方向、公开导入面和测试分层变成可自动验证的规则。Node.js 固定为 22.x，根 metadata、CI 与 Docker 统一使用 `pnpm@10.34.0`；pnpm 负责 workspace、lockfile、Catalog 和依赖约束，Turborepo 负责按测试层执行、并行与缓存。
 
-v0.4.8 的边界非常明确：
+v0.4.9 的边界非常明确：
 
-- 内部 `@ai-mind/*` 依赖必须使用 `workspace:`，根 `preinstall` 会拒绝缺失 provider、普通 semver 内部依赖和 `packages -> apps` 反向依赖。
+- 内部 `@ai-mind/*` 依赖必须使用 `workspace:`；根 `preinstall` 会拒绝缺失 provider、普通 semver 内部依赖、非法 app/package 方向、循环依赖、未纳管 manifest、跨 workspace 相对导入和未公开深层导入。
 - `@types/node@22.20.1`、TypeScript、Vitest、Zod、MCP SDK 和 dotenv 使用选择性 Catalog；Webapp-only 依赖继续保留在各自 manifest。
-- `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 成为本地与 CI 的 canonical root commands；package-level scripts 继续用于诊断。
+- `pnpm lint`、`pnpm typecheck`、`pnpm test:stable`、`pnpm test:integration`、`pnpm test`、`pnpm build` 是 canonical root commands；`pnpm test:governance` 覆盖治理脚本回归，package-level scripts 继续用于诊断。集成通道缺少 `DATABASE_URL` 时会在 Vitest 前失败，不再以全量 skip 冒充成功。
+- `stable-validation` 无 PostgreSQL 服务和 `DATABASE_URL`；`stateful-integration` 仅在其成功后创建数据库状态。cloud/live smoke 只允许通过 `AI_MIND_RUN_EXTERNAL_TESTS=1` 手动执行。
 - Prisma generation、migration 和 checkpoint setup 保持显式、有序且不可缓存，数据库状态不会被隐藏到普通 Turbo task cache 中。
 - 不引入 `--affected`、remote cache、Changesets、npm publishing、`pnpm deploy`、Nx 迁移或大规模 package extraction。
 - 不修改业务 Runtime、API、数据库 schema、stream protocol、前端交互或生产部署步骤。
@@ -274,7 +275,7 @@ v0.4.8 的边界非常明确：
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
 - 普通 text chat / tool-assisted ordinary chat：selected conversation 的浏览器本地完整 UI 历史展示 + 服务端短期 ThreadState + 当前 browser session 的语义相关 UserMemory
 
-详细设计见 [AI Mind v0.4.8: Monorepo pnpm / Turborepo Governance](./docs/versions/v0.4.8-monorepo-pnpm-turborepo-governance.md)、[v0.4.8 Release Note](./docs/releases/v0.4.8.md)、[specs/048-monorepo-pnpm-turborepo-governance](./specs/048-monorepo-pnpm-turborepo-governance/)、[Monorepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md) 和 [Production Deployment](./docs/architecture/production-deployment.md)。
+详细设计见 [AI Mind v0.4.9: Monorepo Boundary and CI Validation Governance](./docs/versions/v0.4.9-monorepo-boundary-ci.md)、[v0.4.9 Release Note](./docs/releases/v0.4.9.md)、[specs/049-monorepo-boundary-ci](./specs/049-monorepo-boundary-ci/)、[Monorepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md) 和 [Production Deployment](./docs/architecture/production-deployment.md)。
 
 ## 当前能力
 
@@ -488,33 +489,56 @@ pnpm install --frozen-lockfile
 
 仓库要求 Node.js 22.x，并由根 `packageManager` 固定 pnpm 10.34.0。
 
-启动开发环境：
+开发环境按真实场景选择入口。数据库使用 `deploy/compose.dev-postgres.yml` 中的本地 Docker PostgreSQL 服务，映射到 `127.0.0.1:5433`；启动场景命令会先执行数据库 migration 和 runtime checkpoint setup。
 
 ```bash
 pnpm dev
 ```
 
-这个命令会同时：
+`pnpm dev` 用于常规业务开发/运行，会启动并检查本地 Docker PostgreSQL，再用 Turbo 同时启动 Webapp 和 Project Assistant Service，但不启动共享包 watch。
 
-- 启动 `packages/*` 的 `build:watch`。
-- 启动 `apps/webapp`。
-
-如果需要验证 remote MCP 服务，请在另一个终端启动：
+如果这次会改 `packages/*`，需要让 Webapp 依赖包进入 Turbo watch，使用：
 
 ```bash
-pnpm dev:pas
+pnpm dev:watch
 ```
 
-如果只想单独启动 webapp，可以使用：
+如果只需要 Webapp 和本地 Docker PostgreSQL，不需要 Project Assistant Service，使用：
+
+```bash
+pnpm dev:webapp:db
+```
+
+如果只想分别定位服务问题，可以使用不带 DB preflight 和本地环境注入的轻量诊断入口：
 
 ```bash
 pnpm dev:webapp
+pnpm dev:pas
 ```
 
-如果只想单独开启 workspace 包 watch，可以使用：
+如果 Webapp 需要本地 PostgreSQL 环境，优先使用上面的 `pnpm dev:webapp:db`，避免手工拼环境变量。
+
+查看或停止本地开发 PostgreSQL：
 
 ```bash
-pnpm build:watch
+pnpm dev:db:logs
+pnpm dev:db:down
+```
+
+首次克隆、清空本地数据库 volume，或拉取到新的数据库 migration 后，显式初始化一次本地业务数据库：
+
+```bash
+pnpm dev:db:setup
+```
+
+该命令才会生成 Prisma Client、执行已提交 migration，并初始化 LangGraph / UserMemory schema；日常 `pnpm dev*` 不会隐式执行这些数据库操作。
+
+其中 `pnpm dev:webapp` 和 `pnpm dev:pas` 是不注入本地 DB/PAS 环境变量的轻量诊断入口。
+
+`pnpm dev:watch` 会由 Turbo 并行运行 `@ai-mind/stream-core` 的 transpile 和 declaration watch；Prisma Client 生成属于显式的 `pnpm dev:db:setup`，不再伪装成长期 watch 或日常启动前置操作。单独诊断这两个共享包 watch 时，使用：
+
+```bash
+pnpm exec turbo run build:watch:transpile build:watch:types --filter=@ai-mind/stream-core
 ```
 
 ### 模型 Provider 配置
@@ -574,13 +598,13 @@ v0.4.6 起引入的真实 UserMemory semantic retrieval 还需要服务端配置
 如果只想单独初始化 chat memory checkpoint，也可以运行：
 
 ```bash
-pnpm db:chat-memory:setup
+pnpm --dir apps/webapp db:chat-memory:setup
 ```
 
 如果只想单独初始化 UserMemory Store，也可以运行：
 
 ```bash
-pnpm db:user-memory:setup
+pnpm --dir apps/webapp db:user-memory:setup
 ```
 
 ## 可以试试这些问题
@@ -606,6 +630,8 @@ pnpm db:user-memory:setup
 ```bash
 pnpm lint
 pnpm typecheck
+pnpm test:stable
+pnpm test:integration
 pnpm test
 pnpm build
 ```
@@ -624,8 +650,8 @@ pnpm --dir apps/webapp build
 
 ```bash
 pnpm dev:pas
-pnpm typecheck:pas
-pnpm build:pas
+pnpm --filter @ai-mind/project-assistant-service typecheck
+pnpm --filter @ai-mind/project-assistant-service build
 ```
 
 ### Stream Core
@@ -640,8 +666,8 @@ pnpm --filter @ai-mind/stream-core build
 
 ```bash
 pnpm lint
-pnpm lint:webapp:fix
-pnpm lint:packages:fix
+pnpm --filter @ai-mind/webapp lint:fix
+pnpm -r --filter "./packages/*" lint:fix
 ```
 
 ## 版本演进
@@ -683,6 +709,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.6  | UserMemory Semantic Retrieval Baseline             | 使用 `PostgresStore` vector search 与独立 embedding 配置，为 eligible ordinary chat 提供 vector-only 的长期 UserMemory 语义召回，并保持公开状态与 Agent/Workflow 边界不变       |
 | v0.4.7  | Browser-local Chat Session Persistence             | 引入浏览器本地最近会话与完整用户可见消息快照恢复，采用本地优先展示 + 服务端会话列表校准，并保持 Server Registry / ThreadState / UserMemory 的权威边界不变                       |
 | v0.4.8  | Monorepo pnpm / Turborepo Governance               | 统一 Node 22、pnpm 10.34.0、workspace/Catalog/安装脚本策略与 Turbo 根任务图，使本地、CI、Docker 共享可复现工程入口，并保持业务 Runtime 与部署契约不变                           |
+| v0.4.9  | Monorepo Boundary and CI Validation Governance     | 强制 workspace 依赖与导入边界，拆分 stable/integration/external 测试任务与缓存语义，并让 CI 仅在稳定验证成功后创建 PostgreSQL 状态                                              |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

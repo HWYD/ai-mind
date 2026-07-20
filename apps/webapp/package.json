@@ -1,7 +1,8 @@
 {
-    "name": "ai-mind",
-    "version": "0.4.8",
+    "name": "@ai-mind/webapp",
+    "version": "0.4.9",
     "main": "index.js",
+    "private": true,
     "scripts": {
         "dev": "next dev",
         "build": "next build",
@@ -20,8 +21,11 @@
         "lint:fix": "eslint . --fix",
         "smoke:cloud-models": "node scripts/smoke/cloud-model-provider-smoke.mjs",
         "test:check-location": "node ../../scripts/validate/check-test-locations.mjs .",
-        "test": "pnpm run test:check-location && vitest run",
-        "test:watch": "vitest"
+        "test": "pnpm run test:stable && pnpm run test:integration",
+        "test:stable": "pnpm run test:check-location && vitest run --config vitest.stable.config.ts",
+        "test:integration": "node ../../scripts/validate/validate-integration-test-env.mjs && vitest run --config vitest.integration.config.ts",
+        "test:external": "node scripts/validate-external-test-env.mjs && vitest run --config vitest.external.config.ts",
+        "test:watch": "vitest --config vitest.stable.config.ts"
     },
     "dependencies": {
         "@ai-mind/database": "workspace:*",

@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createChatModel, getModelProviderConfig, resolveModelSelection } from '@/lib/ai/model-provider'
 
-const describeCloudUsageSmoke = process.env.AI_MIND_RUN_CLOUD_USAGE_SMOKE === '1' ? describe : describe.skip
+const describeCloudUsageSmoke =
+    process.env.AI_MIND_RUN_EXTERNAL_TESTS === '1' || process.env.AI_MIND_RUN_CLOUD_USAGE_SMOKE === '1' ? describe : describe.skip
 
 describeCloudUsageSmoke('cloud model usage smoke', () => {
     afterEach(() => {

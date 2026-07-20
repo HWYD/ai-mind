@@ -141,7 +141,7 @@ Release workflow 必须满足：
 
 `.github/workflows/ci.yml` 必须在 Docker build checks 中构建 `deploy/postgres-pgvector.Dockerfile`，避免 release 才首次发现 pgvector 镜像构建问题。
 
-普通 `lint`、`typecheck`、`test`、`build` 检查通过根目录 Turborepo task graph 执行；Prisma generate、migration 和 runtime checkpoint setup 继续在 graph 之前显式、有序执行，不得从 task cache 恢复数据库状态。
+普通 `lint`、`typecheck`、`test:stable`、`build` 检查通过根目录 Turborepo task graph 执行；`test:integration` 在 stable validation 成功后单独进入有状态通道。Prisma generate、migration 和 runtime checkpoint setup 继续在 graph 之前显式、有序执行，不得从 task cache 恢复数据库状态。
 
 ## Server Deploy Command
 

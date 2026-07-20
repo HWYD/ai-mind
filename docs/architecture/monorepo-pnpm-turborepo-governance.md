@@ -2,136 +2,136 @@
 
 ## Summary
 
-AI Mind 使用 pnpm 管理 workspace、依赖解析、单一 lockfile、Catalog 和依赖安装脚本权限；使用 Turborepo 管理跨 workspace 的任务依赖、并行执行、输出与缓存。根目录命令是日常开发和 CI 的标准入口，package-level 命令继续作为诊断入口。
+AI Mind uses pnpm for workspace discovery, dependency resolution, one lockfile, Catalog versions, and local `workspace:` linking. Turborepo owns task ordering, parallelism, outputs, and cache policy. Root commands are the normal local and CI entry points; package commands remain focused diagnostic tools.
 
-本阶段固定 Node.js 22.x 与 `pnpm@10.34.0`。`--affected`、远程缓存、Changesets、npm publishing、`pnpm deploy`、Nx 迁移和大规模 package extraction 均不在本阶段。
+The repository runs on Node.js 22 and `pnpm@10.34.0`. v0.4.9 adds two enforceable contracts: workspace boundaries and test-lane governance. It does not change product runtime behavior or the production deployment flow.
 
-## Workspace Graph
+## Workspace Graph and Boundaries
 
 ```text
-apps/webapp (ai-mind)
-  -> packages/database (@ai-mind/database)
-  -> packages/stream-core (@ai-mind/stream-core)
-
-apps/project-assistant-service (project-assistant-service)
-
-packages/database (@ai-mind/database)
-packages/stream-core (@ai-mind/stream-core)
+@ai-mind/workspace
+├── @ai-mind/webapp
+│   ├── @ai-mind/database
+│   └── @ai-mind/stream-core
+├── @ai-mind/project-assistant-service
+├── @ai-mind/database
+└── @ai-mind/stream-core
 ```
 
-依赖方向是 `apps -> packages`。当前和未来的 shared package 都不得反向依赖 application。内部 `@ai-mind/*` 依赖必须使用显式 `workspace:` protocol，预期本地包缺失时安装必须失败，不允许静默回退到 registry 同名包。
+Allowed dependency direction is `apps -> packages`. Application-to-application and package-to-application dependencies are forbidden. Every workspace must be private, scoped as `@ai-mind/*`, and discovered by the explicit `apps/*` or `packages/*` membership in `pnpm-workspace.yaml`.
 
-根 `preinstall` 会执行 `scripts/validate/validate-workspace-boundaries.mjs`。这是对 frozen lockfile 可能复用悬空 `link:` 的补充保护：它扫描实际 workspace manifests，拒绝缺失的 `workspace:` provider、指向本地 workspace 却使用普通 semver 的依赖，以及 `packages -> apps` 反向依赖。
+Internal dependencies must use `workspace:`. Source code may cross a workspace boundary only through a declared `workspace:` dependency and an exported public entry point. The boundary validator rejects unmanaged manifests, duplicate or invalid identities, missing providers, non-`workspace:` internal ranges, illegal directions, cycles, cross-workspace relative imports, undeclared imports, deep private imports, and non-literal dynamic imports.
 
-`@ai-mind/*` 命名空间始终视为内部 package，即使对应 provider 目录同时缺失，也必须同时报告普通 semver 和 provider 缺失两类违规。`pnpm test:workspace-boundaries` 固定覆盖正常路径、两个独立错误和二者同时出现的组合错误。
+`preinstall`, `pnpm validate:workspace-boundaries`, every root test lane, and `pnpm build` invoke the boundary validator before Turborepo can restore cached work. `failIfNoMatch: true` makes an incorrect pnpm filter fail instead of silently succeeding.
 
-## Tool Ownership
+## Tool Ownership and Dependency Policy
 
-| Concern                                       | Owner                 | Rule                                             |
-| --------------------------------------------- | --------------------- | ------------------------------------------------ |
-| Workspace discovery and local package linking | pnpm                  | `apps/*`、`packages/*` 与 `workspace:*`          |
-| Reproducible dependency resolution            | pnpm                  | 单一 `pnpm-lock.yaml` 与 frozen install          |
-| Shared dependency versions                    | pnpm Catalog          | 仅集中兼容且有多个消费者的版本                   |
-| Dependency install scripts                    | pnpm `allowBuilds`    | 每项显式 `true`/`false`，默认不扩大权限          |
-| Task dependency order and parallelism         | Turborepo             | 以 package graph 和 `turbo.json` 生成 task graph |
-| Task outputs and local cache                  | Turborepo             | 只缓存可复用的有限任务输出                       |
-| Migrations and checkpoint setup               | Explicit pnpm scripts | 显式、有序、不可从 Turbo cache 恢复              |
+| Concern                                     | Owner                 | Contract                                                                |
+| ------------------------------------------- | --------------------- | ----------------------------------------------------------------------- |
+| Workspace discovery and local linking       | pnpm                  | `apps/*`, `packages/*`, and explicit `workspace:` ranges                |
+| Reproducible dependency resolution          | pnpm                  | One `pnpm-lock.yaml` and frozen installation                            |
+| Shared dependency versions                  | pnpm Catalog          | Centralize only dependencies with multiple compatible consumers         |
+| Dependency install scripts                  | pnpm `allowBuilds`    | Every discovered build script is explicitly allowed or denied           |
+| Task ordering, parallelism, and local cache | Turborepo             | Derive the task graph from workspace dependencies and `turbo.json`      |
+| Stream-core transpile/type watch            | Turborepo             | Run two explicit persistent leaf tasks; no package-local process runner |
+| Migrations and checkpoint setup             | Explicit pnpm scripts | Ordered state changes never restored from Turbo cache                   |
+
+The Catalog currently owns `@types/node`, TypeScript, Vitest, Zod, MCP SDK, and dotenv. Webapp-only UI/framework dependencies stay in the Webapp manifest. `allowBuilds` remains fail closed: Prisma engines, esbuild, sharp, and `unrs-resolver` are allowed for required runtime/build artifacts; Nest donation output, MSW worker copying, and Prisma's redundant Node-version preinstall check remain denied. A new dependency install script requires source and call-chain review before the allowlist changes.
 
 ## Canonical and Diagnostic Commands
 
-| Purpose                        | Canonical root command           | Diagnostic alternative                                                            |
-| ------------------------------ | -------------------------------- | --------------------------------------------------------------------------------- |
-| Lint                           | `pnpm lint`                      | `pnpm --filter <workspace> lint` 或 `pnpm lint:root`                              |
-| Typecheck                      | `pnpm typecheck`                 | `pnpm --filter <workspace> typecheck`                                             |
-| Test                           | `pnpm test`                      | `pnpm --filter <workspace> test`                                                  |
-| Build                          | `pnpm build`                     | `pnpm --filter <workspace> build`                                                 |
-| Workspace boundary regression  | `pnpm test:workspace-boundaries` | `pnpm validate:workspace-boundaries` for current manifests                        |
-| Webapp with dependency watches | `pnpm dev`                       | `pnpm dev:webapp`、`pnpm build:watch`                                             |
-| PAS development                | `pnpm dev:pas`                   | `pnpm --dir apps/project-assistant-service dev`                                   |
-| Database setup                 | No cached aggregate task         | `pnpm db:generate`、`pnpm db:migrate:deploy`、`pnpm db:runtime-checkpoints:setup` |
+| Purpose                  | Canonical root command                      | Diagnostic alternative                            |
+| ------------------------ | ------------------------------------------- | ------------------------------------------------- |
+| Boundary validation      | `pnpm validate:workspace-boundaries`        | `pnpm test:governance:boundaries`                 |
+| Governance regressions   | `pnpm test:governance`                      | the focused `test:governance:*` validator scripts |
+| Stable validation        | `pnpm test:stable`                          | `pnpm --filter <workspace> test:stable`           |
+| Stateful integration     | `pnpm test:integration`                     | `pnpm --filter <workspace> test:integration`      |
+| External validation      | `pnpm test:external`                        | Webapp `test:external` with dedicated credentials |
+| Full daily test contract | `pnpm test`                                 | run stable/integration separately for diagnosis   |
+| Lint, typecheck, build   | `pnpm lint`, `pnpm typecheck`, `pnpm build` | matching package-level command                    |
 
-Root `build`、`typecheck`、`test`、`lint` 通过 Turborepo 执行。`pnpm dev` 运行 `turbo run dev build:watch --filter=ai-mind...`，选择 Webapp 及其依赖；PAS development 保持独立诊断入口。
+## Local Development Commands
 
-## Catalog Policy
+Local development uses a host-run Webapp/PAS process with only PostgreSQL running in Docker through `deploy/compose.dev-postgres.yml`. Daily startup owns container readiness only; database initialization remains an explicit, one-off operation.
 
-| Dependency                  | Version   | Consumers                     | Owner and rationale                                |
-| --------------------------- | --------- | ----------------------------- | -------------------------------------------------- |
-| `@types/node`               | `22.20.1` | root、Webapp、PAS             | Repository maintainers；与 Node.js 22 runtime 对齐 |
-| `typescript`                | `5.9.3`   | root、Webapp、PAS             | Repository maintainers；统一编译器语义             |
-| `vitest`                    | `^4.1.4`  | Webapp、database、stream-core | Repository maintainers；统一测试运行器主版本       |
-| `zod`                       | `^4.3.6`  | Webapp、PAS                   | Repository maintainers；共享 runtime schema 兼容线 |
-| `@modelcontextprotocol/sdk` | `^1.29.0` | Webapp、PAS                   | Repository maintainers；统一 MCP contract 依赖     |
-| `dotenv`                    | `17.2.3`  | Webapp、database              | Repository maintainers；统一 env loader 行为       |
+| Scenario                                                                   | Command              | Behavior                                                                                                                                                         |
+| -------------------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Webapp + PostgreSQL + Project Assistant Service, no package watch          | `pnpm dev`           | Starts local Docker PostgreSQL, then uses Turbo to run Webapp and PAS `dev` tasks with local DB/MCP environment defaults.                                        |
+| Webapp + PostgreSQL + Project Assistant Service, with shared-package watch | `pnpm dev:watch`     | Starts the same PostgreSQL readiness preflight, then uses separate Turbo task graphs for Webapp/PAS `dev` and the stream-core transpile/declaration watch tasks. |
+| Webapp + PostgreSQL only                                                   | `pnpm dev:webapp:db` | Starts local Docker PostgreSQL, then uses Turbo to run only the Webapp `dev` task with local DB/MCP environment defaults.                                        |
 
-Next.js、React、UI/editor 等 Webapp-only dependencies 保留在 Webapp manifest。`@types/node` 已统一到 Node.js 22 类型线；根 `pnpm.overrides` 会把传递依赖中的 `@types/node` 解析也压到根声明版本，避免 lockfile 在 Node 22 runtime 下残留 Node 25 类型快照。其余保留的版本例外必须有明确兼容性依据。
+`pnpm dev:db` is the shared preflight for these scenarios. It starts only the `postgres` service from `deploy/compose.dev-postgres.yml` and waits for readiness at `postgresql://ai_mind:ai_mind@127.0.0.1:5433/ai_mind`; it does not generate Prisma Client, run migrations, or create runtime schemas.
 
-## Dependency Build Script Policy
+Use `pnpm dev:db:setup` explicitly after a fresh clone, a cleared database volume, or a committed migration change. It generates Prisma Client, applies the checked-in migrations, and runs the existing runtime checkpoint/UserMemory schema setup. `db:setup:deploy` remains the unchanged production deployment contract.
 
-`allowBuilds` 以 lockfile 和已安装 package scripts 为证据。`true` 仅用于准备项目实际需要的平台二进制或 engine；提示、自动配置和可由仓库约束替代的检查脚本不执行。
+Use `pnpm dev:db:logs` to follow the local development PostgreSQL logs and `pnpm dev:db:down` to stop the DB-only Compose stack. These commands are separate from `pnpm docker:local:*`, which remains the production-image local acceptance path.
 
-| Package           | Allowed | Evidence and rationale                                                               |
-| ----------------- | ------: | ------------------------------------------------------------------------------------ |
-| `@nestjs/core`    | `false` | `postinstall` 仅运行 OpenCollective 提示，不产生 runtime artifact                    |
-| `@prisma/engines` |  `true` | `postinstall` 准备 Prisma engine，database generate/validate 需要                    |
-| `esbuild`         |  `true` | `postinstall` 校验/准备当前平台二进制，tsup/Vite build 需要                          |
-| `msw`             | `false` | `postinstall` 仅在 consumer 声明 workerDirectory 时自动复制 worker；本仓库没有该配置 |
-| `prisma`          | `false` | `preinstall` 只做 Node compatibility 检查；Node 22 已由仓库、CI、Docker 固定         |
-| `sharp`           |  `true` | `install` 校验可用 libvips/native binary，Next production build/runtime 需要         |
-| `unrs-resolver`   |  `true` | `postinstall` 校验当前平台 N-API resolver binding，ESLint resolver 需要              |
+`pnpm dev:webapp` and `pnpm dev:pas` remain package-level diagnostic shortcuts. They do not start PostgreSQL or inject the local database/MCP defaults. Use them only when the needed environment is already provided by the shell or an app-local env file.
 
-发现新的 dependency build script 时必须 fail closed，审查脚本内容、lockfile 来源和实际调用链后再增加显式决策；不得使用全量批准绕过安装失败。
+Turbo `dev` declares the local runtime environment keys it may receive (`DATABASE_URL`, `PROJECT_ASSISTANT_SERVICE_*`, `AI_MIND_*`, and `NEXT_PUBLIC_*`). This is required because Turborepo's strict environment mode should not accidentally drop the local DB/MCP defaults injected by the root scenario scripts.
 
-## Task Graph and Cache Policy
+## Test Lanes and Commands
 
-- `build` 依赖 upstream `^build`，输出包括 `.next/**`、`dist/**`、`build/**` 和生成目录。
-- `typecheck` 依赖 upstream `^build`，确保依赖包产物可用；`@ai-mind/database#typecheck` 还依赖同包 `build`，避免在干净工作区中读取尚未生成的 Prisma Client。
-- `test` 和 `lint` 是有限任务；当前命令不生成 coverage artifact，因此声明空 outputs。stream-core 与 PAS 的测试不读取外部状态，可以缓存任务结果与日志。
-- `@ai-mind/database#test` 依赖同包 `build` 且不缓存；Webapp 的现有 `test` 脚本混合了纯单测、PostgreSQL integration 和 cloud/live smoke，因此 `ai-mind#test` 也不缓存。数据库内容和远端服务响应不进入稳定 hash，在拆分出独立 hermetic unit-test task 之前，不复用这两个 workspace 的测试结果。
-- `dev` 与真正的 watch task 是 persistent 且 `cache: false`。
-- `@ai-mind/database` 的 `build`/`build:watch` 执行 Prisma generate，属于 side-effect-sensitive task，始终 `cache: false`；其 `build:watch` 是一次性兼容入口，不标记 persistent。
-- migration、checkpoint setup 和数据库状态不进入可复用 task cache。
+Every automated test belongs to exactly one lane, based on its file name:
 
-Turbo hash 覆盖 workspace source、package manifest、lockfile、workspace config、Turbo config 与声明的环境变量。环境或生成文件语义变化时，应修正 inputs/env，而不是全局关闭缓存。
+| Lane        | Naming and scope                                                        | Root command            | Cache policy                                                |
+| ----------- | ----------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------- |
+| stable      | ordinary `*.test.*` / `*.spec.*` tests, including root governance tests | `pnpm test:stable`      | workspace tasks cacheable; governance preflight always runs |
+| integration | `*.integration.test.*`, including database tests                        | `pnpm test:integration` | disabled                                                    |
+| external    | `*-smoke.test.*` cloud/live tests                                       | `pnpm test:external`    | disabled                                                    |
 
-## Complete Example: stream-core to Webapp
+`pnpm validate:test-lanes` inventories every workspace/file/lane before stable work, including the root validator regression files. A test-like file outside its workspace's managed test root is a governance failure rather than an untracked stable test. `pnpm test:governance` then proves the validators themselves before Turbo runs workspace tests. Stable tests run without `DATABASE_URL` and without a PostgreSQL service. Integration tests require explicit PostgreSQL, Prisma migration, and runtime checkpoint setup; a missing `DATABASE_URL` is a configuration failure before Vitest, never a successful all-skipped run. External tests require `AI_MIND_RUN_EXTERNAL_TESTS=1`; ordinary root and CI flows report them as not run. A missing opt-in is a configuration failure; an opted-in provider, quota, or network failure is an external validation failure.
 
-Webapp 在 `apps/webapp/package.json` 中以 `workspace:*` 依赖 `@ai-mind/stream-core`。pnpm 负责把该依赖解析并链接到本地 `packages/stream-core`；如果目录缺失，frozen install 失败。
+The canonical aggregate `pnpm test` runs stable validation first and then integration validation. Package-level lane commands narrow diagnosis without replacing the root flow.
 
-执行 `pnpm build` 时，Turbo 从同一 package graph 看到 Webapp 依赖 stream-core，并通过 `build.dependsOn = ["^build"]` 先运行 `@ai-mind/stream-core#build`，产生 `packages/stream-core/build/**`，随后运行 `ai-mind#build`。因此 pnpm 决定“使用哪个包”，Turbo 决定“相关任务按什么顺序运行”。
+Root `package.json` scripts are reserved for common local/CI entry points and durable governance contracts. Low-frequency one-off diagnostics use documented `pnpm --filter` or `pnpm --dir` commands instead of adding another root alias.
 
-## CI and Docker
+## Turbo Task Contracts
 
-CI 先 frozen install，再显式执行 Prisma generate、migration 和 runtime checkpoint setup，之后运行与本地一致的 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build`。数据库状态步骤不会隐藏在 Turbo cache 后。
+- `build` and `typecheck` respect upstream `^build` dependencies.
+- `test:stable` applies only to webapp, stream-core, and Project Assistant Service, has no database environment input, and is cacheable.
+- `test:integration` applies only to webapp and database, is `cache: false`, and declares `DATABASE_URL` plus required runtime configuration.
+- `test:external` applies only to webapp, is `cache: false`, and declares the explicit external opt-in/runtime variables.
+- Database `build` still runs Prisma generation and remains non-cacheable. Migrations and checkpoint setup stay outside reusable task cache.
+- Stream-core watch is split into `build:watch:transpile` and `build:watch:types`; both are explicit persistent, uncached Turbo tasks. The database no longer exposes `build:watch`, because Prisma generation is finite setup work rather than a watcher.
 
-Docker 使用 Node.js 22 和 `pnpm@10.34.0`。builder 通过根 `pnpm build` 使用相同 dependency-aware graph，production dependency stage 继续显式生成 Prisma client；镜像分层和现有 runner contract 不变。
+One-off diagnostic commands:
+
+```powershell
+pnpm test:governance
+pnpm test:governance:boundaries
+pnpm test:governance:lanes
+pnpm test:governance:integration-env
+pnpm validate:workspace-boundaries
+pnpm validate:test-lanes
+pnpm --filter @ai-mind/webapp test:stable
+pnpm --filter @ai-mind/database test:integration
+pnpm --filter @ai-mind/project-assistant-service build
+pnpm --filter @ai-mind/project-assistant-service typecheck
+pnpm --filter @ai-mind/webapp lint
+pnpm --filter @ai-mind/webapp lint:fix
+pnpm --filter @ai-mind/database db:generate
+pnpm --filter @ai-mind/database db:validate
+pnpm --filter @ai-mind/database db:migrate:deploy
+pnpm --dir apps/webapp db:chat-memory:setup
+pnpm --dir apps/webapp db:user-memory:setup
+pnpm exec turbo run build:watch:transpile build:watch:types --filter=@ai-mind/stream-core
+pnpm exec turbo run test:stable --dry
+pnpm exec turbo run test:integration --dry
+```
+
+## CI Ordering
+
+`stable-validation` has no PostgreSQL service, `DATABASE_URL`, migration, or checkpoint setup. It runs frozen install, boundary validation, lint, typecheck, lane inventory, stable tests, and build.
+
+`stateful-integration` has `needs: stable-validation`; it alone starts PostgreSQL, generates Prisma Client, applies migrations, initializes runtime checkpoint tables, and runs integration tests. Both Node jobs cache the pnpm store. The Docker build-check job remains independent.
+
+This ordering makes the expensive stateful lane a consequence of successful deterministic validation. If stable validation fails, GitHub Actions skips the dependent integration job and no stateful setup starts.
+
+`scripts/validate/validate-ci-workflow.test.mjs` keeps this job topology executable in the stable governance suite: it rejects a stable job that gains a service, database environment, migration, or checkpoint setup, and requires the integration job to remain dependent and ordered.
 
 ## Failure Diagnosis
 
-Turbo 输出使用 `<workspace>#<task>` 标识任务，例如 `@ai-mind/stream-core#build`。并行执行中任一任务失败时，最终命令必须返回非零状态，并保留失败 workspace 与 task 名称。随后使用对应 package-level 命令缩小范围，例如：
+Boundary failures include the workspace/file/reason. Fix the declared graph or public import surface rather than adding registry fallbacks. Lane inventory output identifies a workspace/file/lane mismatch; rename or relocate a test so it has one classification. Turbo reports `<workspace>#<task>` for task failures; use the matching package-level command to reduce scope.
 
-```powershell
-pnpm --filter @ai-mind/stream-core build
-pnpm --filter @ai-mind/database db:validate
-pnpm --dir apps/webapp typecheck
-```
-
-若出现 stale cache，先检查 `inputs`、`outputs`、`env` 和 upstream dependency；若内部包缺失，修复 workspace；若 build script 未审批，更新显式策略。不要通过 registry fallback、全量 script approval 或全局禁用 cache 掩盖问题。
-
-## Acceptance Evidence
-
-| Check                         | Expected evidence                                              | Status                                                                                                                                            |
-| ----------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Version alignment             | Node 22.x；root/CI/Docker 均为 pnpm 10.34.0                    | Passed: Node 22.22.2, pnpm 10.34.0                                                                                                                |
-| Frozen install                | 成功且 `pnpm-lock.yaml` 无意外变化                             | Passed: lockfile hash unchanged                                                                                                                   |
-| Script policy                 | 7 项均为 boolean，无 placeholder，冻结安装和实际构建无阻塞脚本 | Passed: frozen install and all package/Docker builds completed under the explicit policy                                                          |
-| Catalog                       | 6 个集中依赖，`@types/node` 与 Node.js 22 runtime 对齐         | Passed: lockfile Catalog metadata generated                                                                                                       |
-| Task graph                    | stream-core build 在 Webapp build/typecheck 前；独立任务可并行 | Passed: controlled stream-core marker invalidated upstream and dependent Webapp tasks in order                                                    |
-| Database generated dependency | database typecheck/test 在同包 Prisma generation 后执行        | Passed: isolated copy started without generated client; build generated it before both consumers, 3/3 tasks successful                            |
-| Non-hermetic test cache       | database/Webapp test 不缓存；stream-core/PAS test 保留缓存     | Passed: root test showed database/Webapp cache bypass; isolated hermetic rerun was 2/2 cache hits                                                 |
-| Root commands                 | lint/typecheck/test/build 均通过 Turbo                         | Passed: 4 lint, 6 typecheck, 6 test and 4 build tasks successful                                                                                  |
-| Package regressions           | database、stream-core、PAS、Webapp 诊断命令通过                | Passed: database generate/validate; stream-core 22 tests/typecheck/build; PAS 8 tests/typecheck/build; Webapp typecheck plus root lint/test/build |
-| Runtime smoke                 | ordinary chat、tool、Tasklist、Delivery                        | Passed: 4 targeted files, 65 tests                                                                                                                |
-
-Long-running validation confirmed `pnpm dev` selects `ai-mind` plus database/stream-core dependencies and marks all selected tasks cache bypass. An existing user-owned Next dev process already held `.next/dev/lock`, so the validation instance used its failure output without terminating that process. `pnpm dev:pas` reached a healthy Nest startup, and `pnpm build:watch` reached Prisma generation plus stream-core watch mode; validation-owned process trees were then stopped with no remaining watcher.
-
-Local validation had no PostgreSQL listener and no available Docker daemon, so migration/checkpoint setup and a real image build were not executed on that machine. Database integration tests used their existing environment gate and skipped 2 tests. CI retains the PostgreSQL service and explicit setup sequence; the Dockerfile was reviewed statically for validator availability, pnpm version alignment, root Turbo build and explicit production Prisma generation.
+Production Docker, TCR image, Compose, environment, secret, and deployment contracts are unchanged. See [Production Deployment](./production-deployment.md) for their source of truth.

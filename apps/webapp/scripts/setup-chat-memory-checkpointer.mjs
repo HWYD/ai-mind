@@ -1,14 +1,7 @@
 import { PostgresSaver } from '@langchain/langgraph-checkpoint-postgres'
-import { loadSetupDatabaseUrlFromEnvFiles } from './load-setup-env.mjs'
+import { loadSetupEnvFiles } from './load-setup-env.mjs'
 
-try {
-    await import('dotenv/config')
-} catch {
-    // Production runner images receive DATABASE_URL from Compose / server env,
-    // so dotenv is optional for this one-shot setup script.
-}
-
-loadSetupDatabaseUrlFromEnvFiles()
+loadSetupEnvFiles()
 
 const connectionString = process.env.DATABASE_URL?.trim()
 
