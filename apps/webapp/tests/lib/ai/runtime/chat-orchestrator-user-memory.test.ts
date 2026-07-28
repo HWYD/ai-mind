@@ -140,6 +140,7 @@ vi.mock('@ai-mind/stream-core', async importOriginal => {
 })
 
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
+import * as tasklistAgentRuntime from '@/lib/ai/runtime/version-plan-tasklist-agent'
 
 function createExecutionContext(): ResolvedChatExecutionContext {
     return {
@@ -386,12 +387,31 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         runtimeMocks.retrieveRelevantMemories.mockResolvedValue([])
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(false)
         runtimeMocks.startDeliveryChainRun.mockResolvedValue(false)
-        runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue(undefined)
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue({
+            graphResult: { status: 'completed' },
+        })
         runtimeMocks.streamAssistantParts.mockResolvedValue('好的，推荐桃子。')
         runtimeMocks.streamPlanningResponse.mockResolvedValue(new AIMessage({ content: '', tool_calls: [] }))
         runtimeMocks.stripMessageText.mockImplementation((message: AIMessage) => message)
         runtimeMocks.touchConversation.mockResolvedValue(undefined)
         runtimeMocks.writeToolValidationErrors.mockReturnValue([])
+        vi.mocked(tasklistAgentRuntime.createTasklistAgentModelSet).mockReturnValue({ drafting: {}, planning: {} } as never)
+        vi.mocked(tasklistAgentRuntime.createVersionPlanTasklistAgentSkeleton).mockReturnValue({
+            runId: 'run-tasklist-test',
+            versionPlanReference: {
+                id: 'demo://version-plans/demo.md',
+                label: 'demo.md',
+                source: 'local',
+                type: 'resource',
+                uri: 'demo://version-plans/demo.md',
+            },
+        } as never)
+        vi.mocked(tasklistAgentRuntime.getTasklistAgentRuntimeConfig).mockReturnValue({
+            graphCheckpointMode: 'memory',
+            graphDebugViewEnabled: false,
+            graphEventsEnabled: false,
+        })
+        vi.mocked(tasklistAgentRuntime.resolveVersionPlanTasklistAgentInvocation).mockReturnValue(null)
     })
 
     it('ordinary chat 会先注入 UserMemory，再注入 short-term memory，并在 final turn 后异步启动 extraction', async () => {
@@ -913,6 +933,42 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
 
         expect(runtimeMocks.retrieveRelevantMemories).not.toHaveBeenCalled()
         expect(runtimeMocks.processCompletedTurnForMemory).not.toHaveBeenCalled()
+    })
+
+    it('Tasklist Agent 进入人工审核暂停时不追加 finish completed', async () => {
+        const session = createSession()
+        const writtenChunks: Array<{ type: string }> = []
+        runtimeMocks.createChatSession.mockReturnValue(session)
+        vi.mocked(tasklistAgentRuntime.resolveVersionPlanTasklistAgentInvocation).mockReturnValue({
+            kind: 'ready',
+            versionPlanReference: {
+                id: 'demo://version-plans/demo.md',
+                label: 'demo.md',
+                source: 'local',
+                type: 'resource',
+                uri: 'demo://version-plans/demo.md',
+            },
+        })
+        runtimeMocks.startVersionPlanTasklistAgentRun.mockImplementation(
+            async ({ writeChunk }: { writeChunk: (chunk: { type: string }) => void }) => {
+                writeChunk({ type: 'agent-interrupt' })
+
+                return {
+                    graphResult: { status: 'interrupted' },
+                }
+            }
+        )
+
+        const orchestrator = new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createTasklistRequest(),
+            writeChunk: chunk => writtenChunks.push(chunk),
+        })
+
+        await orchestrator.run()
+
+        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'agent-interrupt'])
     })
 
     it('Delivery 路径不读取也不写入 UserMemory', async () => {

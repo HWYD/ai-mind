@@ -713,9 +713,10 @@ export class ChatOrchestrator {
         }
 
         const skeletonResult = createVersionPlanTasklistAgentSkeleton(agentInvocation)
+        const runId = this.context.streamRecovery?.runId ?? skeletonResult.runId
 
         logSkillRuntime('version-plan-tasklist-agent-skeleton', {
-            runId: skeletonResult.runId,
+            runId,
             versionPlanUri: skeletonResult.versionPlanReference.uri,
         })
 
@@ -737,7 +738,7 @@ export class ChatOrchestrator {
             graphEventsEnabled: runtimeConfig.graphEventsEnabled,
         })
 
-        await startVersionPlanTasklistAgentRun({
+        const agentRunResult = await startVersionPlanTasklistAgentRun({
             assistantMessageId: this.assistantMessageId,
             context: this.context,
             conversationId: this.request.conversationId,
@@ -745,7 +746,7 @@ export class ChatOrchestrator {
             modelProvider: this.context.resolvedModelSelection.provider,
             models,
             reasoningEnabled: this.shouldEmitReasoning(),
-            runId: skeletonResult.runId,
+            runId,
             runtimeConfig,
             sessionId,
             userGoal,
@@ -753,7 +754,7 @@ export class ChatOrchestrator {
             writeChunk: this.writeChunk,
         })
 
-        return true
+        return agentRunResult.graphResult.status === 'interrupted' ? 'interrupted' : true
     }
 
     private async runDeliveryChainEntryStage(session: ChatSession) {
@@ -811,8 +812,12 @@ export class ChatOrchestrator {
             // - Capability Context：runtime 主动消费的固定 capability 场景。
             // - Tool Calling：模型自行决定是否调用已绑定工具。
             // - Direct Answer：没有工具或无需工具时直接回答。
-            if (await this.runVersionPlanTasklistAgentEntryStage(session)) {
-                lifecycle.emitFinishIfOpen()
+            const tasklistAgentResult = await this.runVersionPlanTasklistAgentEntryStage(session)
+
+            if (tasklistAgentResult) {
+                if (tasklistAgentResult !== 'interrupted') {
+                    lifecycle.emitFinishIfOpen()
+                }
                 return
             }
 

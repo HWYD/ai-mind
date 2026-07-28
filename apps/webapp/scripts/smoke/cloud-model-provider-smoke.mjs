@@ -33,12 +33,22 @@ async function requestChat(payload) {
     const response = await fetch(`${baseUrl}/api/chat`, {
         method: 'POST',
         headers: {
+            Accept: 'application/x-ndjson; profile="ai-mind-resumable-v1"',
             'content-type': 'application/json',
+            'Idempotency-Key': crypto.randomUUID(),
         },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(timeoutMs),
     })
-    const chunks = parseNdjson(await response.text())
+    const envelopes = parseNdjson(await response.text())
+
+    if (response.ok && envelopes.some(envelope => !envelope || typeof envelope !== 'object' || !('payload' in envelope))) {
+        throw new Error('Chat stream response contained a non-envelope line.')
+    }
+
+    const chunks = envelopes
+        .map(envelope => envelope.payload)
+        .filter(payload => payload?.type !== 'run-status')
 
     return {
         chunks,

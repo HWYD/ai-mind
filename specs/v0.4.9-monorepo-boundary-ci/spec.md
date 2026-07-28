@@ -1,6 +1,6 @@
 # Feature Specification: Monorepo Boundary and CI Validation Governance
 
-**Feature Branch**: `[049-monorepo-boundary-ci]`  
+**Feature Branch**: `[v0.4.9-monorepo-boundary-ci]`  
 **Version**: `v0.4.9`  
 **Created**: 2026-07-18  
 **Status**: Ready for CI verification  

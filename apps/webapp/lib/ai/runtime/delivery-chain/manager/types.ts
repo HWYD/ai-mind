@@ -41,6 +41,7 @@ export interface SubagentToolInvocation extends SubagentToolInput {
 export interface SubagentToolResult {
     artifacts: RuntimeArtifact[]
     endedAt: string
+    failureCode?: string
     invocationId: string
     markdown: string
     status: SubagentToolJsonResult['status']

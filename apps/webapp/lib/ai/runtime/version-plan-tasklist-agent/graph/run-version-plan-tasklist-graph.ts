@@ -179,8 +179,16 @@ function writeGraphDebugSummary(
 }
 
 function createCompiledTasklistGraph(options: CreateCompiledTasklistGraphOptions): CompiledTasklistGraph {
+    const checkpointer = getVersionPlanTasklistCheckpointer(options.runtimeConfig.graphCheckpointMode)
+
+    if (!checkpointer) {
+        throw new Error(
+            'Tasklist Agent HITL requires a LangGraph checkpointer. Set AI_MIND_GRAPH_CHECKPOINT to memory or postgres before starting the WebApp.'
+        )
+    }
+
     return createVersionPlanTasklistGraph({
-        checkpointer: getVersionPlanTasklistCheckpointer(options.runtimeConfig.graphCheckpointMode),
+        checkpointer,
         runtime: {
             context: options.context,
             models: options.models,

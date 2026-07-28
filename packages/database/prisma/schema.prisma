@@ -37,6 +37,28 @@ enum AgentInterruptKind {
   tasklist_revision_review
 }
 
+enum StreamRunKind {
+  chat
+  tasklist_agent
+  delivery_chain
+}
+
+enum StreamRunStatus {
+  running
+  paused
+  completed
+  failed
+  cancelled
+  rejected
+  version_mismatch
+}
+
+enum StreamEventKind {
+  chunk
+  lifecycle
+  terminal
+}
+
 model AgentRun {
   id                 String                @id @default(uuid()) @db.Uuid
   conversationId     String                @map("conversation_id")
@@ -64,6 +86,7 @@ model AgentRun {
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
   interrupts         AgentInterrupt[]
+  streamRun          StreamRun?
 
   @@index([conversationId])
   @@index([assistantMessageId])
@@ -95,4 +118,72 @@ model AgentInterrupt {
   @@index([runId, status])
   @@index([threadId])
   @@map("agent_interrupts")
+}
+
+model StreamRequest {
+  id                 String    @id @default(uuid()) @db.Uuid
+  ownerSessionHash   String    @map("owner_session_hash") @db.VarChar(64)
+  idempotencyKey     String    @map("idempotency_key") @db.VarChar(128)
+  requestFingerprint String    @map("request_fingerprint") @db.VarChar(128)
+  runId              String    @unique @map("run_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt          DateTime  @map("expires_at") @db.Timestamptz(6)
+  run                StreamRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerSessionHash, idempotencyKey])
+  @@index([ownerSessionHash, expiresAt])
+  @@index([expiresAt])
+  @@map("stream_requests")
+}
+
+model StreamRun {
+  id                   String          @id @default(uuid()) @db.Uuid
+  kind                 StreamRunKind
+  ownerSessionHash     String          @map("owner_session_hash") @db.VarChar(64)
+  agentRunId           String?         @map("agent_run_id") @db.Uuid
+  status               StreamRunStatus
+  lastSequence         Int             @default(0) @map("last_sequence")
+  terminalSequence     Int?            @map("terminal_sequence")
+  retentionUntil       DateTime        @map("retention_until") @db.Timestamptz(6)
+  executionOwnerId     String?         @map("execution_owner_id") @db.VarChar(128)
+  cancelRequestedAt    DateTime?       @map("cancel_requested_at") @db.Timestamptz(6)
+  maxRetainedEvents    Int             @default(20000) @map("max_retained_events")
+  maxEventPayloadBytes Int             @default(262144) @map("max_event_payload_bytes")
+  failureCode          String?         @map("failure_code") @db.VarChar(128)
+  publicFailureMessage String?         @map("public_failure_message") @db.VarChar(1000)
+  createdAt            DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt          DateTime?       @map("completed_at") @db.Timestamptz(6)
+  request              StreamRequest?
+  agentRun             AgentRun?       @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  events               StreamEvent[]
+
+  @@index([ownerSessionHash])
+  @@index([kind, status])
+  @@index([status, retentionUntil])
+  @@index([retentionUntil])
+  @@unique([agentRunId])
+  @@map("stream_runs")
+}
+
+model StreamEvent {
+  id                String           @id @default(uuid()) @db.Uuid
+  runId             String           @map("run_id") @db.Uuid
+  sequence          Int
+  eventKind         StreamEventKind  @map("event_kind")
+  protocolVersion   Int              @map("protocol_version")
+  payload           Json
+  payloadByteLength Int              @map("payload_byte_length")
+  runStatus         StreamRunStatus? @map("run_status")
+  terminalState     StreamRunStatus? @map("terminal_state")
+  terminal          Boolean          @default(false)
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt         DateTime         @map("expires_at") @db.Timestamptz(6)
+  run               StreamRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, sequence])
+  @@index([runId, sequence])
+  @@index([runId, terminal])
+  @@index([expiresAt])
+  @@map("stream_events")
 }

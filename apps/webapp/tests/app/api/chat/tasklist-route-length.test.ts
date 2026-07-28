@@ -6,11 +6,19 @@ const rateLimitCheckAndIncrementMock = vi.hoisted(() => vi.fn())
 const resolveSessionIdMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'test-session', setCookie: vi.fn() })))
 const getConversationMock = vi.hoisted(() => vi.fn())
 const touchConversationMock = vi.hoisted(() => vi.fn())
+const createOrReuseRunMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/ai/chat-service', () => ({
     createChatService: () => ({
         streamChat: streamChatMock,
     }),
+}))
+
+vi.mock('@/lib/ai/stream-recovery/stream-run-service', () => ({
+    StreamRunService: class StreamRunServiceMock {
+        createOrReuseRun = createOrReuseRunMock
+    },
+    StreamRunServiceError: class StreamRunServiceError extends Error {},
 }))
 
 vi.mock('@/lib/ai/rate-limit', () => ({
@@ -43,6 +51,7 @@ function createPostRequest(payload: unknown) {
         body: JSON.stringify(payload),
         headers: {
             'Content-Type': 'application/json',
+            'Idempotency-Key': 'tasklist-route-length-key',
         },
     })
 }
@@ -50,10 +59,17 @@ function createPostRequest(payload: unknown) {
 describe('POST /api/chat tasklist input length routing', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        process.env.AI_MIND_AGENT_RUN_SESSION_SECRET = 'test-secret-with-at-least-32-characters'
         getConversationMock.mockResolvedValue({
             id: 'test-tasklist-history-length',
         })
         touchConversationMock.mockResolvedValue(undefined)
+        createOrReuseRunMock.mockResolvedValue({
+            request: { id: 'request-tasklist-test' },
+            run: { id: 'run-tasklist-test' },
+            streamUrl: '/api/chat/runs/run-tasklist-test/stream',
+            type: 'created',
+        })
     })
 
     it('does not reject tasklist requests only because prior history is too long', async () => {

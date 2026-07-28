@@ -32,6 +32,23 @@ describe('static parts', () => {
         })
     })
 
+    it('splits oversized static text into UTF-8-safe deltas', () => {
+        const collector = collectChunks()
+        const text = `${'中'.repeat(45_000)}😀报告结尾`
+
+        writeStaticTextPart(collector.writeChunk, text)
+
+        const deltas = collector.chunks.filter(
+            (chunk): chunk is Extract<ChatStreamChunk, { type: 'text-delta' }> => chunk.type === 'text-delta'
+        )
+
+        expect(deltas.length).toBeGreaterThan(1)
+        expect(deltas.map(chunk => chunk.delta).join('')).toBe(text)
+        expect(deltas.every(chunk => new TextEncoder().encode(chunk.delta).length <= 128 * 1024)).toBe(true)
+        expect(collector.chunks[0]).toMatchObject({ type: 'text-start' })
+        expect(collector.chunks.at(-1)).toMatchObject({ type: 'text-end' })
+    })
+
     it('writes a complete static reasoning part', () => {
         const collector = collectChunks()
 

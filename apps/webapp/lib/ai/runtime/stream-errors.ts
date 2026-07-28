@@ -63,6 +63,14 @@ function normalizePrismaDataLayerError(error: unknown): NormalizedKnownRuntimeEr
         }
     }
 
+    if (message.includes('Tasklist Agent HITL requires a LangGraph checkpointer.')) {
+        return {
+            code: 'RUNTIME_INVARIANT_FAILED',
+            message: 'Tasklist Agent 恢复能力未配置：请将 AI_MIND_GRAPH_CHECKPOINT 设置为 memory 或 postgres，并重启 WebApp 后重试。',
+            retryable: false,
+        }
+    }
+
     if (
         code === 'P2021' ||
         message.includes('does not exist in the current database') ||
@@ -71,14 +79,21 @@ function normalizePrismaDataLayerError(error: unknown): NormalizedKnownRuntimeEr
         message.includes('relation "langgraph_checkpoint.checkpoint_blobs" does not exist') ||
         message.includes('relation "langgraph_checkpoint.checkpoint_migrations" does not exist') ||
         message.includes('relation "langgraph_checkpoint.checkpoint_writes" does not exist') ||
+        message.includes('schema "langgraph_chat_memory" does not exist') ||
+        message.includes('relation "langgraph_chat_memory.checkpoints" does not exist') ||
+        message.includes('relation "langgraph_chat_memory.checkpoint_blobs" does not exist') ||
+        message.includes('relation "langgraph_chat_memory.checkpoint_migrations" does not exist') ||
+        message.includes('relation "langgraph_chat_memory.checkpoint_writes" does not exist') ||
         message.includes('relation "agent_runs" does not exist') ||
         message.includes('relation "agent_interrupts" does not exist')
     ) {
         return {
             code: 'RUNTIME_INVARIANT_FAILED',
-            message: message.includes('langgraph_checkpoint')
-                ? 'Tasklist Agent durable checkpoint 未初始化：请执行 `pnpm --dir apps/webapp db:checkpoint:setup` 后重试。'
-                : 'Tasklist Agent 数据库结构未就绪：请确认已执行 Prisma migration 后重试。',
+            message: message.includes('langgraph_chat_memory')
+                ? 'Chat memory 数据库结构未初始化：请执行 `pnpm --dir apps/webapp db:chat-memory:setup` 后重试。'
+                : message.includes('langgraph_checkpoint')
+                  ? 'Tasklist Agent durable checkpoint 未初始化：请执行 `pnpm --dir apps/webapp db:checkpoint:setup` 后重试。'
+                  : 'Tasklist Agent 数据库结构未就绪：请确认已执行 Prisma migration 后重试。',
             retryable: false,
         }
     }

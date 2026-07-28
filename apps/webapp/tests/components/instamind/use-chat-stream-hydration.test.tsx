@@ -29,14 +29,23 @@ function createNdjsonResponse(headers: Record<string, string> = {}) {
     return new Response(
         new ReadableStream<Uint8Array>({
             start(controller) {
-                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'start', messageId: 'assistant-next' })}\n`))
-                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'finish' })}\n`))
+                controller.enqueue(
+                    encoder.encode(
+                        `${JSON.stringify({ protocolVersion: 1, eventId: 'evt_next_1', runId: 'run-next', sequence: 1, eventKind: 'chunk', payload: { type: 'start', messageId: 'assistant-next' } })}\n`
+                    )
+                )
+                controller.enqueue(
+                    encoder.encode(
+                        `${JSON.stringify({ protocolVersion: 1, eventId: 'evt_next_2', runId: 'run-next', sequence: 2, eventKind: 'terminal', payload: { type: 'finish' }, terminal: true, terminalState: 'completed', runStatus: 'completed' })}\n`
+                    )
+                )
                 controller.close()
             },
         }),
         {
             headers: {
                 'Content-Type': 'application/x-ndjson; charset=utf-8',
+                'X-Run-Id': 'run-next',
                 ...headers,
             },
         }
@@ -49,18 +58,26 @@ function createResumeNdjsonResponse() {
     return new Response(
         new ReadableStream<Uint8Array>({
             start(controller) {
-                controller.enqueue(
-                    encoder.encode(`${JSON.stringify({ type: 'text-start', messageId: 'assistant-resumed', partId: 'text-1' })}\n`)
-                )
-                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'text-delta', partId: 'text-1', delta: '已继续完成' })}\n`))
-                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'text-end', partId: 'text-1' })}\n`))
-                controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'finish' })}\n`))
+                for (const [index, payload] of [
+                    { type: 'text-start', partId: 'text-1' },
+                    { type: 'text-delta', partId: 'text-1', delta: '已继续完成' },
+                    { type: 'text-end', partId: 'text-1' },
+                    { type: 'finish' },
+                ].entries()) {
+                    const terminal = payload.type === 'finish'
+                    controller.enqueue(
+                        encoder.encode(
+                            `${JSON.stringify({ protocolVersion: 1, eventId: `evt_review_${index + 1}`, runId: 'run-review', sequence: index + 1, eventKind: terminal ? 'terminal' : 'chunk', payload, ...(terminal ? { terminal: true, terminalState: 'completed', runStatus: 'completed' } : {}) })}\n`
+                        )
+                    )
+                }
                 controller.close()
             },
         }),
         {
             headers: {
                 'Content-Type': 'application/x-ndjson; charset=utf-8',
+                'X-Run-Id': 'run-review',
             },
         }
     )

@@ -1,6 +1,6 @@
 # Tasks: Monorepo pnpm and Turborepo Governance
 
-**Input**: Design documents from `/specs/048-monorepo-pnpm-turborepo-governance/`
+**Input**: Design documents from `/specs/v0.4.8-monorepo-pnpm-turborepo-governance/`
 
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `quickstart.md`
 
@@ -22,8 +22,8 @@
 **Purpose**: Establish the shared governance rules and documentation boundary required by all user stories.
 
 - [x] T005 Create the long-lived Monorepo governance document in `docs/architecture/monorepo-pnpm-turborepo-governance.md`, covering the package graph, apps-to-packages dependency direction, pnpm-versus-Turbo ownership, canonical commands, diagnostic commands, and deferred optimizations.
-- [x] T006 [P] Update `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md` with the baseline command matrix and evidence fields that implementation tasks must satisfy.
-- [x] T007 [P] Add a requirement-to-task traceability note to `specs/048-monorepo-pnpm-turborepo-governance/checklists/requirements.md` mapping FR-048-001 through FR-048-014 to the story tasks below.
+- [x] T006 [P] Update `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md` with the baseline command matrix and evidence fields that implementation tasks must satisfy.
+- [x] T007 [P] Add a requirement-to-task traceability note to `specs/v0.4.8-monorepo-pnpm-turborepo-governance/checklists/requirements.md` mapping FR-048-001 through FR-048-014 to the story tasks below.
 
 **Checkpoint**: Baseline and governance boundaries are explicit; implementation can proceed by user story.
 
@@ -46,7 +46,7 @@
 
 ### Validation for User Story 1
 
-- [x] T016 [US1] Run the clean-install validation from `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md`, including Node/pnpm version assertions, `pnpm install --frozen-lockfile`, a no-lockfile-diff check, and an isolated negative check proving a missing local `workspace:` package fails instead of falling back to a registry package.
+- [x] T016 [US1] Run the clean-install validation from `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md`, including Node/pnpm version assertions, `pnpm install --frozen-lockfile`, a no-lockfile-diff check, and an isolated negative check proving a missing local `workspace:` package fails instead of falling back to a registry package.
 - [x] T017 [US1] Verify the final `allowBuilds` boolean matrix and Catalog exceptions against the current lockfile and record acceptance evidence in `docs/architecture/monorepo-pnpm-turborepo-governance.md`.
 
 **Checkpoint**: User Story 1 is independently complete when local, CI and Docker agree on pnpm 10.34.0, frozen installation succeeds, internal packages resolve locally, and no build-script placeholder remains.
@@ -70,7 +70,7 @@
 ### Validation for User Story 2
 
 - [x] T025 [US2] Inspect the generated Turborepo package/task graph from `turbo.json`; run `pnpm --filter @ai-mind/stream-core typecheck`, `pnpm --filter @ai-mind/stream-core test`, `pnpm --filter @ai-mind/stream-core build`, `pnpm --filter @ai-mind/database db:generate`, `pnpm --filter @ai-mind/database db:validate`, `pnpm --dir apps/project-assistant-service typecheck`, and `pnpm --dir apps/webapp typecheck` as package-level diagnostics; apply a controlled temporary change under `packages/stream-core`, and confirm the dependent Webapp validation path is scheduled after the shared package task.
-- [x] T026 [US2] Run root `pnpm build`, `pnpm typecheck`, `pnpm test`, and `pnpm lint`, execute one isolated controlled failing workspace task, and record workspace/task-specific success and failure output in `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md`.
+- [x] T026 [US2] Run root `pnpm build`, `pnpm typecheck`, `pnpm test`, and `pnpm lint`, execute one isolated controlled failing workspace task, and record workspace/task-specific success and failure output in `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md`.
 - [x] T027 [US2] Run the exact `pnpm dev` command and the separate `dev:webapp`, `dev:pas`, and `build:watch` diagnostic commands from `package.json`, confirming long-running tasks are persistent, uncached and cleanly stoppable.
 
 **Checkpoint**: User Story 2 is independently complete when root commands use one documented Turbo graph, dependent tasks are ordered, independent tasks can parallelize, persistent tasks are uncached, and CI uses the same ordinary graph.
@@ -95,7 +95,7 @@
 - [x] T034 [P] [US3] Run stream-core typecheck, test and build commands from `packages/stream-core/package.json` and verify generated build outputs are consumed by dependent validation.
 - [x] T035 [P] [US3] Run Project Assistant Service typecheck, test and build commands from `apps/project-assistant-service/package.json`.
 - [x] T036 [P] [US3] Run the Webapp targeted test/typecheck/lint/build paths from `apps/webapp/package.json` and the existing test locations.
-- [x] T037 [US3] Execute the ordinary chat, tool-assisted chat, Tasklist and Delivery smoke checks required by FR-048-012, recording results and any environment prerequisites in `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md`.
+- [x] T037 [US3] Execute the ordinary chat, tool-assisted chat, Tasklist and Delivery smoke checks required by FR-048-012, recording results and any environment prerequisites in `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md`.
 
 **Checkpoint**: User Story 3 is independently complete when package-level commands remain available, explicit database/runtime setup is safe, Docker/CI sequencing is preserved, and required product/regression smoke paths pass.
 
@@ -104,8 +104,8 @@
 **Purpose**: Close documentation, traceability and repository hygiene after all stories pass.
 
 - [x] T038 [P] Update `README.md` with the canonical root commands and a link to `docs/architecture/monorepo-pnpm-turborepo-governance.md`.
-- [x] T039 Reconcile `specs/048-monorepo-pnpm-turborepo-governance/spec.md`, `plan.md`, `quickstart.md`, and `docs/architecture/monorepo-pnpm-turborepo-governance.md` so pnpm version, Catalog scope, Turbo ownership, CI behavior and deferred items are consistent.
-- [x] T040 Run the full quickstart validation in `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md`, including CI-like ordered setup, root Turbo commands, package-level diagnosis and smoke checks.
+- [x] T039 Reconcile `specs/v0.4.8-monorepo-pnpm-turborepo-governance/spec.md`, `plan.md`, `quickstart.md`, and `docs/architecture/monorepo-pnpm-turborepo-governance.md` so pnpm version, Catalog scope, Turbo ownership, CI behavior and deferred items are consistent.
+- [x] T040 Run the full quickstart validation in `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md`, including CI-like ordered setup, root Turbo commands, package-level diagnosis and smoke checks.
 - [x] T041 Run `git diff --check`, inspect `git status --short`, and verify only intended governance files, lockfile updates and documentation changes remain in the final diff.
 
 ## Dependencies & Execution Order
@@ -201,12 +201,12 @@ Task T036: Validate Webapp paths
 
 ## Phase 7: Convergence
 
-- [x] T042 Strengthen `scripts/validate/validate-workspace-boundaries.mjs` so every dependency that resolves to a local workspace must use an explicit `workspace:` range, and add a negative validation case to `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md` per FR-048-003 and T014 (partial).
+- [x] T042 Strengthen `scripts/validate/validate-workspace-boundaries.mjs` so every dependency that resolves to a local workspace must use an explicit `workspace:` range, and add a negative validation case to `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md` per FR-048-003 and T014 (partial).
 - [x] T043 Update `turbo.json` so `@ai-mind/database#typecheck` and `@ai-mind/database#test` wait for the same workspace's uncached Prisma-generation build, then validate the root commands from a disposable state without `packages/database/generated/prisma` per FR-048-007, FR-048-008, US2/AC1, and plan Phase 1.4 (partial).
-- [x] T044 Define and implement a non-hermetic test cache boundary for database-backed and external-service Webapp tests in `turbo.json` and the relevant package scripts, ensuring database/provider state changes cannot reuse an inapplicable result while preserving cache only for demonstrably hermetic tests; document the policy and evidence in `docs/architecture/monorepo-pnpm-turborepo-governance.md` and `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md` per FR-048-008 and the database-state edge case (partial).
+- [x] T044 Define and implement a non-hermetic test cache boundary for database-backed and external-service Webapp tests in `turbo.json` and the relevant package scripts, ensuring database/provider state changes cannot reuse an inapplicable result while preserving cache only for demonstrably hermetic tests; document the policy and evidence in `docs/architecture/monorepo-pnpm-turborepo-governance.md` and `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md` per FR-048-008 and the database-state edge case (partial).
 
 ## Phase 8: Audit Remediation
 
-- [x] T045 Close the combined internal-dependency validation gap in `scripts/validate/validate-workspace-boundaries.mjs`, add permanent regression coverage in `scripts/validate/validate-workspace-boundaries.test.mjs`, and update the evidence in `specs/048-monorepo-pnpm-turborepo-governance/quickstart.md` per FR-048-003.
+- [x] T045 Close the combined internal-dependency validation gap in `scripts/validate/validate-workspace-boundaries.mjs`, add permanent regression coverage in `scripts/validate/validate-workspace-boundaries.test.mjs`, and update the evidence in `specs/v0.4.8-monorepo-pnpm-turborepo-governance/quickstart.md` per FR-048-003.
 - [x] T046 Restore unrelated Vite/Vitest transitive snapshot drift in `pnpm-lock.yaml`, then verify the intended Catalog-only lockfile diff remains frozen-install compatible per T015 and SC-048-001.
 - [x] T047 Replace the static-only T031/T040 evidence with an actual Docker image build and PostgreSQL migration/checkpoint validation, or leave those tasks explicitly incomplete until equivalent CI evidence exists.

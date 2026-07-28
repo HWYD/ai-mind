@@ -1,8 +1,11 @@
-import type { WriteChunk } from '../../core/stream-types'
-import type { ChatStreamChunk } from '../../protocol'
+import type { StreamEventEnvelope } from '../../protocol'
 
-function toNdjsonLine(chunk: ChatStreamChunk): string {
-    return `${JSON.stringify(chunk)}\n`
+type TextEncoderLike = {
+    encode(input?: string): Uint8Array
+}
+
+function toNdjsonLine(envelope: StreamEventEnvelope): string {
+    return `${JSON.stringify(envelope)}\n`
 }
 
 function isControllerClosedError(error: unknown): boolean {
@@ -12,11 +15,14 @@ function isControllerClosedError(error: unknown): boolean {
 export interface ChunkWriter {
     close: () => void
     isClosed: () => boolean
-    writeChunk: WriteChunk
+    writeEnvelope: (envelope: StreamEventEnvelope) => void
     writeHeartbeat: () => void
 }
 
-export function createNdjsonChunkWriter(controller: ReadableStreamDefaultController<Uint8Array>, encoder = new TextEncoder()): ChunkWriter {
+export function createNdjsonChunkWriter(
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    encoder: TextEncoderLike = new TextEncoder()
+): ChunkWriter {
     let closed = false
 
     const close = () => {
@@ -52,14 +58,14 @@ export function createNdjsonChunkWriter(controller: ReadableStreamDefaultControl
         }
     }
 
-    const writeChunk: WriteChunk = chunk => {
-        enqueue(toNdjsonLine(chunk))
+    const writeEnvelope = (envelope: StreamEventEnvelope) => {
+        enqueue(toNdjsonLine(envelope))
     }
 
     return {
         close,
         isClosed: () => closed,
-        writeChunk,
+        writeEnvelope,
         // NDJSON 消费端会忽略空行；代理仍能观察到数据活动，避免长模型步骤被判定为空闲连接。
         writeHeartbeat: () => enqueue('\n'),
     }

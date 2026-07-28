@@ -1,6 +1,6 @@
 # Tasks: Monorepo Boundary and CI Validation Governance
 
-**Input**: Design documents from `/specs/049-monorepo-boundary-ci/`
+**Input**: Design documents from `/specs/v0.4.9-monorepo-boundary-ci/`
 
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `quickstart.md`
 
@@ -51,7 +51,7 @@
 - [x] T007 [US1] Refactor `scripts/validate/validate-workspace-boundaries.mjs` to discover workspace membership from `pnpm-workspace.yaml`, reject unmanaged/unsupported workspace patterns, validate root/workspace scoped-private identities, and build a diagnostic dependency graph across all dependency fields.
 - [x] T008 [US1] Extend `scripts/validate/validate-workspace-boundaries.mjs` with direction validation and depth-first cycle reporting so application-to-application, package-to-application, missing-provider, non-`workspace:`, and cyclic edges fail before downstream commands.
 - [x] T009 [US1] Add Node-built-in static import/export/`require`/literal-dynamic-import scanning to `scripts/validate/validate-workspace-boundaries.mjs`, rejecting cross-workspace relative access and allowing scoped imports only when their `workspace:` dependency and package `exports` entry are both valid.
-- [x] T010 [US1] Keep the preinstall and diagnostic entry points aligned in `package.json`, and make the root `build` entry run `validate:workspace-boundaries` before Turbo can restore a cache hit; then run the real-repository and fixture boundary checks plus the real `pnpm --filter @ai-mind/not-a-workspace test:stable` failure recorded in `specs/049-monorepo-boundary-ci/quickstart.md`.
+- [x] T010 [US1] Keep the preinstall and diagnostic entry points aligned in `package.json`, and make the root `build` entry run `validate:workspace-boundaries` before Turbo can restore a cache hit; then run the real-repository and fixture boundary checks plus the real `pnpm --filter @ai-mind/not-a-workspace test:stable` failure recorded in `specs/v0.4.9-monorepo-boundary-ci/quickstart.md`.
 
 **Checkpoint**: User Story 1 is independently complete when the validator reports a workspace/file/reason for every controlled violation and permits only declared public internal imports.
 
@@ -75,7 +75,7 @@
 - [x] T015 [US2] Add `test:stable`, `test:integration`, and fail-fast `test:external` commands in `apps/webapp/package.json` and `apps/webapp/scripts/validate-external-test-env.mjs`; keep test-location validation in the stable lane and distinguish absent opt-in/credential configuration errors from an opted-in external service failure.
 - [x] T016 [US2] Add `validate:test-lanes`; make every root test entry run `validate:workspace-boundaries` before Turbo, make root `test:stable` then run lane inventory before stable work, and make the canonical root `test` run stable then integration; encode the resulting lane-specific Turbo dependency/cache/environment contracts in `package.json` and `turbo.json`.
 - [x] T017 [US2] Split `.github/workflows/ci.yml` into `stable-validation` (boundary/lint/typecheck/lane inventory/stable/build with no PostgreSQL service or `DATABASE_URL`) and `stateful-integration` (`needs: stable-validation`, PostgreSQL/setup/integration), while preserving the independent Docker build-check job and adding pnpm-store caching to both Node jobs.
-- [ ] T018 [US2] Run the lane commands, lane inventory, and Turbo dry-runs from `specs/049-monorepo-boundary-ci/quickstart.md`; for the negative CI path, capture evidence that `stateful-integration` is skipped due to `needs: stable-validation` and has no PostgreSQL, migration, or checkpoint setup log.
+- [ ] T018 [US2] Run the lane commands, lane inventory, and Turbo dry-runs from `specs/v0.4.9-monorepo-boundary-ci/quickstart.md`; for the negative CI path, capture evidence that `stateful-integration` is skipped due to `needs: stable-validation` and has no PostgreSQL, migration, or checkpoint setup log.
 
 **Checkpoint**: User Story 2 is independently complete when stable validation is cacheable/no-state, integration is explicit/non-cacheable, and external validation is manual-only.
 
@@ -90,7 +90,7 @@
 - [x] T019 [US3] Update the graph, identity, allowed/forbidden import direction, lane inventory, cache, CI ordering, and failure-diagnosis facts in `docs/architecture/monorepo-pnpm-turborepo-governance.md` without changing production deployment claims.
 - [x] T020 [P] [US3] Update the canonical and diagnostic command references for v0.4.9 in `README.md` and `docs/README.md`.
 - [x] T021 [P] [US3] Create the public version explanation and release skeleton in `docs/versions/v0.4.9-monorepo-boundary-ci.md` and `docs/releases/v0.4.9.md`, explicitly retaining external validation and deployment as documented non-goals.
-- [ ] T022 [US3] Follow `specs/049-monorepo-boundary-ci/quickstart.md` from a clean local workspace and reconcile any command, prerequisite, cache, lane-inventory, or failure-attribution drift in that file and the documentation files from T019–T021.
+- [ ] T022 [US3] Follow `specs/v0.4.9-monorepo-boundary-ci/quickstart.md` from a clean local workspace and reconcile any command, prerequisite, cache, lane-inventory, or failure-attribution drift in that file and the documentation files from T019–T021.
 
 **Checkpoint**: User Story 3 is independently complete when the documented root contract and targeted diagnostics agree with the implemented commands and CI lanes.
 
@@ -101,8 +101,8 @@
 **Purpose**: Synchronize version artifacts, validate the complete feature, and protect the stated non-goals.
 
 - [x] T023 Synchronize v0.4.9 lockstep versions and regenerated workspace metadata in `package.json`, `apps/webapp/package.json`, `apps/project-assistant-service/package.json`, `packages/database/package.json`, `packages/stream-core/package.json`, and `pnpm-lock.yaml`.
-- [x] T024 Re-run the complete validation matrix in `specs/049-monorepo-boundary-ci/quickstart.md`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, the boundary fixture suite, and the lane-classification suite; record any environment-limited integration evidence in `docs/releases/v0.4.9.md` without exposing secrets.
-- [x] T025 Review the implementation diff against `specs/049-monorepo-boundary-ci/spec.md`, `specs/049-monorepo-boundary-ci/plan.md`, and `specs/049-monorepo-boundary-ci/checklists/governance.md`; update only the planned version/docs artifacts and run `git diff --check`.
+- [x] T024 Re-run the complete validation matrix in `specs/v0.4.9-monorepo-boundary-ci/quickstart.md`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, the boundary fixture suite, and the lane-classification suite; record any environment-limited integration evidence in `docs/releases/v0.4.9.md` without exposing secrets.
+- [x] T025 Review the implementation diff against `specs/v0.4.9-monorepo-boundary-ci/spec.md`, `specs/v0.4.9-monorepo-boundary-ci/plan.md`, and `specs/v0.4.9-monorepo-boundary-ci/checklists/governance.md`; update only the planned version/docs artifacts and run `git diff --check`.
 
 ---
 

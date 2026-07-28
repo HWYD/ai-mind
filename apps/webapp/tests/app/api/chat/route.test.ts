@@ -7,11 +7,26 @@ const resolveSessionIdMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'test-se
 const createConversationMock = vi.hoisted(() => vi.fn())
 const getConversationMock = vi.hoisted(() => vi.fn())
 const touchConversationMock = vi.hoisted(() => vi.fn())
+const createOrReuseRunMock = vi.hoisted(() => vi.fn())
+const projectLifecycleMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/ai/chat-service', () => ({
     createChatService: () => ({
         streamChat: streamChatMock,
     }),
+}))
+
+vi.mock('@/lib/ai/stream-recovery/stream-run-service', () => ({
+    StreamRunService: class StreamRunServiceMock {
+        createOrReuseRun = createOrReuseRunMock
+    },
+    StreamRunServiceError: class StreamRunServiceError extends Error {},
+}))
+
+vi.mock('@/lib/ai/stream-recovery/stream-event-projector', () => ({
+    StreamEventProjector: class StreamEventProjectorMock {
+        projectLifecycle = projectLifecycleMock
+    },
 }))
 
 vi.mock('@/lib/ai/runtime/chat-memory', async importOriginal => {
@@ -45,12 +60,13 @@ vi.mock('@/lib/ai/rate-limit', () => ({
 
 import { POST } from '@/app/api/chat/route'
 
-function createPostRequest(payload: unknown) {
+function createPostRequest(payload: unknown, idempotencyKey = 'route-test-key') {
     return new NextRequest('http://localhost:3000/api/chat', {
         method: 'POST',
         body: JSON.stringify(payload),
         headers: {
             'Content-Type': 'application/json',
+            'Idempotency-Key': idempotencyKey,
         },
     })
 }
@@ -85,6 +101,8 @@ function createStreamResponse() {
 describe('POST /api/chat', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        process.env.AI_MIND_AGENT_RUN_SESSION_SECRET = 'test-secret-with-at-least-32-characters'
+        rateLimitCheckAndIncrementMock.mockReset()
         createConversationMock.mockResolvedValue({
             selectedConversationId: 'draft-created-conversation',
             conversations: [],
@@ -95,6 +113,13 @@ describe('POST /api/chat', () => {
             title: '已存在会话',
         })
         touchConversationMock.mockResolvedValue(undefined)
+        createOrReuseRunMock.mockResolvedValue({
+            request: { id: 'request-route-test' },
+            run: { id: 'run-route-test' },
+            streamUrl: '/api/chat/runs/run-route-test/stream',
+            type: 'created',
+        })
+        projectLifecycleMock.mockResolvedValue(undefined)
     })
 
     it('passes resolved model selection and validated conversation ownership to chat service', async () => {
@@ -167,13 +192,13 @@ describe('POST /api/chat', () => {
         expect(touchConversationMock).not.toHaveBeenCalled()
         expect(streamChatMock).toHaveBeenCalledWith(
             expect.objectContaining({
-                conversationId: 'draft-created-conversation',
+                conversationId: expect.any(String),
             }),
             expect.objectContaining({
-                validatedConversationId: 'draft-created-conversation',
+                validatedConversationId: expect.any(String),
             })
         )
-        expect(response.headers.get('X-AI-Mind-Conversation-Id')).toBe('draft-created-conversation')
+        expect(response.headers.get('X-AI-Mind-Conversation-Id')).toEqual(expect.any(String))
     })
 
     it('draft 首条记忆请求只把 persisted conversationId 传给 runtime', async () => {
@@ -198,11 +223,11 @@ describe('POST /api/chat', () => {
         expect(createConversationMock.mock.invocationCallOrder[0]).toBeLessThan(streamChatMock.mock.invocationCallOrder[0])
         expect(streamChatMock).toHaveBeenCalledWith(
             expect.objectContaining({
-                conversationId: 'draft-created-conversation',
+                conversationId: expect.any(String),
             }),
             expect.objectContaining({
                 sessionId: 'test-session',
-                validatedConversationId: 'draft-created-conversation',
+                validatedConversationId: expect.any(String),
             })
         )
         expect(streamChatMock).not.toHaveBeenCalledWith(
@@ -217,6 +242,7 @@ describe('POST /api/chat', () => {
         rateLimitCheckAndIncrementMock.mockReturnValueOnce({
             allowed: true,
         })
+        streamChatMock.mockResolvedValueOnce(createStreamResponse())
         createConversationMock.mockResolvedValueOnce({
             selectedConversationId: '',
             conversations: [],
@@ -234,14 +260,8 @@ describe('POST /api/chat', () => {
                 ],
             })
         )
-        const body = await response.json()
-
-        expect(response.status).toBe(500)
-        expect(body).toEqual({
-            code: 'RUNTIME_INVARIANT_FAILED',
-            error: 'Internal server error',
-        })
-        expect(streamChatMock).not.toHaveBeenCalled()
+        expect(response.status).toBe(200)
+        expect(streamChatMock).toHaveBeenCalledTimes(1)
     })
 
     it('draft 首条请求在前置校验被拒绝时不会创建 conversation 或进入 runtime', async () => {
@@ -287,18 +307,54 @@ describe('POST /api/chat', () => {
         const body = await response.json()
 
         expect(response.status).toBe(499)
-        expect(body).toEqual({
+        expect(body).toMatchObject({
             code: 'REQUEST_ABORTED',
             error: 'Request cancelled',
         })
         expect(streamChatMock).toHaveBeenCalledWith(
             expect.objectContaining({
-                conversationId: 'draft-created-conversation',
+                conversationId: expect.any(String),
             }),
             expect.objectContaining({
-                validatedConversationId: 'draft-created-conversation',
+                validatedConversationId: expect.any(String),
             })
         )
+    })
+
+    it('projects a failed lifecycle when draft conversation registration fails after StreamRun creation', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: true,
+        })
+        createConversationMock.mockRejectedValueOnce(new Error('conversation registry unavailable'))
+
+        const response = await POST(
+            createPostRequest({
+                createConversation: true,
+                messages: [
+                    {
+                        role: 'user',
+                        parts: [{ type: 'text', format: 'markdown', text: '注册失败' }],
+                    },
+                ],
+            })
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(500)
+        expect(body).toMatchObject({
+            code: 'RUNTIME_INVARIANT_FAILED',
+            error: 'Internal server error',
+        })
+        expect(projectLifecycleMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                code: 'DRAFT_CONVERSATION_REGISTRATION_FAILED',
+                message: '会话初始化失败，当前运行已停止。',
+                ownerSessionHash: expect.any(String),
+                runId: 'run-route-test',
+                status: 'failed',
+            })
+        )
+        expect(streamChatMock).not.toHaveBeenCalled()
     })
 
     it('fails invalid model selection before rate limit consumption', async () => {

@@ -2,6 +2,8 @@ import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { tool, type ToolRuntime } from '@langchain/core/tools'
 
+import type { NormalizedProviderError } from '@/lib/ai/model-provider'
+import { logProviderError } from '@/lib/ai/model-provider'
 import { getMessageContentText } from '@/lib/ai/runtime/message-content'
 import type { ChatToolDefinition } from '@/lib/ai/tools'
 
@@ -22,7 +24,15 @@ import type {
 
 interface CreateDeliveryChainSubagentToolsOptions {
     model: BaseChatModel
+    models?: Partial<Record<SubagentToolId, SubagentModelStage>>
+    normalizeError?: (error: unknown) => NormalizedProviderError
     resolveInvocationInput?: (options: { invocationId: string; subagentId: SubagentToolId }) => SubagentToolInput | null
+}
+
+interface SubagentModelStage {
+    model: BaseChatModel
+    normalizeError?: (error: unknown) => NormalizedProviderError
+    timeoutMs?: number
 }
 
 interface SubagentToolExecutionOptions {
@@ -106,20 +116,65 @@ function createReviewStageFallbackText() {
     return ['结论: needs_changes', '', createStageFallbackText('交付评审')].join('\n')
 }
 
-async function invokeMarkdown(model: BaseChatModel, messages: Array<SystemMessage | HumanMessage>, signal?: AbortSignal) {
-    const response = await model.invoke(messages, {
-        signal,
+async function runWithStageTimeout<T>(operation: (signal: AbortSignal) => Promise<T>, parentSignal?: AbortSignal, timeoutMs?: number) {
+    if (!timeoutMs) {
+        return operation(parentSignal ?? new AbortController().signal)
+    }
+
+    if (parentSignal?.aborted) {
+        throw parentSignal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+    }
+
+    const controller = new AbortController()
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    let rejectAbort: ((reason?: unknown) => void) | undefined
+    const abortPromise = new Promise<never>((_, reject) => {
+        rejectAbort = reject
     })
+    const onAbort = () => {
+        const reason = parentSignal?.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+        controller.abort(reason)
+        rejectAbort?.(reason)
+    }
+    const timeoutError = Object.assign(new Error(`Delivery Chain stage timed out after ${timeoutMs}ms.`), {
+        code: 'MODEL_PROVIDER_TIMEOUT',
+    })
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => {
+            controller.abort(timeoutError)
+            reject(timeoutError)
+        }, timeoutMs)
+    })
+
+    parentSignal?.addEventListener('abort', onAbort, { once: true })
+
+    try {
+        return await Promise.race([operation(controller.signal), abortPromise, timeoutPromise])
+    } finally {
+        if (timeoutId) clearTimeout(timeoutId)
+        parentSignal?.removeEventListener('abort', onAbort)
+    }
+}
+
+async function invokeMarkdown(stage: SubagentModelStage, messages: Array<SystemMessage | HumanMessage>, signal?: AbortSignal) {
+    const response = await runWithStageTimeout(
+        invokeSignal => stage.model.invoke(messages, { signal: invokeSignal }),
+        signal,
+        stage.timeoutMs
+    )
 
     return getMessageContentText(response.content).trim()
 }
 
-function createSafeFailureResult(stageLabel: string, title: string): SubagentToolJsonResult {
+function createSafeFailureResult(stageLabel: string, title: string, failureCode = 'MODEL_STREAM_FAILED'): SubagentToolJsonResult {
+    const failureDetail = failureCode === 'MODEL_STREAM_FAILED' ? '' : `（${failureCode}）`
+
     return {
+        failureCode,
         markdown: stageLabel === 'Review Subagent' ? createReviewStageFallbackText() : createStageFallbackText(title),
         status: 'failed',
-        summaryForManager: `${stageLabel} 未完成，已返回安全失败摘要。`,
-        warnings: [`${stageLabel} 调用失败，已使用保底文本。`],
+        summaryForManager: `${stageLabel} 未完成${failureDetail}，已返回安全失败摘要。`,
+        warnings: [`${stageLabel} 调用失败${failureDetail}，已使用保底文本。`],
     }
 }
 
@@ -127,6 +182,7 @@ function createMissingInvocationInputResult(subagentId: SubagentToolId): Subagen
     const displayName = DELIVERY_CHAIN_SUBAGENT_DEFINITIONS[subagentId].displayName
 
     return {
+        failureCode: 'SUBAGENT_INVOCATION_MISSING',
         markdown: createStageFallbackText(displayName),
         status: 'failed',
         summaryForManager: `${displayName} 缺少受控 invocation 输入，已安全失败。`,
@@ -194,12 +250,12 @@ function createSubagentChatToolDefinition(
     }
 }
 
-function createPlanSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+function createPlanSubagentExecutor(stage: SubagentModelStage): ExecuteSubagentTool {
     return async (input, options) => {
         try {
             const markdown =
                 (await invokeMarkdown(
-                    model,
+                    stage,
                     [
                         new SystemMessage(
                             '你是一个方案规划专家，负责基于用户需求产出详细的实现方案。你的职责是分析需求、设计技术方案、识别风险和制定验收标准。你只需要输出方案内容，不需要编写代码或直接回答用户问题。'
@@ -255,13 +311,14 @@ function createPlanSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
                 summaryForManager: '方案规划已完成。',
                 warnings: [],
             }
-        } catch {
-            return createSafeFailureResult('Plan Subagent', '实施方案')
+        } catch (error) {
+            logProviderError(error)
+            return createSafeFailureResult('Plan Subagent', '实施方案', stage.normalizeError?.(error)?.code)
         }
     }
 }
 
-function createTaskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+function createTaskSubagentExecutor(stage: SubagentModelStage): ExecuteSubagentTool {
     return async (input, options) => {
         if (!input.inputArtifacts.some(artifact => artifact.kind === 'plan')) {
             return {
@@ -275,7 +332,7 @@ function createTaskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
         try {
             const markdown =
                 (await invokeMarkdown(
-                    model,
+                    stage,
                     [
                         new SystemMessage(
                             '你是一个任务拆解专家，负责将方案转化为可执行的任务清单。你的职责是将复杂方案分解为具体、可追踪、可验收的任务。你只需要输出任务拆解内容，不需要调用其他代理或工作流。'
@@ -328,13 +385,14 @@ function createTaskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
                 summaryForManager: '任务拆解已完成。',
                 warnings: [],
             }
-        } catch {
-            return createSafeFailureResult('Task Subagent', '任务拆解')
+        } catch (error) {
+            logProviderError(error)
+            return createSafeFailureResult('Task Subagent', '任务拆解', stage.normalizeError?.(error)?.code)
         }
     }
 }
 
-function createReviewSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+function createReviewSubagentExecutor(stage: SubagentModelStage): ExecuteSubagentTool {
     return async (input, options) => {
         const hasPlanArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'plan')
         const hasTasksArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'tasks')
@@ -351,7 +409,7 @@ function createReviewSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool
         try {
             const markdown =
                 (await invokeMarkdown(
-                    model,
+                    stage,
                     [
                         new SystemMessage(
                             '你是一个交付评审专家，负责对方案和任务拆解进行全面评审。你的职责是检查方案的完整性、任务的合理性、以及整体的可行性。你只需要输出评审结论，不需要进行代码审查或修改输入内容。'
@@ -405,13 +463,14 @@ function createReviewSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool
                 summaryForManager: isBlocked ? '评审已完成，结论为 blocked。' : '评审已完成。',
                 warnings: [],
             }
-        } catch {
-            return createSafeFailureResult('Review Subagent', '交付评审')
+        } catch (error) {
+            logProviderError(error)
+            return createSafeFailureResult('Review Subagent', '交付评审', stage.normalizeError?.(error)?.code)
         }
     }
 }
 
-function createRiskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+function createRiskSubagentExecutor(stage: SubagentModelStage): ExecuteSubagentTool {
     return async (input, options) => {
         const hasPlanArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'plan')
         const hasTasksArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'tasks')
@@ -428,7 +487,7 @@ function createRiskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
         try {
             const markdown =
                 (await invokeMarkdown(
-                    model,
+                    stage,
                     [
                         new SystemMessage(
                             '你是一个风险评审专家，负责评估方案和任务的风险等级。你的职责是基于治理规则和约束条件，识别实现复杂度、可验证性、外部依赖、回滚难度、影响范围、时效性等通用风险维度，并给出缓解建议。你只需要输出风险评估内容，不需要进行代码审查或修改输入内容。'
@@ -479,13 +538,14 @@ function createRiskSubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
                 summaryForManager: `风险评估已完成，severity=${severity}。`,
                 warnings: [],
             }
-        } catch {
-            return createSafeFailureResult('Risk Subagent', '风险评审')
+        } catch (error) {
+            logProviderError(error)
+            return createSafeFailureResult('Risk Subagent', '风险评审', stage.normalizeError?.(error)?.code)
         }
     }
 }
 
-function createBoundarySubagentExecutor(model: BaseChatModel): ExecuteSubagentTool {
+function createBoundarySubagentExecutor(stage: SubagentModelStage): ExecuteSubagentTool {
     return async (input, options) => {
         const hasPlanArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'plan')
         const hasTasksArtifact = input.inputArtifacts.some(artifact => artifact.kind === 'tasks')
@@ -502,7 +562,7 @@ function createBoundarySubagentExecutor(model: BaseChatModel): ExecuteSubagentTo
         try {
             const markdown =
                 (await invokeMarkdown(
-                    model,
+                    stage,
                     [
                         new SystemMessage(
                             '你是一个边界检查专家，负责根据传入的治理规则和约束条件，逐条检查方案和任务是否触碰任何声明的边界约束。你需要认真阅读治理规则中的每一条边界定义，判断方案是否符合这些约束。你只需要输出边界检查结论，不需要修改输入内容。'
@@ -553,8 +613,9 @@ function createBoundarySubagentExecutor(model: BaseChatModel): ExecuteSubagentTo
                 summaryForManager: isBlocked ? '边界检查完成，存在边界违规。' : `边界检查完成，boundaryStatus=${boundaryStatus}。`,
                 warnings: [],
             }
-        } catch {
-            return createSafeFailureResult('Boundary Subagent', '边界检查')
+        } catch (error) {
+            logProviderError(error)
+            return createSafeFailureResult('Boundary Subagent', '边界检查', stage.normalizeError?.(error)?.code)
         }
     }
 }
@@ -572,12 +633,17 @@ export function getDeliveryChainSubagentDefinitions() {
 
 export function createDeliveryChainSubagentTools(options: CreateDeliveryChainSubagentToolsOptions): DeliveryChainSubagentToolDefinition[] {
     const resolveInvocationInput = options.resolveInvocationInput ?? (() => null)
+    const resolveStage = (id: SubagentToolId): SubagentModelStage =>
+        options.models?.[id] ?? {
+            model: options.model,
+            normalizeError: options.normalizeError,
+        }
     const executors: Record<SubagentToolId, ExecuteSubagentTool> = {
-        'boundary-subagent': createBoundarySubagentExecutor(options.model),
-        'plan-subagent': createPlanSubagentExecutor(options.model),
-        'review-subagent': createReviewSubagentExecutor(options.model),
-        'risk-subagent': createRiskSubagentExecutor(options.model),
-        'task-subagent': createTaskSubagentExecutor(options.model),
+        'boundary-subagent': createBoundarySubagentExecutor(resolveStage('boundary-subagent')),
+        'plan-subagent': createPlanSubagentExecutor(resolveStage('plan-subagent')),
+        'review-subagent': createReviewSubagentExecutor(resolveStage('review-subagent')),
+        'risk-subagent': createRiskSubagentExecutor(resolveStage('risk-subagent')),
+        'task-subagent': createTaskSubagentExecutor(resolveStage('task-subagent')),
     }
 
     return subagentToolIds.map(id => {

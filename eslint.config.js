@@ -8,6 +8,8 @@ const importSort = require('eslint-plugin-simple-import-sort')
 const tseslint = require('typescript-eslint')
 
 const ignores = [
+    'node_modules',
+    '**/node_modules/**',
     'dist',
     '**/dist/**',
     'build',
@@ -24,6 +26,7 @@ const ignores = [
     '**/generated/prisma/**',
     '**/out/**',
     '**/next-env.d.ts',
+    '**/*.min.js',
 ]
 
 const webappConfig = {

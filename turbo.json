@@ -32,6 +32,7 @@
         },
         "dev": {
             "cache": false,
+            "dependsOn": ["^build"],
             "persistent": true,
             "env": ["AI_MIND_*", "DATABASE_URL", "NEXT_PUBLIC_*", "PROJECT_ASSISTANT_SERVICE_*"]
         },

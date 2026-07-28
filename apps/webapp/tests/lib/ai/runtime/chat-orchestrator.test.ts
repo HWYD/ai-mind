@@ -376,6 +376,9 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(true)
         runtimeMocks.startDeliveryChainRun.mockResolvedValue(false)
         runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue({
+            graphResult: {
+                status: 'completed',
+            },
             graphState: {},
             state: {},
         })

@@ -1,16 +1,20 @@
 import { type NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 
-import { AgentRunService, AgentRunServiceError } from '@/lib/ai/agent-runs'
+import { AgentRunService, AgentRunServiceError, createAgentRunOwnerSessionHash } from '@/lib/ai/agent-runs'
 import type { AgentRunApiErrorCode } from '@/lib/ai/agent-runs/contracts'
 import { createChatService } from '@/lib/ai/chat-service'
 import { ModelSelectionError, resolveModelSelection } from '@/lib/ai/model-provider/catalog/resolve-model-selection'
 import { resolveSessionId } from '@/lib/ai/rate-limit'
 import { createTasklistAgentModelSet, getTasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent'
+import { createSafeStreamDiagnostics, RESUMABLE_STREAM_ACCEPT } from '@/lib/ai/stream-recovery/contracts'
+import { StreamEventProjector } from '@/lib/ai/stream-recovery/stream-event-projector'
+import { StreamEventStoreError } from '@/lib/ai/stream-recovery/stream-event-store'
 
 export const runtime = 'nodejs'
 
 const chatService = createChatService()
+let streamEventProjector: StreamEventProjector | undefined
 
 const resumeRequestSchema = z
     .object({
@@ -58,15 +62,59 @@ function buildRejectSummary(interruptKind: string, reason?: string) {
     return reason?.trim() ? `${baseSummary}\n\n终止原因：${reason.trim()}` : baseSummary
 }
 
-function toAgentRunErrorResponse(error: AgentRunServiceError, setCookie?: string | null) {
+function toAgentRunErrorResponse(error: AgentRunServiceError, runId: string | undefined, setCookie?: string | null) {
     return jsonWithOptionalCookie(
         {
             code: error.code,
+            diagnostics: createSafeStreamDiagnostics({
+                errorCode: error.code === 'AGENT_RUN_VERSION_MISMATCH' ? 'AGENT_RUN_VERSION_MISMATCH' : undefined,
+                retryable: error.code === 'AGENT_RESUME_FAILED',
+                ...(runId ? { runId } : {}),
+            }),
             error: error.message,
         },
         agentRunErrorStatusMap[error.code],
         setCookie
     )
+}
+
+function withResumableStreamHeaders(response: Response, runId: string) {
+    const headers = new Headers(response.headers)
+
+    headers.set('Content-Type', RESUMABLE_STREAM_ACCEPT)
+    headers.set('X-Run-Id', runId)
+    headers.set('X-Stream-Protocol', 'ai-mind-resumable-v1')
+
+    return new Response(response.body, {
+        headers,
+        status: response.status,
+        statusText: response.statusText,
+    })
+}
+
+function getStreamEventProjector() {
+    streamEventProjector ??= new StreamEventProjector()
+
+    return streamEventProjector
+}
+
+async function projectVersionMismatchTerminal(runId: string, ownerSessionHash: string, message: string) {
+    try {
+        await getStreamEventProjector().projectLifecycle({
+            agentRunId: runId,
+            code: 'AGENT_RUN_VERSION_MISMATCH',
+            message,
+            ownerSessionHash,
+            runId,
+            status: 'version_mismatch',
+        })
+    } catch (error) {
+        if (error instanceof StreamEventStoreError && ['STREAM_RUN_NOT_FOUND', 'STREAM_RUN_TERMINAL'].includes(error.code)) {
+            return
+        }
+
+        logUnexpectedResumeError(runId, error)
+    }
 }
 
 function logUnexpectedResumeError(runId: string | undefined, error: unknown) {
@@ -82,6 +130,7 @@ function logUnexpectedResumeError(runId: string | undefined, error: unknown) {
 
 export async function POST(request: NextRequest, context: AgentRunResumeRouteContext) {
     const { sessionId, setCookie } = resolveSessionId(request.cookies)
+    const ownerSessionHash = createAgentRunOwnerSessionHash(sessionId)
     let agentRunService: AgentRunService | undefined
     let requestRunId: string | undefined
     let resumedRunId: string | undefined
@@ -102,7 +151,7 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
             resumedRunId = runId
             await agentRunService.markRejected(runId)
 
-            return await chatService.rejectAgentRun(
+            const response = await chatService.rejectAgentRun(
                 {
                     assistantMessageId: preparedResume.run.assistantMessageId,
                     interruptId: preparedResume.interrupt.interruptId,
@@ -113,9 +162,16 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
                 {
                     sessionId,
                     setCookie,
-                    signal: request.signal,
+                    signal: undefined,
+                    streamRecovery: {
+                        ownerSessionHash,
+                        requestSignal: request.signal,
+                        runId,
+                    },
                 }
             )
+
+            return withResumableStreamHeaders(response, runId)
         }
 
         const executionMetadata = await agentRunService.getOwnedRunExecutionMetadata(sessionId, runId)
@@ -136,7 +192,7 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
         })
         resumedRunId = runId
 
-        return await chatService.resumeAgentRun(
+        const response = await chatService.resumeAgentRun(
             {
                 agentRunService,
                 decision: preparedResume.decision,
@@ -151,14 +207,26 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
                 resolvedModelSelection,
                 sessionId,
                 setCookie,
-                signal: request.signal,
+                signal: undefined,
+                streamRecovery: {
+                    ownerSessionHash,
+                    requestSignal: request.signal,
+                    runId,
+                },
             }
         )
+
+        return withResumableStreamHeaders(response, runId)
     } catch (error) {
         if (error instanceof ZodError) {
             return jsonWithOptionalCookie(
                 {
                     code: 'INVALID_AGENT_REVIEW_DECISION',
+                    diagnostics: createSafeStreamDiagnostics({
+                        errorCode: 'INVALID_AGENT_REVIEW_DECISION',
+                        retryable: false,
+                        ...(requestRunId ? { runId: requestRunId } : {}),
+                    }),
                     error: 'Invalid AgentRun resume request.',
                     issues: error.issues,
                 },
@@ -168,7 +236,11 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
         }
 
         if (error instanceof AgentRunServiceError) {
-            return toAgentRunErrorResponse(error, setCookie)
+            if (error.code === 'AGENT_RUN_VERSION_MISMATCH' && requestRunId) {
+                await projectVersionMismatchTerminal(requestRunId, ownerSessionHash, error.message)
+            }
+
+            return toAgentRunErrorResponse(error, requestRunId, setCookie)
         }
 
         if (resumedRunId && agentRunService) {
@@ -183,6 +255,11 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
                     code: error.code,
                     error: error.message,
                     modelId: error.modelId,
+                    diagnostics: createSafeStreamDiagnostics({
+                        errorCode: 'INVALID_AGENT_REVIEW_DECISION',
+                        retryable: false,
+                        ...(requestRunId ? { runId: requestRunId } : {}),
+                    }),
                 },
                 400,
                 setCookie
@@ -194,6 +271,11 @@ export async function POST(request: NextRequest, context: AgentRunResumeRouteCon
         return jsonWithOptionalCookie(
             {
                 code: 'AGENT_RESUME_FAILED',
+                diagnostics: createSafeStreamDiagnostics({
+                    errorCode: 'AGENT_RESUME_FAILED',
+                    retryable: false,
+                    ...((requestRunId ?? resumedRunId) ? { runId: requestRunId ?? resumedRunId } : {}),
+                }),
                 error: 'AgentRun resume failed.',
             },
             500,

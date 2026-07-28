@@ -4,6 +4,10 @@ import {
     streamErrorCodes,
     streamErrorScopes,
     streamErrorStages,
+    streamEventKinds,
+    streamProtocolVersion,
+    streamRunStatuses,
+    streamTerminalStates,
 } from '@ai-mind/stream-core/protocol'
 import { z } from 'zod'
 
@@ -13,6 +17,8 @@ import {
     tasklistValidationStatusSchema,
     tasklistWeakSectionSchema,
 } from '@/lib/ai/tools/tasklist-structure/tasklist-structure-types'
+
+const strictObject = <Shape extends z.ZodRawShape>(shape: Shape) => z.object(shape).strict()
 
 const agentTextArtifactMetadataSchema = z.object({
     charCount: z.number().int().nonnegative().optional(),
@@ -230,11 +236,11 @@ const agentResumeChunkSchema = z
     .strict()
 
 const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
-    z.object({
+    strictObject({
         type: z.literal('start'),
         messageId: z.string().min(1),
     }),
-    z.object({
+    strictObject({
         type: z.literal('skill-selected'),
         skillId: z.string().min(1),
         name: z.string().min(1),
@@ -249,7 +255,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
             pinnedDecisionCount: z.number().int().nonnegative().optional(),
         })
         .strict(),
-    z.object({
+    strictObject({
         type: z.literal('agent-graph-node-start'),
         partId: z.string().min(1),
         runId: z.string().min(1),
@@ -259,7 +265,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         title: z.string().min(1),
         stepIndex: z.number().int().positive(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('agent-graph-node-end'),
         partId: z.string().min(1),
         runId: z.string().min(1),
@@ -273,7 +279,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         tags: z.array(z.string().min(1)).optional(),
         error: z.string().optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('agent-graph-route'),
         partId: z.string().min(1),
         runId: z.string().min(1),
@@ -284,7 +290,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         routeLabel: z.string().min(1),
         reason: z.string().optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('agent-graph-state-patch'),
         partId: z.string().min(1),
         runId: z.string().min(1),
@@ -342,20 +348,20 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
             failureMessage: z.string().min(1).optional(),
         })
         .strict(),
-    z.object({
+    strictObject({
         type: z.literal('text-start'),
         partId: z.string().min(1),
     }),
-    z.object({
+    strictObject({
         type: z.literal('text-delta'),
         partId: z.string().min(1),
         delta: z.string(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('text-end'),
         partId: z.string().min(1),
     }),
-    z.object({
+    strictObject({
         type: z.literal('artifact-start'),
         artifactId: z.string().min(1),
         artifactType: z.literal('text'),
@@ -365,32 +371,32 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         sourceStepId: z.string().min(1).optional(),
         metadata: agentTextArtifactMetadataSchema.optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('artifact-delta'),
         artifactId: z.string().min(1),
         delta: z.string(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('artifact-end'),
         artifactId: z.string().min(1),
         status: z.enum(['completed', 'failed']),
         metadata: agentTextArtifactMetadataSchema.optional(),
         error: z.string().optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('reasoning-start'),
         partId: z.string().min(1),
     }),
-    z.object({
+    strictObject({
         type: z.literal('reasoning-delta'),
         partId: z.string().min(1),
         delta: z.string(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('reasoning-end'),
         partId: z.string().min(1),
     }),
-    z.object({
+    strictObject({
         type: z.literal('tool-start'),
         partId: z.string().min(1),
         toolName: z.string().min(1),
@@ -401,7 +407,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         serverId: z.string().min(1).optional(),
         input: z.string(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('tool-end'),
         partId: z.string().min(1),
         toolName: z.string().min(1),
@@ -413,7 +419,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         input: z.string(),
         output: z.string(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('prompt-start'),
         partId: z.string().min(1),
         promptName: z.string().min(1),
@@ -422,7 +428,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         serverId: z.string().min(1).optional(),
         input: z.string().optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('prompt-end'),
         partId: z.string().min(1),
         promptName: z.string().min(1),
@@ -432,7 +438,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         status: z.enum(['completed', 'failed']),
         messageCount: z.number().int().nonnegative().optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('resource-start'),
         partId: z.string().min(1),
         resourceName: z.string().min(1),
@@ -441,7 +447,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         location: z.enum(['local', 'remote']).optional(),
         serverId: z.string().min(1),
     }),
-    z.object({
+    strictObject({
         type: z.literal('resource-end'),
         partId: z.string().min(1),
         resourceName: z.string().min(1),
@@ -453,10 +459,10 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         isTruncated: z.boolean().optional(),
         previewChars: z.number().int().positive().optional(),
     }),
-    z.object({
+    strictObject({
         type: z.literal('finish'),
     }),
-    z.object({
+    strictObject({
         type: z.literal('error'),
         scope: z.enum(streamErrorScopes),
         errorCode: z.enum(streamErrorCodes),
@@ -476,3 +482,73 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
 ])
 
 export const chatStreamChunkSchema = z.union([baseChatStreamChunkSchema, agentInterruptChunkSchema, agentResumeChunkSchema])
+
+export const streamLifecyclePayloadSchema = z
+    .object({
+        type: z.literal('run-status'),
+        status: z.enum(streamRunStatuses),
+        code: z.string().trim().min(1).max(128).optional(),
+        message: z.string().trim().min(1).max(512).optional(),
+    })
+    .strict()
+
+const chatStreamEnvelopeBaseSchema = z
+    .object({
+        protocolVersion: z.literal(streamProtocolVersion),
+        eventId: z.string().trim().min(1),
+        runId: z.string().trim().min(1),
+        sequence: z.number().int().positive(),
+        eventKind: z.enum(streamEventKinds),
+        payload: z.union([chatStreamChunkSchema, streamLifecyclePayloadSchema]),
+        terminal: z.boolean().optional(),
+        terminalState: z.enum(streamTerminalStates).optional(),
+        runStatus: z.enum(streamRunStatuses).optional(),
+    })
+    .strict()
+
+export const chatStreamEventEnvelopeSchema = chatStreamEnvelopeBaseSchema.superRefine((envelope, context) => {
+    if (envelope.terminal === true && envelope.eventKind !== 'terminal') {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'terminal envelopes must use eventKind terminal.',
+            path: ['eventKind'],
+        })
+    }
+
+    if (envelope.terminal !== true && envelope.eventKind === 'terminal') {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'terminal eventKind requires terminal metadata.',
+            path: ['terminal'],
+        })
+    }
+
+    if (envelope.terminal === true && !envelope.terminalState) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'terminal metadata requires terminalState.',
+            path: ['terminalState'],
+        })
+    }
+
+    if (envelope.terminal !== true && envelope.terminalState) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'terminalState requires terminal true.',
+            path: ['terminalState'],
+        })
+    }
+
+    if (envelope.runStatus && envelope.terminalState && envelope.runStatus !== envelope.terminalState) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: 'runStatus must match terminalState when both are present.',
+            path: ['runStatus'],
+        })
+    }
+})
+
+export const chatStreamLineSchema = chatStreamEventEnvelopeSchema
+
+export type ChatStreamEventEnvelope = z.infer<typeof chatStreamEventEnvelopeSchema>
+export type ChatStreamLine = ChatStreamEventEnvelope

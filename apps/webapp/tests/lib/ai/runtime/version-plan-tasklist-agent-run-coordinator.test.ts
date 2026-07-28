@@ -763,14 +763,14 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
                 ...options,
                 runtimeConfig: createRuntimeConfig('off'),
             })
-        ).rejects.toThrow('No checkpointer set')
+        ).rejects.toThrow('Tasklist Agent HITL requires a LangGraph checkpointer')
 
         const runId = agentRunService.createRun.mock.calls[0]?.[1].id
 
         expect(agentRunService.markFailed).toHaveBeenCalledWith(
             runId,
             'TASKLIST_AGENT_RUN_FAILED',
-            expect.stringContaining('No checkpointer set')
+            expect.stringContaining('Tasklist Agent HITL requires a LangGraph checkpointer')
         )
         expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
@@ -786,7 +786,7 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
                 langSmithObserver,
                 runtimeConfig: createRuntimeConfig('off'),
             })
-        ).rejects.toThrow('No checkpointer set')
+        ).rejects.toThrow('Tasklist Agent HITL requires a LangGraph checkpointer')
 
         const runId = agentRunService.createRun.mock.calls[0]?.[1].id
 
@@ -796,7 +796,7 @@ describe('runtime/version-plan-tasklist-agent run coordinator', () => {
                 assistantMessageId: 'assistant-coordinator-test',
                 durationMs: expect.any(Number),
                 failureCode: 'TASKLIST_AGENT_RUN_FAILED',
-                failureMessage: expect.stringContaining('No checkpointer set'),
+                failureMessage: expect.stringContaining('Tasklist Agent HITL requires a LangGraph checkpointer'),
                 runId,
                 runStatus: 'failed',
                 stage: 'initial',

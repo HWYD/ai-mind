@@ -1,4 +1,5 @@
-import { StreamLifecycle, writeStaticTextPart, writeStreamErrorChunk } from '@ai-mind/stream-core'
+import { StreamLifecycle, writeStaticTextPart } from '@ai-mind/stream-core'
+import type { ChatStreamChunk, StreamEventEnvelope } from '@ai-mind/stream-core/protocol'
 import { type ChunkWriter, createNdjsonChunkWriter } from '@ai-mind/stream-core/web'
 
 import type { AgentRunService } from '@/lib/ai/agent-runs'
@@ -12,6 +13,10 @@ import { resumeVersionPlanTasklistAgentRun } from '@/lib/ai/runtime/version-plan
 import type { TasklistAgentRuntimeConfig } from '@/lib/ai/runtime/version-plan-tasklist-agent/config/agent-runtime-config'
 import { VERSION_PLAN_TASKLIST_AGENT_NAME } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/types'
 import type { TasklistAgentModelSet } from '@/lib/ai/runtime/version-plan-tasklist-agent/model/tasklist-agent-model-set'
+import type { StreamTerminalStateDto } from '@/lib/ai/stream-recovery/contracts'
+import { StreamEventProjector } from '@/lib/ai/stream-recovery/stream-event-projector'
+import { StreamEventStoreError } from '@/lib/ai/stream-recovery/stream-event-store'
+import { StreamExecutionCoordinator, StreamExecutionCoordinatorError } from '@/lib/ai/stream-recovery/stream-execution-coordinator'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 export type { ChatExecutionContext, ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -21,6 +26,19 @@ const STREAM_HEARTBEAT_INTERVAL_MS = 15_000
 interface StreamExecutorOptions {
     isClosed: () => boolean
     writeChunk: WriteChunk
+    writeTerminalChunk?: (chunk: ChatStreamChunk, terminalState: StreamTerminalStateDto) => void
+}
+
+interface ChatServiceDependencies {
+    streamEventProjector?: Pick<StreamEventProjector, 'projectChunk'>
+    streamExecutionCoordinator?: Pick<StreamExecutionCoordinator, 'startExecution'> &
+        Partial<Pick<StreamExecutionCoordinator, 'getCancelRequestedAt'>>
+}
+
+interface ResumableStreamWriterOptions {
+    context: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] }
+    getProjector: () => Pick<StreamEventProjector, 'projectChunk'>
+    writer: ChunkWriter
 }
 
 interface ResumeAgentRunStreamInput {
@@ -46,6 +64,14 @@ function normalizeResumeStreamError(
     error: unknown,
     context: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] }
 ): { code: import('@ai-mind/stream-core/protocol').StreamErrorCode; message: string; retryable: boolean } {
+    if (error instanceof StreamEventStoreError) {
+        return {
+            code: 'RUNTIME_INVARIANT_FAILED',
+            message: '流事件无法安全持久化，当前流已失败，请重新发起请求。',
+            retryable: false,
+        }
+    }
+
     const knownRuntimeError = normalizeKnownRuntimeError(error)
 
     if (knownRuntimeError) {
@@ -76,20 +102,96 @@ function normalizeResumeStreamError(
     }
 }
 
+function createResumableWriteChunk(options: ResumableStreamWriterOptions): {
+    drain: () => Promise<void>
+    getProjectionError: () => unknown
+    writeChunk: WriteChunk
+    writeTerminalChunk: (chunk: ChatStreamChunk, terminalState: StreamTerminalStateDto) => void
+} {
+    let projectionQueue = Promise.resolve()
+    let projectionError: unknown
+
+    const projectChunk = (chunk: ChatStreamChunk, terminalState?: StreamTerminalStateDto) => {
+        const allowAfterProjectionError = terminalState !== undefined
+
+        projectionQueue = projectionQueue
+            .catch(error => {
+                projectionError ??= error
+            })
+            .then(async () => {
+                if (projectionError && !allowAfterProjectionError) {
+                    return
+                }
+
+                const recovery = options.context.streamRecovery!
+
+                const envelope = await options.getProjector().projectChunk({
+                    chunk,
+                    ownerSessionHash: recovery.ownerSessionHash,
+                    runId: recovery.runId,
+                    ...(terminalState ? { terminalState } : {}),
+                })
+
+                if (!options.writer.isClosed()) {
+                    options.writer.writeEnvelope(envelope as unknown as StreamEventEnvelope)
+                }
+            })
+    }
+
+    return {
+        drain: async () => {
+            try {
+                await projectionQueue
+            } catch (error) {
+                projectionError ??= error
+            }
+        },
+        getProjectionError: () => projectionError,
+        writeChunk: chunk => projectChunk(chunk),
+        writeTerminalChunk: (chunk, terminalState) => projectChunk(chunk, terminalState),
+    }
+}
+
 async function createNdjsonStreamResult(
     context: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] },
-    execute: (options: StreamExecutorOptions) => Promise<void>
+    execute: (
+        options: StreamExecutorOptions,
+        executionContext: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] }
+    ) => Promise<void>,
+    dependencies: ChatServiceDependencies = {}
 ): Promise<StreamResult> {
     let closed = false
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
     let writerRef: ChunkWriter | null = null
+    let projector: Pick<StreamEventProjector, 'projectChunk'> | undefined
+    let coordinator:
+        | (Pick<StreamExecutionCoordinator, 'startExecution'> & Partial<Pick<StreamExecutionCoordinator, 'getCancelRequestedAt'>>)
+        | undefined
+
+    const getProjector = () => {
+        projector ??= dependencies.streamEventProjector ?? new StreamEventProjector()
+
+        return projector
+    }
+
+    const getCoordinator = () => {
+        coordinator ??= dependencies.streamExecutionCoordinator ?? new StreamExecutionCoordinator()
+
+        return coordinator
+    }
 
     const responseStream = new ReadableStream<Uint8Array>({
         start(controller) {
             const writer = createNdjsonChunkWriter(controller)
             writerRef = writer
+            let projectionDrain: (() => Promise<void>) | undefined
 
-            const isClosed = () => closed || writer.isClosed()
+            const isResponseClosed = () => closed || writer.isClosed()
+            const isExecutionClosed = (
+                executionContext: ChatExecutionContext & {
+                    resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection']
+                } = context
+            ) => Boolean(executionContext.signal?.aborted)
 
             const closeStream = () => {
                 if (closed) {
@@ -105,7 +207,7 @@ async function createNdjsonStreamResult(
             }
 
             heartbeatTimer = setInterval(() => {
-                if (isClosed()) {
+                if (isResponseClosed()) {
                     closeStream()
                     return
                 }
@@ -117,60 +219,158 @@ async function createNdjsonStreamResult(
                 }
             }, STREAM_HEARTBEAT_INTERVAL_MS)
 
-            const run = async () => {
+            const runWithContext = async (
+                executionContext: ChatExecutionContext & {
+                    resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection']
+                }
+            ) => {
+                const writerOptions = createResumableWriteChunk({
+                    context: executionContext,
+                    getProjector,
+                    writer,
+                })
+                projectionDrain = writerOptions.drain
+
                 try {
-                    await execute({
-                        isClosed,
-                        writeChunk: writer.writeChunk,
-                    })
+                    await execute(
+                        {
+                            isClosed: () => isExecutionClosed(executionContext),
+                            writeChunk: writerOptions.writeChunk,
+                            writeTerminalChunk: writerOptions.writeTerminalChunk,
+                        },
+                        executionContext
+                    )
                 } catch (streamError) {
-                    if (isAbortError(streamError) || context.signal?.aborted || isClosed()) {
-                        if (context.signal?.aborted || isAbortError(streamError)) {
+                    const abortLikeError =
+                        isAbortError(streamError) || executionContext.signal?.aborted || isExecutionClosed(executionContext)
+                    const cancellationRequested =
+                        abortLikeError &&
+                        executionContext.streamRecovery &&
+                        typeof getCoordinator().getCancelRequestedAt === 'function' &&
+                        Boolean(
+                            await getCoordinator()
+                                .getCancelRequestedAt(executionContext.streamRecovery.runId)
+                                .catch(() => null)
+                        )
+
+                    if (cancellationRequested) {
+                        writerOptions.writeTerminalChunk({ type: 'finish' }, 'cancelled')
+                        return
+                    }
+
+                    if (abortLikeError) {
+                        if (executionContext.signal?.aborted || isAbortError(streamError)) {
                             logChatCancellation('model stream aborted')
                         }
                         return
                     }
 
                     if (isInvalidSkillError(streamError)) {
-                        writeStreamErrorChunk(writer.writeChunk, {
+                        const errorChunk: ChatStreamChunk = {
                             scope: 'request',
                             errorCode: 'INVALID_SKILL',
                             retryable: false,
                             message: streamError.message,
-                        })
+                            type: 'error',
+                        }
+                        writerOptions.writeTerminalChunk(errorChunk, 'failed')
                         return
                     }
 
-                    const normalizedRuntimeError = normalizeResumeStreamError(streamError, context)
+                    const normalizedRuntimeError = normalizeResumeStreamError(streamError, executionContext)
 
-                    // 兜底收口：任何未在主链内被消费的异常都按 runtime 错误统一下发。
-                    writeStreamErrorChunk(writer.writeChunk, {
+                    const runtimeErrorChunk: ChatStreamChunk = {
                         scope: 'runtime',
                         errorCode: normalizedRuntimeError.code,
                         retryable: normalizedRuntimeError.retryable,
                         message: normalizedRuntimeError.message,
                         stage: 'runtime',
-                    })
+                        type: 'error',
+                    }
+                    writerOptions.writeTerminalChunk(runtimeErrorChunk, 'failed')
                 } finally {
+                    await projectionDrain?.()
+
+                    const projectionError = writerOptions.getProjectionError()
+
+                    if (projectionError && !executionContext.signal?.aborted) {
+                        if (projectionError instanceof StreamEventStoreError) {
+                            // 不记录 payload，避免把模型输出或运行时数据写入服务端日志。
+                            // eslint-disable-next-line no-console
+                            console.error('Resumable stream event projection failed:', { code: projectionError.code })
+                        }
+                        const normalizedProjectionError = normalizeResumeStreamError(projectionError, executionContext)
+
+                        writerOptions.writeTerminalChunk(
+                            {
+                                errorCode: normalizedProjectionError.code,
+                                message: normalizedProjectionError.message,
+                                retryable: false,
+                                scope: 'runtime',
+                                stage: 'runtime',
+                                type: 'error',
+                            },
+                            'failed'
+                        )
+                        await projectionDrain?.()
+                    }
+
                     closeStream()
                 }
             }
 
-            void run().catch(error => {
-                if (isAbortError(error) || context.signal?.aborted || isClosed()) {
+            const run = async () => {
+                await getCoordinator().startExecution({
+                    execute: async execution => {
+                        await runWithContext({
+                            ...context,
+                            signal: execution.signal,
+                        })
+                    },
+                    ownerSessionHash: context.streamRecovery!.ownerSessionHash,
+                    requestSignal: context.streamRecovery.requestSignal,
+                    runId: context.streamRecovery!.runId,
+                })
+            }
+
+            void run().catch(async error => {
+                if (isAbortError(error) || context.signal?.aborted || isResponseClosed()) {
+                    closeStream()
+                    return
+                }
+
+                if (error instanceof StreamExecutionCoordinatorError) {
+                    // 第二个 executor 或已经结束的 run 不应覆盖现有终态。
                     closeStream()
                     return
                 }
 
                 // eslint-disable-next-line no-console
                 console.error('Chat stream failed:', error)
-                writeStreamErrorChunk(writer.writeChunk, {
+                const terminalErrorChunk: ChatStreamChunk = {
                     scope: 'runtime',
                     errorCode: 'RUNTIME_INVARIANT_FAILED',
                     retryable: false,
                     message: 'Chat stream failed unexpectedly.',
                     stage: 'runtime',
-                })
+                    type: 'error',
+                }
+
+                try {
+                    const envelope = await getProjector().projectChunk({
+                        chunk: terminalErrorChunk,
+                        ownerSessionHash: context.streamRecovery!.ownerSessionHash,
+                        runId: context.streamRecovery!.runId,
+                        terminalState: 'failed',
+                    })
+
+                    if (!isResponseClosed()) {
+                        writer.writeEnvelope(envelope as unknown as StreamEventEnvelope)
+                    }
+                } catch (projectionError) {
+                    // eslint-disable-next-line no-console
+                    console.error('Resumable stream outer failure projection failed:', projectionError)
+                }
                 closeStream()
             })
         },
@@ -201,91 +401,118 @@ async function createNdjsonStreamResult(
     }
 }
 
-async function createChatStreamResult(request: ChatRequest, context: ResolvedChatExecutionContext): Promise<StreamResult> {
-    return createNdjsonStreamResult(context, async ({ isClosed, writeChunk }) => {
-        const orchestrator = new ChatOrchestrator({
-            context,
-            isClosed,
-            request,
-            writeChunk,
-        })
+async function createChatStreamResult(
+    request: ChatRequest,
+    context: ResolvedChatExecutionContext,
+    dependencies: ChatServiceDependencies
+): Promise<StreamResult> {
+    return createNdjsonStreamResult(
+        context,
+        async ({ isClosed, writeChunk }, executionContext) => {
+            const orchestrator = new ChatOrchestrator({
+                context: executionContext as ResolvedChatExecutionContext,
+                isClosed,
+                request,
+                writeChunk,
+            })
 
-        await orchestrator.run()
-    })
+            await orchestrator.run()
+        },
+        dependencies
+    )
 }
 
 async function createResumeAgentRunStreamResult(
     input: ResumeAgentRunStreamInput,
-    context: ResolvedChatExecutionContext
+    context: ResolvedChatExecutionContext,
+    dependencies: ChatServiceDependencies
 ): Promise<StreamResult> {
-    return createNdjsonStreamResult(context, async ({ isClosed, writeChunk }) => {
-        const lifecycle = new StreamLifecycle({
-            context,
-            isClosed,
-            writeChunk,
-        })
+    return createNdjsonStreamResult(
+        context,
+        async ({ isClosed, writeChunk }, executionContext) => {
+            const lifecycle = new StreamLifecycle({
+                context: executionContext,
+                isClosed,
+                writeChunk,
+            })
 
-        if (!context.sessionId) {
-            throw new Error('Tasklist Agent resume requires an owned chat session.')
-        }
+            if (!executionContext.sessionId) {
+                throw new Error('Tasklist Agent resume requires an owned chat session.')
+            }
 
-        await resumeVersionPlanTasklistAgentRun({
-            agentRunService: input.agentRunService,
-            context,
-            decision: input.decision,
-            interruptId: input.interruptId,
-            models: input.models,
-            preparedResume: input.preparedResume,
-            runId: input.runId,
-            runtimeConfig: input.runtimeConfig,
-            sessionId: context.sessionId,
-            userGoal: input.userGoal,
-            writeChunk,
-        })
+            const agentRunResult = await resumeVersionPlanTasklistAgentRun({
+                agentRunService: input.agentRunService,
+                context: executionContext as ResolvedChatExecutionContext,
+                decision: input.decision,
+                interruptId: input.interruptId,
+                models: input.models,
+                preparedResume: input.preparedResume,
+                runId: input.runId,
+                runtimeConfig: input.runtimeConfig,
+                sessionId: executionContext.sessionId,
+                userGoal: input.userGoal,
+                writeChunk,
+            })
 
-        lifecycle.emitFinishIfOpen()
-    })
+            if (agentRunResult.graphResult.status !== 'interrupted') {
+                lifecycle.emitFinishIfOpen()
+            }
+        },
+        dependencies
+    )
 }
 
-async function createRejectAgentRunStreamResult(input: RejectAgentRunStreamInput, context: ChatExecutionContext): Promise<StreamResult> {
-    return createNdjsonStreamResult(context, async ({ isClosed, writeChunk }) => {
-        const lifecycle = new StreamLifecycle({
-            context,
-            isClosed,
-            writeChunk,
-        })
+async function createRejectAgentRunStreamResult(
+    input: RejectAgentRunStreamInput,
+    context: ChatExecutionContext,
+    dependencies: ChatServiceDependencies
+): Promise<StreamResult> {
+    return createNdjsonStreamResult(
+        context,
+        async ({ isClosed, writeChunk, writeTerminalChunk }, executionContext) => {
+            const lifecycle = new StreamLifecycle({
+                context: executionContext,
+                isClosed,
+                writeChunk,
+            })
 
-        writeChunk({
-            agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
-            assistantMessageId: input.assistantMessageId,
-            interruptId: input.interruptId,
-            runId: input.runId,
-            threadId: input.threadId,
-            type: 'agent-resume',
-        })
-        writeStaticTextPart(writeChunk, input.summary)
-        lifecycle.emitFinishIfOpen()
-    })
+            writeChunk({
+                agentName: VERSION_PLAN_TASKLIST_AGENT_NAME,
+                assistantMessageId: input.assistantMessageId,
+                interruptId: input.interruptId,
+                runId: input.runId,
+                threadId: input.threadId,
+                type: 'agent-resume',
+            })
+            writeStaticTextPart(writeChunk, input.summary)
+            if (writeTerminalChunk) {
+                writeTerminalChunk({ type: 'finish' }, 'rejected')
+            } else {
+                lifecycle.emitFinishIfOpen()
+            }
+        },
+        dependencies
+    )
 }
 
-export function createChatService() {
+export function createChatService(dependencies: ChatServiceDependencies = {}) {
     return {
         async rejectAgentRun(input: RejectAgentRunStreamInput, context: ChatExecutionContext) {
-            const streamResult = await createRejectAgentRunStreamResult(input, context)
+            const streamResult = await createRejectAgentRunStreamResult(input, context, dependencies)
 
             return new Response(streamResult.body, {
                 headers: streamResult.headers,
             })
         },
         async resumeAgentRun(input: ResumeAgentRunStreamInput, context: ResolvedChatExecutionContext) {
-            const streamResult = await createResumeAgentRunStreamResult(input, context)
+            const streamResult = await createResumeAgentRunStreamResult(input, context, dependencies)
 
             return new Response(streamResult.body, {
                 headers: streamResult.headers,
             })
         },
         async streamChat(request: ChatRequest, context: ResolvedChatExecutionContext) {
-            const streamResult = await createChatStreamResult(request, context)
+            const streamResult = await createChatStreamResult(request, context, dependencies)
 
             return new Response(streamResult.body, {
                 headers: streamResult.headers,

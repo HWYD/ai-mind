@@ -1,26 +1,69 @@
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 
-import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
+import { chatStreamChunkSchema, type ChatStreamEventEnvelope, chatStreamLineSchema } from '@/lib/ai/stream-chunk-schema'
 
-function parseChatStreamLine(line: string): ChatStreamChunk {
+const streamParseErrorMessage = '服务端返回了无法解析的流式数据。'
+
+export interface ConsumedStreamCursor {
+    eventId: string
+    lastAcknowledgedSequence: number
+    protocolVersion: number
+    runId: string
+}
+
+export interface ConsumeNdjsonStreamOptions {
+    onCursor?: (cursor: ConsumedStreamCursor) => void
+    onEnvelope?: (envelope: ChatStreamEventEnvelope) => void
+    shouldApplyEnvelope?: (envelope: ChatStreamEventEnvelope) => boolean
+}
+
+function parseChatStreamLine(line: string): ChatStreamEventEnvelope {
     let parsedJson: unknown
 
     try {
         parsedJson = JSON.parse(line)
     } catch {
-        throw new Error('服务端返回了无法解析的流式数据。')
+        throw new Error(streamParseErrorMessage)
     }
 
-    const parsedChunk = chatStreamChunkSchema.safeParse(parsedJson)
+    const parsedLine = chatStreamLineSchema.safeParse(parsedJson)
 
-    if (!parsedChunk.success) {
-        throw new Error('服务端返回了无法解析的流式数据。')
+    if (!parsedLine.success) {
+        throw new Error(streamParseErrorMessage)
     }
 
-    return parsedChunk.data as ChatStreamChunk
+    return parsedLine.data
 }
 
-export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, onChunk: (chunk: ChatStreamChunk) => void) {
+function consumeParsedLine(
+    parsedLine: ChatStreamEventEnvelope,
+    onChunk: (chunk: ChatStreamChunk) => void,
+    options: ConsumeNdjsonStreamOptions
+) {
+    options.onEnvelope?.(parsedLine)
+
+    if (options.shouldApplyEnvelope && !options.shouldApplyEnvelope(parsedLine)) {
+        return
+    }
+
+    if (parsedLine.payload.type !== 'run-status') {
+        const parsedPayload = chatStreamChunkSchema.parse(parsedLine.payload)
+        onChunk(parsedPayload as ChatStreamChunk)
+    }
+
+    options.onCursor?.({
+        eventId: parsedLine.eventId,
+        lastAcknowledgedSequence: parsedLine.sequence,
+        protocolVersion: parsedLine.protocolVersion,
+        runId: parsedLine.runId,
+    })
+}
+
+export async function consumeNdjsonStream(
+    stream: ReadableStream<Uint8Array>,
+    onChunk: (chunk: ChatStreamChunk) => void,
+    options: ConsumeNdjsonStreamOptions = {}
+) {
     const reader = stream.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -44,7 +87,7 @@ export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, on
                 continue
             }
 
-            onChunk(parseChatStreamLine(trimmedLine))
+            consumeParsedLine(parseChatStreamLine(trimmedLine), onChunk, options)
         }
     }
 
@@ -54,5 +97,5 @@ export async function consumeNdjsonStream(stream: ReadableStream<Uint8Array>, on
         return
     }
 
-    onChunk(parseChatStreamLine(finalLine))
+    consumeParsedLine(parseChatStreamLine(finalLine), onChunk, options)
 }

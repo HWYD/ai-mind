@@ -1146,7 +1146,10 @@ describe('runtime/delivery-chain', () => {
                 .map(chunk => `${chunk.stepId}:${chunk.status}`)
         ).toEqual(['load:running', 'load:completed', 'delegate-plan:running', 'delegate-plan:failed'])
         expect(JSON.stringify(getWorkflowProgressChunks(writeChunk))).not.toContain('读取上下文未完成')
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('provider tool-call failed'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(
+            writeChunk,
+            expect.stringContaining('Plan Subagent Tool 调用失败，当前交付链已安全失败。')
+        )
         expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 })

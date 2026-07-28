@@ -1,8 +1,8 @@
 # Implementation Plan: Monorepo Boundary and CI Validation Governance
 
-**Branch**: `[049-monorepo-boundary-ci]` | **Date**: 2026-07-18 | **Spec**: [spec.md](./spec.md)
+**Branch**: `[v0.4.9-monorepo-boundary-ci]` | **Date**: 2026-07-18 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/049-monorepo-boundary-ci/spec.md`
+**Input**: Feature specification from `/specs/v0.4.9-monorepo-boundary-ci/spec.md`
 
 ## Summary
 
@@ -52,7 +52,7 @@ The selected design uses no new application abstraction, database schema, extern
 ### Documentation (this feature)
 
 ```text
-specs/049-monorepo-boundary-ci/
+specs/v0.4.9-monorepo-boundary-ci/
 ├── spec.md
 ├── plan.md
 ├── research.md

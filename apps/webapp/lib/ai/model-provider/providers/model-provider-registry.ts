@@ -21,6 +21,7 @@ export interface CreateChatModelOptions {
     enableReasoning?: boolean
     maxOutputTokens?: number
     maxRetries?: number
+    retryableErrorsOnly?: boolean
     resolvedModelSelection: ResolvedModelSelection
     streaming?: boolean
     temperature?: number
@@ -40,6 +41,18 @@ export function createChatModel(options: CreateChatModelOptions): AiMindChatMode
         enableReasoning: options.enableReasoning,
         maxOutputTokens: options.maxOutputTokens,
         maxRetries: options.maxRetries,
+        ...(options.retryableErrorsOnly
+            ? {
+                  onFailedAttempt: (error: unknown) => {
+                      const normalized = provider.normalizeError(error)
+                      const errorType = normalized.logMeta.errorType
+
+                      if (!normalized.retryable || (errorType !== 'timeout' && errorType !== 'rateLimit' && errorType !== 'connection')) {
+                          throw error
+                      }
+                  },
+              }
+            : {}),
         resolvedModelSelection,
         routeType: resolvedModelSelection.routeType,
         streaming: options.streaming,

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { chatStreamChunkSchema } from '@/lib/ai/stream-chunk-schema'
+import {
+    chatStreamChunkSchema,
+    chatStreamEventEnvelopeSchema,
+    chatStreamLineSchema,
+    streamLifecyclePayloadSchema,
+} from '@/lib/ai/stream-chunk-schema'
 
 describe('chatStreamChunkSchema artifact chunks', () => {
     it('接受合法 artifact chunk', () => {
@@ -57,6 +62,127 @@ describe('chatStreamChunkSchema artifact chunks', () => {
                 type: 'artifact-end',
                 artifactId: 'artifact-tasklist',
                 status: 'streaming',
+            }).success
+        ).toBe(false)
+    })
+})
+
+describe('chat stream resumable envelope schema', () => {
+    it('rejects raw NDJSON chunks and keeps chunks valid only as envelope payloads', () => {
+        expect(
+            chatStreamLineSchema.safeParse({
+                delta: 'hello',
+                partId: 'answer',
+                type: 'text-delta',
+            }).success
+        ).toBe(false)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                eventId: 'evt_1',
+                eventKind: 'chunk',
+                payload: {
+                    delta: 'hello',
+                    partId: 'answer',
+                    type: 'text-delta',
+                },
+                protocolVersion: 1,
+                runId: 'run_1',
+                sequence: 1,
+            }).success
+        ).toBe(false)
+    })
+
+    it('accepts negotiated envelopes with public chunk payloads', () => {
+        expect(
+            chatStreamEventEnvelopeSchema.safeParse({
+                eventId: 'evt_1',
+                eventKind: 'chunk',
+                payload: {
+                    delta: 'hello',
+                    partId: 'answer',
+                    type: 'text-delta',
+                },
+                protocolVersion: 1,
+                runId: 'run_1',
+                runStatus: 'running',
+                sequence: 1,
+            }).success
+        ).toBe(true)
+    })
+
+    it('accepts lifecycle payloads and terminal metadata with fixed consistency rules', () => {
+        expect(
+            streamLifecyclePayloadSchema.safeParse({
+                status: 'paused',
+                type: 'run-status',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamEventEnvelopeSchema.safeParse({
+                eventId: 'evt_pause',
+                eventKind: 'lifecycle',
+                payload: {
+                    status: 'paused',
+                    type: 'run-status',
+                },
+                protocolVersion: 1,
+                runId: 'run_1',
+                runStatus: 'paused',
+                sequence: 2,
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamEventEnvelopeSchema.safeParse({
+                eventId: 'evt_done',
+                eventKind: 'terminal',
+                payload: {
+                    type: 'finish',
+                },
+                protocolVersion: 1,
+                runId: 'run_1',
+                runStatus: 'completed',
+                sequence: 3,
+                terminal: true,
+                terminalState: 'completed',
+            }).success
+        ).toBe(true)
+    })
+
+    it('rejects malformed envelopes and private/raw-like leaked fields', () => {
+        expect(
+            chatStreamEventEnvelopeSchema.safeParse({
+                eventId: 'evt_bad',
+                eventKind: 'terminal',
+                payload: {
+                    type: 'finish',
+                },
+                protocolVersion: 1,
+                runId: 'run_1',
+                sequence: 3,
+            }).success
+        ).toBe(false)
+        expect(
+            chatStreamEventEnvelopeSchema.safeParse({
+                eventId: 'evt_secret',
+                eventKind: 'chunk',
+                payload: {
+                    delta: 'hello',
+                    partId: 'answer',
+                    rawProviderError: 'Bearer secret-token',
+                    type: 'text-delta',
+                },
+                protocolVersion: 1,
+                runId: 'run_1',
+                sequence: 1,
+            }).success
+        ).toBe(false)
+        expect(
+            streamLifecyclePayloadSchema.safeParse({
+                checkpoint: {
+                    raw: 'checkpoint should not be public',
+                },
+                status: 'running',
+                type: 'run-status',
             }).success
         ).toBe(false)
     })

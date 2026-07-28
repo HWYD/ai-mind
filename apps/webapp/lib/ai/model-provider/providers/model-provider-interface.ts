@@ -14,6 +14,7 @@ export interface ModelProviderCreateOptions {
     enableReasoning?: boolean
     maxOutputTokens?: number
     maxRetries?: number
+    onFailedAttempt?: (error: unknown) => void
     resolvedModelSelection: ResolvedModelSelection
     routeType: ModelRouteType
     streaming?: boolean

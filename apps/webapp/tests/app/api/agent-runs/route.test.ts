@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const serviceMocks = vi.hoisted(() => ({
     beginResume: vi.fn(),
@@ -72,6 +72,7 @@ function createJsonRequest(body: unknown) {
 describe('AgentRun API routes', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.stubEnv('AI_MIND_AGENT_RUN_SESSION_SECRET', 'test-secret-with-at-least-32-characters')
         resolveModelSelectionMock.mockReturnValue({
             modelId: 'ollama/qwen3-8b',
             provider: 'ollama',
@@ -82,6 +83,10 @@ describe('AgentRun API routes', () => {
         getTasklistAgentRuntimeConfigMock.mockReturnValue({ graphCheckpointMode: 'memory' })
         rejectAgentRunMock.mockResolvedValue(new Response('reject-ok'))
         resumeAgentRunMock.mockResolvedValue(new Response('stream-ok'))
+    })
+
+    afterEach(() => {
+        vi.unstubAllEnvs()
     })
 
     it('GET 返回当前 session 可访问的 AgentRun public DTO', async () => {

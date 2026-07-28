@@ -5,16 +5,30 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useChatStream as useChatStreamBase } from '@/components/instamind/use-chat-stream'
+import type { ChatStreamEventEnvelope } from '@/lib/ai/stream-chunk-schema'
 
 const TEST_CONVERSATION_ID = 'conv-current'
 
-function createNdjsonResponse(chunks: ChatStreamChunk[], status = 200) {
+function createNdjsonResponse(
+    chunks: Array<ChatStreamChunk | ChatStreamEventEnvelope>,
+    status = 200,
+    runId = 'run_test',
+    startSequence = 1
+) {
     const encoder = new TextEncoder()
+    const responseRunId =
+        chunks.find((chunk): chunk is ChatStreamEventEnvelope => 'protocolVersion' in chunk)?.runId ??
+        chunks.find((chunk): chunk is Extract<ChatStreamChunk, { runId: string }> => 'runId' in chunk)?.runId ??
+        runId
 
     const body = new ReadableStream<Uint8Array>({
         start(controller) {
-            for (const chunk of chunks) {
-                controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`))
+            for (const [index, chunk] of chunks.entries()) {
+                const line =
+                    'protocolVersion' in chunk
+                        ? chunk
+                        : createStreamEnvelope(chunk as ChatStreamEventEnvelope['payload'], responseRunId, startSequence + index)
+                controller.enqueue(encoder.encode(`${JSON.stringify(line)}\n`))
             }
 
             controller.close()
@@ -25,12 +39,35 @@ function createNdjsonResponse(chunks: ChatStreamChunk[], status = 200) {
         status,
         headers: {
             'Content-Type': 'application/x-ndjson; charset=utf-8',
+            'X-Run-Id': responseRunId,
+            'X-Stream-Protocol': 'ai-mind-resumable-v1',
         },
     })
 }
 
+function createStreamEnvelope(payload: ChatStreamEventEnvelope['payload'], runId: string, sequence: number): ChatStreamEventEnvelope {
+    const terminalState =
+        payload.type === 'finish'
+            ? 'completed'
+            : payload.type === 'error' && (payload.scope === 'request' || payload.scope === 'runtime')
+              ? 'failed'
+              : null
+    const isTerminal = terminalState !== null
+    const isLifecycle = payload.type === 'agent-interrupt' || payload.type === 'agent-resume'
+
+    return {
+        eventId: `${runId}-event-${sequence}`,
+        eventKind: isTerminal ? 'terminal' : isLifecycle ? 'lifecycle' : 'chunk',
+        payload,
+        protocolVersion: 1,
+        runId,
+        sequence,
+        ...(terminalState ? { runStatus: terminalState, terminal: true, terminalState } : {}),
+    }
+}
+
 function getChatFetchCalls(fetchMock: ReturnType<typeof vi.fn>) {
-    return fetchMock.mock.calls.filter(call => !String(call[0]).startsWith('/api/chat/thread'))
+    return fetchMock.mock.calls.filter(call => String(call[0]) === '/api/chat')
 }
 
 function createThreadHydrationResponse(conversationId = TEST_CONVERSATION_ID) {
@@ -105,12 +142,13 @@ function createStrategyInterruptResponse(runId = 'run-resume-error', interruptId
             threadId: `tasklist-agent:c1:${runId}`,
             type: 'agent-interrupt',
         },
-        { type: 'finish' },
     ])
 }
 
 afterEach(() => {
+    vi.useRealTimers()
     window.localStorage.clear()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     cleanup()
 })
@@ -169,6 +207,467 @@ describe('useChatStream', () => {
 
         expect(requestBody?.options?.modelId).toBe('qwen/qwen3.6-plus')
         expect(requestBody?.options?.enableReasoning).toBe(false)
+        expect(requestInit?.headers).toMatchObject({
+            'Content-Type': 'application/json',
+            'Idempotency-Key': expect.any(String),
+        })
+    })
+
+    it('duplicate POST replay descriptor 会改走 recovery GET，而不是把 JSON 当作 NDJSON 消费', async () => {
+        const encoder = new TextEncoder()
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+            const url = String(input)
+
+            if (url.startsWith('/api/chat/thread')) {
+                return Promise.resolve(createThreadHydrationResponse(TEST_CONVERSATION_ID))
+            }
+
+            if (url === '/api/chat') {
+                return Promise.resolve(
+                    Response.json({
+                        kind: 'stream-replay',
+                        lastSequence: 4,
+                        replayed: true,
+                        runId: 'run_replay',
+                        status: 'running',
+                        streamUrl: '/api/chat/runs/run_replay/stream',
+                    })
+                )
+            }
+
+            if (url === '/api/chat/runs/run_replay/stream') {
+                const body = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        for (const line of [
+                            '{"protocolVersion":1,"eventId":"evt_1","runId":"run_replay","sequence":1,"eventKind":"chunk","payload":{"type":"start","messageId":"assistant-replay"}}',
+                            '{"protocolVersion":1,"eventId":"evt_2","runId":"run_replay","sequence":2,"eventKind":"chunk","payload":{"type":"text-start","partId":"text-replay"}}',
+                            '{"protocolVersion":1,"eventId":"evt_3","runId":"run_replay","sequence":3,"eventKind":"chunk","payload":{"type":"text-delta","partId":"text-replay","delta":"replayed"}}',
+                            '{"protocolVersion":1,"eventId":"evt_4","runId":"run_replay","sequence":4,"eventKind":"terminal","payload":{"type":"finish"},"terminal":true,"terminalState":"completed"}',
+                        ]) {
+                            controller.enqueue(encoder.encode(`${line}\n`))
+                        }
+
+                        controller.close()
+                    },
+                })
+
+                return Promise.resolve(
+                    new Response(body, {
+                        headers: {
+                            'Content-Type': 'application/x-ndjson; profile="ai-mind-resumable-v1"',
+                        },
+                    })
+                )
+            }
+
+            return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('继续已有 run')
+        })
+
+        const recoveryRequest = fetchMock.mock.calls.find(call => String(call[0]) === '/api/chat/runs/run_replay/stream')
+        const recoveryInit = recoveryRequest?.[1] as RequestInit | undefined
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(recoveryInit?.method).toBe('GET')
+        expect(recoveryInit?.headers).toMatchObject({
+            'Last-Event-ID': '0',
+        })
+        expect(textPart).toMatchObject({
+            text: 'replayed',
+            type: 'text',
+        })
+        expect(result.current.streamRecoveryStatus).toBe('terminal')
+    })
+
+    it('在 initial POST 挂起至剩余预算耗尽时中止该 attempt，而不追加新的 POST', async () => {
+        vi.useFakeTimers()
+        const fetchMock = withThreadHydration(
+            (_input, init) =>
+                new Promise<Response>((_resolve, reject) => {
+                    init?.signal?.addEventListener('abort', () => reject(new DOMException('Request aborted', 'AbortError')), { once: true })
+                })
+        )
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderChatStreamHook()
+        let sendPromise: Promise<boolean>
+
+        act(() => {
+            sendPromise = result.current.sendMessage('等待初始请求超时')
+        })
+
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(20_000)
+            await sendPromise!
+        })
+
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
+        expect(result.current.status).toBe('ready')
+        expect(result.current.messages.at(-1)).toMatchObject({
+            role: 'assistant',
+            status: 'failed',
+        })
+    })
+
+    it('在 non-terminal EOF 后使用当前 cursor 进行 GET recovery', async () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0.5)
+        const fetchMock = withThreadHydration((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url === '/api/chat') {
+                return createNdjsonResponse(
+                    [
+                        { type: 'start', messageId: 'assistant-eof' },
+                        { type: 'text-start', partId: 'text-eof' },
+                        { type: 'text-delta', partId: 'text-eof', delta: '保留内容' },
+                    ],
+                    200,
+                    'run-eof'
+                )
+            }
+
+            if (url === '/api/chat/runs/run-eof/stream') {
+                return createNdjsonResponse([{ type: 'finish' }], 200, 'run-eof', 4)
+            }
+
+            throw new Error(`Unexpected fetch: ${url}`)
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('恢复 EOF')
+        })
+
+        const recoveryRequest = fetchMock.mock.calls.find(call => String(call[0]) === '/api/chat/runs/run-eof/stream')
+
+        expect(recoveryRequest?.[1]).toMatchObject({
+            headers: {
+                'Last-Event-ID': '3',
+            },
+            method: 'GET',
+        })
+        expect(result.current.streamRecoveryStatus).toBe('terminal')
+    })
+
+    it('在 replay descriptor 的首次 GET 失败后继续 GET recovery 而不重发 POST', async () => {
+        vi.spyOn(Math, 'random').mockReturnValue(0.5)
+        let recoveryAttempts = 0
+        const fetchMock = withThreadHydration((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url === '/api/chat') {
+                return Response.json({
+                    kind: 'stream-replay',
+                    lastSequence: 0,
+                    replayed: true,
+                    runId: 'run-replay-recovery',
+                    status: 'running',
+                    streamUrl: '/api/chat/runs/run-replay-recovery/stream',
+                })
+            }
+
+            if (url === '/api/chat/runs/run-replay-recovery/stream') {
+                recoveryAttempts += 1
+
+                if (recoveryAttempts === 1) {
+                    return Promise.reject(new TypeError('Failed to fetch'))
+                }
+
+                return createNdjsonResponse(
+                    [{ type: 'start', messageId: 'assistant-replay-recovery' }, { type: 'finish' }],
+                    200,
+                    'run-replay-recovery'
+                )
+            }
+
+            throw new Error(`Unexpected fetch: ${url}`)
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('恢复 replay')
+        })
+
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
+        expect(recoveryAttempts).toBe(2)
+        expect(result.current.streamRecoveryStatus).toBe('terminal')
+    })
+
+    it('初始 POST 未拿到响应时会复用幂等键重试，并通过 replay GET 继续同一轮消息', async () => {
+        let postAttempt = 0
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url.startsWith('/api/chat/thread')) {
+                return Promise.resolve(createThreadHydrationResponse(TEST_CONVERSATION_ID))
+            }
+
+            if (url === '/api/chat') {
+                postAttempt += 1
+
+                if (postAttempt === 1) {
+                    return Promise.reject(new TypeError('Failed to fetch'))
+                }
+
+                return Promise.resolve(
+                    Response.json({
+                        kind: 'stream-replay',
+                        lastSequence: 0,
+                        replayed: true,
+                        runId: 'run_initial_post_retry',
+                        status: 'running',
+                        streamUrl: '/api/chat/runs/run_initial_post_retry/stream',
+                    })
+                )
+            }
+
+            if (url === '/api/chat/runs/run_initial_post_retry/stream') {
+                return Promise.resolve(
+                    createNdjsonResponse(
+                        [
+                            { type: 'start', messageId: 'assistant-initial-post-retry' },
+                            { type: 'text-start', partId: 'text-initial-post-retry' },
+                            { type: 'text-delta', partId: 'text-initial-post-retry', delta: '已从同一 run 恢复。' },
+                            { type: 'finish' },
+                        ],
+                        200,
+                        'run_initial_post_retry'
+                    )
+                )
+            }
+
+            return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('继续这次提交')
+        })
+
+        const postCalls = getChatFetchCalls(fetchMock)
+        const firstInit = postCalls[0]?.[1] as RequestInit | undefined
+        const secondInit = postCalls[1]?.[1] as RequestInit | undefined
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(postCalls).toHaveLength(2)
+        expect(firstInit?.headers).toMatchObject({ 'Idempotency-Key': expect.any(String) })
+        expect(secondInit?.headers).toMatchObject({ 'Idempotency-Key': (firstInit?.headers as Record<string, string>)['Idempotency-Key'] })
+        expect(secondInit?.body).toBe(firstInit?.body)
+        expect(result.current.messages.filter(message => message.role === 'user')).toHaveLength(1)
+        expect(textPart).toMatchObject({ text: '已从同一 run 恢复。', type: 'text' })
+        expect(fetchMock.mock.calls.filter(call => String(call[0]) === '/api/chat/runs/run_initial_post_retry/stream')).toHaveLength(1)
+    })
+
+    it('JSON 声明但没有响应体时也会复用幂等键重试初始 POST', async () => {
+        let postAttempt = 0
+        const fetchMock = vi.fn().mockImplementation(() => {
+            postAttempt += 1
+
+            if (postAttempt === 1) {
+                return Promise.resolve(new Response(null, { headers: { 'Content-Type': 'application/json' } }))
+            }
+
+            return Promise.resolve(
+                createNdjsonResponse(
+                    [
+                        { type: 'start', messageId: 'assistant-empty-json-body' },
+                        { type: 'text-start', partId: 'text-empty-json-body' },
+                        { type: 'text-delta', partId: 'text-empty-json-body', delta: '重试成功。' },
+                        { type: 'finish' },
+                    ],
+                    200,
+                    'run_empty_json_body'
+                )
+            )
+        })
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('处理空响应体')
+        })
+
+        const postCalls = getChatFetchCalls(fetchMock)
+        const firstHeaders = postCalls[0]?.[1]?.headers as Record<string, string> | undefined
+        const secondHeaders = postCalls[1]?.[1]?.headers as Record<string, string> | undefined
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+
+        expect(postCalls).toHaveLength(2)
+        expect(secondHeaders?.['Idempotency-Key']).toBe(firstHeaders?.['Idempotency-Key'])
+        expect(assistantMessage?.parts).toContainEqual(expect.objectContaining({ text: '重试成功。', type: 'text' }))
+    })
+
+    it('初始 POST 的永久失败不会自动重试', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(Response.json({ error: '请求参数无效。' }, { status: 400 }))
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('不应重试')
+        })
+
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
+        expect(result.current.messages.find(message => message.role === 'assistant')?.status).toBe('failed')
+    })
+
+    it('初始 POST 重试预算耗尽时保留未确认结果，不会再补发请求', async () => {
+        let now = 0
+        vi.spyOn(Date, 'now').mockImplementation(() => now)
+        const fetchMock = vi.fn().mockImplementation(() => {
+            now = 20_000
+            return Promise.reject(new TypeError('Failed to fetch'))
+        })
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('网络状态未知')
+        })
+
+        const assistantMessage = result.current.messages.find(message => message.role === 'assistant')
+        const textPart = assistantMessage?.parts.find(part => part.type === 'text')
+
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
+        expect(textPart).toMatchObject({ text: '初始请求状态未确认，请稍后重试。', type: 'text' })
+    })
+
+    it('取消初始 POST 的退避等待后不会继续补发请求', async () => {
+        const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result } = renderChatStreamHook()
+        let sendPromise!: Promise<boolean>
+
+        await act(async () => {
+            sendPromise = result.current.sendMessage('取消等待')
+        })
+        await waitFor(() => {
+            expect(result.current.streamRecoveryStatus).toBe('reconnecting')
+        })
+
+        await act(async () => {
+            result.current.cancel()
+            await sendPromise
+        })
+
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
+        expect(result.current.status).toBe('ready')
+    })
+
+    it('卸载页面会中止初始 POST 的退避等待，不会在后台补发请求', async () => {
+        const fetchMock = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'))
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result, unmount } = renderChatStreamHook()
+        let sendPromise!: Promise<boolean>
+
+        await act(async () => {
+            sendPromise = result.current.sendMessage('关闭页面')
+        })
+        await waitFor(() => {
+            expect(result.current.streamRecoveryStatus).toBe('reconnecting')
+        })
+
+        await act(async () => {
+            unmount()
+            await sendPromise
+        })
+
+        expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
+    })
+
+    it('长时间运行后断线仍会先尝试 recovery GET', async () => {
+        const encoder = new TextEncoder()
+        let streamController: ReadableStreamDefaultController<Uint8Array> | null = null
+        let now = 0
+        vi.spyOn(Date, 'now').mockImplementation(() => now)
+        vi.spyOn(Math, 'random').mockReturnValue(0.5)
+
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url.startsWith('/api/chat/thread')) {
+                return Promise.resolve(createThreadHydrationResponse(TEST_CONVERSATION_ID))
+            }
+
+            if (url === '/api/chat') {
+                const body = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        streamController = controller
+                        controller.enqueue(
+                            encoder.encode(
+                                `${JSON.stringify(
+                                    createStreamEnvelope({ messageId: 'assistant-long-running', type: 'start' }, 'run-long-running', 1)
+                                )}\n`
+                            )
+                        )
+                    },
+                })
+
+                return Promise.resolve(
+                    new Response(body, {
+                        headers: {
+                            'Content-Type': 'application/x-ndjson; profile="ai-mind-resumable-v1"',
+                            'X-Run-Id': 'run-long-running',
+                        },
+                    })
+                )
+            }
+
+            if (url === '/api/chat/runs/run-long-running/stream') {
+                return Promise.resolve(createNdjsonResponse([createStreamEnvelope({ type: 'finish' }, 'run-long-running', 2)]))
+            }
+
+            return Promise.reject(new Error(`Unexpected fetch: ${url}`))
+        })
+
+        vi.stubGlobal('fetch', fetchMock)
+        const { result } = renderChatStreamHook()
+
+        let sendPromise!: Promise<boolean>
+        await act(async () => {
+            sendPromise = result.current.sendMessage('生成交付计划')
+            await Promise.resolve()
+        })
+
+        await waitFor(() => {
+            expect(streamController).not.toBeNull()
+            expect(result.current.status).toBe('streaming')
+        })
+
+        now = 180_001
+        await act(async () => {
+            streamController?.error(new Error('transport disconnected'))
+        })
+
+        await waitFor(
+            () => {
+                expect(fetchMock.mock.calls.some(call => String(call[0]) === '/api/chat/runs/run-long-running/stream')).toBe(true)
+            },
+            { timeout: 1_500 }
+        )
+        await sendPromise
+
+        expect(result.current.streamRecoveryStatus).toBe('terminal')
+        expect(result.current.error).toBeNull()
     })
 
     it('captures the active conversation at request start even if the hook props change mid-stream', async () => {
@@ -178,14 +677,26 @@ describe('useChatStream', () => {
 
             const body = new ReadableStream<Uint8Array>({
                 start(controller) {
-                    controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'start', messageId: 'assistant-ownership' })}\n`))
-                    controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'text-start', partId: 'text-ownership' })}\n`))
                     controller.enqueue(
-                        encoder.encode(`${JSON.stringify({ type: 'text-delta', partId: 'text-ownership', delta: '正在输出' })}\n`)
+                        encoder.encode(
+                            `${JSON.stringify(createStreamEnvelope({ type: 'start', messageId: 'assistant-ownership' }, 'run_ownership', 1))}\n`
+                        )
+                    )
+                    controller.enqueue(
+                        encoder.encode(
+                            `${JSON.stringify(createStreamEnvelope({ type: 'text-start', partId: 'text-ownership' }, 'run_ownership', 2))}\n`
+                        )
+                    )
+                    controller.enqueue(
+                        encoder.encode(
+                            `${JSON.stringify(createStreamEnvelope({ type: 'text-delta', partId: 'text-ownership', delta: '正在输出' }, 'run_ownership', 3))}\n`
+                        )
                     )
 
                     const finishTimer = window.setTimeout(() => {
-                        controller.enqueue(encoder.encode(`${JSON.stringify({ type: 'finish' })}\n`))
+                        controller.enqueue(
+                            encoder.encode(`${JSON.stringify(createStreamEnvelope({ type: 'finish' }, 'run_ownership', 4))}\n`)
+                        )
                         controller.close()
                     }, 30)
 
@@ -205,6 +716,7 @@ describe('useChatStream', () => {
                     status: 200,
                     headers: {
                         'Content-Type': 'application/x-ndjson; charset=utf-8',
+                        'X-Run-Id': 'run_ownership',
                     },
                 })
             )
@@ -264,12 +776,12 @@ describe('useChatStream', () => {
                     }
                     const finishChunk: ChatStreamChunk = { type: 'finish' }
 
-                    controller.enqueue(encoder.encode(`${JSON.stringify(startChunk)}\n`))
-                    controller.enqueue(encoder.encode(`${JSON.stringify(textStartChunk)}\n`))
-                    controller.enqueue(encoder.encode(`${JSON.stringify(textDeltaChunk)}\n`))
+                    controller.enqueue(encoder.encode(`${JSON.stringify(createStreamEnvelope(startChunk, 'run_abort', 1))}\n`))
+                    controller.enqueue(encoder.encode(`${JSON.stringify(createStreamEnvelope(textStartChunk, 'run_abort', 2))}\n`))
+                    controller.enqueue(encoder.encode(`${JSON.stringify(createStreamEnvelope(textDeltaChunk, 'run_abort', 3))}\n`))
 
                     const finishTimer = window.setTimeout(() => {
-                        controller.enqueue(encoder.encode(`${JSON.stringify(finishChunk)}\n`))
+                        controller.enqueue(encoder.encode(`${JSON.stringify(createStreamEnvelope(finishChunk, 'run_abort', 4))}\n`))
                         controller.close()
                     }, 1000)
 
@@ -289,6 +801,7 @@ describe('useChatStream', () => {
                     status: 200,
                     headers: {
                         'Content-Type': 'application/x-ndjson; charset=utf-8',
+                        'X-Run-Id': 'run_abort',
                     },
                 })
             )
@@ -358,7 +871,7 @@ describe('useChatStream', () => {
             { type: 'finish' },
         ]
 
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
         const { result } = renderHook(() => useChatStream({ skillMode: 'utility', enableReasoning: false }))
 
         await act(async () => {
@@ -401,7 +914,7 @@ describe('useChatStream', () => {
             { type: 'finish' },
         ]
 
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
         const { result } = renderHook(() => useChatStream({ skillMode: 'reader', enableReasoning: false }))
 
         await act(async () => {
@@ -433,7 +946,7 @@ describe('useChatStream', () => {
             },
         ]
 
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -494,7 +1007,7 @@ describe('useChatStream', () => {
             { type: 'finish' },
         ]
 
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -541,7 +1054,7 @@ describe('useChatStream', () => {
             { type: 'finish' },
         ]
 
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -594,7 +1107,7 @@ describe('useChatStream', () => {
             { type: 'finish' },
         ]
 
-        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(createNdjsonResponse(streamChunks)))
+        vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
@@ -693,64 +1206,72 @@ describe('useChatStream', () => {
 
             if (url.includes('/resume')) {
                 return Promise.resolve(
-                    createNdjsonResponse([
-                        {
-                            agentName: 'version-plan-to-tasklist-agent',
-                            assistantMessageId: 'assistant-resume',
-                            interruptId: 'interrupt-strategy',
-                            runId: 'run-resume',
-                            threadId: 'tasklist-agent:c1:run-resume',
-                            type: 'agent-resume',
-                        },
-                        {
-                            type: 'artifact-start',
-                            artifactId: 'artifact-resume',
-                            artifactKind: 'tasklist',
-                            artifactType: 'text',
-                            format: 'markdown',
-                            title: 'Tasklist',
-                        },
-                        {
-                            type: 'artifact-delta',
-                            artifactId: 'artifact-resume',
-                            delta: '# Resumed\n',
-                        },
-                        { type: 'finish' },
-                    ])
+                    createNdjsonResponse(
+                        [
+                            {
+                                agentName: 'version-plan-to-tasklist-agent',
+                                assistantMessageId: 'assistant-resume',
+                                interruptId: 'interrupt-strategy',
+                                runId: 'run-resume',
+                                threadId: 'tasklist-agent:c1:run-resume',
+                                type: 'agent-resume',
+                            },
+                            {
+                                type: 'artifact-start',
+                                artifactId: 'artifact-resume',
+                                artifactKind: 'tasklist',
+                                artifactType: 'text',
+                                format: 'markdown',
+                                title: 'Tasklist',
+                            },
+                            {
+                                type: 'artifact-delta',
+                                artifactId: 'artifact-resume',
+                                delta: '# Resumed\n',
+                            },
+                            { type: 'finish' },
+                        ],
+                        200,
+                        'run-resume',
+                        3
+                    )
                 )
             }
 
             return Promise.resolve(
-                createNdjsonResponse([
-                    { type: 'start', messageId: 'assistant-resume' },
-                    {
-                        agentName: 'version-plan-to-tasklist-agent',
-                        assistantMessageId: 'assistant-resume',
-                        interruptId: 'interrupt-strategy',
-                        interruptKind: 'strategy_review',
-                        payload: {
-                            allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
-                            data: {
-                                planUri: 'demo://version-plans/v0.3.0.md',
-                                reviewRound: 1,
-                                strategy: {
-                                    granularity: 'medium',
-                                    grouping: 'by_phase',
-                                    priorityFocus: ['core_runtime'],
-                                    stepCountRange: '5-8',
+                createNdjsonResponse(
+                    [
+                        { type: 'start', messageId: 'assistant-resume' },
+                        {
+                            agentName: 'version-plan-to-tasklist-agent',
+                            assistantMessageId: 'assistant-resume',
+                            interruptId: 'interrupt-strategy',
+                            interruptKind: 'strategy_review',
+                            payload: {
+                                allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                                data: {
+                                    planUri: 'demo://version-plans/v0.3.0.md',
+                                    reviewRound: 1,
+                                    strategy: {
+                                        granularity: 'medium',
+                                        grouping: 'by_phase',
+                                        priorityFocus: ['core_runtime'],
+                                        stepCountRange: '5-8',
+                                    },
                                 },
+                                kind: 'strategy_review',
+                                nodeName: 'reviewTasklistStrategy',
+                                runId: 'run-resume',
+                                threadId: 'tasklist-agent:c1:run-resume',
                             },
-                            kind: 'strategy_review',
-                            nodeName: 'reviewTasklistStrategy',
                             runId: 'run-resume',
                             threadId: 'tasklist-agent:c1:run-resume',
+                            type: 'agent-interrupt',
                         },
-                        runId: 'run-resume',
-                        threadId: 'tasklist-agent:c1:run-resume',
-                        type: 'agent-interrupt',
-                    },
-                    { type: 'finish' },
-                ])
+                    ],
+                    200,
+                    'run-resume'
+                )
             )
         })
 
@@ -777,6 +1298,9 @@ describe('useChatStream', () => {
         const assistantMessage = assistantMessages[0]
 
         expect(resumeRequest?.[0]).toBe('/api/agent-runs/run-resume/resume')
+        expect((resumeRequest?.[1] as RequestInit | undefined)?.headers).toMatchObject({
+            'Content-Type': 'application/json',
+        })
         expect(JSON.parse(String((resumeRequest?.[1] as RequestInit | undefined)?.body))).toEqual({
             decision: { type: 'approve' },
             interruptId: 'interrupt-strategy',
@@ -790,6 +1314,92 @@ describe('useChatStream', () => {
         })
         expect(result.current.pendingInterrupt).toBeNull()
         expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
+    })
+
+    it('resumeAgentRun 复用已消费的 stream cursor，不会误触发 recovery GET', async () => {
+        const runId = 'run-resume-cursor'
+        const threadId = `tasklist-agent:c1:${runId}`
+        const initialResponse = [
+            createStreamEnvelope({ messageId: 'assistant-resume-cursor', type: 'start' }, runId, 1),
+            createStreamEnvelope(
+                {
+                    agentName: 'version-plan-to-tasklist-agent',
+                    assistantMessageId: 'assistant-resume-cursor',
+                    interruptId: 'interrupt-cursor',
+                    interruptKind: 'strategy_review',
+                    payload: {
+                        allowedDecisions: ['approve', 'edit', 'reject', 'respond'],
+                        data: {
+                            planUri: 'demo://version-plans/v0.3.0.md',
+                            reviewRound: 1,
+                            strategy: {
+                                granularity: 'medium',
+                                grouping: 'by_phase',
+                                priorityFocus: ['core_runtime'],
+                                stepCountRange: '5-8',
+                            },
+                        },
+                        kind: 'strategy_review',
+                        nodeName: 'reviewTasklistStrategy',
+                        runId,
+                        threadId,
+                    },
+                    runId,
+                    threadId,
+                    type: 'agent-interrupt',
+                },
+                runId,
+                2
+            ),
+        ]
+        const resumeResponse = [
+            createStreamEnvelope(
+                {
+                    agentName: 'version-plan-to-tasklist-agent',
+                    assistantMessageId: 'assistant-resume-cursor',
+                    interruptId: 'interrupt-cursor',
+                    runId,
+                    threadId,
+                    type: 'agent-resume',
+                },
+                runId,
+                3
+            ),
+            createStreamEnvelope({ type: 'finish' }, runId, 4),
+        ]
+        const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL) => {
+            const url = String(input)
+
+            if (url.includes('/resume')) {
+                return Promise.resolve(createNdjsonResponse(resumeResponse))
+            }
+
+            if (url.includes('/api/chat/runs/')) {
+                return Promise.reject(new Error('unexpected recovery GET'))
+            }
+
+            return Promise.resolve(createNdjsonResponse(initialResponse))
+        })
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
+
+        await act(async () => {
+            await result.current.sendMessage('生成 tasklist')
+        })
+        await waitFor(() => {
+            expect(result.current.pendingInterrupt?.part.runId).toBe(runId)
+        })
+
+        await act(async () => {
+            await result.current.resumeAgentRun({ type: 'approve' })
+        })
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/api/chat/runs/'))).toBe(false)
+        expect(result.current.pendingInterrupt).toBeNull()
     })
 
     it.each([
@@ -853,27 +1463,32 @@ describe('useChatStream', () => {
 
             if (url.includes('/resume')) {
                 return Promise.resolve(
-                    createNdjsonResponse([
-                        {
-                            agentName: 'version-plan-to-tasklist-agent',
-                            assistantMessageId: 'assistant-reject',
-                            interruptId: 'interrupt-strategy',
-                            runId: 'run-reject',
-                            threadId: 'tasklist-agent:c1:run-reject',
-                            type: 'agent-resume',
-                        },
-                        {
-                            partId: 'part-reject-summary',
-                            type: 'text-start',
-                        },
-                        {
-                            delta: '已终止本轮 tasklist 生成。当前策略不会继续执行。',
-                            partId: 'part-reject-summary',
-                            type: 'text-delta',
-                        },
-                        { partId: 'part-reject-summary', type: 'text-end' },
-                        { type: 'finish' },
-                    ])
+                    createNdjsonResponse(
+                        [
+                            {
+                                agentName: 'version-plan-to-tasklist-agent',
+                                assistantMessageId: 'assistant-reject',
+                                interruptId: 'interrupt-strategy',
+                                runId: 'run-reject',
+                                threadId: 'tasklist-agent:c1:run-reject',
+                                type: 'agent-resume',
+                            },
+                            {
+                                partId: 'part-reject-summary',
+                                type: 'text-start',
+                            },
+                            {
+                                delta: '已终止本轮 tasklist 生成。当前策略不会继续执行。',
+                                partId: 'part-reject-summary',
+                                type: 'text-delta',
+                            },
+                            { partId: 'part-reject-summary', type: 'text-end' },
+                            { type: 'finish' },
+                        ],
+                        200,
+                        'run-reject',
+                        4
+                    )
                 )
             }
 

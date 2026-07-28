@@ -96,6 +96,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
                 baseURL,
             },
             maxRetries: options.maxRetries,
+            onFailedAttempt: options.onFailedAttempt,
             maxTokens: maxOutputTokens,
             model: modelName,
             modelKwargs,

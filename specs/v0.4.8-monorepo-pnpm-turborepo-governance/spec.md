@@ -1,6 +1,6 @@
 # Feature Specification: Monorepo pnpm and Turborepo Governance
 
-**Feature Branch**: `[048-monorepo-pnpm-turborepo-governance]`
+**Feature Branch**: `[v0.4.8-monorepo-pnpm-turborepo-governance]`
 
 **Created**: 2026-07-16
 

@@ -1,8 +1,8 @@
 # Implementation Plan: Monorepo pnpm and Turborepo Governance
 
-**Branch**: `[048-monorepo-pnpm-turborepo-governance]` | **Date**: 2026-07-16 | **Spec**: [spec.md](./spec.md)
+**Branch**: `[v0.4.8-monorepo-pnpm-turborepo-governance]` | **Date**: 2026-07-16 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/048-monorepo-pnpm-turborepo-governance/spec.md`
+**Input**: Feature specification from `/specs/v0.4.8-monorepo-pnpm-turborepo-governance/spec.md`
 
 ## Summary
 
@@ -51,7 +51,7 @@ No constitution violation requires a complexity exception.
 ### Documentation (this feature)
 
 ```text
-specs/048-monorepo-pnpm-turborepo-governance/
+specs/v0.4.8-monorepo-pnpm-turborepo-governance/
 ├── plan.md                    # This file
 ├── research.md                # Phase 0 research and decisions
 ├── data-model.md              # Phase 1 internal configuration model

@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.9`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.10`。
 
 已经验证：
 
@@ -255,7 +255,21 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.9
+## 当前版本：v0.4.10
+
+这版的主线是 `Resumable Agent Streams`：为普通聊天、Tasklist Agent 和 Delivery Chain 的 `fetch POST + NDJSON` 流增加固定 envelope、事件持久化、同页断线恢复、幂等提交、显式取消和安全终态收口。
+
+v0.4.10 的边界非常明确：
+
+- 初始 POST 必须携带稳定的 `Idempotency-Key`；响应丢失时最多重试 3 次、总预算 20 秒，收到 replay descriptor 后转入 recovery GET。
+- 同一页面生命周期内的断线可以按 `runId + cursor` 恢复；刷新或关闭页面后不恢复活动订阅，已持久化的最终结果由普通 hydration 查询。
+- StreamRun/StreamEvent 只负责 transport recovery；AgentRun 与 LangGraph checkpoint 继续保持独立职责。
+- retention 使用滚动事件窗口和 per-run 上限；cursor 过期时返回 safe final-state/restart guidance，不静默丢弃事件。
+- 不承诺 process-crash takeover、外部 Tool/MCP side effect exactly-once、原生 EventSource 或无限历史。
+
+详细设计见 [AI Mind v0.4.10](./docs/versions/v0.4.10-resumable-agent-streams.md)、[v0.4.10 Release Note](./docs/releases/v0.4.10.md)、[v0.4.10 Spec](./specs/v0.4.10-resumable-agent-streams/)、[Stream Recovery Architecture](./docs/architecture/stream-recovery.md) 和 [ADR-0015](./docs/adr/0015-resumable-agent-stream-recovery.md)。
+
+## 上一版本：v0.4.9
 
 这版的主线是 `Monorepo Boundary and CI Validation Governance`：在 pnpm/Turbo 基线上，把 workspace 身份、依赖方向、公开导入面和测试分层变成可自动验证的规则。Node.js 固定为 22.x，根 metadata、CI 与 Docker 统一使用 `pnpm@10.34.0`；pnpm 负责 workspace、lockfile、Catalog 和依赖约束，Turborepo 负责按测试层执行、并行与缓存。
 
@@ -275,7 +289,7 @@ v0.4.9 的边界非常明确：
 - `/delivery-chain + @demo://scenarios/*/requirement.md` 或 `/delivery-chain <inline requirement>`：ControlledDeliveryManager + parallel review-group synthesis
 - 普通 text chat / tool-assisted ordinary chat：selected conversation 的浏览器本地完整 UI 历史展示 + 服务端短期 ThreadState + 当前 browser session 的语义相关 UserMemory
 
-详细设计见 [AI Mind v0.4.9: Monorepo Boundary and CI Validation Governance](./docs/versions/v0.4.9-monorepo-boundary-ci.md)、[v0.4.9 Release Note](./docs/releases/v0.4.9.md)、[specs/049-monorepo-boundary-ci](./specs/049-monorepo-boundary-ci/)、[Monorepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md) 和 [Production Deployment](./docs/architecture/production-deployment.md)。
+详细设计见 [AI Mind v0.4.9: Monorepo Boundary and CI Validation Governance](./docs/versions/v0.4.9-monorepo-boundary-ci.md)、[v0.4.9 Release Note](./docs/releases/v0.4.9.md)、[specs/v0.4.9-monorepo-boundary-ci](./specs/v0.4.9-monorepo-boundary-ci/)、[Monorepo Governance](./docs/architecture/monorepo-pnpm-turborepo-governance.md) 和 [Production Deployment](./docs/architecture/production-deployment.md)。
 
 ## 当前能力
 
@@ -710,6 +724,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.7  | Browser-local Chat Session Persistence             | 引入浏览器本地最近会话与完整用户可见消息快照恢复，采用本地优先展示 + 服务端会话列表校准，并保持 Server Registry / ThreadState / UserMemory 的权威边界不变                       |
 | v0.4.8  | Monorepo pnpm / Turborepo Governance               | 统一 Node 22、pnpm 10.34.0、workspace/Catalog/安装脚本策略与 Turbo 根任务图，使本地、CI、Docker 共享可复现工程入口，并保持业务 Runtime 与部署契约不变                           |
 | v0.4.9  | Monorepo Boundary and CI Validation Governance     | 强制 workspace 依赖与导入边界，拆分 stable/integration/external 测试任务与缓存语义，并让 CI 仅在稳定验证成功后创建 PostgreSQL 状态                                              |
+| v0.4.10 | Resumable Agent Streams                            | 为普通聊天、Tasklist Agent 和 Delivery Chain 增加固定 envelope、幂等提交、同页断线恢复、显式取消和 bounded event retention                                                      |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

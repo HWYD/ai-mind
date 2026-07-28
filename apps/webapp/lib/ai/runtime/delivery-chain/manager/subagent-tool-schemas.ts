@@ -49,6 +49,7 @@ export type SubagentToolInput = z.infer<typeof subagentToolInputSchema>
 export const subagentToolJsonResultSchema = z
     .object({
         artifactTitle: z.string().trim().min(1).max(200).optional(),
+        failureCode: z.string().trim().min(1).max(128).optional(),
         markdown: z.string(),
         metadata: z.record(z.string(), z.unknown()).optional(),
         status: z.enum(['completed', 'blocked', 'failed']),

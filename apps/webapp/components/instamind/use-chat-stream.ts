@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react'
 import { resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
+import type { ChatStreamEventEnvelope } from '@/lib/ai/stream-chunk-schema'
+import type { StreamApiErrorCode, StreamReplayDescriptor } from '@/lib/ai/stream-recovery/contracts'
 import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequestInput, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
 import type { AgentInterruptPart, MindMessage } from '@/lib/ai/types/message'
 
@@ -28,7 +30,8 @@ import {
     type StreamMessageReducerResult,
     type StreamMessageState,
 } from './chat-stream/stream-message-reducer'
-import { consumeNdjsonStream } from './chat-stream/stream-reader'
+import { type ConsumedStreamCursor, consumeNdjsonStream } from './chat-stream/stream-reader'
+import { initialPostRetryPolicy, isRetryableInitialPostStatus, resolveStreamReconnectDecision } from './chat-stream/stream-reconnect'
 import { useStreamTextBuffer } from './chat-stream/use-stream-text-buffer'
 import type { LocalConversationMetadata } from './local-chat-persistence/schema'
 import { createLocalConversationSnapshot } from './local-chat-persistence/stable-snapshot'
@@ -54,6 +57,7 @@ interface ThreadHydrationErrorResponse {
 
 type ChatRequestError = Error & {
     code?: string
+    initialPostRetryable?: boolean
     userMessage?: string
 }
 
@@ -63,6 +67,17 @@ function getErrorMessage(error: unknown): string {
     }
 
     return '请求失败，请稍后重试。'
+}
+
+function isRetryableInitialPostError(error: unknown): boolean {
+    return error instanceof TypeError || (error as ChatRequestError | null)?.initialPostRetryable === true
+}
+
+function createUnconfirmedInitialPostError(): ChatRequestError {
+    const error = new Error('初始请求状态未确认，请稍后重试。') as ChatRequestError
+
+    error.userMessage = error.message
+    return error
 }
 
 function getResumeAgentRunUserMessage(code: string | null, fallback: string, status: number): string {
@@ -77,6 +92,106 @@ function getResumeAgentRunUserMessage(code: string | null, fallback: string, sta
             return '当前审核点来自旧版本运行，无法继续恢复。请重新发起 /tasklist。'
         default:
             return fallback || `恢复 AgentRun 失败，状态码：${status}`
+    }
+}
+
+function createClientStreamRequestId(): string {
+    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+        return crypto.randomUUID()
+    }
+
+    return `stream-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function isStreamReplayDescriptor(value: unknown): value is StreamReplayDescriptor {
+    return (
+        Boolean(value) &&
+        typeof value === 'object' &&
+        (value as StreamReplayDescriptor).kind === 'stream-replay' &&
+        typeof (value as StreamReplayDescriptor).runId === 'string' &&
+        typeof (value as StreamReplayDescriptor).streamUrl === 'string'
+    )
+}
+
+function resolveStreamApiErrorCode(value: unknown): StreamApiErrorCode | undefined {
+    if (!value || typeof value !== 'object') {
+        return undefined
+    }
+
+    const code = (value as { code?: unknown }).code
+
+    return typeof code === 'string' ? (code as StreamApiErrorCode) : undefined
+}
+
+function waitForReconnectDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+            reject(new DOMException('Request aborted', 'AbortError'))
+            return
+        }
+
+        const timer = window.setTimeout(resolve, delayMs)
+
+        signal.addEventListener(
+            'abort',
+            () => {
+                window.clearTimeout(timer)
+                reject(new DOMException('Request aborted', 'AbortError'))
+            },
+            { once: true }
+        )
+    })
+}
+
+async function fetchInitialPostWithinBudget(
+    input: RequestInfo | URL,
+    init: RequestInit,
+    controller: AbortController,
+    timeoutMs: number
+): Promise<Response> {
+    const attemptController = new AbortController()
+    let timedOut = false
+    let keepAbortLink = false
+    const abortAttempt = () => attemptController.abort()
+
+    if (controller.signal.aborted) {
+        throw new DOMException('Request aborted', 'AbortError')
+    }
+
+    controller.signal.addEventListener('abort', abortAttempt, { once: true })
+    const timeout = window.setTimeout(() => {
+        timedOut = true
+        attemptController.abort()
+    }, timeoutMs)
+
+    try {
+        const response = await fetch(input, {
+            ...init,
+            signal: attemptController.signal,
+        })
+
+        // response body 仍属于这次 fetch；保留用户取消到其 signal 的连接，
+        // 但清掉预算 timer，避免拿到响应头后中断正常流读取。
+        keepAbortLink = true
+        return response
+    } catch (error) {
+        if (controller.signal.aborted) {
+            throw new DOMException('Request aborted', 'AbortError')
+        }
+
+        if (timedOut) {
+            const timeoutError = new Error('初始请求等待超时。') as ChatRequestError
+
+            timeoutError.initialPostRetryable = true
+            throw timeoutError
+        }
+
+        throw error
+    } finally {
+        window.clearTimeout(timeout)
+        if (!keepAbortLink) {
+            controller.signal.removeEventListener('abort', abortAttempt)
+        }
     }
 }
 
@@ -103,6 +218,24 @@ export interface ThreadMemoryStatusHint {
 }
 
 export type ConversationHydrationStatus = 'idle' | 'loading' | 'ready' | 'failed'
+export type StreamRecoveryStatus =
+    | 'idle'
+    | 'connected'
+    | 'disconnected'
+    | 'reconnecting'
+    | 'paused'
+    | 'cancel_requested'
+    | 'terminal'
+    | 'recovery_unavailable'
+
+interface ActiveStreamRecovery {
+    cursor: ConsumedStreamCursor | null
+    idempotencyKey: string
+    runId: string | null
+    streamUrl: string | null
+    paused?: boolean
+    terminal?: boolean
+}
 
 function findPendingAgentInterrupt(messages: MindMessage[]): PendingAgentInterrupt | null {
     for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
@@ -138,10 +271,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [readOnlyCacheMessage, setReadOnlyCacheMessage] = useState<string | null>(null)
     const [threadMemoryStatusHint, setThreadMemoryStatusHint] = useState<ThreadMemoryStatusHint | null>(null)
     const [hydrationRetryToken, setHydrationRetryToken] = useState(0)
+    const [streamRecoveryStatus, setStreamRecoveryStatus] = useState<StreamRecoveryStatus>('idle')
 
     const messagesRef = useRef(messages)
     const activeConversationIdRef = useRef<string | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
+    const activeStreamRecoveryRef = useRef<ActiveStreamRecovery | null>(null)
     const hydratedConversationIdRef = useRef<string | null>(null)
     const localSnapshotRevisionRef = useRef(0)
 
@@ -251,6 +386,12 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         window.localStorage.removeItem(PENDING_AGENT_RUN_STORAGE_KEY)
+    }, [])
+
+    useEffect(() => {
+        return () => {
+            abortControllerRef.current?.abort()
+        }
     }, [])
 
     useEffect(() => {
@@ -512,6 +653,224 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
     }
 
+    function updateRecoveryCursor(cursor: ConsumedStreamCursor) {
+        const recovery = activeStreamRecoveryRef.current
+
+        if (!recovery) {
+            return
+        }
+
+        activeStreamRecoveryRef.current = {
+            ...recovery,
+            cursor,
+            runId: cursor.runId,
+            streamUrl: recovery.streamUrl ?? `/api/chat/runs/${encodeURIComponent(cursor.runId)}/stream`,
+        }
+    }
+
+    function shouldApplyRecoveryEnvelope(envelope: ChatStreamEventEnvelope) {
+        const recovery = activeStreamRecoveryRef.current
+        const lastSequence = recovery?.cursor?.lastAcknowledgedSequence ?? 0
+        const expectedRunId = recovery?.runId ?? recovery?.cursor?.runId
+        const expectedProtocolVersion = recovery?.cursor?.protocolVersion ?? 1
+
+        if (expectedRunId && envelope.runId !== expectedRunId) {
+            throw new Error('恢复流事件属于其他 run，已停止应用。')
+        }
+
+        if (envelope.protocolVersion !== expectedProtocolVersion) {
+            throw new Error('恢复流协议版本不匹配，请刷新后重试。')
+        }
+
+        if (envelope.sequence <= lastSequence) {
+            if (envelope.sequence === lastSequence && recovery?.cursor?.eventId && envelope.eventId !== recovery.cursor.eventId) {
+                throw new Error('恢复流事件标识与已确认游标不一致。')
+            }
+
+            return false
+        }
+
+        if (envelope.sequence > lastSequence + 1) {
+            throw new Error('恢复流事件出现缺口，请刷新后重试。')
+        }
+
+        if (envelope.runStatus === 'paused' || envelope.payload.type === 'agent-interrupt') {
+            setStreamRecoveryStatus('paused')
+            activeStreamRecoveryRef.current = recovery ? { ...recovery, paused: true } : recovery
+        }
+
+        if (envelope.terminal === true) {
+            setStreamRecoveryStatus('terminal')
+            activeStreamRecoveryRef.current = recovery ? { ...recovery, terminal: true } : recovery
+        }
+
+        return true
+    }
+
+    async function consumeRecoverableStream(stream: ReadableStream<Uint8Array>, controller: AbortController) {
+        await consumeNdjsonStream(stream, handleChunk, {
+            onCursor: updateRecoveryCursor,
+            shouldApplyEnvelope: shouldApplyRecoveryEnvelope,
+        })
+
+        const recovery = activeStreamRecoveryRef.current
+
+        if (recovery?.streamUrl && !recovery.terminal && !recovery.paused && !controller.signal.aborted) {
+            throw new Error('流在收到终态前已结束。')
+        }
+    }
+
+    async function consumeRecoveryGet(streamUrl: string, controller: AbortController) {
+        const recovery = activeStreamRecoveryRef.current
+        const after = recovery?.cursor?.lastAcknowledgedSequence ?? 0
+        const response = await fetch(streamUrl, {
+            method: 'GET',
+            headers: {
+                'Last-Event-ID': String(after),
+            },
+            signal: controller.signal,
+        })
+
+        if (!response.ok) {
+            const responseJson = await response.json().catch(() => null)
+            const requestError = new Error(responseJson?.error ?? `恢复流失败，状态码：${response.status}`) as ChatRequestError
+            requestError.code = resolveStreamApiErrorCode(responseJson)
+            requestError.userMessage = responseJson?.error ?? requestError.message
+            throw requestError
+        }
+
+        if (!response.body) {
+            throw new Error('恢复响应缺少可读取的流式内容。')
+        }
+
+        setStreamRecoveryStatus('connected')
+        await consumeRecoverableStream(response.body, controller)
+    }
+
+    async function recoverActiveStream(controller: AbortController) {
+        const recovery = activeStreamRecoveryRef.current
+
+        if (!recovery?.streamUrl) {
+            throw new Error('当前流缺少可恢复订阅地址。')
+        }
+
+        let attempt = 0
+        const recoveryStartedAtMs = Date.now()
+
+        while (!controller.signal.aborted) {
+            const decision = resolveStreamReconnectDecision({
+                attempt,
+                elapsedMs: Date.now() - recoveryStartedAtMs,
+            })
+
+            if (!decision.retry) {
+                setStreamRecoveryStatus('recovery_unavailable')
+                throw new Error('恢复流重试次数已达到上限，请重新发起请求。')
+            }
+
+            attempt = decision.attempt
+            setStreamRecoveryStatus('reconnecting')
+            await waitForReconnectDelay(decision.delayMs, controller.signal)
+
+            try {
+                await consumeRecoveryGet(recovery.streamUrl, controller)
+                return
+            } catch (recoveryError) {
+                if (isAbortError(recoveryError)) {
+                    throw recoveryError
+                }
+
+                const decisionAfterError = resolveStreamReconnectDecision({
+                    attempt,
+                    elapsedMs: Date.now() - recoveryStartedAtMs,
+                    errorCode: (recoveryError as ChatRequestError).code as StreamApiErrorCode | undefined,
+                })
+
+                if (!decisionAfterError.retry) {
+                    setStreamRecoveryStatus('recovery_unavailable')
+                    throw recoveryError
+                }
+            }
+        }
+    }
+
+    async function requestInitialChatResponse(payload: ChatRequestInput, idempotencyKey: string, controller: AbortController) {
+        let attempt = 0
+        const retryStartedAtMs = Date.now()
+
+        while (!controller.signal.aborted) {
+            try {
+                const remainingBudgetMs = initialPostRetryPolicy.totalBudgetMs - (Date.now() - retryStartedAtMs)
+
+                if (remainingBudgetMs <= 0) {
+                    setStreamRecoveryStatus('recovery_unavailable')
+                    throw createUnconfirmedInitialPostError()
+                }
+
+                const response = await fetchInitialPostWithinBudget(
+                    '/api/chat',
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Idempotency-Key': idempotencyKey,
+                        },
+                        body: JSON.stringify(payload),
+                    },
+                    controller,
+                    remainingBudgetMs
+                )
+                const contentType = response.headers.get('Content-Type') ?? ''
+
+                if (!response.ok) {
+                    const responseJson = await response.json().catch(() => null)
+                    const errorMessage = responseJson?.error ?? `聊天请求失败，状态码：${response.status}`
+                    const errorCode = typeof responseJson?.code === 'string' ? responseJson.code : null
+                    const requestError = new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage) as ChatRequestError
+
+                    requestError.code = errorCode ?? undefined
+                    requestError.initialPostRetryable = isRetryableInitialPostStatus(response.status)
+                    requestError.userMessage = errorMessage
+                    throw requestError
+                }
+
+                if (!response.body) {
+                    const requestError = new Error('响应缺少可读取的流式内容。') as ChatRequestError
+
+                    requestError.initialPostRetryable = true
+                    throw requestError
+                }
+
+                return { contentType, response }
+            } catch (requestError) {
+                if (controller.signal.aborted || isAbortError(requestError)) {
+                    throw new DOMException('Request aborted', 'AbortError')
+                }
+
+                if (!isRetryableInitialPostError(requestError)) {
+                    throw requestError
+                }
+
+                const decision = resolveStreamReconnectDecision({
+                    attempt,
+                    elapsedMs: Date.now() - retryStartedAtMs,
+                    policy: initialPostRetryPolicy,
+                })
+
+                if (!decision.retry) {
+                    setStreamRecoveryStatus('recovery_unavailable')
+                    throw createUnconfirmedInitialPostError()
+                }
+
+                attempt = decision.attempt
+                setStreamRecoveryStatus('reconnecting')
+                await waitForReconnectDelay(decision.delayMs, controller.signal)
+            }
+        }
+
+        throw new DOMException('Request aborted', 'AbortError')
+    }
+
     async function submitTurn(
         baseMessages: MindMessage[],
         input: string,
@@ -537,6 +896,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         const userMessage = createMessage('user', [createTextPart(text, undefined, displaySegments)], composer)
         const nextMessages = [...stableBaseMessages, userMessage]
         const controller = new AbortController()
+        const idempotencyKey = createClientStreamRequestId()
 
         messagesRef.current = nextMessages
         // 每一轮新请求都从“稳定历史消息 + 当前 user 消息”重新初始化 stream reducer 状态；
@@ -545,7 +905,14 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         setMessages(nextMessages)
         setError(null)
         setStatus('submitted')
+        setStreamRecoveryStatus('idle')
         abortControllerRef.current = controller
+        activeStreamRecoveryRef.current = {
+            cursor: null,
+            idempotencyKey,
+            runId: null,
+            streamUrl: null,
+        }
         activeConversationIdRef.current = requestConversationId ?? '__draft__'
 
         try {
@@ -562,22 +929,53 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 },
             }
 
-            const response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(payload),
-                signal: controller.signal,
-            })
-            if (!response.ok) {
+            const { contentType, response } = await requestInitialChatResponse(payload, idempotencyKey, controller)
+
+            if (contentType.includes('application/json')) {
                 const responseJson = await response.json().catch(() => null)
-                const errorMessage = responseJson?.error ?? `聊天请求失败，状态码：${response.status}`
-                const errorCode = typeof responseJson?.code === 'string' ? responseJson.code : null
-                const requestError = new Error(errorCode ? `${errorMessage}（${errorCode}）` : errorMessage) as ChatRequestError
-                requestError.code = errorCode ?? undefined
-                requestError.userMessage = errorMessage
-                throw requestError
+
+                if (!isStreamReplayDescriptor(responseJson)) {
+                    throw new Error('聊天请求返回了无法识别的 JSON 响应。')
+                }
+
+                activeStreamRecoveryRef.current = {
+                    cursor:
+                        activeStreamRecoveryRef.current?.cursor?.runId === responseJson.runId
+                            ? activeStreamRecoveryRef.current.cursor
+                            : {
+                                  eventId: '',
+                                  lastAcknowledgedSequence: 0,
+                                  protocolVersion: 1,
+                                  runId: responseJson.runId,
+                              },
+                    idempotencyKey,
+                    runId: responseJson.runId,
+                    streamUrl: responseJson.streamUrl,
+                }
+                setStreamRecoveryStatus('reconnecting')
+                try {
+                    await consumeRecoveryGet(responseJson.streamUrl, controller)
+                } catch (streamError) {
+                    if (
+                        !controller.signal.aborted &&
+                        activeStreamRecoveryRef.current?.streamUrl &&
+                        !activeStreamRecoveryRef.current.terminal &&
+                        !activeStreamRecoveryRef.current.paused &&
+                        !isAbortError(streamError)
+                    ) {
+                        setStreamRecoveryStatus('disconnected')
+                        await recoverActiveStream(controller)
+                    } else {
+                        throw streamError
+                    }
+                }
+
+                if (!controller.signal.aborted) {
+                    setStatus('ready')
+                    commitStableLocalSnapshot(messagesRef.current, activeConversationIdRef.current ?? requestConversationId)
+                }
+
+                return true
             }
 
             if (!response.body) {
@@ -585,6 +983,18 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             }
 
             const promotedConversationId = response.headers.get('X-AI-Mind-Conversation-Id')?.trim() || null
+            const runId = response.headers.get('X-Run-Id')?.trim() || null
+
+            if (runId) {
+                const existingRecovery = activeStreamRecoveryRef.current
+
+                activeStreamRecoveryRef.current = {
+                    cursor: existingRecovery?.cursor ?? null,
+                    idempotencyKey,
+                    runId,
+                    streamUrl: `/api/chat/runs/${encodeURIComponent(runId)}/stream`,
+                }
+            }
 
             if (shouldCreateConversation) {
                 if (!promotedConversationId) {
@@ -597,8 +1007,24 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             }
 
             setStatus('streaming')
+            setStreamRecoveryStatus(runId ? 'connected' : 'idle')
             // consumeNdjsonStream 会持续回调 handleChunk，把协议事件增量转换成前端消息部件。
-            await consumeNdjsonStream(response.body, handleChunk)
+            try {
+                await consumeRecoverableStream(response.body, controller)
+            } catch (streamError) {
+                if (
+                    !controller.signal.aborted &&
+                    activeStreamRecoveryRef.current?.streamUrl &&
+                    !activeStreamRecoveryRef.current.terminal &&
+                    !activeStreamRecoveryRef.current.paused &&
+                    !isAbortError(streamError)
+                ) {
+                    setStreamRecoveryStatus('disconnected')
+                    await recoverActiveStream(controller)
+                } else {
+                    throw streamError
+                }
+            }
 
             if (!controller.signal.aborted) {
                 setStatus('ready')
@@ -657,15 +1083,25 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         const controller = new AbortController()
+        const runId = pendingInterrupt.part.runId
+        const previousRecovery = activeStreamRecoveryRef.current
+        const previousCursor = previousRecovery?.cursor?.runId === runId ? previousRecovery.cursor : null
 
         textBuffer.clear()
         setThreadMemoryStatusHint(null)
         setError(null)
         setStatus('submitted')
+        setStreamRecoveryStatus('reconnecting')
         abortControllerRef.current = controller
+        activeStreamRecoveryRef.current = {
+            cursor: previousCursor ?? { eventId: '', lastAcknowledgedSequence: 0, protocolVersion: 1, runId },
+            idempotencyKey: previousRecovery?.idempotencyKey ?? createClientStreamRequestId(),
+            runId,
+            streamUrl: `/api/chat/runs/${encodeURIComponent(runId)}/stream`,
+        }
 
         try {
-            const response = await fetch(`/api/agent-runs/${encodeURIComponent(pendingInterrupt.part.runId)}/resume`, {
+            const response = await fetch(`/api/agent-runs/${encodeURIComponent(runId)}/resume`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -694,7 +1130,22 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             }
 
             setStatus('streaming')
-            await consumeNdjsonStream(response.body, handleChunk)
+            setStreamRecoveryStatus('connected')
+            try {
+                await consumeRecoverableStream(response.body, controller)
+            } catch (streamError) {
+                if (
+                    !controller.signal.aborted &&
+                    activeStreamRecoveryRef.current?.streamUrl &&
+                    !activeStreamRecoveryRef.current.terminal &&
+                    !isAbortError(streamError)
+                ) {
+                    setStreamRecoveryStatus('disconnected')
+                    await recoverActiveStream(controller)
+                } else {
+                    throw streamError
+                }
+            }
 
             if (!controller.signal.aborted) {
                 setStatus('ready')
@@ -734,7 +1185,31 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             return
         }
 
+        const runId = activeStreamRecoveryRef.current?.runId
+
+        setStreamRecoveryStatus('cancel_requested')
         abortControllerRef.current.abort()
+
+        if (runId) {
+            void fetch(`/api/chat/runs/${encodeURIComponent(runId)}/cancel`, {
+                method: 'POST',
+            })
+                .then(async response => {
+                    const responseJson = await response.json().catch(() => null)
+
+                    if (!response.ok) {
+                        setStreamRecoveryStatus('recovery_unavailable')
+                        setError(responseJson?.error ?? '取消请求失败，请稍后重试。')
+                        return
+                    }
+
+                    setStreamRecoveryStatus(responseJson?.status === 'cancelled' ? 'terminal' : 'cancel_requested')
+                })
+                .catch(() => {
+                    setStreamRecoveryStatus('recovery_unavailable')
+                    setError('取消请求失败，请稍后重试。')
+                })
+        }
     }
 
     function deleteUserTurn(userMessageId: string) {
@@ -774,6 +1249,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         hydrationError,
         hydrationStatus,
         readOnlyCacheMessage,
+        streamRecoveryStatus,
         threadMemoryStatusHint,
         pendingInterrupt: findPendingAgentInterrupt(messages),
         sendMessage,

@@ -291,11 +291,11 @@ function setupMockChatModels(options?: {
 }
 
 function createProgressRecorder() {
-    const events: Array<{ failureMessage?: string; status: string; stepId: string; summary?: string }> = []
+    const events: Array<{ details?: string[]; failureMessage?: string; status: string; stepId: string; summary?: string }> = []
 
     return {
         events,
-        onProgress(event: { failureMessage?: string; status: string; stepId: string; summary?: string }) {
+        onProgress(event: { details?: string[]; failureMessage?: string; status: string; stepId: string; summary?: string }) {
             events.push(event)
         },
     }
@@ -480,6 +480,10 @@ describe('runtime/delivery-chain-manager run', () => {
             'synthesize-report:running',
             'synthesize-report:completed',
         ])
+        expect(progress.events.find(event => event.stepId === 'delegate-review-group' && event.status === 'completed')).toMatchObject({
+            details: ['- Review Subagent：完成', '- Risk Subagent：完成', '- Boundary Subagent：完成'],
+            summary: '并行评审已完成，3 个评审全部通过',
+        })
         const serializedProgress = JSON.stringify(progress.events)
         expect(serializedProgress).not.toContain('"inputArtifacts"')
         expect(serializedProgress).not.toContain('"artifacts"')

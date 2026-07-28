@@ -366,7 +366,7 @@ describe('runtime/version-plan-tasklist-agent graph runner', () => {
                 proceedPlanningOutput,
                 validTasklist
             )
-        ).rejects.toThrow('No checkpointer set')
+        ).rejects.toThrow('Tasklist Agent HITL requires a LangGraph checkpointer.')
     })
 
     it('development memory checkpoint 可在 Strategy Review 暂停', async () => {

@@ -29,6 +29,7 @@ export class OllamaProvider implements ModelProvider {
             baseUrl: config.ollama.baseURL,
             callbacks: [createModelUsageCallback(resolvedModelSelection)],
             maxRetries: options.maxRetries,
+            onFailedAttempt: options.onFailedAttempt,
             model: resolvedModelSelection.providerModel,
             numPredict: maxOutputTokens,
             streaming: options.streaming ?? true,

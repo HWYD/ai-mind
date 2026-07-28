@@ -32,7 +32,7 @@
 
 说明：
 
-- `specs/` 是 Level C / Level D 变更的正式 AI coding 工作区，承接 spec / plan / tasks / acceptance / decisions。
+- `specs/` 是 Level C / Level D 变更的正式 AI coding 工作区，承接 spec / plan / tasks / acceptance / decisions；版本工作区目录优先采用 `v0.4.10-feature-slug` 这类真实 semver 前缀命名，挂靠规格可用 `v0.4.10-1-followup-topic`，规则见 `docs/architecture/spec-directory-naming.md`。
 - `docs/adr/` 和 `docs/architecture/` 是长期架构约束区，不只是展示文档。
 - `docs/versions/`、`docs/releases/`、`docs/tasklists/` 是公开展示区，不是默认开发任务源。
 - `private-folder/` 是草稿、历史、个人内部材料和博客 / 面试素材区，不是默认开发事实源。
@@ -177,6 +177,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/049-monorepo-boundary-ci/plan.md
+at specs/v0.4.10-resumable-agent-streams/plan.md
 
 <!-- SPECKIT END -->

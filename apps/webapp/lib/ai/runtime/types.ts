@@ -12,6 +12,11 @@ export interface ChatExecutionContext {
     sessionId?: string
     setCookie?: string | null
     signal?: AbortSignal
+    streamRecovery?: {
+        ownerSessionHash: string
+        requestSignal?: AbortSignal
+        runId: string
+    }
     validatedConversationId?: string
 }
 

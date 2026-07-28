@@ -15,13 +15,18 @@ function useChatStream() {
     })
 }
 
-function createNdjsonResponse(chunks: ChatStreamChunk[]) {
+function createNdjsonResponse(chunks: ChatStreamChunk[], runId = 'run-memory-status') {
     const encoder = new TextEncoder()
 
     const body = new ReadableStream<Uint8Array>({
         start(controller) {
-            for (const chunk of chunks) {
-                controller.enqueue(encoder.encode(`${JSON.stringify(chunk)}\n`))
+            for (const [index, chunk] of chunks.entries()) {
+                const terminal = chunk.type === 'finish'
+                controller.enqueue(
+                    encoder.encode(
+                        `${JSON.stringify({ protocolVersion: 1, eventId: `${runId}-${index + 1}`, runId, sequence: index + 1, eventKind: terminal ? 'terminal' : 'chunk', payload: chunk, ...(terminal ? { terminal: true, terminalState: 'completed', runStatus: 'completed' } : {}) })}\n`
+                    )
+                )
             }
 
             controller.close()
@@ -32,6 +37,7 @@ function createNdjsonResponse(chunks: ChatStreamChunk[]) {
         status: 200,
         headers: {
             'Content-Type': 'application/x-ndjson; charset=utf-8',
+            'X-Run-Id': runId,
         },
     })
 }

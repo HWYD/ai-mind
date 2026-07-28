@@ -24,6 +24,7 @@ export {
     subagentToolJsonResultSchema,
 } from './subagent-tool-schemas'
 export { createDeliveryChainSubagentTools, getDeliveryChainSubagentDefinition, getDeliveryChainSubagentDefinitions } from './subagent-tools'
+export { createDeliveryChainModelSet, DELIVERY_CHAIN_MODEL_POLICIES } from './delivery-chain-model-set'
 export type {
     AgentContextBlock,
     DelegationPolicy,

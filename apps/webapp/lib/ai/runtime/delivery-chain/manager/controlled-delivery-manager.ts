@@ -6,7 +6,6 @@ import type { Runnable } from '@langchain/core/runnables'
 
 import { createId } from '@/lib/ai/create-id'
 import type { AiMindChatModelHandle, ResolvedModelSelection } from '@/lib/ai/model-provider'
-import { createChatModel, getModelProviderConfig } from '@/lib/ai/model-provider'
 import { executeToolCall, normalizeAndValidateToolCalls } from '@/lib/ai/runtime/tool-runtime'
 import { createChatToolRegistry } from '@/lib/ai/tools'
 
@@ -20,6 +19,7 @@ import {
     validateToolCallBatch,
     validateToolCallBatchForPhase,
 } from './delegation-policy'
+import { createDeliveryChainModelSet } from './delivery-chain-model-set'
 import { buildDeliveryManagerFailureReport, synthesizeReviewBundle, toSubagentReportSummary } from './report-synthesis'
 import { createRuntimeArtifact, createSubagentResultArtifacts, findRuntimeArtifact } from './runtime-artifacts'
 import {
@@ -67,16 +67,10 @@ export interface ControlledDeliveryManagerResult {
 const SERIAL_SUBAGENT_ORDER: SubagentToolId[] = ['plan-subagent', 'task-subagent']
 const REVIEW_GROUP_TOOLS: SubagentToolId[] = ['review-subagent', 'risk-subagent', 'boundary-subagent']
 
-function formatRuntimeError(error: unknown) {
-    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+function buildRuntimeFailureMessage(prefix: string, error: unknown, normalizeError?: (error: unknown) => { code: string }) {
+    const failureCode = normalizeError?.(error)?.code
 
-    return message.replace(/\s+/g, ' ').trim().slice(0, 240)
-}
-
-function buildRuntimeFailureMessage(prefix: string, error: unknown) {
-    const detail = formatRuntimeError(error)
-
-    return detail ? `${prefix}：${detail}` : `${prefix}。`
+    return failureCode ? `${prefix}（${failureCode}）。` : `${prefix}。`
 }
 
 function createManagerToolFailureResult(options: {
@@ -419,24 +413,24 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
     }
     const artifacts: RuntimeArtifact[] = []
     const subagentInvocations = new Map<string, SubagentToolInvocation>()
-    const config = getModelProviderConfig()
-
-    const subagentModelHandle = createChatModel({
-        config,
-        enableReasoning: false,
+    const modelSet = createDeliveryChainModelSet({
         resolvedModelSelection: options.resolvedModelSelection,
-        streaming: false,
     })
-
-    const managerModelHandle = createChatModel({
-        config,
-        enableReasoning: false,
-        resolvedModelSelection: options.resolvedModelSelection,
-        streaming: false,
-    })
+    const managerModelHandle = modelSet.manager.handle
 
     const defaultToolDefinitions = createDeliveryChainSubagentTools({
-        model: subagentModelHandle.model,
+        model: modelSet.subagents['plan-subagent'].handle.model,
+        models: Object.fromEntries(
+            Object.entries(modelSet.subagents).map(([subagentId, stage]) => [
+                subagentId,
+                {
+                    model: stage.handle.model,
+                    normalizeError: stage.handle.normalizeError,
+                    timeoutMs: stage.timeoutMs,
+                },
+            ])
+        ),
+        normalizeError: modelSet.subagents['plan-subagent'].handle.normalizeError,
         resolveInvocationInput: ({ invocationId, subagentId }) => {
             const invocation = subagentInvocations.get(invocationId)
 
@@ -614,6 +608,7 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
             const normalizedResult: SubagentToolResult = {
                 artifacts: createSubagentResultArtifacts(expectedToolId, parsedToolResult.data, getDefaultArtifactTitle(expectedToolId)),
                 endedAt: new Date().toISOString(),
+                failureCode: parsedToolResult.data.failureCode,
                 invocationId: traceEntry.invocationId,
                 markdown: parsedToolResult.data.markdown,
                 status: parsedToolResult.data.status,
@@ -651,7 +646,11 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
             })
         } catch (error) {
             return failCurrentStep(
-                buildRuntimeFailureMessage(`${toolDefinition.displayName} Tool 调用失败，当前交付链已安全失败`, error),
+                buildRuntimeFailureMessage(
+                    `${toolDefinition.displayName} Tool 调用失败，当前交付链已安全失败`,
+                    error,
+                    modelSet.subagents[expectedToolId].handle.normalizeError
+                ),
                 `${toolDefinition.displayName} Tool 调用失败`
             )
         } finally {
@@ -738,7 +737,7 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
         )
     } catch (error) {
         return failReviewGroup(
-            buildRuntimeFailureMessage('Review Group Tool 调用失败，当前交付链已安全失败', error),
+            buildRuntimeFailureMessage('Review Group Tool 调用失败，当前交付链已安全失败', error, managerModelHandle.normalizeError),
             'Review Group Tool 调用失败'
         )
     }
@@ -805,7 +804,7 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
         )
     } catch (error) {
         return failReviewGroup(
-            buildRuntimeFailureMessage('Review Group Tool 执行失败，当前交付链已安全失败', error),
+            buildRuntimeFailureMessage('Review Group Tool 执行失败，当前交付链已安全失败', error, managerModelHandle.normalizeError),
             'Review Group Tool 执行失败'
         )
     }
@@ -852,6 +851,7 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
         const normalizedResult: SubagentToolResult = {
             artifacts: createSubagentResultArtifacts(reviewToolId, parsedToolResult.data, getDefaultArtifactTitle(reviewToolId)),
             endedAt: new Date().toISOString(),
+            failureCode: parsedToolResult.data.failureCode,
             invocationId: traceEntry.invocationId,
             markdown: parsedToolResult.data.markdown,
             status: parsedToolResult.data.status,
@@ -933,10 +933,7 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
     const completedReviewNames = completedReviews as string[]
     const failedReviewNames = failedReviews.map(f => f.subagentId)
 
-    const completedDetails =
-        completedReviewNames.length > 0
-            ? ['并行评审已完成。', ...completedReviewNames.map(name => `- ${name}：完成`)]
-            : ['并行评审已完成。']
+    const completedDetails = completedReviewNames.map(name => `- ${name}：完成`)
 
     const failedDetails = failedReviewNames.length > 0 ? [...failedReviewNames.map(name => `- ${name}：失败`)] : []
 
@@ -983,7 +980,11 @@ export async function runControlledDeliveryManager(options: ControlledDeliveryMa
             warnings,
         })
     } catch (error) {
-        const failureMessage = buildRuntimeFailureMessage('Delivery Chain Report 汇总失败，当前交付链已安全失败', error)
+        const failureMessage = buildRuntimeFailureMessage(
+            'Delivery Chain Report 汇总失败，当前交付链已安全失败',
+            error,
+            managerModelHandle.normalizeError
+        )
 
         emitProgress(options, {
             failureMessage,
