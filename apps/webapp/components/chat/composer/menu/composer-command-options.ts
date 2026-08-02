@@ -7,6 +7,12 @@ export interface ComposerCommandOption extends ComposerCommand {
 
 export const composerCommandOptions: ComposerCommandOption[] = [
     {
+        name: 'image',
+        label: '生成图片',
+        badgeLabel: 'Agent',
+        description: '基于文字描述生成单张图片',
+    },
+    {
         name: 'delivery-chain',
         label: '生成交付计划',
         badgeLabel: 'Multi-Agent',

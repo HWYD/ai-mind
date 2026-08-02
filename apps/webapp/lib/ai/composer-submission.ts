@@ -1,3 +1,4 @@
+import { parseImageCommand } from './chat-schema'
 import type { ChatComposerPayload } from './types/chat'
 
 export function hasComposerSemanticInput(composer: ChatComposerPayload | undefined) {
@@ -20,4 +21,24 @@ export function resolveComposerSubmissionText(input: string, composer: ChatCompo
 
     // 后端 messages 仍要求至少有一段非空 text；chip-only 提交时用可读标签作为兼容文本。
     return [commandLabel, ...referenceLabels].filter(Boolean).join(' ').trim()
+}
+
+export function normalizeImageComposerSubmission(input: string, composer: ChatComposerPayload | undefined) {
+    if (composer?.command || !/^\s*\/image(?=\s|$)/u.test(input)) {
+        return { composer, text: input }
+    }
+
+    const parsed = parseImageCommand({ text: input })
+    if (parsed.kind === 'not-image') {
+        return { composer, text: input }
+    }
+
+    return {
+        composer: {
+            ...composer,
+            command: { label: '生成图片', name: 'image' as const },
+            plainText: parsed.kind === 'accepted' ? parsed.description : '',
+        },
+        text: parsed.kind === 'accepted' ? parsed.description : input,
+    }
 }

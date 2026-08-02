@@ -21,7 +21,7 @@ export const messageInputSchema = z.object({
 })
 
 export const composerCommandSchema = z.object({
-    name: z.enum(['check', 'delivery-chain', 'summary', 'tasklist']),
+    name: z.enum(['check', 'delivery-chain', 'image', 'summary', 'tasklist']),
     label: z.string().min(1),
 })
 
@@ -66,3 +66,39 @@ export const draftCreateChatRequestSchema = chatRequestBaseSchema.extend({
 })
 
 export const chatRequestSchema = z.union([persistedChatRequestSchema, draftCreateChatRequestSchema])
+
+export type ImageCommandParseResult =
+    | { description: string; kind: 'accepted' }
+    | { kind: 'not-image' }
+    | { kind: 'rejected'; reason: 'empty' | 'oversize' | 'unsupported' }
+
+const unicodeWhitespace = /^[\s\p{Z}]+|[\s\p{Z}]+$/gu
+const imageCommandPrefix = /^\s*\/image(?=\s|$)/u
+const unsupportedImageCapability =
+    /\b(edit|inpaint|outpaint|remove\s+background|reference\s+image|multi(?:ple)?\s+(?:image|candidate)|局部重绘|扩图|去背景|参考图|多图)\b/iu
+
+export function parseImageCommand(input: { composer?: { command?: { name?: string } }; text: string }): ImageCommandParseResult {
+    const hasImageChip = input.composer?.command?.name === 'image'
+    const matchedPrefix = imageCommandPrefix.exec(input.text)
+
+    if (!hasImageChip && !matchedPrefix) {
+        return { kind: 'not-image' }
+    }
+
+    const rawDescription = matchedPrefix ? input.text.slice(matchedPrefix[0].length) : input.text
+    const description = rawDescription.normalize('NFC').replace(unicodeWhitespace, '')
+
+    if (description.length === 0) {
+        return { kind: 'rejected', reason: 'empty' }
+    }
+
+    if (Array.from(description).length > 2_000) {
+        return { kind: 'rejected', reason: 'oversize' }
+    }
+
+    if (unsupportedImageCapability.test(description)) {
+        return { kind: 'rejected', reason: 'unsupported' }
+    }
+
+    return { description, kind: 'accepted' }
+}

@@ -2,6 +2,7 @@ import type { NextRequest } from 'next/server'
 
 import { createAgentRunOwnerSessionHash } from '@/lib/ai/agent-runs'
 import { resolveSessionId } from '@/lib/ai/rate-limit'
+import { ImageGenerationRunRepository } from '@/lib/ai/runtime/image-generation-agent/image-generation-run-repository'
 import { createSafeStreamDiagnostics } from '@/lib/ai/stream-recovery/contracts'
 import { StreamExecutionCoordinator, StreamExecutionCoordinatorError } from '@/lib/ai/stream-recovery/stream-execution-coordinator'
 
@@ -66,6 +67,10 @@ export async function POST(request: NextRequest, context: { params: { runId: str
             ownerSessionHash,
             runId,
         })
+
+        if (run.kind === 'image_generation') {
+            await new ImageGenerationRunRepository().markCancelled(runId)
+        }
 
         const terminal = new Set(['completed', 'failed', 'cancelled', 'rejected', 'version_mismatch']).has(run.status)
 

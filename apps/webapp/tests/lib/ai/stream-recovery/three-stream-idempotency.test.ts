@@ -22,7 +22,7 @@ describe('three stream idempotency', () => {
         )
     })
 
-    it('keeps request identity, run identity and event sequences isolated for all current stream kinds', async () => {
+    it('keeps request identity, run identity and event sequences isolated for every supported stream kind', async () => {
         const streamRequests = [
             { idempotencyKey: 'chat-key', kind: 'chat' as const, request: { conversationId: 'chat', message: 'hello' } },
             {
@@ -34,6 +34,11 @@ describe('three stream idempotency', () => {
                 idempotencyKey: 'delivery-key',
                 kind: 'delivery_chain' as const,
                 request: { conversationId: 'delivery', message: 'make delivery plan' },
+            },
+            {
+                idempotencyKey: 'image-key',
+                kind: 'image_generation' as const,
+                request: { conversationId: 'image', description: 'a quiet lake' },
             },
         ]
 
@@ -78,15 +83,19 @@ describe('three stream idempotency', () => {
             ['run_1', 'chat', 2],
             ['run_2', 'tasklist_agent', 2],
             ['run_3', 'delivery_chain', 2],
+            ['run_4', 'image_generation', 2],
         ])
         expect(
-            ['run_1', 'run_2', 'run_3'].map(runId => fake.events.filter(event => event.runId === runId).map(event => event.sequence))
+            ['run_1', 'run_2', 'run_3', 'run_4'].map(runId =>
+                fake.events.filter(event => event.runId === runId).map(event => event.sequence)
+            )
         ).toEqual([
             [1, 2],
             [1, 2],
             [1, 2],
+            [1, 2],
         ])
-        expect(fake.requests).toHaveLength(3)
-        expect(fake.events).toHaveLength(6)
+        expect(fake.requests).toHaveLength(4)
+        expect(fake.events).toHaveLength(8)
     })
 })

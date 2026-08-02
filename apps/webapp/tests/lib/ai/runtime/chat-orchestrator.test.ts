@@ -1229,7 +1229,7 @@ describe('runtime/chat-orchestrator', () => {
                 type: 'error',
                 scope: 'runtime',
                 errorCode: 'RUNTIME_INVARIANT_FAILED',
-                message: expect.stringContaining('Tasklist Agent'),
+                message: expect.stringContaining('数据服务未配置'),
                 retryable: false,
             })
         )

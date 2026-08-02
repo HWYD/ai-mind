@@ -8,6 +8,10 @@ export interface RateLimitConfig {
     tasklistDailyLimitPerIp: number
     /** tasklist routeType 每日每 session 上限 */
     tasklistDailyLimitPerSession: number
+    /** image routeType 每日每个 IP 防刷上限 */
+    imageDailyLimitPerIp: number
+    /** image routeType 每日每个 session 生图配额 */
+    imageDailyLimitPerSession: number
 }
 
 const defaultRateLimitConfig: RateLimitConfig = {
@@ -16,6 +20,8 @@ const defaultRateLimitConfig: RateLimitConfig = {
     chatDailyLimitPerSession: 100,
     tasklistDailyLimitPerIp: 50,
     tasklistDailyLimitPerSession: 20,
+    imageDailyLimitPerIp: 10,
+    imageDailyLimitPerSession: 3,
 }
 
 export function getRateLimitConfig(env: Record<string, string | undefined> = process.env): RateLimitConfig {
@@ -44,6 +50,11 @@ export function getRateLimitConfig(env: Record<string, string | undefined> = pro
             env.AI_MIND_TASKLIST_DAILY_LIMIT_PER_SESSION,
             defaultRateLimitConfig.tasklistDailyLimitPerSession
         ),
+        imageDailyLimitPerIp: readBoundedInteger(env.AI_MIND_IMAGE_DAILY_LIMIT_PER_IP, defaultRateLimitConfig.imageDailyLimitPerIp, 10, 20),
+        imageDailyLimitPerSession: readPositiveInteger(
+            env.AI_MIND_IMAGE_DAILY_LIMIT_PER_SESSION,
+            defaultRateLimitConfig.imageDailyLimitPerSession
+        ),
     }
 }
 
@@ -52,4 +63,11 @@ function readPositiveInteger(rawValue: string | undefined, fallback: number): nu
     if (!value) return fallback
     const parsed = Number(value)
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback
+}
+
+function readBoundedInteger(rawValue: string | undefined, fallback: number, minimum: number, maximum: number): number {
+    const value = rawValue?.trim()
+    if (!value) return fallback
+    const parsed = Number(value)
+    return Number.isInteger(parsed) && parsed >= minimum && parsed <= maximum ? parsed : fallback
 }

@@ -1,9 +1,10 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
+import { getMessageCopyText } from '@/components/chat/message-list/shared/message-list-utils'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type { MindMessage } from '@/lib/ai/types/message'
 
@@ -68,6 +69,27 @@ function createResourcePart(resourceName: string, uri: string) {
 }
 
 describe('ChatMessageList', () => {
+    it('copies a command chip with its stable command name', () => {
+        const message: MindMessage = {
+            id: 'user-image',
+            role: 'user',
+            createdAt: '2026-08-01T10:00:00.000Z',
+            parts: [
+                {
+                    type: 'text',
+                    text: '生成猫咪照片',
+                    format: 'markdown',
+                    displaySegments: [
+                        { type: 'command', command: { label: '生成图片', name: 'image' } },
+                        { type: 'text', text: ' 生成猫咪照片' },
+                    ],
+                },
+            ],
+        }
+
+        expect(getMessageCopyText(message)).toBe('/image 生成猫咪照片')
+    })
+
     it('隐藏深度思考时不展示 reasoning 面板', () => {
         render(
             <ChatMessageList
@@ -173,5 +195,62 @@ describe('ChatMessageList', () => {
         )
 
         expect(screen.queryByText('试试这些能力')).toBeNull()
+    })
+
+    it('renders image summary and result parts after an image generation task completes', async () => {
+        const message: MindMessage = {
+            id: 'assistant-image-result',
+            role: 'assistant',
+            createdAt: '2026-08-01T10:00:00.000Z',
+            parts: [
+                {
+                    id: 'image-brief-1',
+                    type: 'image-brief',
+                    runId: 'run-1',
+                    summary: {
+                        assumptions: [],
+                        avoid: [],
+                        intent: '一只晒太阳的猫',
+                        mustInclude: [],
+                        scene: '阳台',
+                        subjects: ['猫'],
+                    },
+                },
+                {
+                    id: 'image-result-1',
+                    type: 'image-result',
+                    runId: 'run-1',
+                    contentPath: '/api/chat/runs/run-1/image',
+                    expiresAt: '2000-01-01T00:00:00.000Z',
+                    suggestedFileName: 'cat.png',
+                    temporary: true,
+                },
+            ],
+        }
+
+        const onSelectFollowUpQuestion = vi.fn()
+
+        render(
+            <ChatMessageList
+                messages={[message]}
+                status="ready"
+                enableReasoning={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={onSelectFollowUpQuestion}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        expect(screen.getByText('图像生成摘要')).toBeTruthy()
+        expect(screen.getByText('生成结果')).toBeTruthy()
+
+        const recommendationButtons = within(screen.getByRole('group', { name: '推荐问题' })).getAllByRole('button')
+        await waitFor(() => expect(screen.getByText(/临时图片已过期/)).toBeTruthy())
+        const selectedQuestion = recommendationButtons[0].textContent ?? ''
+
+        fireEvent.click(recommendationButtons[0])
+
+        expect(onSelectFollowUpQuestion).toHaveBeenCalledWith(selectedQuestion)
     })
 })

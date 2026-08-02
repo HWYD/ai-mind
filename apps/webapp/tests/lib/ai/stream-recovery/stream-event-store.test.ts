@@ -276,6 +276,27 @@ describe('stream-event-store', () => {
         expect(fake.runs.get(runId)?.agentRunId).toBe(runId)
     })
 
+    it('rejects AgentRun links for non-Tasklist streams before attempting persistence', async () => {
+        fake.runs.set(runId, createRun({ kind: 'image_generation' }))
+
+        await expect(
+            store.appendEvent({
+                agentRunId: runId,
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: {
+                    delta: 'invalid link',
+                    partId: 'answer',
+                    type: 'text-delta',
+                },
+                runId,
+            })
+        ).rejects.toMatchObject({ code: 'STREAM_EVENT_INVALID' })
+
+        expect(fake.events).toHaveLength(0)
+        expect(fake.runs.get(runId)?.agentRunId).toBeNull()
+    })
+
     it('keeps unique ordered sequences for concurrent append callers', async () => {
         const results = await Promise.all(
             ['one', 'two', 'three', 'four', 'five'].map(delta =>

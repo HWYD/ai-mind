@@ -4,7 +4,7 @@ import type { Editor } from '@tiptap/react'
 import { useCallback, useState } from 'react'
 
 import { Card, CardContent } from '@/components/ui/card'
-import { hasComposerSemanticInput, resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
+import { hasComposerSemanticInput, normalizeImageComposerSubmission, resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { type ChatModel, type ChatModelGroup } from '@/lib/ai/models'
 import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
@@ -97,13 +97,14 @@ export function ChatComposer({
 
             const composer = editor ? serializeComposerPayload(editor) : undefined
             const displaySegments = editor ? serializeComposerDisplaySegments(editor) : undefined
-            const submitValue = resolveComposerSubmissionText(value, composer)
+            const normalized = normalizeImageComposerSubmission(value, composer)
+            const submitValue = resolveComposerSubmissionText(normalized.text, normalized.composer)
 
             if (!submitValue) {
                 return
             }
 
-            const accepted = await onSubmit(submitValue, composer, displaySegments)
+            const accepted = await onSubmit(submitValue, normalized.composer, displaySegments)
 
             if (accepted) {
                 setInput('')

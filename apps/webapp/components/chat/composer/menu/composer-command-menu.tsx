@@ -1,6 +1,6 @@
 'use client'
 
-import { FileText, GitBranchPlus, ListChecks, ShieldCheck } from 'lucide-react'
+import { FileText, GitBranchPlus, Image, ListChecks, ShieldCheck } from 'lucide-react'
 import { forwardRef, useCallback, useImperativeHandle, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +16,7 @@ export interface ComposerCommandMenuRef {
 const commandIconByName: Record<ComposerCommandName, typeof FileText> = {
     check: ShieldCheck,
     'delivery-chain': GitBranchPlus,
+    image: Image,
     summary: FileText,
     tasklist: ListChecks,
 }
@@ -102,7 +103,8 @@ export const ComposerCommandMenu = forwardRef<
                                     item.name === 'summary' && 'bg-violet-50 text-violet-600',
                                     item.name === 'tasklist' && 'bg-blue-50 text-blue-600',
                                     item.name === 'check' && 'bg-emerald-50 text-emerald-600',
-                                    item.name === 'delivery-chain' && 'bg-amber-50 text-amber-600'
+                                    item.name === 'delivery-chain' && 'bg-amber-50 text-amber-600',
+                                    item.name === 'image' && 'bg-fuchsia-50 text-fuchsia-600'
                                 )}
                             >
                                 <Icon className="size-4 sm:size-5" strokeWidth={2.2} />

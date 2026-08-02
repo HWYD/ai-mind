@@ -58,7 +58,7 @@ function normalizePrismaDataLayerError(error: unknown): NormalizedKnownRuntimeEr
     if (message.includes('DATABASE_URL is required')) {
         return {
             code: 'RUNTIME_INVARIANT_FAILED',
-            message: 'Tasklist Agent 数据库未配置：请设置 DATABASE_URL，并启动 PostgreSQL / 执行 Prisma migration 后重试。',
+            message: '数据服务未配置：请设置 DATABASE_URL，并启动 PostgreSQL / 执行 Prisma migration 后重试。',
             retryable: false,
         }
     }
@@ -93,7 +93,9 @@ function normalizePrismaDataLayerError(error: unknown): NormalizedKnownRuntimeEr
                 ? 'Chat memory 数据库结构未初始化：请执行 `pnpm --dir apps/webapp db:chat-memory:setup` 后重试。'
                 : message.includes('langgraph_checkpoint')
                   ? 'Tasklist Agent durable checkpoint 未初始化：请执行 `pnpm --dir apps/webapp db:checkpoint:setup` 后重试。'
-                  : 'Tasklist Agent 数据库结构未就绪：请确认已执行 Prisma migration 后重试。',
+                  : message.includes('agent_runs') || message.includes('agent_interrupts')
+                    ? 'Tasklist Agent 数据库结构未就绪：请确认已执行 Prisma migration 后重试。'
+                    : '数据服务数据库结构未就绪：请确认已执行 Prisma migration 后重试。',
             retryable: false,
         }
     }
@@ -108,7 +110,7 @@ function normalizePrismaDataLayerError(error: unknown): NormalizedKnownRuntimeEr
     ) {
         return {
             code: 'RUNTIME_INVARIANT_FAILED',
-            message: 'Tasklist Agent 数据库暂时不可用：请确认 PostgreSQL、DATABASE_URL 和 Prisma Client 状态后重试。',
+            message: '数据服务暂时不可用：请确认 PostgreSQL、DATABASE_URL 和 Prisma Client 状态后重试。',
             retryable: true,
         }
     }

@@ -184,6 +184,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/v0.4.11-structured-supervisor-review-loop/plan.md
+at specs/v0.4.12-image-generation-agent/plan.md
 
 <!-- SPECKIT END -->

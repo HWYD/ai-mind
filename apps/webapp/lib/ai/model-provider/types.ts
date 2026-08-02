@@ -8,7 +8,7 @@ export const aiMindModelFamilies = [...aiMindLlmProviders, 'kimi'] as const
 
 export type AiMindModelFamily = (typeof aiMindModelFamilies)[number]
 
-export type ModelRouteType = 'chat' | 'delivery-chain' | 'tasklist'
+export type ModelRouteType = 'chat' | 'delivery-chain' | 'image' | 'tasklist'
 
 export type ModelRuntimeEnvironment = 'development' | 'production'
 

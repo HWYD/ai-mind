@@ -7,6 +7,8 @@ import type {
     AgentInterruptPart,
     AgentStepPart,
     AgentTextArtifactViewModel,
+    ImageBriefPart,
+    ImageResultPart,
     MindMessage,
     MindMessagePart,
     MindRole,
@@ -167,6 +169,30 @@ export function createWorkflowProgressPart(chunk: Extract<ChatStreamChunk, { typ
         steps: [],
         startedAt: chunk.startedAt,
         visibility: 'expanded',
+    }
+}
+
+export function createImageBriefPart(chunk: Extract<ChatStreamChunk, { type: 'image-brief' }>): ImageBriefPart {
+    return {
+        id: chunk.partId,
+        type: 'image-brief',
+        runId: chunk.runId,
+        summary: chunk.summary,
+    }
+}
+
+export function createImageResultPart(chunk: Extract<ChatStreamChunk, { type: 'image-result-ready' }>): ImageResultPart {
+    return {
+        id: chunk.partId,
+        type: 'image-result',
+        runId: chunk.runId,
+        contentPath: chunk.contentPath,
+        expiresAt: chunk.expiresAt,
+        height: chunk.height,
+        mimeType: chunk.mimeType,
+        suggestedFileName: chunk.suggestedFileName,
+        temporary: true,
+        width: chunk.width,
     }
 }
 

@@ -63,4 +63,30 @@ describe('stream terminal and recoverable states', () => {
             retry: true,
         })
     })
+
+    it('keeps an image result-ready payload non-terminal until the completed envelope arrives', () => {
+        const ready = streamEventEnvelopeSchema.parse({
+            eventId: 'evt_image_ready',
+            eventKind: 'chunk',
+            payload: {
+                contentPath: '/api/chat/runs/run-image/image',
+                expiresAt: '2026-07-05T10:10:00.000Z',
+                partId: 'image-result-run-image',
+                runId: 'run-image',
+                suggestedFileName: 'ai-mind-image-run-image.jpg',
+                temporary: true,
+                type: 'image-result-ready',
+            },
+            protocolVersion: 1,
+            runId: 'run-image',
+            runStatus: 'running',
+            sequence: 4,
+        })
+
+        expect(ready).toMatchObject({
+            eventKind: 'chunk',
+            runStatus: 'running',
+        })
+        expect(ready).not.toHaveProperty('terminal')
+    })
 })

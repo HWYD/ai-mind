@@ -203,6 +203,16 @@ Debug Summary 也默认关闭，只在服务端开启后输出白名单字段，
 - history list。
 - 完整 GraphState 调试台。
 
+## Image Generation Agent
+
+v0.4.12 的 `/image` 是独立的受控 Agent 入口，不经过普通聊天的 Composer Context、Skill、Tool Calling、direct answer 或 final-turn memory 写入。API route 完成显式命令解析、StreamRun 和 active lease 后，经 `chat-service` 调用 `ImageGenerationRunCoordinator`。
+
+图片规划使用独立 LangGraph `StateGraph`：`ImageBrief -> PromptDraft -> PromptInspect -> optional PromptRevision -> PromptInspect -> terminal`。它不提供开放式循环、checkpoint、resume 或 HITL；GraphState 只保存 JSON-serializable 的领域状态，Provider、Prisma、writer、AbortSignal 和 secret 均留在 Coordinator/runtime 边界。
+
+该 Agent 的总上限是五次规划模型调用、一次 Prompt 修正和一次图片生成。前端只消费安全 ImageBrief、进度、耗时、同源临时结果路径和公共错误，不消费 Prompt、检查细节、Provider URL 或图片字节。
+
+详见 [Image Generation Agent Architecture](./image-generation-agent.md) 与 [ADR-0016](../adr/0016-controlled-image-generation-agent.md)。
+
 ## Design Principle
 
 AI Mind 的 Agent 演进遵循一个原则：

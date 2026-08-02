@@ -67,6 +67,65 @@ describe('chatStreamChunkSchema artifact chunks', () => {
     })
 })
 
+describe('chatStreamChunkSchema image generation chunks', () => {
+    const summary = {
+        aspectRatio: 'square',
+        assumptions: ['square composition'],
+        avoid: ['watermark'],
+        intent: 'product photograph',
+        mustInclude: ['yellow lemon'],
+        subjects: ['yellow lemon'],
+    }
+
+    it('accepts bounded public ImageBrief and same-origin temporary result chunks', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'image-brief',
+                partId: 'image-brief-1',
+                runId: 'image-run-1',
+                summary,
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'image-result-ready',
+                partId: 'image-result-1',
+                runId: 'image-run-1',
+                contentPath: '/api/chat/runs/image-run-1/image',
+                expiresAt: '2026-07-29T00:10:00.000Z',
+                mimeType: 'image/jpeg',
+                suggestedFileName: 'ai-mind-image-image-run-1.jpg',
+                temporary: true,
+            }).success
+        ).toBe(true)
+    })
+
+    it('rejects private fields, invalid result paths and missing expiry', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'image-brief',
+                partId: 'image-brief-1',
+                runId: 'image-run-1',
+                summary: {
+                    ...summary,
+                    prompt: 'internal prompt',
+                },
+            }).success
+        ).toBe(false)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'image-result-ready',
+                partId: 'image-result-1',
+                runId: 'image-run-1',
+                contentPath: 'https://provider.example/image.jpg',
+                providerUrl: 'https://provider.example/image.jpg',
+                suggestedFileName: 'result.jpg',
+                temporary: true,
+            }).success
+        ).toBe(false)
+    })
+})
+
 describe('chat stream resumable envelope schema', () => {
     it('rejects raw NDJSON chunks and keeps chunks valid only as envelope payloads', () => {
         expect(

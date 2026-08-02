@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
+    ImageBriefPart,
     MindMessage,
     MindMessagePart,
     PromptPart,
@@ -18,6 +19,8 @@ import { AgentTextArtifactPanel } from '../parts/agent-text-artifact-panel'
 import { AgentTracePanel } from '../parts/agent-trace-panel'
 import { canRenderDeliveryChainReport } from '../parts/delivery-chain-report-parser'
 import { DeliveryChainReportView } from '../parts/delivery-chain-report-view'
+import { ImageBriefPart as ImageBriefPartView } from '../parts/image-brief-part'
+import { ImageResultPart as ImageResultPartView } from '../parts/image-result-part'
 import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
 import { ReasoningPanel } from '../parts/reasoning-panel'
 import { TextPartView } from '../parts/text-part'
@@ -324,12 +327,31 @@ export function AssistantMessage({
                     }
 
                     if (part.type === 'workflow-progress') {
-                        return isDeliveryChainMessage ? (
+                        return isDeliveryChainMessage || part.workflowKind === 'image_generation' ? (
                             <WorkflowProgressPanel
                                 key={`${message.id}:workflow-progress:${part.workflowId}:${part.visibility}`}
                                 part={part}
                             />
                         ) : null
+                    }
+
+                    if (part.type === 'image-brief') {
+                        return <ImageBriefPartView key={`${message.id}:image-brief:${part.runId}`} part={part} />
+                    }
+
+                    if (part.type === 'image-result') {
+                        const brief = contentParts.find(
+                            (candidate): candidate is ImageBriefPart => candidate.type === 'image-brief' && candidate.runId === part.runId
+                        )
+
+                        return (
+                            <ImageResultPartView
+                                key={`${message.id}:image-result:${part.runId}`}
+                                brief={brief}
+                                enabled={isAssistantReplyCompleted}
+                                part={part}
+                            />
+                        )
                     }
 
                     if (part.type === 'resource') {
@@ -439,7 +461,9 @@ export function AssistantMessage({
                 ) : null}
 
                 {showBuiltInFollowUpSuggestions ? (
-                    <FollowUpSuggestions seed={`${message.id}:${message.createdAt}`} onSelectQuestion={onSelectFollowUpQuestion} />
+                    <div role="group" aria-label="推荐问题">
+                        <FollowUpSuggestions seed={`${message.id}:${message.createdAt}`} onSelectQuestion={onSelectFollowUpQuestion} />
+                    </div>
                 ) : null}
             </div>
         </article>

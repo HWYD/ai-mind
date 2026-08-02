@@ -37,11 +37,10 @@ export class StreamEventProjector {
 
         const terminalState = input.terminalState ?? inferTerminalState(publicChunk)
         const runStatus = input.runStatus ?? inferRunStatus(publicChunk, terminalState)
+        const agentRunId = input.agentRunId ?? extractTasklistAgentRunId(publicChunk)
 
         return this.eventStore.appendEvent({
-            ...(input.agentRunId || extractChunkRunId(publicChunk)
-                ? { agentRunId: input.agentRunId ?? extractChunkRunId(publicChunk) }
-                : {}),
+            ...(agentRunId ? { agentRunId } : {}),
             eventKind: inferEventKind(publicChunk, terminalState),
             ownerSessionHash: input.ownerSessionHash,
             payload: publicChunk as StreamEventEnvelopeDto['payload'],
@@ -75,12 +74,8 @@ export class StreamEventProjector {
     }
 }
 
-function extractChunkRunId(chunk: ChatStreamChunk): string | undefined {
-    if ('runId' in chunk && typeof chunk.runId === 'string') {
-        return chunk.runId
-    }
-
-    return undefined
+function extractTasklistAgentRunId(chunk: ChatStreamChunk): string | undefined {
+    return chunk.type === 'agent-interrupt' || chunk.type === 'agent-resume' ? chunk.runId : undefined
 }
 
 const terminalLifecycleStatuses: ReadonlySet<StreamRunStatusDto> = new Set([

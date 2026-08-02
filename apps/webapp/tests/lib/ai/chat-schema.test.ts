@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { chatRequestSchema } from '@/lib/ai/chat-schema'
+import { chatRequestSchema, parseImageCommand } from '@/lib/ai/chat-schema'
+import { normalizeImageComposerSubmission } from '@/lib/ai/composer-submission'
 
 function createValidChatRequest(overrides: Record<string, unknown> = {}) {
     return {
@@ -90,5 +91,28 @@ describe('chatRequestSchema', () => {
         const result = chatRequestSchema.parse(createValidChatRequest())
 
         expect(result.options).toBeUndefined()
+    })
+
+    it('parses only exact /image entries with normalized bounded descriptions', () => {
+        expect(parseImageCommand({ text: '  /image  cafe\u0301  ' })).toEqual({ description: 'café', kind: 'accepted' })
+        expect(parseImageCommand({ text: '/imagex a lake' })).toEqual({ kind: 'not-image' })
+        expect(parseImageCommand({ text: 'draw /image a lake' })).toEqual({ kind: 'not-image' })
+        expect(parseImageCommand({ text: '/image   ' })).toEqual({ kind: 'rejected', reason: 'empty' })
+        expect(parseImageCommand({ text: `/image ${'a'.repeat(2_001)}` })).toEqual({ kind: 'rejected', reason: 'oversize' })
+        expect(parseImageCommand({ text: '/image a lake, remove background' })).toEqual({ kind: 'rejected', reason: 'unsupported' })
+        expect(parseImageCommand({ composer: { command: { name: 'image' } }, text: 'a lake' })).toEqual({
+            description: 'a lake',
+            kind: 'accepted',
+        })
+    })
+
+    it('restores image command semantics when copied /image text is pasted without a chip', () => {
+        expect(normalizeImageComposerSubmission('/image 生成一张猫咪照片', undefined)).toEqual({
+            composer: {
+                command: { label: '生成图片', name: 'image' },
+                plainText: '生成一张猫咪照片',
+            },
+            text: '生成一张猫咪照片',
+        })
     })
 })

@@ -4,11 +4,12 @@ import { streamProtocolVersion } from '@ai-mind/stream-core/protocol'
 import {
     type StreamEventEnvelopeDto,
     streamEventEnvelopeSchema,
+    type StreamRunKindDto,
     type StreamRunStatusDto,
     type StreamTerminalStateDto,
 } from '@/lib/ai/stream-recovery/contracts'
 
-export type StreamRunKindDto = 'chat' | 'tasklist_agent' | 'delivery_chain'
+export type { StreamRunKindDto } from '@/lib/ai/stream-recovery/contracts'
 export type StreamEventKindDto = 'chunk' | 'lifecycle' | 'terminal'
 
 export type StreamEventStoreErrorCode =
@@ -217,6 +218,10 @@ export class StreamEventStore {
 
             if (input.agentRunId && run.agentRunId && input.agentRunId !== run.agentRunId) {
                 throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event agentRunId does not match the linked AgentRun.')
+            }
+
+            if (input.agentRunId && run.kind !== 'tasklist_agent') {
+                throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Only Tasklist stream runs can link an AgentRun.')
             }
 
             const persistedEvent = await transaction.streamEvent.create({

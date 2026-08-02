@@ -1,4 +1,14 @@
-import { Calculator, CalendarDays, FileSearch, GitBranchPlus, ListChecks, type LucideIcon, Network, ShieldCheck } from 'lucide-react'
+import {
+    Calculator,
+    CalendarDays,
+    FileSearch,
+    GitBranchPlus,
+    ImagePlus,
+    ListChecks,
+    type LucideIcon,
+    Network,
+    ShieldCheck,
+} from 'lucide-react'
 
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 
@@ -90,6 +100,22 @@ export const deliveryChainDemoSuggestion: EmptyStateSuggestion = {
     text: '',
 }
 
+export const imageGenerationDemoSuggestion: EmptyStateSuggestion = {
+    composer: {
+        plainText: '阳光正好，一只橘猫在沙滩上睡懒觉。',
+        command: { name: 'image', label: '生成图片' },
+    },
+    displaySegments: [
+        { type: 'command', command: { name: 'image', label: '生成图片' } },
+        { type: 'text', text: ' 阳光正好，一只橘猫在沙滩上睡懒觉。' },
+    ],
+    icon: ImagePlus,
+    tag: 'Image Agent',
+    label: 'AI 图像生成 Demo',
+    description: '快速填充图片生成示例，直接进入受控 Image Agent 链路。',
+    text: '阳光正好，一只橘猫在沙滩上睡懒觉。',
+}
+
 export const emptyStateSuggestions: EmptyStateSuggestion[] = [
     // {
     //     icon: Layers3,
@@ -100,6 +126,7 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
     // },
     tasklistDemoSuggestion,
     deliveryChainDemoSuggestion,
+    imageGenerationDemoSuggestion,
     {
         composer: {
             plainText: '总结这份 demo 说明',

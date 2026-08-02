@@ -130,6 +130,12 @@ Before a client receives `X-Run-Id` or a replay descriptor, it cannot use the re
 
 This initial-request policy is separate from GET recovery: it uses at most three retries within 20 seconds with the existing exponential backoff and jitter. A duplicate POST is expected to return `stream-replay`, after which the client enters the normal cursor-based GET recovery path. Validation, authorization, conflict responses, cancellation, unmount, and any request that has obtained a `runId` do not retry the POST. When the budget is exhausted, the UI reports that the initial submission is unconfirmed rather than claiming the server did not accept it.
 
+## Image Generation Runs
+
+v0.4.12 将 `image_generation` 加入 StreamRun kind。它沿用同一 owner session、幂等提交、公开事件投影、显式取消和 cursor recovery 语义，但外部 Provider 调用仍是至多一次的不可恢复副作用：重放只恢复安全 stream events，不会续跑或重复生成。
+
+图片结果的 Provider URL 不写入 StreamEvent。运行记录只在服务端保存临时 URL 与过期元数据，浏览器通过拥有者校验后的 `GET /api/chat/runs/{runId}/image` 读取验证后的同源字节。取消和失败均为 terminal 状态，晚到 Provider 结果不会覆盖它们。
+
 ## Related Documents
 
 ## Initial POST and EOF Closure
