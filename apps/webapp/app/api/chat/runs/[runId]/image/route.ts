@@ -9,8 +9,13 @@ import {
 
 export const runtime = 'nodejs'
 
-const imageContentService = new TemporaryImageContentService()
+let imageContentService: TemporaryImageContentService | undefined
 const runIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+
+function getImageContentService(): TemporaryImageContentService {
+    imageContentService ??= new TemporaryImageContentService()
+    return imageContentService
+}
 
 export async function GET(request: NextRequest, context: { params: { runId: string } | Promise<{ runId: string }> }) {
     const { runId } = await context.params
@@ -27,7 +32,7 @@ export async function GET(request: NextRequest, context: { params: { runId: stri
 
     try {
         const { sessionId, setCookie } = resolveSessionId(request.cookies)
-        const content = await imageContentService.readOwnedResult({
+        const content = await getImageContentService().readOwnedResult({
             ownerSessionHash: createAgentRunOwnerSessionHash(sessionId),
             runId,
         })
