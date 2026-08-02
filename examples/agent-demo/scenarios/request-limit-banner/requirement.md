@@ -30,6 +30,14 @@
 
 在公开 demo 聊天页面顶部，当用户剩余请求次数低于阈值时，显示一个非侵入式的提醒横幅。
 
+### 实现决策契约（本节优先于本文其他描述）
+
+- **唯一显示条件**：`isNearLimit === true` 时显示，`false` 时隐藏。`isNearLimit` 已由现有 store 按 `remainingRequests <= 5` 计算；Banner 不直接比较或展示 `remainingRequests`。
+- **唯一布局位置**：Banner 是 composer 区域的直接前置 sibling；视觉顺序固定为 `Message List -> Usage Banner -> Chat Composer`，不属于 Message List 的滚动内容。
+- **滚动语义**：沿用现有 composer 区域的定位行为；Banner 自身不得增加 `fixed` 或 `sticky` 定位。消息列表滚动时，Banner 随 composer 区域一起保持可见。
+- **更新语义**：组件只订阅现有 Zustand store 的 `isNearLimit`。store 更新后由 React 正常重渲染；不轮询、不新增事件、不要求动画或过渡效果。
+- **需求完整性**：以上规则已足够生成 Plan 和 Tasks；不得因为 store 内部实现、helper 命名或样式细节而要求澄清。
+
 ### 触发条件
 
 - 剩余请求次数 ≤ 5 次时显示 banner

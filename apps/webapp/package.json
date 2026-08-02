@@ -20,6 +20,7 @@
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
         "smoke:cloud-models": "node scripts/smoke/cloud-model-provider-smoke.mjs",
+        "smoke:delivery-chain": "node scripts/smoke/delivery-chain-provider-smoke.mjs",
         "test:check-location": "node ../../scripts/validate/check-test-locations.mjs .",
         "test": "pnpm run test:stable && pnpm run test:integration",
         "test:stable": "pnpm run test:check-location && vitest run --config vitest.stable.config.ts",

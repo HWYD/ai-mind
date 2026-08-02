@@ -9,6 +9,7 @@ export type ModelSelectionErrorCode =
     | 'MODEL_NOT_AVAILABLE_IN_ENVIRONMENT'
     | 'MODEL_DOES_NOT_SUPPORT_ROUTE_TYPE'
     | 'MODEL_DOES_NOT_SUPPORT_TOOL_CALLING'
+    | 'MODEL_DOES_NOT_SUPPORT_JSON_OUTPUT'
 
 export class ModelSelectionError extends Error {
     readonly code: ModelSelectionErrorCode
@@ -27,6 +28,8 @@ export interface ResolveModelSelectionParams {
     routeType: ModelRouteType
     /** 是否需要 Tool Calling（当前链路显式声明需额外能力，例如普通 Tool Calling 或 Capability Context 等） */
     requireToolCalling?: boolean
+    /** 是否需要严格结构化输出能力。Delivery Chain 的 Agent Contract 以此为前置条件。 */
+    requireJsonOutput?: boolean
 }
 
 /**
@@ -54,6 +57,14 @@ export function resolveModelSelection(params: ResolveModelSelectionParams): Reso
             'MODEL_DOES_NOT_SUPPORT_TOOL_CALLING',
             targetModelId,
             `Model "${targetModelId}" does not declare tool calling capability for request route type "${params.routeType}".`
+        )
+    }
+
+    if (params.requireJsonOutput && !catalogItem.capabilities.jsonOutput) {
+        throw new ModelSelectionError(
+            'MODEL_DOES_NOT_SUPPORT_JSON_OUTPUT',
+            targetModelId,
+            `Model "${targetModelId}" does not declare JSON output capability for request route type "${params.routeType}".`
         )
     }
 

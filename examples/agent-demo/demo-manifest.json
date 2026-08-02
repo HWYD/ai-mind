@@ -10,16 +10,16 @@
     ],
     "scenarios": [
         {
-            "id": "request-limit-banner",
-            "entry": "scenarios/request-limit-banner/requirement.md"
+            "id": "register-login",
+            "entry": "scenarios/register-login/requirement.md"
         },
         {
-            "id": "langsmith-safe-mode",
-            "entry": "scenarios/langsmith-safe-mode/requirement.md"
+            "id": "guangzhou-3-day-trip",
+            "entry": "scenarios/guangzhou-3-day-trip/requirement.md"
         },
         {
-            "id": "delivery-chain-resource-boundary",
-            "entry": "scenarios/delivery-chain-resource-boundary/requirement.md"
+            "id": "frontend-learning-plan",
+            "entry": "scenarios/frontend-learning-plan/requirement.md"
         }
     ]
 }

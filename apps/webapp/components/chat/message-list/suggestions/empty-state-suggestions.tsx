@@ -196,20 +196,20 @@ export function EmptyStateSuggestions({
                                             多 Agent
                                         </Badge>
                                         <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="delivery-case-title">生成交付计划</h3>
+                                            <h3 id="delivery-case-title">设计注册登录系统交付计划</h3>
                                         </CardTitle>
                                     </div>
                                 </div>
                             </CardHeader>
                             <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
                                 <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                    按阶段委派规划 Agent 与任务 Agent，并行调用 3 个评审子 Agent，汇总规则生成交付报告。
+                                    从用户流程到接口、安全和测试，生成注册登录系统的实施方案与任务拆解。
                                 </p>
                             </CardContent>
                             <Separator className="hidden bg-border/60 md:block" />
                             <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                                 <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                    Agent 调用 · 3 路并行 · 评审规则汇总
+                                    Agent-as-Tool · 3 个评审 subAgent · 结构化
                                 </p>
                                 <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
                                     运行示例
@@ -220,7 +220,7 @@ export function EmptyStateSuggestions({
                                 </span>
                             </CardFooter>
                             <ExecutableCardOverlay
-                                ariaLabel="运行生成交付计划示例"
+                                ariaLabel="运行注册登录系统示例"
                                 disabled={disabled}
                                 onClick={() => onSelectSuggestion(deliveryChainDemoSuggestion)}
                             />

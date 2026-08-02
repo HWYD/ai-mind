@@ -23,7 +23,7 @@ export function InlineComposerChipNodeView({ deleteNode, node }: NodeViewProps) 
     return (
         <NodeViewWrapper as="span" className="mx-0.5 inline-flex align-middle" contentEditable={false} data-composer-resource-chip="">
             <ComposerChip className="h-6 px-2 text-xs shadow-none" title={uri} variant="resource" onRemove={deleteNode}>
-                @{label}
+                {label}
             </ComposerChip>
         </NodeViewWrapper>
     )

@@ -1,5 +1,12 @@
 # AGENTS
 
+## Version Spec Workspace Continuity (Mandatory)
+
+- 同一未收口版本只允许一个 canonical `specs/` 工作区。当前版本尚未完成 release closing / merge，尤其代码或规格仍有未提交变更时，所有需求、方案、冲突决策和实现任务 MUST 继续写入 `.specify/feature.json` 指向的当前目录。
+- 禁止因为返工、主题变化或方案冲突创建 `vX.Y.Z-1-*`、`vX.Y.Z-2-*` 等 sibling spec directory。只有用户明确声明独立 follow-up，或基准版本已经 release closing 并进入新的开发窗口，才允许创建挂靠目录。
+- 新决定覆盖旧决定时，必须在同一 canonical 工作区更新 `spec.md`、`plan.md`、`tasks.md`、`data-model.md`、`contracts/` 和 `decisions.md`（如存在），删除、改写或标记 superseded 的旧决策；不要通过新目录并存两套事实。
+- 运行 `speckit-specify`、`speckit-plan`、`speckit-tasks`、`speckit-implement`、`speckit-analyze` 或 `speckit-converge` 前，先读取 `.specify/feature.json` 和当前 managed plan 指针；同一 semver 已有 canonical directory 时 MUST 复用它。需要新目录时，必须先取得用户对“独立 follow-up”的明确授权并说明边界。
+
 ## 项目定位
 
 `AI Mind` 是一个按版本持续演进的 AI Native 工程项目。
@@ -32,7 +39,7 @@
 
 说明：
 
-- `specs/` 是 Level C / Level D 变更的正式 AI coding 工作区，承接 spec / plan / tasks / acceptance / decisions；版本工作区目录优先采用 `v0.4.10-feature-slug` 这类真实 semver 前缀命名，挂靠规格可用 `v0.4.10-1-followup-topic`，规则见 `docs/architecture/spec-directory-naming.md`。
+- `specs/` 是 Level C / Level D 变更的正式 AI coding 工作区，承接 spec / plan / tasks / acceptance / decisions；版本工作区目录优先采用 `v0.4.10-feature-slug` 这类真实 semver 前缀命名。挂靠规格只有在基准版本 release closing 后或用户明确授权独立 follow-up 时才可用，规则见 `docs/architecture/spec-directory-naming.md`。
 - `docs/adr/` 和 `docs/architecture/` 是长期架构约束区，不只是展示文档。
 - `docs/versions/`、`docs/releases/`、`docs/tasklists/` 是公开展示区，不是默认开发任务源。
 - `private-folder/` 是草稿、历史、个人内部材料和博客 / 面试素材区，不是默认开发事实源。

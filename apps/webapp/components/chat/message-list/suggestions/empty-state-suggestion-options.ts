@@ -39,10 +39,10 @@ const tasklistDemoReference = {
 } as const
 
 const deliveryChainScenarioReference = {
-    id: 'demo:scenario:request-limit-banner/requirement.md',
+    id: 'demo:scenario:register-login/requirement.md',
     type: 'resource',
-    label: 'request-limit-banner/requirement.md',
-    uri: 'demo://scenarios/request-limit-banner/requirement.md',
+    label: '注册登录系统',
+    uri: 'demo://scenarios/register-login/requirement.md',
     source: 'local',
 } as const
 
@@ -95,8 +95,8 @@ export const deliveryChainDemoSuggestion: EmptyStateSuggestion = {
     ],
     icon: GitBranchPlus,
     tag: 'Agent',
-    label: 'Delivery Chain Demo',
-    description: '快速填入 public demo 的交付计划示例入口。',
+    label: '注册与登录交付计划',
+    description: '快速填入 public demo 的注册与登录交付计划示例。',
     text: '',
 }
 

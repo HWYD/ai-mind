@@ -18,6 +18,7 @@ export type DemoResourceBadgeLabel = '示例' | '测试'
 export interface ComposerResourceOption extends ComposerReference {
     badgeLabel?: DemoResourceBadgeLabel
     description: string
+    fileName: string
     group: 'scenario' | 'version-plan'
 }
 

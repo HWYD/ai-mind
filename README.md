@@ -648,7 +648,7 @@ pnpm --dir apps/webapp db:user-memory:setup
 - `以后解释技术问题时，先用大白话，再补充专业说法。`
 - 选择 `/summary`，引用 `@demo://README.md`，输入：`帮我总结这个 demo workspace 的边界设计`
 - 选择 `/tasklist`，引用 `@demo://version-plans/v034-langsmith-observability.md`，输入：`基于这个版本方案生成 tasklist 草稿`
-- 选择 `/delivery-chain`，引用 `@demo://scenarios/request-limit-banner/requirement.md`，输入：`基于这个 demo scenario 生成交付计划报告`
+- 选择 `/delivery-chain`，引用 `@demo://scenarios/register-login/requirement.md`，输入：`基于这个 demo scenario 生成交付计划报告`
 - 输入：`/delivery-chain 帮我规划一个登录表单，支持手机号、密码、错误提示和加载状态`
 - 选择 `@project://latest-context`，输入：`帮我概括当前项目上下文`
 
@@ -742,6 +742,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.8  | Monorepo pnpm / Turborepo Governance               | 统一 Node 22、pnpm 10.34.0、workspace/Catalog/安装脚本策略与 Turbo 根任务图，使本地、CI、Docker 共享可复现工程入口，并保持业务 Runtime 与部署契约不变                           |
 | v0.4.9  | Monorepo Boundary and CI Validation Governance     | 强制 workspace 依赖与导入边界，拆分 stable/integration/external 测试任务与缓存语义，并让 CI 仅在稳定验证成功后创建 PostgreSQL 状态                                              |
 | v0.4.10 | Resumable Agent Streams                            | 为普通聊天、Tasklist Agent 和 Delivery Chain 增加固定 envelope、幂等提交、同页断线恢复、显式取消和 bounded event retention                                                      |
+| v0.4.11 | Structured Supervisor Review Loop                  | 将 `/delivery-chain` 演进为拥有严格 Contract、Runtime 强制 Review Group 和一次受控返修的 ControlledDeliverySupervisor                                                           |
 | v0.4.12 | Image Generation Agent                             | 通过显式 `/image` 增加受控单张文生图：独立 LangGraph 图、固定 Provider、临时同源预览与下载                                                                                      |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。

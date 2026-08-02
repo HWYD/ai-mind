@@ -52,15 +52,18 @@ const DEMO_VERSION_PRESENTATION: Record<string, { badgeLabel: '示例' | '测试
         description: '用于测试版本方案信息缺失',
     },
 }
-const DEMO_SCENARIO_PRESENTATION: Record<string, { description: string }> = {
-    'delivery-chain-resource-boundary': {
-        description: '体验 demo 资源边界约束下的交付链路规划',
+const DEMO_SCENARIO_PRESENTATION: Record<string, { description: string; label: string }> = {
+    'register-login': {
+        label: '注册登录系统',
+        description: '为注册登录系统生成方案、任务拆解和评审报告',
     },
-    'langsmith-safe-mode': {
-        description: '体验 observability safe mode 的方案与评审链路',
+    'guangzhou-3-day-trip': {
+        label: '广州三天旅行计划',
+        description: '为广州三天旅行生成行程方案、任务清单和评审报告',
     },
-    'request-limit-banner': {
-        description: '体验需求到 Plan、Task、Review 报告的完整链路',
+    'frontend-learning-plan': {
+        label: '前端学习计划',
+        description: '为前端学习路线生成阶段方案、任务拆解和评审报告',
     },
 }
 
@@ -214,6 +217,7 @@ async function toCatalogItems(projectRoot: string, resourceRoot: string, version
 function getDemoScenarioPresentation(scenarioId: string) {
     return (
         DEMO_SCENARIO_PRESENTATION[scenarioId] ?? {
+            label: scenarioId,
             description: '体验公开 demo scenario 的受控交付链路',
         }
     )
@@ -252,7 +256,7 @@ async function toScenarioCatalogItems(
             description: presentation.description,
             fileName: `${scenario.id}/requirement.md`,
             group: 'scenario',
-            label: `${scenario.id}/requirement.md`,
+            label: presentation.label,
             uri: createDocsResourceUri(scenario.entry),
         })
     }

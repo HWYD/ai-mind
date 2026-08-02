@@ -1,3 +1,4 @@
+import type { ReviewerRole } from './agent-contracts'
 import { findRuntimeArtifact, hasRuntimeArtifact } from './runtime-artifacts'
 import type { DelegationPolicy, RuntimeArtifact, SubagentToolId } from './types'
 
@@ -25,9 +26,84 @@ export const deliveryChainDelegationPolicy: DelegationPolicy = {
     requireTasksBeforeReview: true,
 }
 
+/** v0.4.11 的阶段预算；它限制受控流程，而非给模型开放动态调度。 */
+export const deliveryChainExecutionBudgets = {
+    contractRepairAttemptsPerStage: 1,
+    plan: 1,
+    postReviewDecision: 1,
+    preDecision: 1,
+    planRevision: 1,
+    reviewCycles: 1,
+    reviewerStartsPerCycle: 3,
+    revisionCycles: 1,
+    taskRevision: 1,
+    tasks: 1,
+} as const
+
+export type DeliveryChainExecutionBudgetStage = keyof typeof deliveryChainExecutionBudgets
+
+export interface DeliveryChainExecutionBudget {
+    claim: (stage: DeliveryChainExecutionBudgetStage) => boolean
+    remaining: () => Readonly<Record<DeliveryChainExecutionBudgetStage, number>>
+}
+
+export function createDeliveryChainExecutionBudget(): DeliveryChainExecutionBudget {
+    const remaining: Record<DeliveryChainExecutionBudgetStage, number> = {
+        contractRepairAttemptsPerStage: deliveryChainExecutionBudgets.contractRepairAttemptsPerStage,
+        plan: deliveryChainExecutionBudgets.plan,
+        postReviewDecision: deliveryChainExecutionBudgets.postReviewDecision,
+        preDecision: deliveryChainExecutionBudgets.preDecision,
+        planRevision: deliveryChainExecutionBudgets.planRevision,
+        reviewCycles: deliveryChainExecutionBudgets.reviewCycles,
+        reviewerStartsPerCycle: deliveryChainExecutionBudgets.reviewerStartsPerCycle,
+        revisionCycles: deliveryChainExecutionBudgets.revisionCycles,
+        taskRevision: deliveryChainExecutionBudgets.taskRevision,
+        tasks: deliveryChainExecutionBudgets.tasks,
+    }
+
+    return {
+        claim(stage) {
+            if (remaining[stage] < 1) return false
+            remaining[stage] -= 1
+            return true
+        },
+        remaining() {
+            return { ...remaining }
+        },
+    }
+}
+
 export interface DelegationValidationFailure {
     message: string
     summary: string
+}
+
+const REQUIRED_REVIEWER_ROLES: ReviewerRole[] = ['general', 'risk', 'boundary']
+
+/**
+ * Runtime 不会替 Supervisor 排序、去重或补齐角色；只接受恰好一次的固定集合。
+ */
+export function validateExactReviewerRoles(reviewerRoles: ReviewerRole[]): DelegationValidationFailure | null {
+    if (reviewerRoles.length !== REQUIRED_REVIEWER_ROLES.length) {
+        return {
+            message: 'Supervisor reviewerRoles 必须恰好声明 general、risk、boundary 各一次。',
+            summary: 'Supervisor 声明的 Reviewer 集合不完整。',
+        }
+    }
+
+    const counts = new Map<ReviewerRole, number>()
+    for (const role of reviewerRoles) {
+        counts.set(role, (counts.get(role) ?? 0) + 1)
+    }
+
+    if (REQUIRED_REVIEWER_ROLES.some(role => counts.get(role) !== 1)) {
+        return {
+            message: 'Supervisor reviewerRoles 必须恰好声明 general、risk、boundary 各一次。',
+            summary: 'Supervisor 声明的 Reviewer 集合不完整或重复。',
+        }
+    }
+
+    return null
 }
 
 // v0.4.1: phase 上下文，用于区分串行阶段和并行 Review 阶段。

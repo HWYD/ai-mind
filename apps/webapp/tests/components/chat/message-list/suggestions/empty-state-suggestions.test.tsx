@@ -33,14 +33,15 @@ describe('EmptyStateSuggestions', () => {
         vi.useRealTimers()
     })
 
-    it('renders the quick start heading, four cases, and current technical evidence', () => {
+    it('renders the quick start section and four cases', () => {
         render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
 
+        expect(screen.getByRole('heading', { level: 2 })).toBeTruthy()
         expect(screen.getByRole('heading', { name: '试试这些能力' })).toBeTruthy()
         expect(screen.getByText('选择一个场景，查看执行过程、控制边界与最终产物。')).toBeTruthy()
         expect(screen.getAllByRole('article')).toHaveLength(4)
         expect(screen.getByText('LangGraph · HITL Checkpoint · 最多两轮修订')).toBeTruthy()
-        expect(screen.getByText('Agent 调用 · 3 路并行 · 评审规则汇总')).toBeTruthy()
+        expect(screen.getByText('Agent-as-Tool · 3 个评审 subAgent · 结构化')).toBeTruthy()
         expect(screen.getByText('图像需求摘要 · 结构化输出 · 最多一次修订')).toBeTruthy()
         expect(screen.getByText('UserMemory · PostgresStore · 向量检索')).toBeTruthy()
         expect(screen.queryByText('LangGraph · HITL Checkpoint · 最多两轮受控修订')).toBeNull()
@@ -67,7 +68,10 @@ describe('EmptyStateSuggestions', () => {
         const onSelectSuggestion = vi.fn()
         render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
-        fireEvent.click(screen.getByRole('button', { name: '运行生成交付计划示例' }))
+        const deliveryCase = document.querySelector<HTMLElement>('[aria-labelledby="delivery-case-title"]')
+
+        expect(deliveryCase).toBeTruthy()
+        fireEvent.click(within(deliveryCase as HTMLElement).getByRole('button'))
 
         expect(onSelectSuggestion).toHaveBeenCalledTimes(1)
         expect(onSelectSuggestion).toHaveBeenCalledWith(deliveryChainDemoSuggestion)

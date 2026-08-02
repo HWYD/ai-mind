@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
@@ -197,7 +197,7 @@ describe('ChatMessageList', () => {
         expect(screen.queryByText('试试这些能力')).toBeNull()
     })
 
-    it('renders image summary and result parts after an image generation task completes', () => {
+    it('renders image summary and result parts after an image generation task completes', async () => {
         const message: MindMessage = {
             id: 'assistant-image-result',
             role: 'assistant',
@@ -246,6 +246,7 @@ describe('ChatMessageList', () => {
         expect(screen.getByText('生成结果')).toBeTruthy()
 
         const recommendationButtons = within(screen.getByRole('group', { name: '推荐问题' })).getAllByRole('button')
+        await waitFor(() => expect(screen.getByText(/临时图片已过期/)).toBeTruthy())
         const selectedQuestion = recommendationButtons[0].textContent ?? ''
 
         fireEvent.click(recommendationButtons[0])

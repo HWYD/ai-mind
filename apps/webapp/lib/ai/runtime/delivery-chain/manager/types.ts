@@ -1,23 +1,36 @@
+import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
+import type { BaseMessage } from '@langchain/core/messages'
+import type { ZodType } from 'zod'
+
 import type { ChatToolDefinition } from '@/lib/ai/tools'
 
 import type {
-    AgentContextBlock,
+    BoundaryReviewResultDraft,
+    GeneralReviewResultDraft,
+    PlanArtifactDraft,
+    ReviewerRole,
+    ReviewFindingDraft,
+    RevisionTarget,
+    RiskReviewResultDraft,
+    RunStatus,
+    TaskArtifactDraft,
+} from './agent-contracts'
+import type { SafeContractIssue } from './agent-contracts'
+import type { StructuredOutputModel } from './contract-invocation'
+import type {
+    DeliveryWorkerToolResult,
     RuntimeArtifact,
     RuntimeArtifactKind,
     SubagentToolCallInput,
     SubagentToolId,
-    SubagentToolInput,
-    SubagentToolJsonResult,
 } from './subagent-tool-schemas'
 
 export type {
-    AgentContextBlock,
+    DeliveryWorkerToolResult,
     RuntimeArtifact,
     RuntimeArtifactKind,
     SubagentToolCallInput,
     SubagentToolId,
-    SubagentToolInput,
-    SubagentToolJsonResult,
 } from './subagent-tool-schemas'
 
 export interface SubagentToolDefinition {
@@ -32,22 +45,16 @@ export interface SubagentToolDefinition {
     roleInstruction: string
 }
 
-export interface SubagentToolInvocation extends SubagentToolInput {
-    invocationId: string
-    startedAt: string
-    subagentId: SubagentToolId
-}
-
-export interface SubagentToolResult {
-    artifacts: RuntimeArtifact[]
-    endedAt: string
-    failureCode?: string
-    invocationId: string
-    markdown: string
-    status: SubagentToolJsonResult['status']
-    subagentId: SubagentToolId
-    summaryForManager: string
-    warnings: string[]
+export interface DeliveryWorkerInvocation {
+    businessModel: BaseChatModel
+    contractModel: StructuredOutputModel
+    messages: BaseMessage[]
+    name: string
+    normalizeError?: (error: unknown) => { code?: string }
+    onBusinessInvoke?: () => void
+    onContractInvoke?: (attempt: 'initial' | 'repair') => void
+    schema: ZodType<unknown>
+    validate?: (value: unknown) => SafeContractIssue[]
 }
 
 export interface SubagentToolInvocationTraceEntry {
@@ -79,13 +86,49 @@ export interface DeliveryChainSubagentToolDefinition extends SubagentToolDefinit
     chatToolDefinition: ChatToolDefinition<SubagentToolCallInput>
 }
 
-// v0.4.1: 并行 Review Group 的结果聚合，只在 Manager synthesis 内部使用，不进入 DB / stream / frontend message / public DTO。
-export interface ReviewBundle {
-    boundaryReview: SubagentToolResult | null
-    failedReviews: Array<{
-        subagentId: SubagentToolId
-        summary: string
-    }>
-    generalReview: SubagentToolResult | null
-    riskReview: SubagentToolResult | null
+export type RuntimePlanArtifact = RuntimeArtifact & PlanArtifactDraft
+
+export type RuntimeTaskArtifact = RuntimeArtifact &
+    TaskArtifactDraft & {
+        planRef: {
+            artifactId: string
+            revision: 1 | 2
+        }
+    }
+
+export interface RuntimeReviewFinding extends ReviewFindingDraft {
+    cycleId: string
+    findingId: string
+    sourceRole: ReviewerRole
 }
+
+export interface RevisionOutcome {
+    requests: Array<{
+        artifactRefs: Array<{ artifactId: string; revision: 2; target: RevisionTarget }>
+        outcomeSummary: string
+        requestKey: string
+        sourceFindingIds: string[]
+        updatedTargets: RevisionTarget[]
+    }>
+    revisionSequence: 1
+}
+
+export type RuntimeReviewResult =
+    | (GeneralReviewResultDraft & { cycleId: string; findings: RuntimeReviewFinding[] })
+    | (RiskReviewResultDraft & { cycleId: string; findings: RuntimeReviewFinding[] })
+    | (BoundaryReviewResultDraft & { cycleId: string; findings: RuntimeReviewFinding[] })
+
+export type ReviewExecutionState = 'completed' | 'contract_failure' | 'execution_failed' | 'timeout'
+
+export interface StructuredReviewBundle {
+    artifactRefs: {
+        plan: { artifactId: string; revision: 1 | 2 }
+        tasks: { artifactId: string; revision: 1 | 2 }
+    }
+    coverage: Record<ReviewerRole, ReviewExecutionState>
+    cycleId: string
+    findings: RuntimeReviewFinding[]
+    results: Partial<Record<ReviewerRole, RuntimeReviewResult>>
+}
+
+export type { RunStatus }

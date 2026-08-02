@@ -31,8 +31,8 @@ describe('emptyStateSuggestions', () => {
         expect(deliveryChainDemoSuggestion.composer?.plainText).toBe('')
         expect(deliveryChainDemoSuggestion.composer?.references).toEqual([
             expect.objectContaining({
-                label: 'request-limit-banner/requirement.md',
-                uri: 'demo://scenarios/request-limit-banner/requirement.md',
+                label: '注册登录系统',
+                uri: 'demo://scenarios/register-login/requirement.md',
             }),
         ])
         expect(deliveryChainDemoSuggestion.displaySegments).toEqual(

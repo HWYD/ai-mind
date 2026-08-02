@@ -11,14 +11,14 @@ Roadmap 不是当前版本的实现清单。每个版本只能实现对应 spec 
 
 ## Current baseline
 
-截至 v0.4.3，当前 Agent Runtime 基线是：
+截至 v0.4.11，当前 Agent Runtime 基线是：
 
 - Public Agent demo resource root 已收口到 `examples/agent-demo/`。
 - Public Agent demo 文件资源只使用 `@demo://`。
 - Tasklist Agent public demo 入口是 `/tasklist + @demo://version-plans/*.md`。
 - Tasklist Agent 是受控 LangGraph Agent Runtime，包含 GraphState、HITL、checkpoint / resume 和 AgentRun 协调边界。
 - `/delivery-chain` 支持 demo scenario 和 inline requirement 两类输入。
-- `/delivery-chain` 内部 runtime 是 `ControlledDeliveryManager`：通过受控 tool-calling 委派子 Agent tool，Review 阶段支持 3 个 review-class subagent 并行执行。
+- `/delivery-chain` 内部 runtime 是结构化 Supervisor：用户模型生成业务判断，固定 Contract 模型编码严格 Contract，Review 阶段固定并行执行 General/Risk/Boundary 三个角色。
 - `/delivery-chain` 已支持 `workflow-progress-*` stream channel 和对应前端展示，包含 `delegate-review-group` step。
 - 普通 chat 已有单会话 chat memory baseline；tool / MCP final answer、Tasklist final answer summary、Delivery final report 现在也可作为安全 final turn 进入 chat history，但它们仍不进入 Agent Runtime、GraphState 或 Delivery runtime artifact 边界。
 - `@docs://`、`docs://versions/*.md` 不再作为 public Agent demo 输入。
@@ -206,6 +206,28 @@ rejectOutOfOrderToolCalls: true
 ```text
 把 Review 阶段从"单 subagent 串行"推进到"多维度并行评审 + 规则综合判断"，为后续多 Agent 协作奠定基础。
 ```
+
+## v0.4.11: Structured Supervisor Review Loop (Implemented)
+
+目标：
+
+- 将 `/delivery-chain` 的 Runtime 主链收敛为结构化 Supervisor、Plan、Tasks、固定三角色 Review Group 和至多一次返修。
+- 保持业务判断使用用户选择的模型；将每个严格 Contract 和唯一 repair 固定到 `deepseek/deepseek-v4-pro`。
+- 将 dispatch plan、artifact revision、review coverage、finding lineage 和 canonical RunStatus 保持为 Runtime-owned typed data；Markdown 仅用于展示。
+- 使用既有 `workflow-progress-*` 展示 Supervisor、首次 Review、返修和报告，不扩展 public stream 协议；返修后不执行 Re-review。
+
+明确不做：
+
+- 不恢复 Manager tool-calling fallback、Markdown 业务解析或开放 metadata 驱动的状态合成。
+- 不新增 GraphState、持久化 artifact、checkpoint/resume、开放 Agent Catalog 或用户可选 Agent。
+- 不让 `/delivery-chain` 调用 Tasklist Graph Runtime，也不改变 `/tasklist` 的 Graph/HITL 边界。
+
+实现摘要：
+
+- 58 个实现任务完成（T001–T058），覆盖 Contract、Supervisor、Plan/Tasks、Review Group、返修和报告。
+- 确定性测试：130 文件 / 908 测试通过，含 Contract、policy、Review Group、status matrix、loop 和 evaluation harness。
+- 新增 ADR-0013，详见 `docs/adr/0013-structured-supervisor-review-loop.md`。
+- Demo 案例替换为 `register-login`、`guangzhou-3-day-trip`、`frontend-learning-plan`。
 
 ## Future Direction
 
