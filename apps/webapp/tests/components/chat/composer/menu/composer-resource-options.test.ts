@@ -16,11 +16,11 @@ const mockCatalogResponse = {
             },
             {
                 badgeLabel: '示例',
-                fileName: 'request-limit-banner/requirement.md',
+                fileName: 'register-login/requirement.md',
                 group: 'scenario',
-                label: 'request-limit-banner/requirement.md',
-                uri: 'demo://scenarios/request-limit-banner/requirement.md',
-                description: '体验需求到 Plan、Task、Review 报告的完整链路',
+                label: '注册登录系统',
+                uri: 'demo://scenarios/register-login/requirement.md',
+                description: '体验注册、登录与安全边界的交付规划链路',
             },
         ],
     },
@@ -71,10 +71,10 @@ describe('getFilteredComposerResources', () => {
         expect(resources).toEqual([
             expect.objectContaining({
                 badgeLabel: '示例',
-                description: '体验需求到 Plan、Task、Review 报告的完整链路',
+                description: '体验注册、登录与安全边界的交付规划链路',
                 group: 'scenario',
-                label: 'request-limit-banner/requirement.md',
-                uri: 'demo://scenarios/request-limit-banner/requirement.md',
+                label: '注册登录系统',
+                uri: 'demo://scenarios/register-login/requirement.md',
                 source: 'local',
             }),
         ])

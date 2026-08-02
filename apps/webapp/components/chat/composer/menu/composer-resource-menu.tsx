@@ -4,6 +4,7 @@ import { FileText, Server } from 'lucide-react'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { cn } from '@/lib/utils'
 
 import type { ComposerResourceOption } from '../composer-types'
@@ -96,14 +97,21 @@ export const ComposerResourceMenu = forwardRef<
                                 isSelected ? 'bg-[var(--composer-focus-soft)]' : 'hover:bg-muted/70'
                             )}
                         >
-                            <span
-                                className={cn(
-                                    'inline-flex size-9 shrink-0 items-center justify-center rounded-xl sm:size-10',
-                                    item.source === 'remote' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
-                                )}
-                            >
-                                <Icon className="size-4 sm:size-5" strokeWidth={2.2} />
-                            </span>
+                            <HoverCard openDelay={600} closeDelay={100}>
+                                <HoverCardTrigger asChild>
+                                    <span
+                                        className={cn(
+                                            'inline-flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl sm:size-10',
+                                            item.source === 'remote' ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'
+                                        )}
+                                    >
+                                        <Icon className="size-4 sm:size-5" strokeWidth={2.2} />
+                                    </span>
+                                </HoverCardTrigger>
+                                <HoverCardContent side="top" sideOffset={8} className="z-[100] w-auto px-3 py-1.5 text-xs font-mono">
+                                    {item.fileName}
+                                </HoverCardContent>
+                            </HoverCard>
                             <span className="min-w-0 flex-1">
                                 <span className="flex min-w-0 items-center gap-2">
                                     <span className="truncate text-sm font-semibold text-foreground sm:text-base">{item.label}</span>

@@ -87,7 +87,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
                 ? {
                       enable_thinking: options.enableReasoning,
                   }
-                : undefined
+                : (this.provider === 'deepseek' || this.provider === 'doubao') && options.enableReasoning === false
+                  ? {
+                        thinking: { type: 'disabled' },
+                    }
+                  : undefined
 
         return new ChatOpenAI({
             apiKey,

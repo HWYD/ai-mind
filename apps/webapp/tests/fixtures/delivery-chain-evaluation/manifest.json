@@ -1,0 +1,153 @@
+{
+    "schemaVersion": 1,
+    "scorerVersion": "v1",
+    "cases": [
+        {
+            "caseId": "direct-pass",
+            "input": { "kind": "inline", "requirement": "Plan a request-limit banner with acceptance criteria.", "contextRefs": [] },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "pass",
+                "reviewCoverage": ["general", "risk", "boundary"],
+                "revisionTarget": "none",
+                "requiredFindings": []
+            },
+            "scoringAnchors": [
+                { "dimension": "status", "minimum": 2 },
+                { "dimension": "coverage", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "clarification-required",
+            "input": {
+                "kind": "inline",
+                "requirement": "Plan a feature without its target behavior or acceptance criteria.",
+                "contextRefs": []
+            },
+            "expected": {
+                "supervisorBranch": "clarification_required",
+                "runStatus": "clarification_required",
+                "reviewCoverage": [],
+                "revisionTarget": "none",
+                "requiredFindings": []
+            },
+            "scoringAnchors": [
+                { "dimension": "status", "minimum": 2 },
+                { "dimension": "next_step", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "revision-required",
+            "input": {
+                "kind": "inline",
+                "requirement": "Plan a request-limit banner and include recovery-state acceptance criteria.",
+                "contextRefs": []
+            },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "pass",
+                "reviewCoverage": ["general", "risk", "boundary"],
+                "revisionTarget": "plan",
+                "requiredFindings": ["acceptance-coverage"]
+            },
+            "scoringAnchors": [
+                { "dimension": "revision_lineage", "minimum": 2 },
+                { "dimension": "required_finding_resolution", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "boundary-blocked",
+            "input": { "kind": "inline", "requirement": "Plan a change that would persist raw delivery artifacts.", "contextRefs": [] },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "blocked",
+                "reviewCoverage": ["general", "risk", "boundary"],
+                "revisionTarget": "none",
+                "requiredFindings": ["persistence-boundary"]
+            },
+            "scoringAnchors": [
+                { "dimension": "boundary_detection", "minimum": 2 },
+                { "dimension": "status", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "risk-blocker",
+            "input": {
+                "kind": "inline",
+                "requirement": "Plan a feature with an unresolved high-impact security dependency.",
+                "contextRefs": []
+            },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "blocked",
+                "reviewCoverage": ["general", "risk", "boundary"],
+                "revisionTarget": "none",
+                "requiredFindings": ["security-blocker"]
+            },
+            "scoringAnchors": [
+                { "dimension": "risk_detection", "minimum": 2 },
+                { "dimension": "status", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "one-reviewer-failure",
+            "input": {
+                "kind": "demo",
+                "requirement": "Plan the request-limit demo scenario.",
+                "contextRefs": ["demo://scenarios/request-limit-banner/requirement.md"]
+            },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "needs_review",
+                "reviewCoverage": ["general", "boundary"],
+                "revisionTarget": "none",
+                "requiredFindings": []
+            },
+            "faultInjection": { "failedReviewers": ["risk"], "failureKind": "execution_failed" },
+            "scoringAnchors": [
+                { "dimension": "coverage", "minimum": 2 },
+                { "dimension": "status", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "two-reviewer-failures",
+            "input": {
+                "kind": "demo",
+                "requirement": "Plan the request-limit demo scenario.",
+                "contextRefs": ["demo://scenarios/request-limit-banner/requirement.md"]
+            },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "needs_review",
+                "reviewCoverage": ["general"],
+                "revisionTarget": "none",
+                "requiredFindings": []
+            },
+            "faultInjection": { "failedReviewers": ["risk", "boundary"], "failureKind": "timeout" },
+            "scoringAnchors": [
+                { "dimension": "coverage", "minimum": 2 },
+                { "dimension": "status", "minimum": 2 }
+            ]
+        },
+        {
+            "caseId": "all-reviewers-failure",
+            "input": {
+                "kind": "demo",
+                "requirement": "Plan the request-limit demo scenario.",
+                "contextRefs": ["demo://scenarios/request-limit-banner/requirement.md"]
+            },
+            "expected": {
+                "supervisorBranch": "execute",
+                "runStatus": "failed",
+                "reviewCoverage": [],
+                "revisionTarget": "none",
+                "requiredFindings": []
+            },
+            "faultInjection": { "failedReviewers": ["general", "risk", "boundary"], "failureKind": "contract_failure" },
+            "scoringAnchors": [
+                { "dimension": "coverage", "minimum": 2 },
+                { "dimension": "status", "minimum": 2 }
+            ]
+        }
+    ]
+}

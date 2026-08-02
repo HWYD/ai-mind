@@ -8,6 +8,12 @@
 
 本文档定义了 Delivery Chain 的交付边界规则，用于确保交付过程中的范围控制、资源隔离和安全合规。所有交付活动必须严格遵守这些边界。
 
+### 规划与实际变更的区分
+
+Delivery Chain 在本版本只生成和评审交付计划，不会读取或修改真实项目源码。下文“不得修改 `apps/`、`packages/` 等核心代码”的限制，约束的是**本次 Runtime 的实际读写和执行副作用**，不禁止 Plan、Tasks 或 Review 引用案例 requirement/context 中已经明确提供的目标模块。
+
+因此，案例可以要求后续实施阶段修改 `apps/webapp/components/**` 等目标区域；只要本次 Delivery Chain 仅消费 `examples/agent-demo/` 中的受控文本资源、输出规划产物，并且不尝试读取或写入这些目标文件，就应继续进入 Plan、Tasks 和 Review，而不是因目标模块位于 `apps/` 自动 `blocked`。
+
 ---
 
 ## 1. 范围边界 (Scope Boundaries)

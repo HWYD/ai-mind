@@ -25,7 +25,7 @@ import type { ChatComposerReference, ChatRequest } from '@/lib/ai/types/chat'
 
 import type { ChatExecutionContext, WriteChunk } from '../types'
 import type { DeliveryChainInput, DeliveryChainResourceBundle } from './graph-state'
-import { runControlledDeliveryManager } from './manager'
+import { DeliveryChainModelCapabilityError, runControlledDeliveryManager } from './manager'
 import { buildDeliveryManagerFailureReport } from './manager/report-synthesis'
 import {
     type DeliveryManagerProgressEvent,
@@ -39,6 +39,12 @@ const LEGACY_VERSION_PLAN_REFERENCE_PATTERN = /^(docs|demo):\/\/versions\/[^/\\]
 const DELIVERY_CHAIN_SCENARIO_ENTRY_PATTERN = /^demo:\/\/scenarios\/([^/\\]+)\/requirement\.md$/i
 const DELIVERY_CHAIN_SCENARIO_NON_ENTRY_PATTERN =
     /^demo:\/\/scenarios\/([^/\\]+)\/(context|plan\.sample|tasks\.sample|review\.expected)\.md$/i
+const DELIVERY_CHAIN_SCENARIO_EXPECTED_PRE_DECISIONS: Readonly<Record<string, 'execute'>> = {
+    'register-login': 'execute',
+    'guangzhou-3-day-trip': 'execute',
+    'frontend-learning-plan': 'execute',
+    'request-limit-banner': 'execute',
+}
 const FORBIDDEN_SCHEME_PATTERN = /^@?(docs|specs|file):\/\//i
 const MIN_INLINE_REQUIREMENT_CHARS = 24
 const DELIVERY_CHAIN_WORKFLOW_KIND = 'delivery-chain'
@@ -66,7 +72,11 @@ type DeliveryChainWorkflowStepId =
     | 'delegate-task'
     | 'delegate-review'
     | 'delegate-review-group'
+    | 'revise-plan'
+    | 'revise-tasks'
     | 'synthesize-report'
+    | 'supervisor-post-decision'
+    | 'supervisor-pre-decision'
 
 interface DeliveryChainWorkflowProgressRuntime {
     partId: string
@@ -91,6 +101,7 @@ const LOAD_STEP_DEFINITION: DeliveryChainWorkflowStepDefinition = {
 
 type DeliveryChainInvocation =
     | {
+          expectedPreDecision?: 'execute'
           inlineRequirementText?: string
           kind: 'ready-scenario'
           requirementReference: ChatComposerReference
@@ -194,6 +205,7 @@ function createDeliveryChainInput(
     }
 
     return {
+        expectedPreDecision: invocation.expectedPreDecision,
         inlineRequirementText: invocation.inlineRequirementText,
         requirementRef: invocation.requirementReference.uri,
         scenarioId: invocation.scenarioId,
@@ -321,6 +333,27 @@ function buildLoadCompletedSummary(input: DeliveryChainInput, resources: Deliver
 }
 
 function mapManagerProgressEvent(event: DeliveryManagerProgressEvent): DeliveryChainWorkflowStepDefinition {
+    if (event.stepId === 'supervisor-pre-decision' || event.stepId === 'supervisor-post-decision') {
+        return {
+            details: event.details ?? ['Supervisor 正在生成受控调度决策'],
+            runningSummary: event.summary ?? 'Supervisor 正在生成受控调度决策',
+            stepId: event.stepId,
+            title: event.stepId === 'supervisor-pre-decision' ? 'Supervisor 执行前决策' : 'Supervisor 评审后决策',
+        }
+    }
+
+    if (event.stepId === 'revise-plan' || event.stepId === 'revise-tasks') {
+        const subagentId = event.stepId === 'revise-plan' ? 'plan-subagent' : 'task-subagent'
+
+        return {
+            ...getSubagentProgressStepDefinition(subagentId),
+            details: event.details ?? [`${subagentId} 正在处理已验证的返修请求`],
+            runningSummary: event.summary ?? `${subagentId} 正在返修`,
+            stepId: event.stepId,
+            title: event.stepId === 'revise-plan' ? 'Plan Worker 返修' : 'Task Worker 返修',
+        }
+    }
+
     if (event.stepId === 'synthesize-report') {
         return {
             ...getReportProgressStepDefinition(),
@@ -331,8 +364,8 @@ function mapManagerProgressEvent(event: DeliveryManagerProgressEvent): DeliveryC
     // v0.4.1: Review Group 并行评审使用独立 step，保留 event 中的详细信息
     if (event.stepId === 'delegate-review-group') {
         return {
-            details: event.details ?? ['Manager 并行调用评审子 Agent'],
-            runningSummary: event.summary ?? 'Manager 正在并行调用评审子 Agent',
+            details: event.details ?? ['Manager 并行调用评审子 Agent：方案评审、风险评估、边界检查'],
+            runningSummary: event.summary ?? 'Manager 正在并行调用评审子 Agent：方案评审、风险评估、边界检查',
             stepId: 'delegate-review-group',
             title: 'Manager 并行评审',
         }
@@ -668,11 +701,14 @@ export function resolveDeliveryChainInvocation(request: ChatRequest): DeliveryCh
     const entryMatch = normalizedReference.uri.match(DELIVERY_CHAIN_SCENARIO_ENTRY_PATTERN)
 
     if (entryMatch) {
+        const scenarioId = entryMatch[1] ?? 'unknown-scenario'
+
         return {
+            expectedPreDecision: DELIVERY_CHAIN_SCENARIO_EXPECTED_PRE_DECISIONS[scenarioId],
             inlineRequirementText: inlineRequirementText || undefined,
             kind: 'ready-scenario',
             requirementReference: normalizedReference,
-            scenarioId: entryMatch[1] ?? 'unknown-scenario',
+            scenarioId,
         }
     }
 
@@ -793,6 +829,7 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
 
     try {
         const result = await runControlledDeliveryManager({
+            context: options.context,
             input,
             modelHandle: options.modelHandle,
             onProgress(event) {
@@ -808,6 +845,7 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
             resources,
             signal: options.context.signal,
             workflowId: workflowProgress.workflowId,
+            writeChunk: options.writeChunk,
         })
 
         emitWorkflowProgressEnd(
@@ -838,17 +876,19 @@ export async function startDeliveryChainRun(options: StartDeliveryChainRunOption
         }
 
         return true
-    } catch {
+    } catch (error) {
+        const capabilityFailure = error instanceof DeliveryChainModelCapabilityError
+        const failureMessage = capabilityFailure
+            ? 'Delivery Chain 的固定 Contract 模型不支持结构化 JSON 输出，当前交付计划已安全停止。'
+            : 'Delivery Manager 执行异常，请稍后重试。'
+
         emitWorkflowProgressStep(options.writeChunk, workflowProgress, getReportProgressStepDefinition(), 'failed', {
-            failureMessage: 'Delivery Manager 执行异常，当前交付计划已安全停止。',
-            summary: 'Delivery Manager 执行异常',
+            failureMessage: capabilityFailure ? failureMessage : 'Delivery Manager 执行异常，当前交付计划已安全停止。',
+            summary: capabilityFailure ? '当前模型缺少结构化输出能力' : 'Delivery Manager 执行异常',
         })
         emitWorkflowProgressEnd(options.writeChunk, workflowProgress, 'failed', undefined, '交付计划未完整生成，请稍后重试。')
 
-        writeStaticTextPart(
-            options.writeChunk,
-            buildUnexpectedFailureReport(input, 'Delivery Manager 执行异常，请稍后重试。', resources.warnings)
-        )
+        writeStaticTextPart(options.writeChunk, buildUnexpectedFailureReport(input, failureMessage, resources.warnings))
         return true
     }
 }

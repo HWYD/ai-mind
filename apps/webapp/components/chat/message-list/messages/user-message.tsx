@@ -34,7 +34,7 @@ function renderDisplaySegment(segment: ChatComposerDisplaySegment, key: string):
             title={segment.reference.uri}
             variant="resource"
         >
-            @{segment.reference.label || '资源'}
+            {segment.reference.label || '资源'}
         </ComposerChip>
     )
 }

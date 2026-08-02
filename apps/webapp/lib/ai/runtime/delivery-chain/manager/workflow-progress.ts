@@ -5,7 +5,11 @@ export type DeliveryManagerProgressStepId =
     | 'delegate-review'
     | 'delegate-review-group'
     | 'delegate-task'
+    | 'revise-plan'
+    | 'revise-tasks'
     | 'synthesize-report'
+    | 'supervisor-post-decision'
+    | 'supervisor-pre-decision'
 export type DeliveryManagerProgressStatus = 'completed' | 'failed' | 'running'
 
 export interface DeliveryManagerProgressEvent {

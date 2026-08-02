@@ -70,7 +70,7 @@ export function ComposerChipRow({
             {command ? <ComposerChip onRemove={onCommandRemove}>{command.label}</ComposerChip> : null}
             {references.map(reference => (
                 <ComposerChip key={reference.id} title={reference.uri} variant="resource" onRemove={() => onReferenceRemove?.(reference)}>
-                    @{reference.label}
+                    {reference.label}
                 </ComposerChip>
             ))}
         </div>

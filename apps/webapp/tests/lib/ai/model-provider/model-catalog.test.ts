@@ -26,4 +26,13 @@ describe('model catalog', () => {
     it('所有模型 provider 都必须属于项目支持的 provider 集合', () => {
         expect(modelCatalog.every(item => aiMindLlmProviders.includes(item.provider))).toBe(true)
     })
+
+    it('Delivery Chain 的固定 Contract 模型声明严格 JSON 输出能力', () => {
+        expect(modelCatalog).toContainEqual(
+            expect.objectContaining({
+                capabilities: expect.objectContaining({ jsonOutput: true }),
+                id: 'deepseek/deepseek-v4-pro',
+            })
+        )
+    })
 })

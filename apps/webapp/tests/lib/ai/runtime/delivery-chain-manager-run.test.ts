@@ -1,1217 +1,593 @@
-import { AIMessage } from '@langchain/core/messages'
-import { tool } from '@langchain/core/tools'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
-import { adaptFinalTurnCandidate, DELIVERY_FINAL_TEXT_LIMIT, DELIVERY_FINAL_TEXT_TRUNCATION_NOTICE } from '@/lib/ai/runtime/chat-memory'
-import type { DeliveryChainInput, DeliveryChainResourceBundle } from '@/lib/ai/runtime/delivery-chain/graph-state'
-import {
-    createDeliveryChainSubagentTools,
-    createRuntimeArtifact,
-    type DeliveryChainSubagentToolDefinition,
-    findRuntimeArtifact,
-    runControlledDeliveryManager,
-    type SubagentToolCallInput,
-    subagentToolCallInputSchema,
-    type SubagentToolInput,
-} from '@/lib/ai/runtime/delivery-chain/manager'
+import { runStructuredDeliveryManager } from '@/lib/ai/runtime/delivery-chain/manager'
 
-const modelProviderMocks = vi.hoisted(() => ({
-    createChatModel: vi.fn(),
-    getModelProviderConfig: vi.fn(),
-}))
-
-vi.mock('@/lib/ai/model-provider', async importOriginal => {
-    const actual = await importOriginal<typeof import('@/lib/ai/model-provider')>()
-
-    return {
-        ...actual,
-        createChatModel: modelProviderMocks.createChatModel,
-        getModelProviderConfig: modelProviderMocks.getModelProviderConfig,
-    }
-})
-
-const testResolvedModelSelection: ResolvedModelSelection = {
-    catalogItem: {
-        availableIn: ['development'],
-        capabilities: {
-            chat: true,
-            embedding: false,
-            jsonOutput: true,
-            streaming: true,
-            tasklist: false,
-            toolCalling: true,
-        },
-        enabled: true,
-        family: 'ollama',
-        id: 'test-model',
-        label: 'Test Model',
-        modelKey: 'test-model',
-        provider: 'ollama',
-        providerModel: 'test-model',
-    },
-    modelId: 'test-model',
-    provider: 'ollama',
-    providerModel: 'test-model',
-    routeType: 'chat',
+const resources = {
+    governanceText: 'Read-only. No persistence. No public stream protocol changes.',
+    planRubricText: 'Produce a verifiable plan.',
+    requirementText: 'Show a request-limit banner with a recoverable failure state.',
+    reviewRubricText: 'Review scope, risks, and boundaries.',
+    sourceRefs: [],
+    taskRubricText: 'Produce executable tasks.',
+    warnings: [],
 }
 
-function createInput(): DeliveryChainInput {
-    return {
-        requirementRef: 'demo://scenarios/request-limit-banner/requirement.md',
-        scenarioId: 'request-limit-banner',
-        source: 'demo_scenario',
-    }
-}
+type StructuredOutput = Record<string, unknown | ((messages: unknown[]) => unknown)>
 
-function createResources(): DeliveryChainResourceBundle {
-    return {
-        contextText: '需要在接近请求上限时展示提醒 banner。',
-        governanceText: '只读 @demo:// 公开 demo 资源，不写代码文件。',
-        planRubricText: '- 明确实现方案与非目标',
-        requirementText: '当接近请求上限时，显示提示 banner。',
-        reviewRubricText: '- 判断覆盖与风险',
-        scenarioId: 'request-limit-banner',
-        sourceRefs: ['demo://scenarios/request-limit-banner/requirement.md', 'demo://scenarios/request-limit-banner/context.md'],
-        taskRubricText: '- 任务要按依赖顺序拆解',
-        warnings: [],
-    }
-}
-
-function extractBalancedJson(content: string, startIndex: number) {
-    let depth = 0
-    let endIndex = -1
-
-    for (let index = startIndex; index < content.length; index += 1) {
-        const char = content[index]
-
-        if (char === '{') {
-            depth += 1
-        } else if (char === '}') {
-            depth -= 1
-
-            if (depth === 0) {
-                endIndex = index + 1
-                break
-            }
-        }
-    }
-
-    if (endIndex < 0) {
-        throw new Error(`未找到完整 JSON: ${content}`)
-    }
-
-    return content.slice(startIndex, endIndex)
-}
-
-function extractToolInvocation(messages: unknown[]) {
-    const humanMessage = messages.at(-1) as { content?: string }
-    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
-    const marker = '请直接发起工具调用'
-    const markerIndex = content.indexOf(marker)
-    const jsonStart = content.indexOf('{', markerIndex >= 0 ? markerIndex : 0)
-
-    if (jsonStart < 0) {
-        throw new Error(`未找到 tool 参数 JSON: ${content}`)
-    }
-
-    return JSON.parse(extractBalancedJson(content, jsonStart)) as SubagentToolCallInput
-}
-
-function extractExpectedTool(messages: unknown[]) {
-    const humanMessage = messages.at(-1) as { content?: string }
-    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
-    const match = content.match(/下一步必须调用工具[:：]\s*(plan-subagent|task-subagent|review-subagent)/)
-
-    if (match?.[1]) {
-        return match[1] as 'plan-subagent' | 'task-subagent' | 'review-subagent'
-    }
-
-    // v0.4.1: Review Group 返回 3 个 review-class tools
-    if (content.includes('同时调用以下 3 个评审工具')) {
-        return 'review-group'
-    }
-
-    return 'plan-subagent'
-}
-
-// v0.4.1: 从 Review Group 的 prompt 中提取 3 个 tool call inputs
-function extractReviewGroupToolInvocations(messages: unknown[]): SubagentToolCallInput[] {
-    const humanMessage = messages.at(-1) as { content?: string }
-    const content = typeof humanMessage?.content === 'string' ? humanMessage.content : ''
-    const marker = '请直接发起 3 个工具调用'
-    const markerIndex = content.indexOf(marker)
-    const arrayStart = content.indexOf('[', markerIndex >= 0 ? markerIndex : 0)
-
-    if (arrayStart < 0) {
-        throw new Error(`未找到 Review Group tool 参数 JSON: ${content}`)
-    }
-
-    // 找到匹配的 ]
-    let depth = 0
-    let endIndex = -1
-
-    for (let i = arrayStart; i < content.length; i += 1) {
-        if (content[i] === '[') depth += 1
-        else if (content[i] === ']') {
-            depth -= 1
-            if (depth === 0) {
-                endIndex = i + 1
-                break
-            }
-        }
-    }
-
-    if (endIndex < 0) {
-        throw new Error(`未找到完整 JSON 数组: ${content}`)
-    }
-
-    return JSON.parse(content.slice(arrayStart, endIndex)) as SubagentToolCallInput[]
-}
-
-function createManagerToolCall(name: string, args: SubagentToolCallInput) {
-    return {
-        args,
-        id: `tool-call:${name}`,
-        name,
-        type: 'tool_call' as const,
-    }
-}
-
-function serializeMessages(messages: unknown[]) {
-    return messages
-        .map(message => {
-            const content = (message as { content?: unknown })?.content
-            return typeof content === 'string' ? content : JSON.stringify(content)
-        })
-        .join('\n\n')
-}
-
-function overrideSubagentToolDefinition(
-    definitions: DeliveryChainSubagentToolDefinition[],
-    subagentId: DeliveryChainSubagentToolDefinition['id'],
-    handler: () => unknown
-) {
-    return definitions.map(definition =>
-        definition.id === subagentId
-            ? {
-                  ...definition,
-                  chatToolDefinition: {
-                      ...definition.chatToolDefinition,
-                      tool: tool(async () => handler(), {
-                          description: definition.description,
-                          name: definition.id,
-                          schema: subagentToolCallInputSchema,
-                      }),
-                  },
-              }
-            : definition
-    ) as DeliveryChainSubagentToolDefinition[]
-}
-
-function createInvocationResolver(inputs: Record<string, SubagentToolInput>) {
-    return ({ invocationId }: { invocationId: string }) => inputs[invocationId] ?? null
-}
-
-function setupMockChatModels(options?: {
-    boundInvoke?: (messages: unknown[]) => Promise<AIMessage>
-    stageResponses?: string[]
-    toolCalling?: boolean
-}) {
-    // v0.4.1: 使用索引而非 shift()，避免并行调用时竞态
-    const stageResponses = [...(options?.stageResponses ?? [])]
-    let invokeCount = 0
-    const baseInvoke = vi.fn().mockImplementation(async (messages: unknown[]) => {
-        // v0.4.1: Review Group 并行调用时，根据 SystemMessage 内容返回对应的 response
-        const systemMessage = (messages as Array<{ content?: string }>)[0]
-        const content = typeof systemMessage?.content === 'string' ? systemMessage.content : ''
-
-        if (content.includes('风险评审专家')) {
-            return new AIMessage({ content: stageResponses[3] ?? '' })
-        }
-
-        if (content.includes('边界检查专家')) {
-            return new AIMessage({ content: stageResponses[4] ?? '' })
-        }
-
-        if (content.includes('交付评审专家')) {
-            return new AIMessage({ content: stageResponses[2] ?? '' })
-        }
-
-        // 串行阶段按顺序返回
-        return new AIMessage({ content: stageResponses[invokeCount++] ?? '' })
-    })
-    const boundInvoke =
-        options?.boundInvoke ??
-        (async (messages: unknown[]) => {
-            // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
-            const expectedTool = extractExpectedTool(messages)
-
-            if (expectedTool === 'review-group') {
-                const reviewInputs = extractReviewGroupToolInvocations(messages)
-                const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
-
-                return new AIMessage({
-                    content: '',
-                    tool_calls: reviewToolNames.map((name, index) =>
-                        createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
-                    ),
-                })
-            }
-
-            return new AIMessage({
-                content: '',
-                tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
-            })
-        })
-
-    const modelHandle = {
-        bindTools: vi.fn(() => ({
-            invoke: vi.fn().mockImplementation(boundInvoke),
-        })),
-        capabilities: {
-            jsonOutput: true,
-            reasoning: true,
-            streaming: true,
-            toolCalling: options?.toolCalling ?? true,
-            usageInStream: true,
-        },
+function createModelSet(outputs: StructuredOutput, contractCalls: string[]) {
+    const handle = {
+        capabilities: { jsonOutput: true },
         model: {
-            invoke: baseInvoke,
+            invoke: async () => ({ content: 'Business judgment draft.' }),
+            withStructuredOutput: (_schema: unknown, options: { name: string }) => ({
+                invoke: async (messages: unknown[]) => {
+                    contractCalls.push(options.name)
+                    const output = outputs[options.name]
+                    return typeof output === 'function' ? output(messages) : output
+                },
+            }),
         },
-        modelId: 'test-model',
-        normalizeError: vi.fn(error => error),
-        provider: 'ollama' as const,
-        providerModel: 'test-model',
-    }
-
-    modelProviderMocks.createChatModel.mockReturnValue(modelHandle)
-
-    return { baseInvoke, modelHandle }
-}
-
-function createProgressRecorder() {
-    const events: Array<{ details?: string[]; failureMessage?: string; status: string; stepId: string; summary?: string }> = []
+    } as never
 
     return {
-        events,
-        onProgress(event: { details?: string[]; failureMessage?: string; status: string; stepId: string; summary?: string }) {
-            events.push(event)
+        manager: { contractHandle: handle, handle },
+        subagents: {
+            'boundary-subagent': { contractHandle: handle, handle },
+            'plan-subagent': { contractHandle: handle, handle },
+            'review-subagent': { contractHandle: handle, handle },
+            'risk-subagent': { contractHandle: handle, handle },
+            'task-subagent': { contractHandle: handle, handle },
         },
     }
 }
 
-describe('runtime/delivery-chain-manager run', () => {
-    beforeEach(() => {
-        vi.clearAllMocks()
-        modelProviderMocks.getModelProviderConfig.mockReturnValue({
-            allowedProviders: ['ollama'],
-            chatMaxOutputTokens: 4096,
-            deepseek: {},
-            ollama: { baseUrl: 'http://localhost:11434' },
-            qwen: {},
-            tasklistMaxOutputTokens: 8192,
-        })
-    })
+function createOutputs(options: { revisionTargets?: Array<'plan' | 'tasks'> } = {}): StructuredOutput {
+    const revisionTargets = options.revisionTargets
+    let generalReviewCount = 0
 
-    it('plan-subagent completed 输出 plan artifact，并按 policy 串行委派 3 次', async () => {
-        const managerPrompts: string[] = []
-        const { baseInvoke } = setupMockChatModels({
-            boundInvoke: async messages => {
-                managerPrompts.push(serializeMessages(messages))
-                const expectedTool = extractExpectedTool(messages)
-
-                // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
-                if (expectedTool === 'review-group') {
-                    const reviewInputs = extractReviewGroupToolInvocations(messages)
-                    const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
-
-                    return new AIMessage({
-                        content: '',
-                        tool_calls: reviewToolNames.map((name, index) =>
-                            createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
-                        ),
-                    })
-                }
-
-                return new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
-                })
-            },
-            stageResponses: [
-                [
-                    '## 需求理解',
-                    '',
-                    '- 需要限流 banner',
-                    '',
-                    '## 实现方案',
-                    '',
-                    '- 接入状态并显示提醒',
-                    '',
-                    '## 涉及模块',
-                    '',
-                    '- Chat page',
-                    '',
-                    '## 非目标',
-                    '',
-                    '- 不改 reducer',
-                    '',
-                    '## 风险',
-                    '',
-                    '- 阈值定义',
-                    '',
-                    '## 验收标准建议',
-                    '',
-                    '- 接近上限时展示 banner',
-                ].join('\n'),
-                [
-                    '## 任务拆解',
-                    '',
-                    '- 接入限流状态',
-                    '',
-                    '## 推荐顺序',
-                    '',
-                    '1. 先补状态',
-                    '',
-                    '## 风险任务',
-                    '',
-                    '- 阈值确认',
-                    '',
-                    '## 验收相关任务',
-                    '',
-                    '- UI 验证',
-                    '',
-                    '## 非目标保护任务',
-                    '',
-                    '- 确认不改 reducer',
-                ].join('\n'),
-                // v0.4.1: review-subagent
-                [
-                    '结论: pass',
-                    '',
-                    '## 覆盖检查',
-                    '',
-                    '- 覆盖主要需求',
-                    '',
-                    '## 一致性检查',
-                    '',
-                    '- plan 与 tasks 一致',
-                    '',
-                    '## 范围漂移检查',
-                    '',
-                    '- 未超边界',
-                    '',
-                    '## 风险与下一步建议',
-                    '',
-                    '- 可进入实现',
-                ].join('\n'),
-                // v0.4.1: risk-subagent
-                [
-                    'severity: low',
-                    '',
-                    '## 风险识别',
-                    '',
-                    '- 低风险',
-                    '',
-                    '## 风险等级',
-                    '',
-                    '- low',
-                    '',
-                    '## 缓解建议',
-                    '',
-                    '- 无需特殊处理',
-                ].join('\n'),
-                // v0.4.1: boundary-subagent
-                [
-                    'boundaryStatus: passed',
-                    '',
-                    '## DB / 持久化边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## HITL / checkpoint / resume 边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## Stream / UI 边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## Tool / Agent 边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## 安全边界',
-                    '',
-                    '- 未触碰',
-                ].join('\n'),
-            ],
-        })
-        const progress = createProgressRecorder()
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            onProgress: progress.onProgress,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-1',
-        })
-
-        expect(baseInvoke).toHaveBeenCalledTimes(5)
-        expect(result.status).toBe('completed')
-        expect(findRuntimeArtifact(result.artifacts, 'plan')).toBeDefined()
-        expect(findRuntimeArtifact(result.artifacts, 'tasks')).toBeDefined()
-        expect(findRuntimeArtifact(result.artifacts, 'review')).toBeDefined()
-        expect(findRuntimeArtifact(result.artifacts, 'delivery_report')).toBeDefined()
-        expect(result.trace.invocations).toHaveLength(5)
-        expect(result.reportMarkdown).toContain('# Delivery Chain Report / 交付计划报告')
-        expect(result.reportMarkdown).toContain('## 实现方案')
-        expect(result.reportMarkdown).toContain('## 任务拆解')
-        expect(result.reportMarkdown).toContain('## Review 总评')
-        expect(progress.events.map(event => `${event.stepId}:${event.status}`)).toEqual([
-            'delegate-plan:running',
-            'delegate-plan:completed',
-            'delegate-task:running',
-            'delegate-task:completed',
-            'delegate-review-group:running',
-            'delegate-review-group:completed',
-            'synthesize-report:running',
-            'synthesize-report:completed',
-        ])
-        expect(progress.events.find(event => event.stepId === 'delegate-review-group' && event.status === 'completed')).toMatchObject({
-            details: ['- Review Subagent：完成', '- Risk Subagent：完成', '- Boundary Subagent：完成'],
-            summary: '并行评审已完成，3 个评审全部通过',
-        })
-        const serializedProgress = JSON.stringify(progress.events)
-        expect(serializedProgress).not.toContain('"inputArtifacts"')
-        expect(serializedProgress).not.toContain('"artifacts"')
-        expect(serializedProgress).not.toContain('"markdown"')
-        expect(managerPrompts).toHaveLength(3)
-        expect(managerPrompts.every(prompt => prompt.includes('"invocationId"'))).toBe(true)
-        expect(managerPrompts.every(prompt => !prompt.includes('"contextBlocks"'))).toBe(true)
-        expect(managerPrompts.every(prompt => !prompt.includes('"inputArtifacts"'))).toBe(true)
-        expect(managerPrompts.every(prompt => !prompt.includes('"constraints"'))).toBe(true)
-        expect(managerPrompts.join('\n')).not.toContain('AI Mind 的 ControlledDeliveryManager')
-        expect(managerPrompts.join('\n')).not.toContain('Agent-as-tool delegation MVP')
-        expect(managerPrompts.join('\n')).toContain('任务委派管理器')
-    })
-
-    it('manager long final report 交给 final-turn adapter 时会按 8000 字符确定性截断', async () => {
-        const longPlanSection = 'A'.repeat(4_600)
-        const longTaskSection = 'B'.repeat(4_600)
-        setupMockChatModels({
-            stageResponses: [
-                [
-                    '## 需求理解',
-                    '',
-                    `- ${longPlanSection}`,
-                    '',
-                    '## 实现方案',
-                    '',
-                    `- ${longPlanSection}`,
-                    '',
-                    '## 涉及模块',
-                    '',
-                    '- Chat page',
-                    '',
-                    '## 非目标',
-                    '',
-                    '- 不改 reducer',
-                    '',
-                    '## 风险',
-                    '',
-                    '- 阈值定义',
-                    '',
-                    '## 验收标准建议',
-                    '',
-                    '- 接近上限时展示 banner',
-                ].join('\n'),
-                [
-                    '## 任务拆解',
-                    '',
-                    `- ${longTaskSection}`,
-                    '',
-                    '## 推荐顺序',
-                    '',
-                    '1. 先补状态',
-                    '',
-                    '## 风险任务',
-                    '',
-                    '- 阈值确认',
-                    '',
-                    '## 验收相关任务',
-                    '',
-                    '- UI 验证',
-                    '',
-                    '## 非目标保护任务',
-                    '',
-                    '- 确认不改 reducer',
-                ].join('\n'),
-                [
-                    '结论: pass',
-                    '',
-                    '## 覆盖检查',
-                    '',
-                    '- 覆盖主要需求',
-                    '',
-                    '## 一致性检查',
-                    '',
-                    '- plan 与 tasks 一致',
-                    '',
-                    '## 范围漂移检查',
-                    '',
-                    '- 未超边界',
-                    '',
-                    '## 风险与下一步建议',
-                    '',
-                    '- 可进入实现',
-                ].join('\n'),
-                [
-                    'severity: low',
-                    '',
-                    '## 风险识别',
-                    '',
-                    '- 低风险',
-                    '',
-                    '## 风险等级',
-                    '',
-                    '- low',
-                    '',
-                    '## 缓解建议',
-                    '',
-                    '- 无需特殊处理',
-                ].join('\n'),
-                [
-                    'boundaryStatus: passed',
-                    '',
-                    '## DB / 持久化边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## HITL / checkpoint / resume 边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## Stream / UI 边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## Tool / Agent 边界',
-                    '',
-                    '- 未触碰',
-                    '',
-                    '## 安全边界',
-                    '',
-                    '- 未触碰',
-                ].join('\n'),
-            ],
-        })
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-long-report',
-        })
-
-        expect(result.status).toBe('completed')
-        expect(result.reportMarkdown.length).toBeGreaterThan(DELIVERY_FINAL_TEXT_LIMIT)
-
-        const adapted = adaptFinalTurnCandidate({
-            assistantText: result.reportMarkdown,
-            completionStatus: 'completed',
-            source: 'delivery-chain',
-            userText: '生成交付计划',
-        })
-
-        expect(adapted?.assistantText.length).toBeLessThanOrEqual(DELIVERY_FINAL_TEXT_LIMIT)
-        expect(adapted?.assistantText.endsWith(DELIVERY_FINAL_TEXT_TRUNCATION_NOTICE)).toBe(true)
-    })
-
-    it('task-subagent 缺少 plan artifact 时不能 completed', async () => {
-        setupMockChatModels({
-            boundInvoke: async messages =>
-                new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall('task-subagent', extractToolInvocation(messages))],
-                }),
-        })
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-2',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(findRuntimeArtifact(result.artifacts, 'tasks')).toBeUndefined()
-        expect(result.failureMessage).toContain('期望调用 plan-subagent')
-    })
-
-    it('review-subagent 缺少 plan/tasks artifact 时不能 completed', async () => {
-        setupMockChatModels({
-            boundInvoke: async messages =>
-                new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall('review-subagent', extractToolInvocation(messages))],
-                }),
-        })
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-3',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(findRuntimeArtifact(result.artifacts, 'review')).toBeUndefined()
-        expect(result.failureMessage).toContain('期望调用 plan-subagent')
-    })
-
-    it('未注册 tool call 会 fail closed', async () => {
-        setupMockChatModels({
-            boundInvoke: async messages =>
-                new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall('rogue-subagent', extractToolInvocation(messages))],
-                }),
-        })
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-3b',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('未收到合法 tool call')
-        expect(findRuntimeArtifact(result.artifacts, 'plan')).toBeUndefined()
-        expect(result.trace.invocations).toHaveLength(1)
-    })
-
-    it('maxDelegations 通过固定 5 次工具调用生效，且不会继续第 6 次', async () => {
-        const boundInvoke = vi.fn().mockImplementation(async messages => {
-            const expectedTool = extractExpectedTool(messages)
-
-            // v0.4.1: Review Group 阶段返回 3 个 review-class tool calls
-            if (expectedTool === 'review-group') {
-                const reviewInputs = extractReviewGroupToolInvocations(messages)
-                const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
-
-                return new AIMessage({
-                    content: '',
-                    tool_calls: reviewToolNames.map((name, index) =>
-                        createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
-                    ),
-                })
-            }
-
-            return new AIMessage({
-                content: '',
-                tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
-            })
-        })
-        setupMockChatModels({
-            boundInvoke,
-            stageResponses: [
-                [
-                    '## 需求理解',
-                    '',
-                    '- plan',
-                    '',
-                    '## 实现方案',
-                    '',
-                    '- plan',
-                    '',
-                    '## 涉及模块',
-                    '',
-                    '- module',
-                    '',
-                    '## 非目标',
-                    '',
-                    '- no',
-                    '',
-                    '## 风险',
-                    '',
-                    '- risk',
-                    '',
-                    '## 验收标准建议',
-                    '',
-                    '- done',
-                ].join('\n'),
-                [
-                    '## 任务拆解',
-                    '',
-                    '- task',
-                    '',
-                    '## 推荐顺序',
-                    '',
-                    '1. a',
-                    '',
-                    '## 风险任务',
-                    '',
-                    '- b',
-                    '',
-                    '## 验收相关任务',
-                    '',
-                    '- c',
-                    '',
-                    '## 非目标保护任务',
-                    '',
-                    '- d',
-                ].join('\n'),
-                // v0.4.1: review-subagent
-                [
-                    '结论: pass',
-                    '',
-                    '## 覆盖检查',
-                    '',
-                    '- ok',
-                    '',
-                    '## 一致性检查',
-                    '',
-                    '- ok',
-                    '',
-                    '## 范围漂移检查',
-                    '',
-                    '- ok',
-                    '',
-                    '## 风险与下一步建议',
-                    '',
-                    '- ok',
-                ].join('\n'),
-                // v0.4.1: risk-subagent
-                [
-                    'severity: low',
-                    '',
-                    '## 风险识别',
-                    '',
-                    '- low risk',
-                    '',
-                    '## 风险等级',
-                    '',
-                    '- low',
-                    '',
-                    '## 缓解建议',
-                    '',
-                    '- none',
-                ].join('\n'),
-                // v0.4.1: boundary-subagent
-                [
-                    'boundaryStatus: passed',
-                    '',
-                    '## DB / 持久化边界',
-                    '',
-                    '- ok',
-                    '',
-                    '## HITL / checkpoint / resume 边界',
-                    '',
-                    '- ok',
-                    '',
-                    '## Stream / UI 边界',
-                    '',
-                    '- ok',
-                    '',
-                    '## Tool / Agent 边界',
-                    '',
-                    '- ok',
-                    '',
-                    '## 安全边界',
-                    '',
-                    '- ok',
-                ].join('\n'),
-            ],
-        })
-
-        await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-4',
-        })
-
-        // v0.4.1: manager invoke 3 次（plan + task + review-group），baseInvoke 5 次（plan + task + 3 review）
-        expect(boundInvoke).toHaveBeenCalledTimes(3)
-    })
-
-    it('no parallel delegation：一次多个 tool calls 会 fail closed', async () => {
-        setupMockChatModels({
-            boundInvoke: async messages =>
-                new AIMessage({
-                    content: '',
-                    tool_calls: [
-                        createManagerToolCall(extractExpectedTool(messages), extractToolInvocation(messages)),
-                        createManagerToolCall('task-subagent', extractToolInvocation(messages)),
+    return {
+        delivery_chain_boundary_review: {
+            boundaryStatus: 'passed',
+            findings: [],
+            markdown: '# Boundary',
+            role: 'boundary',
+            summary: 'Boundary passed.',
+            violations: [],
+        },
+        delivery_chain_general_review: (messages: unknown[]) => {
+            generalReviewCount += 1
+            if (generalReviewCount === 1 && revisionTargets) {
+                return {
+                    disposition: 'needs_changes',
+                    findings: [
+                        {
+                            description: 'Add explicit failure-state acceptance criteria.',
+                            evidence: ['The current artifact omits the failure state.'],
+                            findingType: 'issue',
+                            requirement: 'required',
+                            severity: 'medium',
+                            suggestedAction: 'Add the missing acceptance criteria.',
+                            targetArtifacts: revisionTargets,
+                        },
                     ],
-                }),
-        })
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-5',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('多个 tool calls')
-    })
-
-    it('failed subagent 不生成正式 artifact', async () => {
-        const { modelHandle } = setupMockChatModels({
-            stageResponses: [],
-        })
-        const subagentTools = overrideSubagentToolDefinition(
-            createDeliveryChainSubagentTools({
-                model: modelHandle.model as never,
-            }),
-            'plan-subagent',
-            () => ({
-                markdown: '## 实现方案\n\n- 当前阶段未返回有效内容，请人工补充。',
-                status: 'failed' as const,
-                summaryForManager: 'Plan Subagent 未完成。',
-                warnings: ['Plan Subagent 调用失败，已使用保底文本。'],
-            })
-        )
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            subagentTools,
-            workflowId: 'workflow-6',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(findRuntimeArtifact(result.artifacts, 'plan')).toBeUndefined()
-    })
-
-    it('invalid JSON-like tool result 会 fail closed', async () => {
-        const { modelHandle } = setupMockChatModels({
-            stageResponses: [],
-        })
-        const subagentTools = overrideSubagentToolDefinition(
-            createDeliveryChainSubagentTools({
-                model: modelHandle.model as never,
-            }),
-            'plan-subagent',
-            () => ({
-                markdown: '## 实现方案\n\n- plan',
-                status: 'completed' as const,
-                warnings: [],
-            })
-        )
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            subagentTools,
-            workflowId: 'workflow-7',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('JSON result')
-    })
-
-    it('当前模型不支持 tool-calling 时 fail closed，不降级 runner', async () => {
-        const { modelHandle, baseInvoke } = setupMockChatModels({
-            toolCalling: false,
-        })
-
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {
-                ...modelHandle,
-                bindTools: undefined,
-            } as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-8',
-        })
-
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('tool-calling')
-        expect(baseInvoke).not.toHaveBeenCalled()
-    })
-
-    it('subagent model prompts 使用更通用的职责与边界表达', async () => {
-        const promptSnapshots: string[] = []
-        const stageResponses = ['## 需求理解\n\n- ok', '## 任务拆解\n\n- ok', '结论: pass\n\n## 覆盖检查\n\n- ok']
-        const planInvocationId = 'plan-invocation'
-        const taskInvocationId = 'task-invocation'
-        const reviewInvocationId = 'review-invocation'
-        const toolModel = {
-            invoke: vi.fn().mockImplementation(async (messages: unknown[]) => {
-                promptSnapshots.push(serializeMessages(messages))
-                return new AIMessage({ content: stageResponses.shift() ?? '' })
-            }),
-        } as never
-
-        const planArtifact = createRuntimeArtifact({
-            kind: 'plan',
-            markdown: '## 实现方案\n\n- plan',
-            source: {
-                stage: 'plan',
-                subagentId: 'plan-subagent',
-            },
-            title: 'Delivery Chain Plan',
-        })
-        const taskArtifact = createRuntimeArtifact({
-            kind: 'tasks',
-            markdown: '## 任务拆解\n\n- task',
-            source: {
-                stage: 'task',
-                subagentId: 'task-subagent',
-            },
-            title: 'Delivery Chain Tasks',
-        })
-        const baseInput = {
-            constraints: ['不得读取未授权资源，不得写文件，不得触发人工审批或人工中断流程，不得调用其他代理或其他工作流运行时。'],
-            contextBlocks: [
-                {
-                    kind: 'requirement' as const,
-                    markdown: '当接近请求上限时，显示提示 banner。',
-                    title: 'Requirement',
-                },
-            ],
-        }
-        const tools = createDeliveryChainSubagentTools({
-            model: toolModel,
-            resolveInvocationInput: createInvocationResolver({
-                [planInvocationId]: {
-                    ...baseInput,
-                    inputArtifacts: [],
-                    instruction: '请基于 requirement 产出 plan artifact。',
-                },
-                [reviewInvocationId]: {
-                    ...baseInput,
-                    inputArtifacts: [planArtifact, taskArtifact],
-                    instruction: '请消费 plan 与 tasks artifacts，并产出 review artifact。',
-                },
-                [taskInvocationId]: {
-                    ...baseInput,
-                    inputArtifacts: [planArtifact],
-                    instruction: '请消费 plan artifact，并产出 tasks artifact。',
-                },
-            }),
-        })
-
-        await tools
-            .find(tool => tool.id === 'plan-subagent')!
-            .chatToolDefinition.tool.invoke({
-                invocationId: planInvocationId,
-            })
-        await tools
-            .find(tool => tool.id === 'task-subagent')!
-            .chatToolDefinition.tool.invoke({
-                invocationId: taskInvocationId,
-            })
-        await tools
-            .find(tool => tool.id === 'review-subagent')!
-            .chatToolDefinition.tool.invoke({
-                invocationId: reviewInvocationId,
-            })
-
-        const serializedPrompts = promptSnapshots.join('\n')
-
-        expect(serializedPrompts).not.toContain('你是 Delivery Chain 的')
-        expect(serializedPrompts).not.toContain('Tasklist Agent')
-        expect(serializedPrompts).not.toContain('HITL')
-        expect(serializedPrompts).toContain('人工审批或人工中断流程')
-        expect(serializedPrompts).toContain('其他代理或其他工作流')
-    })
-
-    it('review group 内出现未注册 tool 必须 fail closed', async () => {
-        const { baseInvoke } = setupMockChatModels({
-            boundInvoke: async messages => {
-                const expectedTool = extractExpectedTool(messages)
-                if (expectedTool === 'review-group') {
-                    return new AIMessage({
-                        content: '',
-                        tool_calls: [
-                            createManagerToolCall(
-                                'review-subagent',
-                                extractReviewGroupToolInvocations(messages)[0] ?? { invocationId: 'fallback-0' }
-                            ),
-                            createManagerToolCall(
-                                'rogue-subagent',
-                                extractReviewGroupToolInvocations(messages)[1] ?? { invocationId: 'fallback-1' }
-                            ),
-                            createManagerToolCall(
-                                'boundary-subagent',
-                                extractReviewGroupToolInvocations(messages)[2] ?? { invocationId: 'fallback-2' }
-                            ),
-                        ],
-                    })
+                    markdown: '# General',
+                    planTaskAlignment: 'aligned',
+                    role: 'general',
+                    summary: 'Revision is required.',
                 }
-                return new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
-                })
-            },
-            stageResponses: [
-                '## 实现方案\n\n- plan',
-                '## 任务拆解\n\n- task',
-                '结论: pass\n## 覆盖检查\n\n- ok',
-                'severity: low\n## 风险识别\n\n- low',
-                'boundaryStatus: passed\n## DB / 持久化边界\n\n- ok',
-            ],
-        })
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-rogue-in-review',
-        })
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('未注册')
-    })
-
-    it('review group 不能调用 plan/task tool', async () => {
-        const { baseInvoke } = setupMockChatModels({
-            boundInvoke: async messages => {
-                const expectedTool = extractExpectedTool(messages)
-                if (expectedTool === 'review-group') {
-                    return new AIMessage({
-                        content: '',
-                        tool_calls: [
-                            createManagerToolCall(
-                                'review-subagent',
-                                extractReviewGroupToolInvocations(messages)[0] ?? { invocationId: 'fallback-0' }
-                            ),
-                            createManagerToolCall(
-                                'plan-subagent',
-                                extractReviewGroupToolInvocations(messages)[1] ?? { invocationId: 'fallback-1' }
-                            ),
-                            createManagerToolCall(
-                                'boundary-subagent',
-                                extractReviewGroupToolInvocations(messages)[2] ?? { invocationId: 'fallback-2' }
-                            ),
-                        ],
-                    })
-                }
-                return new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
-                })
-            },
-            stageResponses: [
-                '## 实现方案\n\n- plan',
-                '## 任务拆解\n\n- task',
-                '结论: pass\n## 覆盖检查\n\n- ok',
-                'severity: low\n## 风险识别\n\n- low',
-                'boundaryStatus: passed\n## DB / 持久化边界\n\n- ok',
-            ],
-        })
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-plan-in-review',
-        })
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('非 review-class tool')
-    })
-
-    it('boundary blocked 强制 final report blocked', async () => {
-        const { baseInvoke } = setupMockChatModels({
-            stageResponses: [
-                '## 实现方案\n\n- plan',
-                '## 任务拆解\n\n- task',
-                '结论: pass\n## 覆盖检查\n\n- ok',
-                'severity: low\n## 风险识别\n\n- low',
-                'boundaryStatus: blocked\n## DB / 持久化边界\n\n- 触碰了数据库边界',
-            ],
-        })
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-boundary-blocked',
-        })
-        expect(result.status).toBe('blocked')
-        expect(result.reportMarkdown).toContain('blocked')
-    })
-
-    it('3 个 review 全部 failed fail closed', async () => {
-        const { baseInvoke } = setupMockChatModels({
-            boundInvoke: async messages => {
-                const expectedTool = extractExpectedTool(messages)
-                if (expectedTool === 'review-group') {
-                    const reviewInputs = extractReviewGroupToolInvocations(messages)
-                    const reviewToolNames = ['review-subagent', 'risk-subagent', 'boundary-subagent']
-                    return new AIMessage({
-                        content: '',
-                        tool_calls: reviewToolNames.map((name, index) =>
-                            createManagerToolCall(name, reviewInputs[index] ?? { invocationId: `fallback-${index}` })
-                        ),
-                    })
-                }
-                return new AIMessage({
-                    content: '',
-                    tool_calls: [createManagerToolCall(expectedTool, extractToolInvocation(messages))],
-                })
-            },
-        })
-        // 让 review 阶段的 baseInvoke 抛异常，触发 executor catch 返回 failed
-        baseInvoke.mockImplementation(async (messages: unknown[]) => {
-            const systemMessage = (messages as Array<{ content?: string }>)[0]
-            const content = typeof systemMessage?.content === 'string' ? systemMessage.content : ''
-            if (content.includes('评审专家') || content.includes('边界检查专家')) {
-                throw new Error('model unavailable')
             }
-            return new AIMessage({ content: baseInvoke.mock.calls.length === 1 ? '## 实现方案\n\n- plan' : '## 任务拆解\n\n- task' })
-        })
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-all-review-failed',
-        })
-        expect(result.status).toBe('failed')
-        expect(result.failureMessage).toContain('全部评审子 Agent 失败')
+
+            return {
+                disposition: 'pass',
+                findings: [],
+                markdown: '# General',
+                planTaskAlignment: 'aligned',
+                role: 'general',
+                summary: 'General review completed.',
+            }
+        },
+        delivery_chain_plan: {
+            acceptanceCriteria: [
+                { criterionKey: 'AC-1', description: 'Banner and recovery state are visible.', requirementRefs: ['REQ-1'] },
+            ],
+            assumptions: [],
+            deliveryPhases: [
+                {
+                    dependsOnPhaseKeys: [],
+                    objective: 'Implement banner.',
+                    phaseKey: 'implementation',
+                    requirementRefs: ['REQ-1'],
+                    title: 'Implementation',
+                },
+            ],
+            markdown: '# Plan',
+            requirementRefs: ['REQ-1'],
+            scope: { excluded: [], included: ['request limit banner'] },
+            summary: 'Plan completed.',
+        },
+        delivery_chain_plan_revision: {
+            acceptanceCriteria: [
+                { criterionKey: 'AC-1', description: 'Banner and recovery state are visible.', requirementRefs: ['REQ-1'] },
+            ],
+            assumptions: [],
+            deliveryPhases: [
+                {
+                    dependsOnPhaseKeys: [],
+                    objective: 'Implement banner.',
+                    phaseKey: 'implementation',
+                    requirementRefs: ['REQ-1'],
+                    title: 'Implementation',
+                },
+            ],
+            markdown: '# Revised Plan',
+            requirementRefs: ['REQ-1'],
+            scope: { excluded: [], included: ['request limit banner'] },
+            summary: 'Plan revised.',
+        },
+        delivery_chain_risk_review: {
+            findings: [],
+            markdown: '# Risk',
+            role: 'risk',
+            severity: 'low',
+            summary: 'Risk is controlled.',
+        },
+        delivery_chain_supervisor_post: (messages: unknown[]) => {
+            return {
+                rationale: 'Address the review findings with one bounded revision.',
+                recommendations: (revisionTargets ?? ['plan']).map(target => ({
+                    acceptanceSuggestion: 'Confirm the recovery behavior is verifiable.',
+                    requiredActions: ['Add acceptance coverage.'],
+                    summary: `Update the affected ${target} artifact.`,
+                    target,
+                })),
+            }
+        },
+        delivery_chain_supervisor_pre: {
+            assumptions: ['Read-only planning.'],
+            branch: 'execute',
+            planningFocus: ['Scope'],
+            reviewFocus: { boundary: ['Boundary'], general: ['Alignment'], risk: ['Risk'] },
+            reviewerRoles: ['general', 'risk', 'boundary'],
+            stageIntents: [
+                { objective: 'Plan', stage: 'plan' },
+                { objective: 'Tasks', stage: 'tasks' },
+                { objective: 'Review', stage: 'review' },
+            ],
+            taskFocus: ['Tasks'],
+        },
+        delivery_chain_task_revision: {
+            markdown: '# Revised Tasks',
+            summary: 'Tasks revised.',
+            tasks: [
+                {
+                    acceptanceCriteria: ['Banner and recovery state are visible.'],
+                    dependsOnTaskIds: [],
+                    requirementRefs: ['REQ-1'],
+                    targetArea: 'request limit banner',
+                    taskId: 'TASK-1',
+                    title: 'Implement banner',
+                },
+            ],
+        },
+        delivery_chain_tasks: {
+            markdown: '# Tasks',
+            summary: 'Tasks completed.',
+            tasks: [
+                {
+                    acceptanceCriteria: ['Banner is visible.'],
+                    dependsOnTaskIds: [],
+                    requirementRefs: ['REQ-1'],
+                    targetArea: 'request limit banner',
+                    taskId: 'TASK-1',
+                    title: 'Implement banner',
+                },
+            ],
+        },
+    }
+}
+
+async function runScenario(options: { revisionTargets?: Array<'plan' | 'tasks'> } = {}) {
+    const contractCalls: string[] = []
+    const result = await runStructuredDeliveryManager({
+        input: { requirementText: resources.requirementText, source: 'inline_requirement' },
+        modelSet: createModelSet(createOutputs(options), contractCalls),
+        resources,
+        workflowId: 'delivery-chain-manager-run',
     })
 
-    it('Manager synthesis 不是 raw concatenation', async () => {
-        const { baseInvoke } = setupMockChatModels({
-            stageResponses: [
-                '## 实现方案\n\n- plan',
-                '## 任务拆解\n\n- task',
-                '结论: pass\n## 覆盖检查\n\n- ok',
-                'severity: low\n## 风险识别\n\n- low',
-                'boundaryStatus: passed\n## DB / 持久化边界\n\n- ok',
-            ],
-        })
-        const result = await runControlledDeliveryManager({
-            input: createInput(),
-            modelHandle: {} as never,
-            resolvedModelSelection: testResolvedModelSelection,
-            resources: createResources(),
-            workflowId: 'workflow-synthesis-check',
-        })
+    return { contractCalls, result }
+}
+
+async function runWithOutputs(outputs: StructuredOutput) {
+    const contractCalls: string[] = []
+    const result = await runStructuredDeliveryManager({
+        input: { requirementText: resources.requirementText, source: 'inline_requirement' },
+        modelSet: createModelSet(outputs, contractCalls),
+        resources,
+        workflowId: 'delivery-chain-manager-custom-output',
+    })
+
+    return { contractCalls, result }
+}
+
+describe('runtime/delivery-chain manager revision lifecycle', () => {
+    it('owns one immutable pre-decision DispatchPlan and short-circuits clarification or blocked branches', async () => {
+        const clarificationOutputs = createOutputs()
+        clarificationOutputs.delivery_chain_supervisor_pre = {
+            branch: 'clarification_required',
+            missingInformation: ['The acceptance criteria are missing.'],
+            nextStep: 'Provide the expected user-visible result.',
+            reason: 'The plan would otherwise change product behavior arbitrarily.',
+        }
+        const { contractCalls: clarificationCalls, result: clarification } = await runWithOutputs(clarificationOutputs)
+
+        expect(clarification).toMatchObject({ runStatus: 'clarification_required', status: 'completed' })
+        expect(clarification.dispatchPlan?.dispatchPlanId).toEqual(expect.any(String))
+        expect(clarification.dispatchPlan?.preDecision.branch).toBe('clarification_required')
+        expect(clarificationCalls).toEqual(['delivery_chain_supervisor_pre'])
+
+        const blockedOutputs = createOutputs()
+        blockedOutputs.delivery_chain_supervisor_pre = {
+            boundaryEvidence: ['The request asks this read-only Runtime to write production data.'],
+            branch: 'blocked',
+            nextStep: 'Remove the prohibited side effect from this planning request.',
+            reason: 'The runtime boundary is explicit.',
+        }
+        const { contractCalls: blockedCalls, result: blocked } = await runWithOutputs(blockedOutputs)
+
+        expect(blocked).toMatchObject({ runStatus: 'blocked', status: 'blocked' })
+        expect(blocked.dispatchPlan?.postReviewDecision).toBeUndefined()
+        expect(blockedCalls).toEqual(['delivery_chain_supervisor_pre'])
+    })
+
+    it('does not derive status from contradictory Reviewer Markdown', async () => {
+        const outputs = createOutputs()
+        outputs.delivery_chain_general_review = {
+            disposition: 'pass',
+            findings: [],
+            markdown: '# General\n\nConclusion: blocked',
+            planTaskAlignment: 'aligned',
+            role: 'general',
+            summary: 'The typed result passes.',
+        }
+        const { result } = await runWithOutputs(outputs)
+
+        expect(result.runStatus).toBe('pass')
         expect(result.status).toBe('completed')
-        expect(result.reportMarkdown).toContain('## 综合结论')
-        expect(result.reportMarkdown).toContain('## 本轮评审覆盖情况')
-        expect(result.reportMarkdown).toContain('## Review 总评')
-        expect(result.reportMarkdown).toContain('## 风险评估')
-        expect(result.reportMarkdown).toContain('## 边界检查')
+    })
+
+    it('projects validated Plan and Tasks fields when Worker Markdown contains only a title', async () => {
+        const { result } = await runScenario()
+
+        expect(result.reportMarkdown).toContain('## 需求摘要')
+        expect(result.reportMarkdown).toContain('- 用户目标：Show a request-limit banner with a recoverable failure state.')
+        expect(result.reportMarkdown.indexOf('## 需求摘要')).toBeLessThan(result.reportMarkdown.indexOf('## 交付结论'))
+        expect(result.reportMarkdown).toContain('## 方案概览')
+        expect(result.reportMarkdown).toContain('Plan completed.')
+        expect(result.reportMarkdown).toContain('### 实施阶段')
+        expect(result.reportMarkdown).toContain('Implementation')
+        expect(result.reportMarkdown).toContain('Banner and recovery state are visible.')
+        expect(result.reportMarkdown).toContain('### 任务 TASK-1：Implement banner')
+        expect(result.reportMarkdown).toContain('目标区域：request limit banner')
+        expect(result.reportMarkdown).toContain('Banner is visible.')
+    })
+
+    it('extracts a short requirement summary from standard Requirement sections', async () => {
+        const summaryResources = {
+            ...resources,
+            requirementText: [
+                '# Requirement: Registration and Login System',
+                '',
+                '## User Story',
+                '作为普通 Web 应用用户，我希望能够注册并登录。',
+                '',
+                '## User-facing Outcome',
+                '- 用户可以创建账号。',
+                '- 用户可以登录并退出。',
+                '',
+                '## Non-goals',
+                '- 不包含找回密码。',
+            ].join('\n'),
+        }
+        const result = await runStructuredDeliveryManager({
+            input: { requirementText: summaryResources.requirementText, source: 'inline_requirement' },
+            modelSet: createModelSet(createOutputs(), []),
+            resources: summaryResources,
+            workflowId: 'delivery-chain-manager-requirement-summary',
+        })
+
+        expect(result.reportMarkdown).toContain('- 用户目标：作为普通 Web 应用用户，我希望能够注册并登录。')
+        expect(result.reportMarkdown).toContain('- 本轮重点：用户可以创建账号。、用户可以登录并退出。')
+        expect(result.reportMarkdown).toContain('- 明确不包含：不包含找回密码。')
+    })
+
+    it('passes the matching rubric into each Worker context', async () => {
+        const outputs = createOutputs()
+        const planOutput = outputs.delivery_chain_plan
+        const taskOutput = outputs.delivery_chain_tasks
+        const reviewOutput = outputs.delivery_chain_general_review
+        let planMessages = ''
+        let taskMessages = ''
+        let reviewMessages = ''
+
+        outputs.delivery_chain_plan = messages => {
+            planMessages = messages.map(message => String((message as { content?: unknown }).content ?? '')).join('\n')
+            return planOutput
+        }
+        outputs.delivery_chain_tasks = messages => {
+            taskMessages = messages.map(message => String((message as { content?: unknown }).content ?? '')).join('\n')
+            return taskOutput
+        }
+        outputs.delivery_chain_general_review = messages => {
+            reviewMessages = messages.map(message => String((message as { content?: unknown }).content ?? '')).join('\n')
+            return typeof reviewOutput === 'function' ? reviewOutput(messages) : reviewOutput
+        }
+
+        await runWithOutputs(outputs)
+
+        expect(planMessages).toContain('Plan rubric:\nProduce a verifiable plan.')
+        expect(taskMessages).toContain('Task rubric:\nProduce executable tasks.')
+        expect(reviewMessages).toContain('Review rubric:\nReview scope, risks, and boundaries.')
+    })
+
+    it('keeps a positive review observation out of required follow-up status', async () => {
+        const outputs = createOutputs()
+        outputs.delivery_chain_risk_review = {
+            findings: [
+                {
+                    description: 'The Plan and Tasks are fully compliant with the supplied requirement.',
+                    evidence: ['All required controls are present.'],
+                    findingType: 'observation',
+                    requirement: 'required',
+                    severity: 'low',
+                    suggestedAction: 'No action is required.',
+                    targetArtifacts: ['plan', 'tasks'],
+                },
+            ],
+            markdown: '# Risk',
+            role: 'risk',
+            severity: 'low',
+            summary: 'Risk is controlled.',
+        }
+
+        const { result } = await runWithOutputs(outputs)
+
+        expect(result.runStatus).toBe('pass')
+        expect(result.reportMarkdown).toContain('## 评审观察')
+        expect(result.reportMarkdown).toContain('fully compliant')
+        expect(result.reportMarkdown).not.toContain('## 待处理事项')
+    })
+
+    it('passes typed Plan and Tasks snapshots to Review without Runtime-owned identifiers', async () => {
+        const outputs = createOutputs()
+        let boundaryMessages = ''
+        outputs.delivery_chain_boundary_review = (messages: unknown[]) => {
+            boundaryMessages = messages.map(message => String((message as { content?: unknown }).content ?? '')).join('\n')
+            return {
+                boundaryStatus: 'passed',
+                findings: [],
+                markdown: '# Boundary',
+                role: 'boundary',
+                summary: 'Boundary passed.',
+                violations: [],
+            }
+        }
+
+        const { result } = await runWithOutputs(outputs)
+
+        expect(result.reviewBundles[0]?.coverage.boundary).toBe('completed')
+        expect(boundaryMessages).toContain('deliveryPhases')
+        expect(boundaryMessages).toContain('"taskId":"TASK-1"')
+        expect(boundaryMessages).not.toContain('"artifactId"')
+        expect(boundaryMessages).not.toContain('"planRef"')
+    })
+
+    it('distinguishes a Supervisor execution failure from a Contract failure', async () => {
+        const outputs = createOutputs()
+        outputs.delivery_chain_supervisor_pre = () => {
+            throw new Error('provider unavailable')
+        }
+
+        const { result } = await runWithOutputs(outputs)
+
+        expect(result.status).toBe('failed')
+        expect(result.failureMessage).toBe('Supervisor pre-decision 执行未完成。')
+        expect(result.reportMarkdown).toContain('Supervisor pre-decision 执行未完成。')
+        expect(result.reportMarkdown).not.toContain('provider unavailable')
+    })
+
+    it.each([{ target: 'plan' as const }, { target: 'tasks' as const }])(
+        'only revises the requested $target artifact and preserves lineage',
+        async ({ target }) => {
+            const { result } = await runScenario({ revisionTargets: [target] })
+            const untouchedTarget = target === 'plan' ? 'tasks' : 'plan'
+
+            expect(result.runStatus).toBe('needs_review')
+            expect(result.artifacts.filter(artifact => artifact.kind === target).at(-1)).toMatchObject({ revision: 2 })
+            expect(result.artifacts.filter(artifact => artifact.kind === untouchedTarget).at(-1)).toMatchObject({ revision: 1 })
+            expect(result.revisionOutcome?.requests[0]).toMatchObject({
+                sourceFindingIds: [result.reviewBundles[0]?.findings[0]?.findingId],
+                updatedTargets: [target],
+            })
+        }
+    )
+
+    it('revises Plan before Tasks when both targets are validated', async () => {
+        const { contractCalls, result } = await runScenario({ revisionTargets: ['plan', 'tasks'] })
+
+        expect(result.failureMessage).toBeUndefined()
+        expect(result.runStatus).toBe('needs_review')
+        expect(result.artifacts.filter(artifact => artifact.kind === 'plan').at(-1)).toMatchObject({ revision: 2 })
+        expect(result.artifacts.filter(artifact => artifact.kind === 'tasks').at(-1)).toMatchObject({
+            revision: 2,
+            planRef: { revision: 2 },
+        })
+        expect(contractCalls.indexOf('delivery_chain_plan_revision')).toBeLessThan(contractCalls.indexOf('delivery_chain_task_revision'))
+    })
+
+    it('passes the validated RevisionRequest and referenced typed findings to the selected revision Worker', async () => {
+        const outputs = createOutputs({ revisionTargets: ['plan'] })
+        const planRevision = outputs.delivery_chain_plan_revision
+        let revisionMessages = ''
+        outputs.delivery_chain_plan_revision = messages => {
+            revisionMessages = messages.map(message => String((message as { content?: unknown }).content ?? '')).join('\n')
+            return planRevision
+        }
+
+        const { result } = await runWithOutputs(outputs)
+        const findingId = result.reviewBundles[0]?.findings[0]?.findingId
+
+        expect(result.runStatus).toBe('needs_review')
+        expect(revisionMessages).toContain('已验证的修订上下文')
+        expect(revisionMessages).toContain('runtime-plan-revision')
+        expect(revisionMessages).toContain('Add acceptance coverage.')
+        expect(revisionMessages).toContain('Add explicit failure-state acceptance criteria.')
+        expect(revisionMessages).toContain(findingId)
+    })
+
+    it('retains first-review evidence and ends without a second Review Group after revision', async () => {
+        const { contractCalls, result } = await runScenario({ revisionTargets: ['plan'] })
+
+        expect(result.runStatus).toBe('needs_review')
+        expect(result.reviewBundles).toHaveLength(1)
+        expect(contractCalls.filter(name => name === 'delivery_chain_general_review')).toHaveLength(1)
+        expect(result.reportMarkdown).toContain('## 返修依据')
+        expect(result.reportMarkdown).not.toContain('## 原问题处理结果')
+    })
+
+    it('stops on a Review hard blocker without post-review revision', async () => {
+        const contractCalls: string[] = []
+        const outputs = createOutputs()
+        outputs.delivery_chain_boundary_review = {
+            boundaryStatus: 'blocked',
+            findings: [],
+            markdown: '# Boundary',
+            role: 'boundary',
+            summary: 'Boundary blocks this run.',
+            violations: ['No persistence boundary violated.'],
+        }
+        const result = await runStructuredDeliveryManager({
+            input: { requirementText: resources.requirementText, source: 'inline_requirement' },
+            modelSet: createModelSet(outputs, contractCalls),
+            resources,
+            workflowId: 'delivery-chain-manager-blocked',
+        })
+
+        expect(result.status).toBe('blocked')
+        expect(contractCalls).not.toContain('delivery_chain_supervisor_post')
+        expect(result.revisionOutcome).toBeUndefined()
+    })
+
+    it('reports partial Review coverage as needs_review and never upgrades it to pass', async () => {
+        const contractCalls: string[] = []
+        const outputs = createOutputs()
+        outputs.delivery_chain_risk_review = () => {
+            throw new Error('risk reviewer timeout')
+        }
+        const result = await runStructuredDeliveryManager({
+            input: { requirementText: resources.requirementText, source: 'inline_requirement' },
+            modelSet: createModelSet(outputs, contractCalls),
+            resources,
+            workflowId: 'delivery-chain-manager-partial-review',
+        })
+
+        expect(result.runStatus).toBe('needs_review')
+        expect(result.reviewBundles[0]?.coverage.risk).toBe('execution_failed')
+        expect(result.reportMarkdown).toContain('风险检查：执行失败')
+        expect(contractCalls).not.toContain('delivery_chain_supervisor_post')
+    })
+
+    it('fails safely when every Reviewer fails after a valid dispatch', async () => {
+        const outputs = createOutputs()
+        for (const name of ['delivery_chain_general_review', 'delivery_chain_risk_review', 'delivery_chain_boundary_review']) {
+            outputs[name] = () => {
+                throw new Error('reviewer execution failed')
+            }
+        }
+        const { contractCalls, result } = await runWithOutputs(outputs)
+
+        expect(result.runStatus).toBe('failed')
+        expect(result.status).toBe('failed')
+        expect(result.reportMarkdown).not.toContain('当前状态：')
+        expect(result.reportMarkdown).toContain('## 需求摘要')
+        expect(contractCalls).not.toContain('delivery_chain_supervisor_post')
+    })
+
+    it('uses a Runtime-derived revision when post-review guidance Contract remains invalid', async () => {
+        const contractCalls: string[] = []
+        const outputs = createOutputs({ revisionTargets: ['plan'] })
+        outputs.delivery_chain_supervisor_post = { action: 'revise' }
+        const result = await runStructuredDeliveryManager({
+            input: { requirementText: resources.requirementText, source: 'inline_requirement' },
+            modelSet: createModelSet(outputs, contractCalls),
+            resources,
+            workflowId: 'delivery-chain-manager-invalid-post',
+        })
+
+        expect(result.status).toBe('completed')
+        expect(result.runStatus).toBe('needs_review')
+        expect(contractCalls).toEqual(expect.arrayContaining(['delivery_chain_supervisor_post', 'delivery_chain_supervisor_post']))
+        expect(contractCalls).toContain('delivery_chain_plan_revision')
+        expect(result.reportMarkdown).toContain('Supervisor 评审后说明未完成，Runtime 已根据已验证的评审发现继续处理。')
+        expect(result.reportMarkdown).not.toContain('provider unavailable')
+    })
+
+    it('ignores Supervisor guidance outside the finding-derived target set', async () => {
+        const contractCalls: string[] = []
+        const outputs = createOutputs({ revisionTargets: ['plan'] })
+        outputs.delivery_chain_supervisor_post = () => {
+            return {
+                rationale: 'Use the only allowed target.',
+                recommendations: [
+                    {
+                        acceptanceSuggestion: 'Keep this suggestion as narrative only.',
+                        requiredActions: ['Update the task list instead.'],
+                        summary: 'Try to redirect revision to tasks.',
+                        target: 'tasks',
+                    },
+                ],
+            }
+        }
+
+        const result = await runStructuredDeliveryManager({
+            input: { requirementText: resources.requirementText, source: 'inline_requirement' },
+            modelSet: createModelSet(outputs, contractCalls),
+            resources,
+            workflowId: 'delivery-chain-manager-post-policy-repair',
+        })
+
+        expect(result.runStatus).toBe('needs_review')
+        expect(contractCalls.filter(name => name === 'delivery_chain_supervisor_post')).toHaveLength(1)
+        expect(contractCalls).toContain('delivery_chain_plan_revision')
+        expect(contractCalls).not.toContain('delivery_chain_task_revision')
+        expect(result.dispatchPlan?.postReviewDecision).toMatchObject({ action: 'revise', revisionTargets: ['plan'] })
+    })
+
+    it('preserves typed Review evidence and artifact versions when a revision Worker fails', async () => {
+        const outputs = createOutputs({ revisionTargets: ['plan'] })
+        outputs.delivery_chain_plan_revision = () => {
+            throw new Error('revision provider unavailable')
+        }
+
+        const { result } = await runWithOutputs(outputs)
+        const plan = result.artifacts.filter(artifact => artifact.kind === 'plan').at(-1)
+        const tasks = result.artifacts.filter(artifact => artifact.kind === 'tasks').at(-1)
+
+        expect(result.status).toBe('failed')
+        expect(result.reportMarkdown).toContain('## 已保留的评审证据')
+        expect(result.reportMarkdown).toContain('方案与任务一致性：已完成')
+        expect(result.reportMarkdown).toContain('Add explicit failure-state acceptance criteria.')
+        expect(result.reportMarkdown).toContain(`方案：第 ${plan?.revision} 版`)
+        expect(result.reportMarkdown).toContain(`任务：第 ${tasks?.revision} 版`)
+        expect(result.reportMarkdown).not.toContain('revision provider unavailable')
+    })
+
+    it('does not start a second Review Group or revision after the one allowed revision', async () => {
+        const { contractCalls, result } = await runScenario({ revisionTargets: ['plan'] })
+
+        expect(result.runStatus).toBe('needs_review')
+        expect(contractCalls.filter(name => name === 'delivery_chain_supervisor_post')).toHaveLength(1)
+        expect(contractCalls.filter(name => name === 'delivery_chain_general_review')).toHaveLength(1)
+        expect(result.artifacts.filter(artifact => artifact.kind === 'plan').every(artifact => artifact.revision <= 2)).toBe(true)
     })
 })

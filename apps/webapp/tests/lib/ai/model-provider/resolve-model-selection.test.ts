@@ -73,6 +73,23 @@ describe('resolveModelSelection', () => {
         )
     })
 
+    it('delivery-chain 的用户业务模型不因 Contract JSON 能力被拒绝', () => {
+        testState.catalog = [
+            createCatalogItem({
+                capabilities: {
+                    chat: true,
+                    embedding: false,
+                    jsonOutput: false,
+                    streaming: true,
+                    tasklist: true,
+                    toolCalling: true,
+                },
+            }),
+        ]
+
+        expect(resolveModelSelection({ routeType: 'delivery-chain' })).toEqual(expect.objectContaining({ modelId: 'ollama/qwen3-8b' }))
+    })
+
     it('非法 modelId 会 fail closed', () => {
         testState.catalog = [createCatalogItem()]
 
@@ -181,5 +198,27 @@ describe('resolveModelSelection', () => {
                 routeType: 'chat',
             })
         ).toThrowError(expect.objectContaining({ code: 'MODEL_DOES_NOT_SUPPORT_TOOL_CALLING' }))
+    })
+
+    it('需要 JSON output 但模型未声明时 fail closed', () => {
+        testState.catalog = [
+            createCatalogItem({
+                capabilities: {
+                    chat: true,
+                    embedding: false,
+                    jsonOutput: false,
+                    streaming: true,
+                    tasklist: true,
+                    toolCalling: true,
+                },
+            }),
+        ]
+
+        expect(() =>
+            resolveModelSelection({
+                requireJsonOutput: true,
+                routeType: 'delivery-chain',
+            })
+        ).toThrowError(expect.objectContaining({ code: 'MODEL_DOES_NOT_SUPPORT_JSON_OUTPUT' }))
     })
 })

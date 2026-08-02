@@ -264,20 +264,33 @@ describe('OpenAICompatibleProvider', () => {
             expect((tasklistModel as { maxTokens?: number }).maxTokens).toBe(8192)
         })
 
-        it('DeepSeek 不透传未声明的 reasoning 参数', () => {
+        it('DeepSeek 在明确关闭推理时透传 thinking disabled', () => {
             const provider = new OpenAICompatibleProvider('deepseek', deepseekCapabilities)
             const model = provider.createModel({
                 config: createTestConfig({
                     deepseek: { apiKey: 'sk-test-key', baseURL: 'https://api.deepseek.com' },
                     qwen: { apiKey: 'sk-test-key', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
                 }),
-                enableReasoning: true,
+                enableReasoning: false,
                 resolvedModelSelection: createDeepSeekSelection(),
                 routeType: 'chat',
-            }) as { reasoning?: unknown; think?: unknown }
+            }) as { modelKwargs?: Record<string, unknown> }
 
-            expect(model.reasoning).toBeUndefined()
-            expect(model.think).toBeUndefined()
+            expect(model.modelKwargs).toEqual({ thinking: { type: 'disabled' } })
+        })
+
+        it('Doubao 路由的 DeepSeek 模型在明确关闭推理时透传 thinking disabled', () => {
+            const provider = new OpenAICompatibleProvider('doubao', deepseekCapabilities)
+            const model = provider.createModel({
+                config: createTestConfig({
+                    doubao: { apiKey: 'ark-test-key', baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
+                }),
+                enableReasoning: false,
+                resolvedModelSelection: createDeepSeekSelection({ provider: 'doubao' }),
+                routeType: 'chat',
+            }) as { modelKwargs?: Record<string, unknown> }
+
+            expect(model.modelKwargs).toEqual({ thinking: { type: 'disabled' } })
         })
 
         it.each([

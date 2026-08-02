@@ -53,6 +53,7 @@ describe('Composer popup mobile polish', () => {
                     {
                         id: 'demo:version-plan:v034',
                         type: 'resource',
+                        fileName: 'v034-langsmith-observability.md',
                         group: 'version-plan',
                         label: 'v034-langsmith-observability.md',
                         uri: 'demo://version-plans/v034-langsmith-observability.md',
@@ -63,6 +64,7 @@ describe('Composer popup mobile polish', () => {
                     {
                         id: 'demo:version-plan:test-over-scoped',
                         type: 'resource',
+                        fileName: 'test-over-scoped-runtime-change.md',
                         group: 'version-plan',
                         label: 'test-over-scoped-runtime-change.md',
                         uri: 'demo://version-plans/test-over-scoped-runtime-change.md',

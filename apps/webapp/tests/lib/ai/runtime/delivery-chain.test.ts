@@ -113,7 +113,7 @@ function createRequest(overrides: Partial<ChatRequest> = {}): ChatRequest {
     }
 }
 
-function createScenarioRequest() {
+function createScenarioRequest(scenarioId = 'request-limit-banner') {
     return createRequest({
         composer: {
             command: {
@@ -123,11 +123,11 @@ function createScenarioRequest() {
             plainText: '',
             references: [
                 {
-                    id: 'demo:scenario:request-limit-banner',
-                    label: 'request-limit-banner/requirement.md',
+                    id: `demo:scenario:${scenarioId}`,
+                    label: `${scenarioId}/requirement.md`,
                     source: 'local',
                     type: 'resource',
-                    uri: 'demo://scenarios/request-limit-banner/requirement.md',
+                    uri: `demo://scenarios/${scenarioId}/requirement.md`,
                 },
             ],
         },
@@ -257,14 +257,19 @@ function createManagerToolCall(name: string, args: SubagentToolCallInput) {
 }
 
 function createDeliveryChainModelHandle(options?: {
+    businessInvoke?: (messages: unknown[]) => Promise<AIMessage>
+    businessStructuredOutput?: boolean
     boundInvoke?: (messages: unknown[]) => Promise<AIMessage>
+    contractStructuredOutput?: boolean
     stageResponses?: string[]
+    structuredOutputs?: Record<string, unknown | ((messages: unknown[]) => unknown)>
     toolCalling?: boolean
 }) {
     // v0.4.1: 使用索引而非 shift()，避免并行调用时竞态
     const stageResponses = [...(options?.stageResponses ?? [])]
     let invokeCount = 0
     const baseInvoke = vi.fn().mockImplementation(async (messages: unknown[]) => {
+        if (options?.businessInvoke) return options.businessInvoke(messages)
         // v0.4.1: Review Group 并行调用时，根据 SystemMessage 内容返回对应的 response
         const systemMessage = (messages as Array<{ content?: string }>)[0]
         const content = typeof systemMessage?.content === 'string' ? systemMessage.content : ''
@@ -308,6 +313,85 @@ function createDeliveryChainModelHandle(options?: {
             })
         })
 
+    const structuredOutputs: Record<string, unknown | ((messages: unknown[]) => unknown)> = {
+        delivery_chain_boundary_review: {
+            boundaryStatus: 'passed',
+            findings: [],
+            markdown: '# Boundary',
+            role: 'boundary',
+            summary: 'Boundary passed.',
+            violations: [],
+        },
+        delivery_chain_general_review: {
+            disposition: 'pass',
+            findings: [],
+            markdown: '# General',
+            planTaskAlignment: 'aligned',
+            role: 'general',
+            summary: 'Plan and Tasks align.',
+        },
+        delivery_chain_plan: {
+            acceptanceCriteria: [{ criterionKey: 'AC-1', description: 'Banner appears near the limit.', requirementRefs: ['REQ-1'] }],
+            assumptions: [],
+            deliveryPhases: [
+                {
+                    dependsOnPhaseKeys: [],
+                    objective: 'Implement banner.',
+                    phaseKey: 'implementation',
+                    requirementRefs: ['REQ-1'],
+                    title: 'Implementation',
+                },
+            ],
+            markdown: '# Plan',
+            requirementRefs: ['REQ-1'],
+            scope: { excluded: [], included: ['request limit banner'] },
+            summary: 'Plan completed.',
+        },
+        delivery_chain_risk_review: {
+            findings: [],
+            markdown: '# Risk',
+            role: 'risk',
+            severity: 'low',
+            summary: 'Risk is controlled.',
+        },
+        delivery_chain_supervisor_post: { action: 'finalize', rationale: 'Review passed.' },
+        delivery_chain_supervisor_pre: {
+            assumptions: ['Read-only planning.'],
+            branch: 'execute',
+            planningFocus: ['Scope'],
+            reviewFocus: { boundary: ['Boundary'], general: ['Alignment'], risk: ['Risk'] },
+            reviewerRoles: ['general', 'risk', 'boundary'],
+            stageIntents: [
+                { objective: 'Plan', stage: 'plan' },
+                { objective: 'Tasks', stage: 'tasks' },
+                { objective: 'Review', stage: 'review' },
+            ],
+            taskFocus: ['Tasks'],
+        },
+        delivery_chain_tasks: {
+            markdown: '# Tasks',
+            summary: 'Tasks completed.',
+            tasks: [
+                {
+                    acceptanceCriteria: ['Banner appears near the limit.'],
+                    dependsOnTaskIds: [],
+                    requirementRefs: ['REQ-1'],
+                    targetArea: 'request limit banner',
+                    taskId: 'TASK-1',
+                    title: 'Implement banner',
+                },
+            ],
+        },
+        ...options?.structuredOutputs,
+    }
+
+    const withStructuredOutput = vi.fn((_schema, structuredOptions: { name: string }) => ({
+        invoke: async (messages: unknown[]) => {
+            const output = structuredOutputs[structuredOptions.name]
+            return typeof output === 'function' ? output(messages) : output
+        },
+    }))
+
     const modelHandle = {
         bindTools:
             options?.toolCalling === false
@@ -324,6 +408,7 @@ function createDeliveryChainModelHandle(options?: {
         },
         model: {
             invoke: baseInvoke,
+            ...(options?.businessStructuredOutput === false ? {} : { withStructuredOutput }),
         },
         modelId: 'test-model',
         normalizeError: vi.fn(error => error),
@@ -331,7 +416,19 @@ function createDeliveryChainModelHandle(options?: {
         providerModel: 'test-model',
     }
 
-    modelProviderMocks.createChatModel.mockReturnValue(modelHandle)
+    modelProviderMocks.createChatModel.mockImplementation(createOptions => {
+        const isContractModel = createOptions.resolvedModelSelection.modelId === 'deepseek/deepseek-v4-pro'
+        const supportsStructuredOutput = isContractModel
+            ? options?.contractStructuredOutput !== false
+            : options?.businessStructuredOutput !== false
+        return {
+            ...modelHandle,
+            model: {
+                invoke: baseInvoke,
+                ...(supportsStructuredOutput ? { withStructuredOutput } : {}),
+            },
+        }
+    })
 
     return {
         baseInvoke,
@@ -381,8 +478,17 @@ describe('runtime/delivery-chain', () => {
 
     it('只在显式 /delivery-chain + scenario requirement 时解析为 ready-scenario', () => {
         expect(resolveDeliveryChainInvocation(createScenarioRequest())).toMatchObject({
+            expectedPreDecision: 'execute',
             kind: 'ready-scenario',
             scenarioId: 'request-limit-banner',
+        })
+    })
+
+    it('quick-start register-login scenario is accepted as an execute planning entry', () => {
+        expect(resolveDeliveryChainInvocation(createScenarioRequest('register-login'))).toMatchObject({
+            expectedPreDecision: 'execute',
+            kind: 'ready-scenario',
+            scenarioId: 'register-login',
         })
     })
 
@@ -708,8 +814,7 @@ describe('runtime/delivery-chain', () => {
         })
 
         expect(handled).toBe(true)
-        // v0.4.1: baseInvoke 5 次（plan + task + 3 review）
-        expect(modelHandle.baseInvoke).toHaveBeenCalledTimes(5)
+        expect(modelHandle.baseInvoke).toHaveBeenCalledTimes(7)
         const resourceStartUris = writeChunk.mock.calls
             .map(([chunk]) => chunk as ChatStreamChunk)
             .filter((chunk): chunk is Extract<ChatStreamChunk, { type: 'resource-start' }> => chunk.type === 'resource-start')
@@ -737,12 +842,16 @@ describe('runtime/delivery-chain', () => {
         ).toEqual([
             'load:running',
             'load:completed',
+            'supervisor-pre-decision:running',
+            'supervisor-pre-decision:completed',
             'delegate-plan:running',
             'delegate-plan:completed',
             'delegate-task:running',
             'delegate-task:completed',
             'delegate-review-group:running',
             'delegate-review-group:completed',
+            'supervisor-post-decision:running',
+            'supervisor-post-decision:completed',
             'synthesize-report:running',
             'synthesize-report:completed',
         ])
@@ -763,8 +872,8 @@ describe('runtime/delivery-chain', () => {
         )
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 实现方案'))
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 任务拆解'))
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## Review 总评'))
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`needs_review`'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 评审覆盖'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.not.stringContaining('当前状态：'))
 
         const chunkTypes = new Set(getWrittenChunks(writeChunk).map(chunk => chunk.type))
         expect(chunkTypes.has('tool-start')).toBe(false)
@@ -937,7 +1046,7 @@ describe('runtime/delivery-chain', () => {
         ])
     })
 
-    it('短 inline requirement 会在报告里补默认假设，blocked review 仍输出最终报告', async () => {
+    it('短 inline requirement 仍通过结构化 Supervisor、Review 和安全报告链路完成', async () => {
         const modelHandle = createDeliveryChainModelHandle({
             stageResponses: [
                 [
@@ -1066,22 +1175,26 @@ describe('runtime/delivery-chain', () => {
         ).toEqual([
             'load:running',
             'load:completed',
+            'supervisor-pre-decision:running',
+            'supervisor-pre-decision:completed',
             'delegate-plan:running',
             'delegate-plan:completed',
             'delegate-task:running',
             'delegate-task:completed',
             'delegate-review-group:running',
             'delegate-review-group:completed',
+            'supervisor-post-decision:running',
+            'supervisor-post-decision:completed',
             'synthesize-report:running',
             'synthesize-report:completed',
         ])
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('inline requirement 较短'))
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('`blocked`'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('## 交付结论'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.not.stringContaining('当前状态：'))
         expect(chatMemoryMocks.appendCompletedTurn).toHaveBeenCalledWith(
             buildChatConversationThreadId('delivery-inline-session', 'conversation-1', chatMemoryEnv),
             expect.objectContaining({
                 assistantMessageId: expect.stringContaining('delivery-chain:'),
-                completionStatus: 'blocked',
+                completionStatus: 'completed',
                 source: 'delivery-chain',
                 userMessageId: expect.stringContaining('delivery-chain:'),
                 userText: '做个表单',
@@ -1092,9 +1205,9 @@ describe('runtime/delivery-chain', () => {
         )
     })
 
-    it('当前模型不支持 tool-calling 时 fail closed，并输出安全报告', async () => {
+    it('固定 Contract 模型不支持结构化输出时 fail closed，并输出安全报告', async () => {
         const modelHandle = createDeliveryChainModelHandle({
-            toolCalling: false,
+            contractStructuredOutput: false,
         })
         const writeChunk = vi.fn()
 
@@ -1112,21 +1225,219 @@ describe('runtime/delivery-chain', () => {
             getWorkflowProgressChunks(writeChunk)
                 .filter(chunk => chunk.type === 'workflow-progress-step')
                 .map(chunk => `${chunk.stepId}:${chunk.status}`)
-        ).toEqual(['load:running', 'load:completed', 'delegate-plan:failed'])
+        ).toEqual(['load:running', 'load:completed', 'supervisor-pre-decision:failed'])
         expect(getWorkflowProgressChunks(writeChunk)).toContainEqual(
             expect.objectContaining({
                 type: 'workflow-progress-end',
                 status: 'failed',
             })
         )
-        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('tool-calling'))
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(writeChunk, expect.stringContaining('Fixed Contract model'))
         expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 
-    it('Manager 阶段模型调用抛错时不会误报读取上下文失败', async () => {
+    it('clarification_required 和 pre-execution blocked 使用既有安全报告与 workflow-progress 边界', async () => {
+        const clarificationHandle = createDeliveryChainModelHandle({
+            structuredOutputs: {
+                delivery_chain_supervisor_pre: {
+                    branch: 'clarification_required',
+                    missingInformation: ['The accepted user-visible outcome is missing.'],
+                    nextStep: 'Provide the acceptance criteria.',
+                    reason: 'The requirement is underspecified.',
+                },
+            },
+        })
+        const clarificationChunks = vi.fn()
+
+        await startDeliveryChainRun({
+            context: {},
+            modelHandle: clarificationHandle.handle as never,
+            request: createInlineRequest('需要一个新功能，但没有说明验收结果。'),
+            resolvedModelSelection: testResolvedModelSelection,
+            writeChunk: clarificationChunks,
+        })
+
+        expect(
+            getWorkflowProgressChunks(clarificationChunks)
+                .filter(chunk => chunk.type === 'workflow-progress-step')
+                .map(chunk => `${chunk.stepId}:${chunk.status}`)
+        ).toEqual(['load:running', 'load:completed', 'supervisor-pre-decision:running', 'supervisor-pre-decision:completed'])
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(clarificationChunks, expect.stringContaining('`clarification_required`'))
+
+        const blockedHandle = createDeliveryChainModelHandle({
+            structuredOutputs: {
+                delivery_chain_supervisor_pre: {
+                    boundaryEvidence: ['This read-only planning run must not write production data.'],
+                    branch: 'blocked',
+                    nextStep: 'Remove the prohibited side effect.',
+                    reason: 'The runtime boundary is explicit.',
+                },
+            },
+        })
+        const blockedChunks = vi.fn()
+
+        await startDeliveryChainRun({
+            context: {},
+            modelHandle: blockedHandle.handle as never,
+            request: createInlineRequest('直接写入生产数据库。'),
+            resolvedModelSelection: testResolvedModelSelection,
+            writeChunk: blockedChunks,
+        })
+
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(blockedChunks, expect.stringContaining('`blocked`'))
+        expect(getWorkflowProgressChunks(blockedChunks)).toContainEqual(
+            expect.objectContaining({ status: 'completed', type: 'workflow-progress-end' })
+        )
+    })
+
+    it('一次返修只通过既有 workflow-progress family 展示安全阶段摘要', async () => {
+        let generalReviewCount = 0
         const modelHandle = createDeliveryChainModelHandle({
-            boundInvoke: async () => {
-                throw new Error('provider tool-call failed')
+            structuredOutputs: {
+                delivery_chain_general_review: messages => {
+                    generalReviewCount += 1
+                    if (generalReviewCount === 1) {
+                        return {
+                            disposition: 'needs_changes',
+                            findings: [
+                                {
+                                    description: 'Add recovery-state acceptance criteria.',
+                                    evidence: ['The Plan omits recovery coverage.'],
+                                    findingType: 'issue',
+                                    requirement: 'required',
+                                    severity: 'medium',
+                                    suggestedAction: 'Revise the Plan once.',
+                                    targetArtifacts: ['plan'],
+                                },
+                            ],
+                            markdown: '# General',
+                            planTaskAlignment: 'aligned',
+                            role: 'general',
+                            summary: 'Revision required.',
+                        }
+                    }
+
+                    const findingId = messages
+                        .map(message => String((message as { content?: unknown }).content ?? ''))
+                        .join('\n')
+                        .match(/original finding ID: ([^.,\s]+)/)?.[1]
+                    return {
+                        disposition: 'pass',
+                        findings: [],
+                        markdown: '# General',
+                        planTaskAlignment: 'aligned',
+                        resolutions: findingId ? [{ evidence: ['Re-review checked the revised Plan.'], findingId, state: 'resolved' }] : [],
+                        role: 'general',
+                        summary: 'Re-review passed.',
+                    }
+                },
+                delivery_chain_plan_revision: {
+                    acceptanceCriteria: [
+                        { criterionKey: 'AC-1', description: 'Banner and recovery state are visible.', requirementRefs: ['REQ-1'] },
+                    ],
+                    assumptions: [],
+                    deliveryPhases: [
+                        {
+                            dependsOnPhaseKeys: [],
+                            objective: 'Implement banner.',
+                            phaseKey: 'implementation',
+                            requirementRefs: ['REQ-1'],
+                            title: 'Implementation',
+                        },
+                    ],
+                    markdown: '# Revised Plan',
+                    requirementRefs: ['REQ-1'],
+                    scope: { excluded: [], included: ['request limit banner'] },
+                    summary: 'Plan revised.',
+                },
+                delivery_chain_supervisor_post: messages => {
+                    const findingId = messages
+                        .map(message => String((message as { content?: unknown }).content ?? ''))
+                        .join('\n')
+                        .match(/"findingId":"([^"]+)"/)?.[1]
+                    return {
+                        action: 'revise',
+                        rationale: 'Address the required finding.',
+                        requests: [
+                            {
+                                requestKey: 'repair-plan',
+                                requiredActions: ['Add recovery coverage.'],
+                                sourceFindingIds: findingId ? [findingId] : ['missing'],
+                                summary: 'Revise Plan.',
+                                targets: ['plan'],
+                            },
+                        ],
+                        revisionTargets: ['plan'],
+                    }
+                },
+            },
+        })
+        const writeChunk = vi.fn()
+
+        await startDeliveryChainRun({
+            context: {},
+            modelHandle: modelHandle.handle as never,
+            request: createScenarioRequest(),
+            resolvedModelSelection: testResolvedModelSelection,
+            writeChunk,
+        })
+
+        const progressSteps = getWorkflowProgressChunks(writeChunk)
+            .filter(chunk => chunk.type === 'workflow-progress-step')
+            .map(chunk => `${chunk.stepId}:${chunk.status}`)
+        expect(progressSteps).toContain('revise-plan:running')
+        expect(progressSteps).toContain('revise-plan:completed')
+        expect(progressSteps).not.toContain('delegate-re-review-group:completed')
+        expect(progressSteps).not.toContain('revise-tasks:running')
+        expect(JSON.stringify(getWorkflowProgressChunks(writeChunk))).not.toContain('Business judgment draft')
+        expect(JSON.stringify(getWrittenChunks(writeChunk))).not.toContain('workflow-progress-revision')
+    })
+
+    it('用户业务模型不支持 structured output 时仍使用固定 Contract 模型执行', async () => {
+        const modelHandle = createDeliveryChainModelHandle({ businessStructuredOutput: false })
+        const writeChunk = vi.fn()
+        const resolvedModelSelection: ResolvedModelSelection = {
+            ...testResolvedModelSelection,
+            catalogItem: {
+                ...testResolvedModelSelection.catalogItem,
+                capabilities: {
+                    ...testResolvedModelSelection.catalogItem.capabilities,
+                    jsonOutput: false,
+                },
+            },
+        }
+
+        const handled = await startDeliveryChainRun({
+            context: {},
+            modelHandle: modelHandle.handle as never,
+            request: createScenarioRequest(),
+            resolvedModelSelection,
+            writeChunk,
+        })
+
+        expect(handled).toBe(true)
+        expect(modelProviderMocks.createChatModel).toHaveBeenCalledWith(
+            expect.objectContaining({
+                resolvedModelSelection: expect.objectContaining({ modelId: 'deepseek/deepseek-v4-pro' }),
+            })
+        )
+        expect(getWorkflowProgressChunks(writeChunk)).toContainEqual(
+            expect.objectContaining({
+                type: 'workflow-progress-end',
+                status: 'completed',
+            })
+        )
+        expect(testState.writeStaticTextPart).toHaveBeenCalledWith(
+            writeChunk,
+            expect.stringContaining('# Delivery Chain Report / 交付计划报告')
+        )
+        expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
+    })
+
+    it('Manager 阶段模型调用抛错时显示安全执行失败而非读取上下文或 Contract 失败', async () => {
+        const modelHandle = createDeliveryChainModelHandle({
+            businessInvoke: async () => {
+                throw new Error('provider business-model failed')
             },
         })
         const writeChunk = vi.fn()
@@ -1144,12 +1455,13 @@ describe('runtime/delivery-chain', () => {
             getWorkflowProgressChunks(writeChunk)
                 .filter(chunk => chunk.type === 'workflow-progress-step')
                 .map(chunk => `${chunk.stepId}:${chunk.status}`)
-        ).toEqual(['load:running', 'load:completed', 'delegate-plan:running', 'delegate-plan:failed'])
+        ).toEqual(['load:running', 'load:completed', 'supervisor-pre-decision:running', 'supervisor-pre-decision:failed'])
         expect(JSON.stringify(getWorkflowProgressChunks(writeChunk))).not.toContain('读取上下文未完成')
         expect(testState.writeStaticTextPart).toHaveBeenCalledWith(
             writeChunk,
-            expect.stringContaining('Plan Subagent Tool 调用失败，当前交付链已安全失败。')
+            expect.stringContaining('Supervisor pre-decision 执行未完成。')
         )
+        expect(JSON.stringify(getWorkflowProgressChunks(writeChunk))).not.toContain('provider business-model failed')
         expect(chatMemoryMocks.appendCompletedTurn).not.toHaveBeenCalled()
     })
 })

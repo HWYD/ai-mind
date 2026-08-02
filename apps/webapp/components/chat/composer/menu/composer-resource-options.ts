@@ -44,13 +44,14 @@ async function getDocsResourceOptions() {
 
             const options = payload.data.resources.filter(isDocsResourceCatalogItem).map<ComposerResourceOption>(resource => ({
                 badgeLabel: resource.badgeLabel,
+                description: resource.description,
+                fileName: resource.fileName,
                 group: resource.group,
                 id: `demo:${resource.group}:${resource.fileName}`,
                 type: 'resource',
                 label: resource.label,
                 uri: resource.uri,
                 source: 'local',
-                description: resource.description,
             }))
 
             cachedDocsResourceOptions = options
