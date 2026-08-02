@@ -213,6 +213,69 @@ describe('local chat persistence schema and projection', () => {
         })
         expect(localConversationSnapshotSchema.safeParse({ ...snapshot, rawGraphState: {} }).success).toBe(false)
     })
+
+    it('excludes transient image parts from snapshots and rejects an injected image result', () => {
+        const messages: MindMessage[] = [
+            createTextMessage('user-1', 'user', 'Generate an image'),
+            {
+                createdAt: '2026-07-05T10:00:01.000Z',
+                id: 'assistant-image',
+                parts: [
+                    {
+                        id: 'image-brief-run-1',
+                        runId: 'run-1',
+                        summary: {
+                            assumptions: [],
+                            avoid: [],
+                            intent: 'A calm landscape',
+                            mustInclude: ['lake'],
+                            subjects: ['lake'],
+                        },
+                        type: 'image-brief',
+                    },
+                    {
+                        contentPath: '/api/chat/runs/run-1/image',
+                        expiresAt: '2026-07-05T10:10:00.000Z',
+                        id: 'image-result-run-1',
+                        runId: 'run-1',
+                        suggestedFileName: 'ai-mind-image-run-1.jpg',
+                        temporary: true,
+                        type: 'image-result',
+                    },
+                ],
+                role: 'assistant',
+                status: 'completed',
+            },
+        ]
+        const snapshot = createLocalConversationSnapshot({
+            conversation: createConversation('conv-image'),
+            messages,
+            snapshotAt: '2026-07-05T10:00:02.000Z',
+        })
+
+        expect(snapshot?.messages.map(message => message.id)).toEqual(['user-1'])
+        expect(
+            localConversationSnapshotSchema.safeParse({
+                ...snapshot,
+                messages: [
+                    {
+                        ...snapshot?.messages[0],
+                        parts: [
+                            {
+                                contentPath: '/api/chat/runs/run-1/image',
+                                expiresAt: '2026-07-05T10:10:00.000Z',
+                                objectUrl: 'blob:private-image',
+                                runId: 'run-1',
+                                suggestedFileName: 'ai-mind-image-run-1.jpg',
+                                temporary: true,
+                                type: 'image-result',
+                            },
+                        ],
+                    },
+                ],
+            }).success
+        ).toBe(false)
+    })
 })
 
 describe('local chat persistence store', () => {

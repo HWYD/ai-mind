@@ -6,6 +6,8 @@ import {
     createAgentInterruptPart,
     createAgentTextArtifact,
     createAssistantPlaceholder,
+    createImageBriefPart,
+    createImageResultPart,
     createPromptPart,
     createReasoningPart,
     createResourcePart,
@@ -34,6 +36,8 @@ import {
     upsertAgentGraphDebugSummaryPart,
     upsertAgentGraphNodePart,
     upsertAgentInterruptPart,
+    upsertImageBriefPart,
+    upsertImageResultPart,
     upsertThreadMemoryStatusPart,
     upsertWorkflowProgressPart,
 } from './message-operations'
@@ -368,6 +372,14 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                     failureMessage: chunk.failureMessage,
                     visibility: 'collapsed',
                 }))
+            )
+        case 'image-brief':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertImageBriefPart(messages, messageId, createImageBriefPart(chunk))
+            )
+        case 'image-result-ready':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertImageResultPart(messages, messageId, createImageResultPart(chunk))
             )
         case 'text-start':
             return applyMessagesAndActiveStream(state, appendActivePartMessages(state, createTextPart('', chunk.partId)), {

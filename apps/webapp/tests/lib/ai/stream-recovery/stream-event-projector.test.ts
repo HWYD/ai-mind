@@ -197,6 +197,29 @@ describe('stream-event-projector', () => {
             eventKind: 'lifecycle',
             runStatus: 'running',
         })
+        expect(fakeStore.appended[0]).toMatchObject({ agentRunId: runId })
+        expect(fakeStore.appended[1]).toMatchObject({ agentRunId: runId })
+    })
+
+    it('does not treat an image run id as a Tasklist AgentRun id', async () => {
+        await projector.projectChunk({
+            chunk: {
+                partId: 'image-brief',
+                runId,
+                summary: {
+                    assumptions: [],
+                    avoid: [],
+                    intent: '生成猫咪照片',
+                    mustInclude: ['猫咪'],
+                    subjects: ['猫咪'],
+                },
+                type: 'image-brief',
+            },
+            ownerSessionHash,
+            runId,
+        })
+
+        expect(fakeStore.appended[0]).not.toHaveProperty('agentRunId')
     })
 
     it('projects lifecycle run-status payloads including terminal cancellation', async () => {

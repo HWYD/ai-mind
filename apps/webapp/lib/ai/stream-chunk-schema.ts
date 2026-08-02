@@ -29,6 +29,20 @@ const agentTextArtifactMetadataSchema = z.object({
     validated: z.boolean().optional(),
 })
 
+const imageBriefSummarySchema = strictObject({
+    aspectRatio: z.enum(['square', 'landscape', 'portrait']).optional(),
+    assumptions: z.array(z.string().trim().min(1).max(160)).max(8),
+    avoid: z.array(z.string().trim().min(1).max(160)).max(12),
+    composition: z.string().trim().min(1).max(240).optional(),
+    intent: z.string().trim().min(1).max(160),
+    lightingAndColor: z.string().trim().min(1).max(240).optional(),
+    mustInclude: z.array(z.string().trim().min(1).max(160)).max(12),
+    scene: z.string().trim().min(1).max(240).optional(),
+    style: z.string().trim().min(1).max(240).optional(),
+    subjects: z.array(z.string().trim().min(1).max(120)).max(8),
+    visibleText: z.array(z.string().trim().min(1).max(120)).max(8).optional(),
+})
+
 const agentGraphExpectedStepRangeSchema = z.custom<[number, number]>(
     value => Array.isArray(value) && value.length === 2 && value.every(item => Number.isInteger(item) && item > 0)
 )
@@ -327,7 +341,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
             workflowId: z.string().min(1),
             stepId: z.string().min(1),
             title: z.string().min(1),
-            status: z.enum(['running', 'completed', 'failed']),
+            status: z.enum(['running', 'completed', 'failed', 'cancelled']),
             summary: z.string().min(1).optional(),
             details: z.array(z.string().min(1)).max(8).optional(),
             startedAt: z.number().int().nonnegative().optional(),
@@ -341,13 +355,46 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
             type: z.literal('workflow-progress-end'),
             partId: z.string().min(1),
             workflowId: z.string().min(1),
-            status: z.enum(['completed', 'failed']),
+            status: z.enum(['completed', 'failed', 'cancelled']),
             summary: z.string().min(1).optional(),
             endedAt: z.number().int().nonnegative().optional(),
             durationMs: z.number().int().nonnegative().optional(),
             failureMessage: z.string().min(1).optional(),
         })
         .strict(),
+    strictObject({
+        type: z.literal('image-brief'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        summary: imageBriefSummarySchema,
+    }),
+    z
+        .object({
+            type: z.literal('image-result-ready'),
+            partId: z.string().min(1),
+            runId: z.string().min(1),
+            contentPath: z.string().regex(/^\/api\/chat\/runs\/[^/]+\/image$/),
+            expiresAt: z.string().datetime({ offset: true }),
+            height: z.number().int().positive().optional(),
+            mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']).optional(),
+            suggestedFileName: z
+                .string()
+                .min(1)
+                .max(160)
+                .regex(/^[^\\/]+$/),
+            temporary: z.literal(true),
+            width: z.number().int().positive().optional(),
+        })
+        .strict()
+        .superRefine((chunk, context) => {
+            if (chunk.contentPath !== `/api/chat/runs/${chunk.runId}/image`) {
+                context.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    message: 'contentPath must belong to runId.',
+                    path: ['contentPath'],
+                })
+            }
+        }),
     strictObject({
         type: z.literal('text-start'),
         partId: z.string().min(1),

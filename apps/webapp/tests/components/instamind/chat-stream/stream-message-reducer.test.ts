@@ -258,6 +258,57 @@ describe('stream-message-reducer', () => {
         })
     })
 
+    it('按 runId 聚合 ImageBrief 和同源临时图片结果，且 finish 后可安全重放', () => {
+        const imageBriefChunk: ChatStreamChunk = {
+            partId: 'image-brief-run-1',
+            runId: 'run-1',
+            summary: {
+                assumptions: ['使用自然光'],
+                avoid: ['水印'],
+                intent: '展示安静的湖畔',
+                mustInclude: ['湖泊'],
+                subjects: ['湖泊'],
+            },
+            type: 'image-brief',
+        }
+        const imageResultChunk: ChatStreamChunk = {
+            contentPath: '/api/chat/runs/run-1/image',
+            expiresAt: '2026-07-05T10:10:00.000Z',
+            mimeType: 'image/jpeg',
+            partId: 'image-result-run-1',
+            runId: 'run-1',
+            suggestedFileName: 'ai-mind-image-run-1.jpg',
+            temporary: true,
+            type: 'image-result-ready',
+        }
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-image' },
+            imageBriefChunk,
+            imageBriefChunk,
+            imageResultChunk,
+            imageResultChunk,
+            { type: 'finish' },
+        ])
+        const assistantMessage = getAssistantMessage(state)
+
+        expect(assistantMessage).toMatchObject({
+            id: 'assistant-image',
+            status: 'completed',
+        })
+        expect(assistantMessage?.parts).toEqual([
+            expect.objectContaining({
+                runId: 'run-1',
+                type: 'image-brief',
+            }),
+            expect.objectContaining({
+                contentPath: '/api/chat/runs/run-1/image',
+                runId: 'run-1',
+                type: 'image-result',
+            }),
+        ])
+        expect(assistantMessage?.parts).not.toContainEqual(expect.objectContaining({ providerUrl: expect.anything() }))
+    })
+
     it('agent-interrupt 会写入当前 assistant message 并让 finish 保持 paused', () => {
         const state = reduceChunks([
             { type: 'start', messageId: 'assistant-hitl' },

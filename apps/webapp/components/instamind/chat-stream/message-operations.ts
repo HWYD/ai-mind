@@ -7,6 +7,8 @@ import type {
     AgentInterruptPart,
     AgentStepPart,
     AgentTextArtifactViewModel,
+    ImageBriefPart,
+    ImageResultPart,
     MindMessage,
     MindMessagePart,
     PromptPart,
@@ -39,6 +41,8 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
                 part.type === 'thread-memory-status' ||
                 part.type === 'prompt' ||
                 part.type === 'workflow-progress' ||
+                part.type === 'image-brief' ||
+                part.type === 'image-result' ||
                 part.type === 'agent-interrupt'
             ) {
                 return true
@@ -215,6 +219,38 @@ export function upsertThreadMemoryStatusPart(messages: MindMessage[], messageId:
             ...message,
             parts: message.parts.map((existingPart, index) => (index === existingPartIndex ? part : existingPart)),
         }
+    })
+}
+
+export function upsertImageBriefPart(messages: MindMessage[], messageId: string, part: ImageBriefPart): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPartIndex = message.parts.findIndex(
+            existingPart => existingPart.type === 'image-brief' && existingPart.runId === part.runId
+        )
+
+        return existingPartIndex === -1
+            ? { ...message, parts: [...message.parts, part] }
+            : { ...message, parts: message.parts.map((existingPart, index) => (index === existingPartIndex ? part : existingPart)) }
+    })
+}
+
+export function upsertImageResultPart(messages: MindMessage[], messageId: string, part: ImageResultPart): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existingPartIndex = message.parts.findIndex(
+            existingPart => existingPart.type === 'image-result' && existingPart.runId === part.runId
+        )
+
+        return existingPartIndex === -1
+            ? { ...message, parts: [...message.parts, part] }
+            : { ...message, parts: message.parts.map((existingPart, index) => (index === existingPartIndex ? part : existingPart)) }
     })
 }
 

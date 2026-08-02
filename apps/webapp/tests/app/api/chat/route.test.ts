@@ -2,18 +2,40 @@ import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const streamChatMock = vi.hoisted(() => vi.fn())
+const streamImageMock = vi.hoisted(() => vi.fn())
 const rateLimitCheckAndIncrementMock = vi.hoisted(() => vi.fn())
+const rateLimitRollbackMock = vi.hoisted(() => vi.fn())
 const resolveSessionIdMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'test-session', setCookie: vi.fn() })))
 const createConversationMock = vi.hoisted(() => vi.fn())
 const getConversationMock = vi.hoisted(() => vi.fn())
 const touchConversationMock = vi.hoisted(() => vi.fn())
 const createOrReuseRunMock = vi.hoisted(() => vi.fn())
 const projectLifecycleMock = vi.hoisted(() => vi.fn())
+const createActiveImageRunMock = vi.hoisted(() => vi.fn())
+const ImageGenerationRunRepositoryErrorMock = vi.hoisted(
+    () =>
+        class ImageGenerationRunRepositoryErrorMock extends Error {
+            readonly code: string
+
+            constructor(code: string, message: string) {
+                super(message)
+                this.code = code
+            }
+        }
+)
 
 vi.mock('@/lib/ai/chat-service', () => ({
     createChatService: () => ({
         streamChat: streamChatMock,
+        streamImage: streamImageMock,
     }),
+}))
+
+vi.mock('@/lib/ai/runtime/image-generation-agent/image-generation-run-repository', () => ({
+    ImageGenerationRunRepository: class ImageGenerationRunRepositoryMock {
+        createActiveRun = createActiveImageRunMock
+    },
+    ImageGenerationRunRepositoryError: ImageGenerationRunRepositoryErrorMock,
 }))
 
 vi.mock('@/lib/ai/stream-recovery/stream-run-service', () => ({
@@ -50,9 +72,12 @@ vi.mock('@/lib/ai/rate-limit', () => ({
         enabled: true,
         tasklistDailyLimitPerIp: 1,
         tasklistDailyLimitPerSession: 1,
+        imageDailyLimitPerIp: 10,
+        imageDailyLimitPerSession: 3,
     }),
     MemoryRateLimitStore: class MemoryRateLimitStoreMock {
         checkAndIncrement = rateLimitCheckAndIncrementMock
+        rollback = rateLimitRollbackMock
     },
     resolveClientIp: () => '127.0.0.1',
     resolveSessionId: resolveSessionIdMock,
@@ -120,6 +145,7 @@ describe('POST /api/chat', () => {
             type: 'created',
         })
         projectLifecycleMock.mockResolvedValue(undefined)
+        createActiveImageRunMock.mockResolvedValue({ id: 'image-run-route-test' })
     })
 
     it('passes resolved model selection and validated conversation ownership to chat service', async () => {
@@ -160,6 +186,70 @@ describe('POST /api/chat', () => {
             })
         )
         expect(response.headers.get('X-AI-Mind-Conversation-Id')).toBe('test-conversation')
+    })
+
+    it('routes an explicit /image request to the controlled image stream without ordinary chat execution', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({ allowed: true })
+        streamImageMock.mockResolvedValueOnce(createStreamResponse())
+
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    composer: {
+                        command: { label: '生成图片', name: 'image' },
+                        plainText: '/image 一只戴围巾的橘猫',
+                    },
+                    messages: [
+                        {
+                            role: 'user',
+                            parts: [{ type: 'text', format: 'markdown', text: '/image 一只戴围巾的橘猫' }],
+                        },
+                    ],
+                })
+            )
+        )
+
+        expect(response.status).toBe(200)
+        expect(createOrReuseRunMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                kind: 'image_generation',
+            })
+        )
+        expect(createActiveImageRunMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                assistantMessageId: 'image-assistant-run-route-test',
+                streamRunId: 'run-route-test',
+            })
+        )
+        expect(streamImageMock).toHaveBeenCalledWith(
+            expect.objectContaining({
+                rawDescription: '一只戴围巾的橘猫',
+                runId: 'run-route-test',
+            }),
+            expect.objectContaining({ validatedConversationId: 'test-conversation' })
+        )
+        expect(streamChatMock).not.toHaveBeenCalled()
+    })
+
+    it('rejects empty /image before stream, conversation, and quota work', async () => {
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    messages: [
+                        {
+                            role: 'user',
+                            parts: [{ type: 'text', format: 'markdown', text: '/image\u3000' }],
+                        },
+                    ],
+                })
+            )
+        )
+
+        await expect(response.json()).resolves.toMatchObject({ code: 'IMAGE_REQUEST_INVALID' })
+        expect(response.status).toBe(400)
+        expect(rateLimitCheckAndIncrementMock).not.toHaveBeenCalled()
+        expect(createActiveImageRunMock).not.toHaveBeenCalled()
+        expect(streamImageMock).not.toHaveBeenCalled()
     })
 
     it('creates and validates a persisted conversation for the draft-promotion path', async () => {
@@ -578,5 +668,72 @@ describe('POST /api/chat', () => {
         })
         expect(touchConversationMock).not.toHaveBeenCalled()
         expect(createConversationMock).not.toHaveBeenCalled()
+    })
+
+    it('returns a dedicated image quota message for a limited /image request', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({
+            allowed: false,
+            limitKey: 'session',
+            limitValue: 3,
+        })
+
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    composer: {
+                        command: { label: '生成图片', name: 'image' },
+                        plainText: '/image 一只橘猫',
+                    },
+                    messages: [
+                        {
+                            role: 'user',
+                            parts: [{ type: 'text', format: 'markdown', text: '/image 一只橘猫' }],
+                        },
+                    ],
+                })
+            )
+        )
+        const body = await response.json()
+
+        expect(response.status).toBe(429)
+        expect(body).toEqual({
+            code: 'MODEL_PROVIDER_RATE_LIMITED',
+            error: '今日生图次数已用完（3 次）。',
+            limitKey: 'session',
+        })
+        expect(streamImageMock).not.toHaveBeenCalled()
+        expect(createActiveImageRunMock).not.toHaveBeenCalled()
+    })
+
+    it('rolls back the reserved image quota when the active-session lease conflicts', async () => {
+        rateLimitCheckAndIncrementMock.mockReturnValueOnce({ allowed: true })
+        createActiveImageRunMock.mockRejectedValueOnce(
+            new ImageGenerationRunRepositoryErrorMock('IMAGE_GENERATION_ALREADY_ACTIVE', 'active image run')
+        )
+
+        const response = await POST(
+            createPostRequest(
+                createUserPayload({
+                    composer: {
+                        command: { label: '生成图片', name: 'image' },
+                        plainText: '/image 一只橘猫',
+                    },
+                    messages: [
+                        {
+                            role: 'user',
+                            parts: [{ type: 'text', format: 'markdown', text: '/image 一只橘猫' }],
+                        },
+                    ],
+                }),
+                'active-conflict-key'
+            )
+        )
+
+        expect(response.status).toBe(409)
+        expect(rateLimitRollbackMock).toHaveBeenCalledWith({
+            ip: '127.0.0.1',
+            routeType: 'image',
+            sessionId: 'test-session',
+        })
     })
 })

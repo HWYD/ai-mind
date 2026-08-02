@@ -3,7 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/prisma/client'
 
 export { PrismaClient } from '../generated/prisma/client'
-export type { AgentInterrupt, AgentRun, Prisma } from '../generated/prisma/client'
+export type { AgentInterrupt, AgentRun, ImageGenerationRun, Prisma } from '../generated/prisma/client'
 
 const globalForPrisma = globalThis as unknown as {
     aiMindPrisma?: PrismaClient

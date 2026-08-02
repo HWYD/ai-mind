@@ -1,4 +1,4 @@
-import type { AgentArtifactFormat, AgentArtifactKind, AgentGraphDebugSummary } from '@ai-mind/stream-core/protocol'
+import type { AgentArtifactFormat, AgentArtifactKind, AgentGraphDebugSummary, PublicImageBriefSummary } from '@ai-mind/stream-core/protocol'
 
 import type { TasklistAgentInterruptPayload } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/hitl-review-schema'
 
@@ -83,8 +83,8 @@ export interface PromptPart extends BasePart {
     error?: string
 }
 
-export type WorkflowProgressStepStatus = 'completed' | 'failed' | 'running'
-export type WorkflowProgressRunStatus = 'completed' | 'failed' | 'running'
+export type WorkflowProgressStepStatus = 'cancelled' | 'completed' | 'failed' | 'running'
+export type WorkflowProgressRunStatus = 'cancelled' | 'completed' | 'failed' | 'running'
 
 export interface WorkflowProgressStep {
     id: string
@@ -111,6 +111,24 @@ export interface WorkflowProgressPart extends BasePart {
     durationMs?: number
     failureMessage?: string
     visibility: 'collapsed' | 'expanded'
+}
+
+export interface ImageBriefPart extends BasePart {
+    type: 'image-brief'
+    runId: string
+    summary: PublicImageBriefSummary
+}
+
+export interface ImageResultPart extends BasePart {
+    type: 'image-result'
+    runId: string
+    contentPath: string
+    expiresAt: string
+    height?: number
+    mimeType?: 'image/jpeg' | 'image/png' | 'image/webp'
+    suggestedFileName: string
+    temporary: true
+    width?: number
 }
 
 export type AgentStepStatus = 'completed' | 'failed' | 'paused' | 'running' | 'skipped'
@@ -179,7 +197,7 @@ export interface AgentTextArtifactViewModel {
         targetVersion?: string
         validated?: boolean
     }
-    status: 'completed' | 'failed' | 'streaming'
+    status: 'cancelled' | 'completed' | 'failed' | 'streaming'
     title: string
 }
 
@@ -192,6 +210,8 @@ export type MindMessagePart =
     | ThreadMemoryStatusPart
     | PromptPart
     | WorkflowProgressPart
+    | ImageBriefPart
+    | ImageResultPart
     | AgentStepPart
     | AgentInterruptPart
 

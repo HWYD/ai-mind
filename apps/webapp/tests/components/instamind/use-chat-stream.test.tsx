@@ -666,7 +666,9 @@ describe('useChatStream', () => {
         )
         await sendPromise
 
-        expect(result.current.streamRecoveryStatus).toBe('terminal')
+        await waitFor(() => {
+            expect(result.current.streamRecoveryStatus).toBe('terminal')
+        })
         expect(result.current.error).toBeNull()
     })
 

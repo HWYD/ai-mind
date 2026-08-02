@@ -215,6 +215,38 @@ describe('chat stream workflow progress chunks', () => {
     })
 })
 
+describe('chat stream image generation chunks', () => {
+    it('accepts public ImageBrief and temporary-result chunks without provider data', () => {
+        const chunks = [
+            {
+                type: 'image-brief',
+                partId: 'image-brief-1',
+                runId: 'image-run-1',
+                summary: {
+                    aspectRatio: 'square',
+                    assumptions: ['square composition'],
+                    avoid: ['watermark'],
+                    intent: 'product photograph',
+                    mustInclude: ['yellow lemon'],
+                    subjects: ['yellow lemon'],
+                },
+            },
+            {
+                type: 'image-result-ready',
+                partId: 'image-result-1',
+                runId: 'image-run-1',
+                contentPath: '/api/chat/runs/image-run-1/image',
+                expiresAt: '2026-07-29T00:10:00.000Z',
+                mimeType: 'image/jpeg',
+                suggestedFileName: 'ai-mind-image-image-run-1.jpg',
+                temporary: true,
+            },
+        ] satisfies ChatStreamChunk[]
+
+        expect(chunks.map(chunk => chunk.type)).toEqual(['image-brief', 'image-result-ready'])
+    })
+})
+
 describe('chat stream backward-compatible chunk inventory', () => {
     it('includes the optional thread-memory-status chunk without removing existing chunk types', () => {
         const knownChunkTypes = [
@@ -231,6 +263,8 @@ describe('chat stream backward-compatible chunk inventory', () => {
             'workflow-progress-start',
             'workflow-progress-step',
             'workflow-progress-end',
+            'image-brief',
+            'image-result-ready',
             'text-start',
             'text-delta',
             'text-end',
@@ -251,6 +285,7 @@ describe('chat stream backward-compatible chunk inventory', () => {
         ] satisfies ChatStreamChunk['type'][]
 
         expect(knownChunkTypes).toContain('thread-memory-status')
+        expect(knownChunkTypes).toContain('image-result-ready')
         expect(knownChunkTypes).toContain('finish')
     })
 
@@ -269,6 +304,8 @@ describe('chat stream backward-compatible chunk inventory', () => {
             'workflow-progress-start',
             'workflow-progress-step',
             'workflow-progress-end',
+            'image-brief',
+            'image-result-ready',
             'text-start',
             'text-delta',
             'text-end',

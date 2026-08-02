@@ -1,0 +1,26 @@
+.headerShimmer {
+    background-image: linear-gradient(90deg, var(--muted-foreground), var(--primary), var(--muted-foreground));
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: workflow-progress-shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes workflow-progress-shimmer {
+    from {
+        background-position: 100% 0;
+    }
+
+    to {
+        background-position: -100% 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .headerShimmer {
+        background-image: none;
+        color: var(--primary);
+        animation: none;
+    }
+}

@@ -228,13 +228,14 @@ export function ChatMessageList({
                 const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messageEntries.length - 1
                 const isAssistantReplyCompleted = !isLatestAssistantMessage || !isBusy
                 const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted
+                const hasImageResult = message.parts.some(part => part.type === 'image-result')
                 const showFollowUpSuggestions =
                     isLatestAssistantMessage &&
                     isAssistantReplyCompleted &&
                     !actionsDisabled &&
                     status === 'ready' &&
                     message.status !== 'failed' &&
-                    getMessageTextContent(message).trim().length > 0
+                    (getMessageTextContent(message).trim().length > 0 || hasImageResult)
 
                 return (
                     <ChatMessageItem

@@ -28,6 +28,8 @@ export function hasVisibleContent(part: MindMessagePart) {
         case 'skill':
         case 'prompt':
         case 'workflow-progress':
+        case 'image-brief':
+        case 'image-result':
         case 'agent-step':
             return true
         case 'thread-memory-status':
@@ -236,7 +238,7 @@ export function getMessageCopyText(message: MindMessage) {
             }
 
             if (segment.type === 'command') {
-                return `/${segment.command.label}`
+                return `/${segment.command.name}`
             }
 
             return `@${segment.reference.label}`

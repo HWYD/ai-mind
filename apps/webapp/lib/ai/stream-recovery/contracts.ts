@@ -14,6 +14,7 @@ export const RESUMABLE_STREAM_ACCEPT = `application/x-ndjson; profile="${streamP
 export const streamRunStatusSchema = z.enum(streamRunStatuses)
 export const streamTerminalStateSchema = z.enum(streamTerminalStates)
 export const streamEventKindSchema = z.enum(streamEventKinds)
+export const streamRunKindSchema = z.enum(['chat', 'tasklist_agent', 'delivery_chain', 'image_generation'])
 
 export const streamCursorSchema = z
     .object({
@@ -40,6 +41,9 @@ export const streamApiErrorCodes = [
     'INVALID_CHAT_REQUEST',
     'INVALID_CURSOR',
     'INVALID_IDEMPOTENCY_KEY',
+    'IMAGE_CAPABILITY_UNSUPPORTED',
+    'IMAGE_GENERATION_ALREADY_ACTIVE',
+    'IMAGE_REQUEST_INVALID',
     'STREAM_RUN_FORBIDDEN',
     'STREAM_RUN_NOT_FOUND',
     'STREAM_SERVICE_UNAVAILABLE',
@@ -114,6 +118,7 @@ export type StreamApiErrorResponse = z.infer<typeof streamApiErrorResponseSchema
 export type StreamCursor = z.infer<typeof streamCursorSchema>
 export type StreamEventEnvelopeDto = z.infer<typeof streamEventEnvelopeSchema>
 export type StreamReplayDescriptor = z.infer<typeof streamReplayDescriptorSchema>
+export type StreamRunKindDto = z.infer<typeof streamRunKindSchema>
 export type StreamRunStatusDto = z.infer<typeof streamRunStatusSchema>
 export type StreamTerminalStateDto = z.infer<typeof streamTerminalStateSchema>
 

@@ -9,7 +9,7 @@ interface RateLimitBucket {
     sessionCount: number
 }
 
-type BucketKey = `${string}:${string}`
+type BucketKey = `${string}:${string}:${string}`
 
 /**
  * 基于内存的轻量限流存储。
@@ -41,8 +41,9 @@ export class MemoryRateLimitStore {
         const today = todayKey()
 
         const ipLimits = this.getLimits(params.routeType)
-        const ipKey: BucketKey = `ip:${params.ip}`
-        const sessionKey: BucketKey = `session:${params.sessionId}`
+        const scope = this.getBucketScope(params.routeType)
+        const ipKey: BucketKey = `ip:${scope}:${params.ip}`
+        const sessionKey: BucketKey = `session:${scope}:${params.sessionId}`
 
         // 检查 IP 维度
         const ipResult = this.checkBucket(ipKey, today, ipLimits.ip, params.ip)
@@ -62,10 +63,11 @@ export class MemoryRateLimitStore {
     }
 
     /** 回滚：模型调用前失败不计。只影响计数，不影响已拒绝的后续检查。 */
-    rollback(params: { ip: string; sessionId: string }): void {
+    rollback(params: { ip: string; routeType?: string; sessionId: string }): void {
         const today = todayKey()
-        this.rollbackBucket(`ip:${params.ip}`, today, params.ip)
-        this.rollbackBucket(`session:${params.sessionId}`, today, params.sessionId)
+        const scope = this.getBucketScope(params.routeType ?? 'chat')
+        this.rollbackBucket(`ip:${scope}:${params.ip}`, today, params.ip)
+        this.rollbackBucket(`session:${scope}:${params.sessionId}`, today, params.sessionId)
     }
 
     private checkBucket(key: BucketKey, today: string, limit: number, _idForDebug: string): { allowed: boolean; current: number } {
@@ -115,6 +117,13 @@ export class MemoryRateLimitStore {
     }
 
     private getLimits(routeType: string): { ip: number; session: number } {
+        if (routeType === 'image') {
+            return {
+                ip: this.config.imageDailyLimitPerIp,
+                session: this.config.imageDailyLimitPerSession,
+            }
+        }
+
         if (routeType === 'tasklist') {
             return {
                 ip: this.config.tasklistDailyLimitPerIp,
@@ -125,6 +134,10 @@ export class MemoryRateLimitStore {
             ip: this.config.chatDailyLimitPerIp,
             session: this.config.chatDailyLimitPerSession,
         }
+    }
+
+    private getBucketScope(routeType: string): 'image' | 'shared' {
+        return routeType === 'image' ? 'image' : 'shared'
     }
 }
 

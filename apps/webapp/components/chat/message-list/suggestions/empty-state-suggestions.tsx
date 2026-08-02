@@ -1,6 +1,6 @@
 'use client'
 
-import { ArrowRight, ChevronDown, Database, FileText, ListChecks, Network, ShieldCheck, UserCheck, Users } from 'lucide-react'
+import { ArrowRight, ChevronDown, Database, ImagePlus, Network, Users } from 'lucide-react'
 import { type ReactNode, useId, useState, useSyncExternalStore } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -10,15 +10,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Separator } from '@/components/ui/separator'
 
-import { deliveryChainDemoSuggestion, type EmptyStateSuggestion, tasklistDemoSuggestion } from './empty-state-suggestion-options'
+import {
+    deliveryChainDemoSuggestion,
+    type EmptyStateSuggestion,
+    imageGenerationDemoSuggestion,
+    tasklistDemoSuggestion,
+} from './empty-state-suggestion-options'
 import { FollowUpSuggestions } from './follow-up-suggestions'
-
-const tasklistSteps = [
-    { icon: FileText, label: '读取方案' },
-    { icon: UserCheck, label: '人工确认' },
-    { icon: ListChecks, label: '生成草稿' },
-    { icon: ShieldCheck, label: '结构校验' },
-] as const
 
 const memorySteps = ['发送“记住我喜欢吃桃子。”', '新建或切换对话。', '发送“给我推荐几种水果。”']
 const finePointerQuery = '(hover: hover) and (pointer: fine)'
@@ -126,13 +124,13 @@ export function EmptyStateSuggestions({
                 </p>
             </div>
 
-            <div className="mt-7 grid w-full gap-4 text-left">
+            <div className="mt-7 grid w-full grid-cols-1 gap-4 text-left md:grid-cols-2">
                 <article aria-labelledby="tasklist-case-title" className="min-w-0">
                     <Card
                         data-disabled={disabled || undefined}
-                        className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-[var(--composer-focus-border)] bg-[var(--composer-focus-soft)]/45 py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs"
+                        className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-[var(--composer-focus-border)] bg-[var(--composer-focus-soft)]/45 py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
                     >
-                        <CardHeader className="p-4 sm:p-5">
+                        <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
                             <div className="flex min-w-0 items-start gap-3">
                                 <CaseIcon>
                                     <Network className="size-6" strokeWidth={1.9} aria-hidden="true" />
@@ -149,51 +147,14 @@ export function EmptyStateSuggestions({
                                             <h3 id="tasklist-case-title">受控任务规划</h3>
                                         </CardTitle>
                                     </div>
-                                    <p className="mt-2 text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                        读取显式引用的版本方案，人工确认策略后生成 Tasklist 草稿，并完成结构校验。
-                                    </p>
                                 </div>
                             </div>
                         </CardHeader>
 
-                        <CardContent className="p-4 pt-0 sm:p-5 sm:pt-0">
-                            <div className="hidden" aria-label="受控任务规划流程">
-                                {tasklistSteps.map(({ label }, index) => (
-                                    <span key={label} className="inline-flex items-center gap-1">
-                                        {label}
-                                        {index < tasklistSteps.length - 1 ? (
-                                            <span aria-hidden="true" className="text-muted-foreground">
-                                                →
-                                            </span>
-                                        ) : null}
-                                    </span>
-                                ))}
-                            </div>
-
-                            <div
-                                className="hidden min-w-0 grid-cols-2 gap-2 md:grid lg:grid-cols-4 lg:gap-x-7"
-                                aria-label="受控任务规划流程"
-                            >
-                                {tasklistSteps.map(({ icon: Icon, label }, index) => (
-                                    <div key={label} className="relative min-w-0">
-                                        <div className="flex min-w-0 items-center gap-2 rounded-xl border border-border/80 bg-background/80 px-2.5 py-2.5">
-                                            <Icon
-                                                className="size-4 shrink-0 text-[var(--composer-focus)]"
-                                                strokeWidth={2}
-                                                aria-hidden="true"
-                                            />
-                                            <span className="min-w-0 break-words text-xs leading-4 text-foreground">{label}</span>
-                                        </div>
-                                        {index < tasklistSteps.length - 1 ? (
-                                            <ArrowRight
-                                                className="absolute top-1/2 -right-[19px] hidden size-4 -translate-y-1/2 text-muted-foreground lg:block"
-                                                strokeWidth={1.8}
-                                                aria-hidden="true"
-                                            />
-                                        ) : null}
-                                    </div>
-                                ))}
-                            </div>
+                        <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
+                            <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
+                                读取显式引用的版本方案，人工确认策略后生成 Tasklist 草稿，并完成结构校验。
+                            </p>
                         </CardContent>
                         <Separator className="hidden bg-border/60 md:block" />
                         <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
@@ -216,7 +177,7 @@ export function EmptyStateSuggestions({
                     </Card>
                 </article>
 
-                <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="contents">
                     <article aria-labelledby="delivery-case-title" className="min-w-0">
                         <Card
                             data-disabled={disabled || undefined}
@@ -232,23 +193,23 @@ export function EmptyStateSuggestions({
                                             variant="outline"
                                             className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
                                         >
-                                            Multi-Agent
+                                            多 Agent
                                         </Badge>
                                         <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="delivery-case-title">受控交付评审</h3>
+                                            <h3 id="delivery-case-title">生成交付计划</h3>
                                         </CardTitle>
                                     </div>
                                 </div>
                             </CardHeader>
                             <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
                                 <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                    Delivery Manager 按阶段委派规划与任务 Agent，并行调用 3 个 Reviewer，规则汇总为交付报告。
+                                    按阶段委派规划 Agent 与任务 Agent，并行调用 3 个评审子 Agent，汇总规则生成交付报告。
                                 </p>
                             </CardContent>
                             <Separator className="hidden bg-border/60 md:block" />
                             <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                                 <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                    Agent-as-Tool · 3 路并行 · 规则汇总
+                                    Agent 调用 · 3 路并行 · 评审规则汇总
                                 </p>
                                 <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
                                     运行示例
@@ -259,9 +220,58 @@ export function EmptyStateSuggestions({
                                 </span>
                             </CardFooter>
                             <ExecutableCardOverlay
-                                ariaLabel="运行受控交付评审示例"
+                                ariaLabel="运行生成交付计划示例"
                                 disabled={disabled}
                                 onClick={() => onSelectSuggestion(deliveryChainDemoSuggestion)}
+                            />
+                        </Card>
+                    </article>
+
+                    <article aria-labelledby="image-generation-case-title" className="min-w-0">
+                        <Card
+                            data-disabled={disabled || undefined}
+                            className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-[var(--composer-focus-border)] bg-[var(--composer-focus-soft)]/45 py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
+                        >
+                            <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
+                                <CaseIcon>
+                                    <ImagePlus className="size-6" strokeWidth={1.9} aria-hidden="true" />
+                                </CaseIcon>
+                                <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
+                                        <Badge
+                                            variant="outline"
+                                            className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
+                                        >
+                                            Image Agent
+                                        </Badge>
+                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
+                                            <h3 id="image-generation-case-title">AI 图像生成</h3>
+                                        </CardTitle>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
+                                <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
+                                    通过 /image 显式入口整理画面需求，自动优化生图描述后生成一张临时图片。
+                                </p>
+                            </CardContent>
+                            <Separator className="hidden bg-border/60 md:block" />
+                            <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                                <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
+                                    图像需求摘要 · 结构化输出 · 最多一次修订
+                                </p>
+                                <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
+                                    运行示例
+                                    <ArrowRight
+                                        className="size-4 transition-transform group-hover/executable:translate-x-0.5"
+                                        aria-hidden="true"
+                                    />
+                                </span>
+                            </CardFooter>
+                            <ExecutableCardOverlay
+                                ariaLabel="运行 AI 图像生成示例"
+                                disabled={disabled}
+                                onClick={() => onSelectSuggestion(imageGenerationDemoSuggestion)}
                             />
                         </Card>
                     </article>
@@ -362,7 +372,7 @@ export function EmptyStateSuggestions({
                     </article>
 
                     {supportsDesktopRecommendations ? (
-                        <div role="group" aria-label="推荐问题" className="hidden min-w-0 md:block">
+                        <div role="group" aria-label="推荐问题" className="hidden min-w-0 md:col-span-2 md:block">
                             <FollowUpSuggestions seed={desktopRecommendationSeed} className="mt-0" onSelectQuestion={onSelectQuestion} />
                         </div>
                     ) : null}

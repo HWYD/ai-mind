@@ -6,6 +6,8 @@ import type { AgentRunService } from '@/lib/ai/agent-runs'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import { createChatModel, getModelProviderConfig } from '@/lib/ai/model-provider'
 import { ChatOrchestrator } from '@/lib/ai/runtime/chat-orchestrator'
+import { createImagePlanningModel } from '@/lib/ai/runtime/image-generation-agent/graph/fixed-image-planning-model'
+import { ImageGenerationRunCoordinator } from '@/lib/ai/runtime/image-generation-agent/image-generation-run-coordinator'
 import { logChatCancellation, normalizeKnownRuntimeError } from '@/lib/ai/runtime/stream-errors'
 import type { ChatExecutionContext, ResolvedChatExecutionContext, StreamResult, WriteChunk } from '@/lib/ai/runtime/types'
 import type { PreparedVersionPlanTasklistAgentResume } from '@/lib/ai/runtime/version-plan-tasklist-agent'
@@ -30,6 +32,7 @@ interface StreamExecutorOptions {
 }
 
 interface ChatServiceDependencies {
+    imageGenerationRunCoordinator?: Pick<ImageGenerationRunCoordinator, 'run'>
     streamEventProjector?: Pick<StreamEventProjector, 'projectChunk'>
     streamExecutionCoordinator?: Pick<StreamExecutionCoordinator, 'startExecution'> &
         Partial<Pick<StreamExecutionCoordinator, 'getCancelRequestedAt'>>
@@ -58,6 +61,12 @@ interface RejectAgentRunStreamInput {
     runId: string
     summary: string
     threadId: string
+}
+
+interface ImageGenerationStreamInput {
+    assistantMessageId: string
+    rawDescription: string
+    runId: string
 }
 
 function normalizeResumeStreamError(
@@ -422,6 +431,37 @@ async function createChatStreamResult(
     )
 }
 
+async function createImageGenerationStreamResult(
+    input: ImageGenerationStreamInput,
+    context: ChatExecutionContext,
+    dependencies: ChatServiceDependencies
+): Promise<StreamResult> {
+    return createNdjsonStreamResult(
+        context,
+        async ({ isClosed, writeChunk }, executionContext) => {
+            const lifecycle = new StreamLifecycle({
+                context: executionContext,
+                isClosed,
+                writeChunk,
+            })
+
+            lifecycle.emitStartOnce(input.assistantMessageId)
+            const coordinator =
+                dependencies.imageGenerationRunCoordinator ??
+                new ImageGenerationRunCoordinator({
+                    planningModel: createImagePlanningModel(),
+                })
+            await coordinator.run({
+                rawDescription: input.rawDescription,
+                runId: input.runId,
+                signal: executionContext.signal,
+                writeChunk,
+            })
+        },
+        dependencies
+    )
+}
+
 async function createResumeAgentRunStreamResult(
     input: ResumeAgentRunStreamInput,
     context: ResolvedChatExecutionContext,
@@ -497,6 +537,13 @@ async function createRejectAgentRunStreamResult(
 
 export function createChatService(dependencies: ChatServiceDependencies = {}) {
     return {
+        async streamImage(input: ImageGenerationStreamInput, context: ChatExecutionContext) {
+            const streamResult = await createImageGenerationStreamResult(input, context, dependencies)
+
+            return new Response(streamResult.body, {
+                headers: streamResult.headers,
+            })
+        },
         async rejectAgentRun(input: RejectAgentRunStreamInput, context: ChatExecutionContext) {
             const streamResult = await createRejectAgentRunStreamResult(input, context, dependencies)
 

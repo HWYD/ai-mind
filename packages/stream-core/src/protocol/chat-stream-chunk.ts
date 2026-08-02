@@ -157,8 +157,8 @@ export interface AgentResumeChunk {
     threadId: string
 }
 
-export type WorkflowProgressStepStatus = 'completed' | 'failed' | 'running'
-export type WorkflowProgressRunStatus = 'completed' | 'failed' | 'running'
+export type WorkflowProgressStepStatus = 'cancelled' | 'completed' | 'failed' | 'running'
+export type WorkflowProgressRunStatus = 'cancelled' | 'completed' | 'failed' | 'running'
 
 export interface WorkflowProgressStartChunk {
     type: 'workflow-progress-start'
@@ -194,6 +194,42 @@ export interface WorkflowProgressEndChunk {
     endedAt?: number
     durationMs?: number
     failureMessage?: string
+}
+
+export type ImageBriefAspectRatio = 'landscape' | 'portrait' | 'square'
+
+export interface PublicImageBriefSummary {
+    aspectRatio?: ImageBriefAspectRatio
+    assumptions: string[]
+    avoid: string[]
+    composition?: string
+    intent: string
+    lightingAndColor?: string
+    mustInclude: string[]
+    scene?: string
+    style?: string
+    subjects: string[]
+    visibleText?: string[]
+}
+
+export interface ImageBriefChunk {
+    type: 'image-brief'
+    partId: string
+    runId: string
+    summary: PublicImageBriefSummary
+}
+
+export interface ImageResultReadyChunk {
+    type: 'image-result-ready'
+    partId: string
+    runId: string
+    contentPath: string
+    expiresAt: string
+    height?: number
+    mimeType?: 'image/jpeg' | 'image/png' | 'image/webp'
+    suggestedFileName: string
+    temporary: true
+    width?: number
 }
 
 export interface TextStartChunk {
@@ -364,6 +400,19 @@ export const streamErrorCodes = [
     'MCP_TIMEOUT',
     'MCP_EXECUTION_FAILED',
     'RUNTIME_INVARIANT_FAILED',
+    'IMAGE_REQUEST_INVALID',
+    'IMAGE_CAPABILITY_UNSUPPORTED',
+    'IMAGE_GENERATION_ALREADY_ACTIVE',
+    'IMAGE_PROMPT_BLOCKED',
+    'IMAGE_PROMPT_PLANNING_FAILED',
+    'IMAGE_PROVIDER_CONTENT_REJECTED',
+    'IMAGE_PROVIDER_AUTH_FAILED',
+    'IMAGE_PROVIDER_BUSY',
+    'IMAGE_PROVIDER_UNAVAILABLE',
+    'IMAGE_GENERATION_AMBIGUOUS',
+    'IMAGE_PROVIDER_INVALID_RESULT',
+    'IMAGE_RESULT_EXPIRED',
+    'IMAGE_RESULT_UNAVAILABLE',
 ] as const
 export type StreamErrorCode = (typeof streamErrorCodes)[number]
 
@@ -403,6 +452,8 @@ export type ChatStreamChunk =
     | WorkflowProgressStartChunk
     | WorkflowProgressStepChunk
     | WorkflowProgressEndChunk
+    | ImageBriefChunk
+    | ImageResultReadyChunk
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk

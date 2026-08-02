@@ -4,7 +4,7 @@ import { type NextRequest } from 'next/server'
 import { ZodError } from 'zod'
 
 import { createAgentRunOwnerSessionHash } from '@/lib/ai/agent-runs'
-import { chatRequestSchema } from '@/lib/ai/chat-schema'
+import { chatRequestSchema, parseImageCommand } from '@/lib/ai/chat-schema'
 import { createChatService } from '@/lib/ai/chat-service'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import { ModelSelectionError, resolveModelSelection } from '@/lib/ai/model-provider/catalog/resolve-model-selection'
@@ -12,6 +12,10 @@ import { resolveRouteType } from '@/lib/ai/model-provider/resolve-route-type'
 import { InputLengthExceededError, validateInputLength } from '@/lib/ai/model-provider/validate-input-length'
 import { getRateLimitConfig, MemoryRateLimitStore, resolveClientIp, resolveSessionId } from '@/lib/ai/rate-limit'
 import { conversationRegistryService } from '@/lib/ai/runtime/chat-memory'
+import {
+    ImageGenerationRunRepository,
+    ImageGenerationRunRepositoryError,
+} from '@/lib/ai/runtime/image-generation-agent/image-generation-run-repository'
 import { normalizeKnownRuntimeError } from '@/lib/ai/runtime/stream-errors'
 import { validateExplicitSkillForRequest } from '@/lib/ai/skills/router'
 import { createSafeStreamDiagnostics, RESUMABLE_STREAM_ACCEPT } from '@/lib/ai/stream-recovery/contracts'
@@ -28,6 +32,7 @@ let streamEventProjector: StreamEventProjector | undefined
 const rateLimitConfig = getRateLimitConfig()
 const rateLimitStore = new MemoryRateLimitStore(rateLimitConfig)
 const streamProtocolHeader = 'ai-mind-resumable-v1'
+const imageGenerationLeaseMs = 5 * 60 * 1000
 
 function getStreamRunService() {
     streamRunService ??= new StreamRunService()
@@ -60,6 +65,10 @@ function isDraftCreateRequest(payload: ChatRequestInput): payload is Extract<Cha
 }
 
 function buildRateLimitedErrorMessage(routeType: ReturnType<typeof resolveRouteType>, limitKey: 'ip' | 'session', limitValue: number) {
+    if (routeType === 'image') {
+        return limitKey === 'session' ? `今日生图次数已用完（${limitValue} 次）。` : `当前网络今日生图请求已达到上限（${limitValue} 次）。`
+    }
+
     const routeLabel = routeType === 'tasklist' ? '任务清单' : routeType === 'delivery-chain' ? '交付链路' : '聊天'
     const limitScopeLabel = limitKey === 'session' ? '当前会话' : '当前 IP'
 
@@ -71,6 +80,10 @@ function createResumableDiagnostics(input: Parameters<typeof createSafeStreamDia
 }
 
 function resolveStreamRunKind(routeType: ReturnType<typeof resolveRouteType>) {
+    if (routeType === 'image') {
+        return 'image_generation'
+    }
+
     if (routeType === 'delivery-chain') {
         return 'delivery_chain'
     }
@@ -92,15 +105,42 @@ export async function POST(request: NextRequest) {
     try {
         const json = await request.json()
         const payload = chatRequestSchema.parse(json) as ChatRequestInput
+        const inputMessages = getMessagesForInputLengthValidation(payload)
+        const userText =
+            inputMessages[0]?.parts
+                .map(part => ('text' in part ? part.text : ''))
+                .join('\n')
+                .trim() ?? ''
+        const imageCommand = parseImageCommand({ composer: payload.composer, text: userText })
+
+        if (imageCommand.kind === 'rejected') {
+            const unsupported = imageCommand.reason === 'unsupported'
+            return Response.json(
+                {
+                    code: unsupported ? 'IMAGE_CAPABILITY_UNSUPPORTED' : 'IMAGE_REQUEST_INVALID',
+                    diagnostics: createSafeStreamDiagnostics({
+                        errorCode: unsupported ? 'IMAGE_CAPABILITY_UNSUPPORTED' : 'IMAGE_REQUEST_INVALID',
+                        retryable: false,
+                    }),
+                    error: unsupported
+                        ? '此版本仅支持单张文生图；请移除编辑、参考图或多图要求后重新提交。'
+                        : '请在 /image 后提供 1 到 2000 个字符的图像描述。',
+                },
+                { status: 400 }
+            )
+        }
+
         validateExplicitSkillForRequest(payload)
 
-        const routeType = resolveRouteType(payload)
+        const routeType = imageCommand.kind === 'accepted' ? 'image' : resolveRouteType(payload)
         const resolvedModelSelection = resolveModelSelection({
             modelId: payload.options?.modelId,
             routeType,
         })
 
-        validateInputLength(getMessagesForInputLengthValidation(payload))
+        if (imageCommand.kind !== 'accepted') {
+            validateInputLength(inputMessages)
+        }
 
         const clientIp = resolveClientIp(request)
         const { sessionId, setCookie } = resolveSessionId(request.cookies)
@@ -136,11 +176,6 @@ export async function POST(request: NextRequest) {
                 )
             }
         }
-
-        const userText = getMessagesForInputLengthValidation(payload)[0]
-            ?.parts.map(part => ('text' in part ? part.text : ''))
-            .join('\n')
-            .trim()
 
         let validatedConversationId: string
 
@@ -204,7 +239,7 @@ export async function POST(request: NextRequest) {
 
         if (streamRunResult.type === 'replay') {
             if (!hasReusableRequest) {
-                rateLimitStore.rollback?.({ ip: clientIp, sessionId })
+                rateLimitStore.rollback?.({ ip: clientIp, routeType, sessionId })
             }
             return Response.json(streamRunResult.descriptor, {
                 headers: {
@@ -213,6 +248,44 @@ export async function POST(request: NextRequest) {
                     'X-Stream-Protocol': streamProtocolHeader,
                 },
             })
+        }
+
+        if (imageCommand.kind === 'accepted') {
+            try {
+                await new ImageGenerationRunRepository().createActiveRun({
+                    activeLeaseExpiresAt: new Date(Date.now() + imageGenerationLeaseMs),
+                    assistantMessageId: `image-assistant-${streamRunResult.run.id}`,
+                    conversationId: validatedConversationId,
+                    ownerSessionHash,
+                    streamRunId: streamRunResult.run.id,
+                })
+            } catch (error) {
+                if (error instanceof ImageGenerationRunRepositoryError && error.code === 'IMAGE_GENERATION_ALREADY_ACTIVE') {
+                    rateLimitStore.rollback?.({ ip: clientIp, routeType, sessionId })
+                    await getStreamEventProjector().projectLifecycle({
+                        code: error.code,
+                        message: '当前会话已有图像生成任务，请先停止原任务或等待其结束。',
+                        ownerSessionHash,
+                        runId: streamRunResult.run.id,
+                        status: 'failed',
+                    })
+
+                    return Response.json(
+                        {
+                            code: 'IMAGE_GENERATION_ALREADY_ACTIVE',
+                            diagnostics: createSafeStreamDiagnostics({
+                                errorCode: 'IMAGE_GENERATION_ALREADY_ACTIVE',
+                                retryable: false,
+                                runId: streamRunResult.run.id,
+                            }),
+                            error: '当前会话已有图像生成任务，请先停止原任务或等待其结束。',
+                        },
+                        { status: 409 }
+                    )
+                }
+
+                throw error
+            }
         }
 
         if (isDraftCreateRequest(payload) && streamRunResult.type === 'created') {
@@ -250,10 +323,10 @@ export async function POST(request: NextRequest) {
             })
         }
 
-        const response = await chatService.streamChat(normalizedPayload, {
+        const executionContext = {
+            resolvedModelSelection,
             sessionId,
             signal: undefined,
-            resolvedModelSelection,
             setCookie,
             streamRecovery: {
                 ownerSessionHash,
@@ -261,7 +334,19 @@ export async function POST(request: NextRequest) {
                 runId: streamRunResult.run.id,
             },
             validatedConversationId,
-        })
+        }
+
+        const response =
+            imageCommand.kind === 'accepted'
+                ? await chatService.streamImage(
+                      {
+                          assistantMessageId: `image-assistant-${streamRunResult.run.id}`,
+                          rawDescription: imageCommand.description,
+                          runId: streamRunResult.run.id,
+                      },
+                      executionContext
+                  )
+                : await chatService.streamChat(normalizedPayload, executionContext)
 
         const headers = new Headers(response.headers)
         headers.set('X-AI-Mind-Conversation-Id', validatedConversationId)

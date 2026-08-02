@@ -27,13 +27,19 @@ export const localConversationIndexSchema = z
     })
     .strict()
 
+const recoverablePartSchema = z
+    .object({
+        type: z.enum(['agent-step', 'prompt', 'reasoning', 'resource', 'skill', 'text', 'tool', 'workflow-progress']),
+    })
+    .passthrough()
+
 const recoverableMessageSchema: z.ZodType<MindMessage> = z
     .object({
         artifacts: z.array(z.record(z.string(), z.unknown())).optional(),
         composer: z.record(z.string(), z.unknown()).optional(),
         createdAt: z.string().datetime(),
         id: z.string().min(1),
-        parts: z.array(z.record(z.string(), z.unknown())).min(1),
+        parts: z.array(recoverablePartSchema).min(1),
         role: z.union([z.literal('user'), z.literal('assistant')]),
         status: z.literal('completed').optional(),
     })

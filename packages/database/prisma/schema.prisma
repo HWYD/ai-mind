@@ -41,6 +41,32 @@ enum StreamRunKind {
   chat
   tasklist_agent
   delivery_chain
+  image_generation
+}
+
+enum ImageGenerationRunStatus {
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum ImageGenerationStage {
+  received
+  briefing
+  prompting
+  generating
+  preparing_result
+  completed
+  failed
+  cancelled
+}
+
+enum ImageProviderResultStatus {
+  none
+  ready
+  expired
+  discarded
 }
 
 enum StreamRunStatus {
@@ -156,6 +182,7 @@ model StreamRun {
   completedAt          DateTime?       @map("completed_at") @db.Timestamptz(6)
   request              StreamRequest?
   agentRun             AgentRun?       @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+  imageGenerationRun   ImageGenerationRun?
   events               StreamEvent[]
 
   @@index([ownerSessionHash])
@@ -164,6 +191,45 @@ model StreamRun {
   @@index([retentionUntil])
   @@unique([agentRunId])
   @@map("stream_runs")
+}
+
+model ImageGenerationRun {
+  id                       String                    @id @default(uuid()) @db.Uuid
+  streamRunId              String                    @unique @map("stream_run_id") @db.Uuid
+  conversationId           String                    @map("conversation_id")
+  assistantMessageId       String                    @map("assistant_message_id")
+  ownerSessionHash         String                    @map("owner_session_hash") @db.VarChar(64)
+  activeOwnerSessionHash   String?                   @unique @map("active_owner_session_hash") @db.VarChar(64)
+  activeLeaseExpiresAt     DateTime?                 @map("active_lease_expires_at") @db.Timestamptz(6)
+  status                   ImageGenerationRunStatus
+  stage                    ImageGenerationStage
+  promptRevisionCount      Int                       @default(0) @map("prompt_revision_count")
+  imageGenerationCount     Int                       @default(0) @map("image_generation_count")
+  publicBriefSummaryJson   Json?                     @map("public_brief_summary_json")
+  provider                 String                    @default("doubao")
+  providerModel            String                    @default("doubao-seedream-5.0-lite") @map("provider_model")
+  providerRequestId        String?                   @map("provider_request_id")
+  providerResultUrl        String?                   @map("provider_result_url")
+  providerResultStatus     ImageProviderResultStatus @default(none) @map("provider_result_status")
+  providerResultMimeType   String?                   @map("provider_result_mime_type")
+  providerResultWidth      Int?                      @map("provider_result_width")
+  providerResultHeight     Int?                      @map("provider_result_height")
+  providerResultByteLength Int?                      @map("provider_result_byte_length")
+  providerResultExpiresAt  DateTime?                 @map("provider_result_expires_at") @db.Timestamptz(6)
+  failureCode              String?                   @map("failure_code") @db.VarChar(128)
+  publicFailureMessage     String?                   @map("public_failure_message") @db.VarChar(1000)
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt              DateTime?                 @map("completed_at") @db.Timestamptz(6)
+  failedAt                 DateTime?                 @map("failed_at") @db.Timestamptz(6)
+  cancelledAt              DateTime?                 @map("cancelled_at") @db.Timestamptz(6)
+  streamRun                StreamRun                 @relation(fields: [streamRunId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([ownerSessionHash])
+  @@index([status])
+  @@index([providerResultExpiresAt])
+  @@map("image_generation_runs")
 }
 
 model StreamEvent {

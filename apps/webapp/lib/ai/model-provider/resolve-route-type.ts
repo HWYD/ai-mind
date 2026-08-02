@@ -15,6 +15,10 @@ export function resolveRouteType(request: ChatRequest | ChatRequestInput): Model
         return 'delivery-chain'
     }
 
+    if (command === 'image') {
+        return 'image'
+    }
+
     if (command !== 'tasklist') {
         return 'chat'
     }

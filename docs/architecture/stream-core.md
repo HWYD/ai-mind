@@ -121,6 +121,12 @@ Package 名称：
 
 这不是把项目推进成完整平台 SDK，而是把最稳定的流式内核沉淀成一个小型内部复用包。
 
+## Image Generation Chunks
+
+v0.4.12 在既有 `ChatStreamChunk` 中增加 `image-brief` 和 `image-result-ready`。它们是公开、严格校验的业务 DTO：前者只包含公共 ImageBrief 摘要，后者只包含 runId、同源 content path、临时标记、过期时间和允许的图片元数据。
+
+图片工作流复用 `workflow-progress-start/step/end`，可携带开始时间、结束时间和安全耗时。`stream-core` 只定义这些可复用的表达能力；图片规划、Provider 调用、临时 URL、Blob 和安全策略仍属于 webapp runtime。内部 Prompt、检查细节、Provider URL、Base64、图片字节、密钥和原始错误不得进入 chunk。
+
 ## Design Principle
 
 只有当某个 stream primitive 足够稳定、可复用、并且弱耦合于 app runtime 决策时，才适合进入 `stream-core`。
