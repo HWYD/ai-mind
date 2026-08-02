@@ -1,5 +1,16 @@
 # 版本交付物规则
 
+## Version Spec Workspace Continuity
+
+版本尚未收口时，版本规格必须保持单一工作区，避免同一版本出现两套互相竞争的事实源。
+
+- 先读取 `.specify/feature.json`，把其中的 `feature_directory` 视为当前 Spec Kit 工作区指针，并核对 `AGENTS.md` 的 managed plan 指针。
+- 如果当前任务的 `vX.Y.Z` 已有 canonical `specs/<version-topic>/`，且尚未完成 release closing / merge，后续 specify、clarify、plan、tasks、implement、analyze、converge 和人工修订都 MUST 复用该目录。
+- 代码未提交、规格仍在讨论、tasks 尚未收口或 converge 尚未通过时，均视为版本仍在开发中；不得创建 `vX.Y.Z-1-*`、`vX.Y.Z-2-*` 等新目录来承载返工或新决策。
+- 只有用户明确要求独立 follow-up，或基准版本已经 release closing 并进入新的开发窗口，才允许创建挂靠规格；创建前必须记录其独立目标、边界和与基准版本的关系。
+- 方案发生冲突时，直接编辑 canonical 工作区中的 spec / plan / tasks / contracts / decisions；旧决策应删除、改写或明确标记为 superseded，不得保留为第二套默认事实源。
+- 交付前检查 `specs/` 是否存在同一 semver 的 sibling directories；若存在且没有用户授权和独立边界说明，必须先合并回 canonical 工作区再继续实现或 release closing。
+
 ## 目标
 
 保证每个有意义的版本，不只交付代码，还交付可复盘的版本材料。

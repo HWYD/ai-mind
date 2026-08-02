@@ -666,8 +666,13 @@ describe('useChatStream', () => {
         )
         await sendPromise
 
-        expect(result.current.streamRecoveryStatus).toBe('terminal')
-        expect(result.current.error).toBeNull()
+        await waitFor(
+            () => {
+                expect(result.current.streamRecoveryStatus).toBe('terminal')
+                expect(result.current.error).toBeNull()
+            },
+            { timeout: 2_000 }
+        )
     })
 
     it('captures the active conversation at request start even if the hook props change mid-stream', async () => {

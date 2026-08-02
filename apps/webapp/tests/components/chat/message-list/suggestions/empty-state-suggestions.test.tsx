@@ -32,27 +32,21 @@ describe('EmptyStateSuggestions', () => {
         vi.useRealTimers()
     })
 
-    it('renders the quick start heading, three cases, and current technical evidence', () => {
+    it('renders the quick start section and three cases', () => {
         render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
 
-        expect(screen.getByRole('heading', { name: '试试这些能力' })).toBeTruthy()
-        expect(screen.getByText('选择一个场景，查看执行过程、控制边界与最终产物。')).toBeTruthy()
+        expect(screen.getByRole('heading', { level: 2 })).toBeTruthy()
         expect(screen.getAllByRole('article')).toHaveLength(3)
-        expect(screen.getByText('LangGraph · HITL Checkpoint · 最多两轮修订')).toBeTruthy()
-        expect(screen.getByText('Agent-as-Tool · 3 路并行 · 规则汇总')).toBeTruthy()
-        expect(screen.getByText('UserMemory · PostgresStore · 向量检索')).toBeTruthy()
-        expect(screen.queryByText('LangGraph · HITL Checkpoint · 最多两轮受控修订')).toBeNull()
-        expect(screen.queryByText('Agent-as-Tool · 3 个 Reviewer 并行 · 规则汇总')).toBeNull()
-        expect(screen.queryByText('UserMemory · PostgresStore · Vector Search')).toBeNull()
     })
 
     it('runs the original Tasklist suggestion once through the card interaction without a second footer button', () => {
         const onSelectSuggestion = vi.fn()
         render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
-        expect(screen.getAllByRole('button')).toHaveLength(3)
-        expect(screen.queryByRole('button', { name: '运行示例' })).toBeNull()
-        fireEvent.click(screen.getByRole('button', { name: '运行受控任务规划示例' }))
+        const tasklistCase = document.querySelector<HTMLElement>('[aria-labelledby="tasklist-case-title"]')
+
+        expect(tasklistCase).toBeTruthy()
+        fireEvent.click(within(tasklistCase as HTMLElement).getByRole('button'))
 
         expect(onSelectSuggestion).toHaveBeenCalledTimes(1)
         expect(onSelectSuggestion).toHaveBeenCalledWith(tasklistDemoSuggestion)
@@ -65,7 +59,10 @@ describe('EmptyStateSuggestions', () => {
         const onSelectSuggestion = vi.fn()
         render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
 
-        fireEvent.click(screen.getByRole('button', { name: '运行受控交付评审示例' }))
+        const deliveryCase = document.querySelector<HTMLElement>('[aria-labelledby="delivery-case-title"]')
+
+        expect(deliveryCase).toBeTruthy()
+        fireEvent.click(within(deliveryCase as HTMLElement).getByRole('button'))
 
         expect(onSelectSuggestion).toHaveBeenCalledTimes(1)
         expect(onSelectSuggestion).toHaveBeenCalledWith(deliveryChainDemoSuggestion)

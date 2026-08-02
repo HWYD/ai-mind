@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.10`。
+当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.11`。
 
 已经验证：
 
@@ -255,7 +255,25 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.10
+## 当前版本：v0.4.11
+
+这版的主线是 `Structured Supervisor Review Loop`：将 `/delivery-chain` 从固定路由式 Manager 演进为具备有限真实决策能力的 ControlledDeliverySupervisor。
+
+v0.4.11 的边界非常明确：
+
+- Supervisor 在受控边界内做有限但真实的执行前和评审后决策，每个 run 只有一个 Runtime 分配身份的 SupervisorDispatchPlan。
+- 所有影响调度的 Agent 输出使用严格、角色专属的 closed Zod Contract；Markdown 仅用于展示，不再作为业务结论的机器事实源。
+- Review Group 固定为 General、Risk、Boundary 三类 Reviewer 各一次，由 Runtime 强制校验完整性，Supervisor 不得跳过或替换。
+- 初次 Review 后允许一次由 Runtime 从已验证 finding 派生的 Revision，返修后不执行 Re-review，直接以 `needs_review` 内部状态收口，报告引导人工确认。
+- 最终状态由确定性硬规则生成（`pass`/`clarification_required`/`needs_changes`/`needs_review`/`blocked`/`failed`）。
+- 业务生成使用用户选定模型，结构化 Contract 和 repair 固定使用 `deepseek/deepseek-v4-pro`。
+- 不引入 ReAct、通用 DAG、Agent Catalog、A2A、HITL、checkpoint、resume 或持久化。
+
+Demo 案例：`register-login`、`guangzhou-3-day-trip`、`frontend-learning-plan`。
+
+详细设计见 [AI Mind v0.4.11](./docs/versions/v0.4.11-structured-supervisor-review-loop.md)、[v0.4.11 Release Note](./docs/releases/v0.4.11.md)、[v0.4.11 Spec](./specs/v0.4.11-structured-supervisor-review-loop/)、[ADR-0013](./docs/adr/0013-structured-supervisor-review-loop.md)。
+
+## 上一版本：v0.4.10
 
 这版的主线是 `Resumable Agent Streams`：为普通聊天、Tasklist Agent 和 Delivery Chain 的 `fetch POST + NDJSON` 流增加固定 envelope、事件持久化、同页断线恢复、幂等提交、显式取消和安全终态收口。
 
@@ -269,7 +287,7 @@ v0.4.10 的边界非常明确：
 
 详细设计见 [AI Mind v0.4.10](./docs/versions/v0.4.10-resumable-agent-streams.md)、[v0.4.10 Release Note](./docs/releases/v0.4.10.md)、[v0.4.10 Spec](./specs/v0.4.10-resumable-agent-streams/)、[Stream Recovery Architecture](./docs/architecture/stream-recovery.md) 和 [ADR-0015](./docs/adr/0015-resumable-agent-stream-recovery.md)。
 
-## 上一版本：v0.4.9
+## 再上一版本：v0.4.9
 
 这版的主线是 `Monorepo Boundary and CI Validation Governance`：在 pnpm/Turbo 基线上，把 workspace 身份、依赖方向、公开导入面和测试分层变成可自动验证的规则。Node.js 固定为 22.x，根 metadata、CI 与 Docker 统一使用 `pnpm@10.34.0`；pnpm 负责 workspace、lockfile、Catalog 和依赖约束，Turborepo 负责按测试层执行、并行与缓存。
 
@@ -631,7 +649,7 @@ pnpm --dir apps/webapp db:user-memory:setup
 - `以后解释技术问题时，先用大白话，再补充专业说法。`
 - 选择 `/summary`，引用 `@demo://README.md`，输入：`帮我总结这个 demo workspace 的边界设计`
 - 选择 `/tasklist`，引用 `@demo://version-plans/v034-langsmith-observability.md`，输入：`基于这个版本方案生成 tasklist 草稿`
-- 选择 `/delivery-chain`，引用 `@demo://scenarios/request-limit-banner/requirement.md`，输入：`基于这个 demo scenario 生成交付计划报告`
+- 选择 `/delivery-chain`，引用 `@demo://scenarios/register-login/requirement.md`，输入：`基于这个 demo scenario 生成交付计划报告`
 - 输入：`/delivery-chain 帮我规划一个登录表单，支持手机号、密码、错误提示和加载状态`
 - 选择 `@project://latest-context`，输入：`帮我概括当前项目上下文`
 
@@ -725,6 +743,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.8  | Monorepo pnpm / Turborepo Governance               | 统一 Node 22、pnpm 10.34.0、workspace/Catalog/安装脚本策略与 Turbo 根任务图，使本地、CI、Docker 共享可复现工程入口，并保持业务 Runtime 与部署契约不变                           |
 | v0.4.9  | Monorepo Boundary and CI Validation Governance     | 强制 workspace 依赖与导入边界，拆分 stable/integration/external 测试任务与缓存语义，并让 CI 仅在稳定验证成功后创建 PostgreSQL 状态                                              |
 | v0.4.10 | Resumable Agent Streams                            | 为普通聊天、Tasklist Agent 和 Delivery Chain 增加固定 envelope、幂等提交、同页断线恢复、显式取消和 bounded event retention                                                      |
+| v0.4.11 | Structured Supervisor Review Loop                  | 将 `/delivery-chain` 演进为拥有严格 Contract、Runtime 强制 Review Group 和一次受控返修的 ControlledDeliverySupervisor                                                           |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

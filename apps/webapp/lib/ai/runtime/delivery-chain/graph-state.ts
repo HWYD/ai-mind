@@ -4,6 +4,7 @@ export type DeliveryChainStage = 'plan' | 'review' | 'task'
 
 export type DeliveryChainInput =
     | {
+          expectedPreDecision?: 'execute'
           inlineRequirementText?: string
           requirementRef: string
           scenarioId: string

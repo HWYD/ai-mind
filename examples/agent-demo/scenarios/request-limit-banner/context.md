@@ -52,6 +52,14 @@ Chat Page Shell
 - State 来源：HTTP response header 或本地 cookie
 - 不提供写入 API
 
+### 已确认的实现边界（本节优先于本文其他描述）
+
+- `isNearLimit` 是唯一供 Banner 消费的布尔字段，定义为 `remainingRequests <= 5`；当 `remainingRequests` 不可用时为 `false`。Banner 不读取 `remainingRequests`，也不重新实现阈值计算。
+- Banner 仅渲染在 Composer Region 内、Chat Composer 的直接上方；它不是 Message List 的子节点。视觉顺序为 `Message List -> Usage Banner -> Chat Composer`。
+- Composer Region 已处理页面底部的定位；Banner 不自行使用 `fixed` 或 `sticky`。
+- Zustand store 更新 `isNearLimit` 后，Banner 通过普通订阅重渲染；不新增 polling、event、transition 或 animation。
+- Banner 最大高度为 `48px`。上述位置、滚动与更新规则均已确定，不构成澄清项。
+
 ## Module Map
 
 | 模块名称                                       | 职责             | 改动范围             |

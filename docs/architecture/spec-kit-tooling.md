@@ -1,5 +1,9 @@
 # Spec Kit Tooling
 
+## Current Version Workspace Lock
+
+AI Mind 的 Spec Kit 操作以当前版本的 canonical workspace 为唯一写入目标。对尚未 release closing 的版本，`.specify/feature.json` 的 `feature_directory` 不只是临时指针，还承担工作区连续性锁定职责：后续 Spec Kit 操作必须复用它，不得因方案返工或需求讨论创建同 semver 的 `-1` / `-2` sibling directory。只有用户明确授权独立 follow-up，或基准版本已完成 release closing 并进入新的开发窗口，才允许初始化新目录；冲突决策必须在原目录内收口。
+
 ## 摘要
 
 AI Mind v0.3.3 采用 official Spec Kit full skills 作为 Level C / D 变更的默认入口。
