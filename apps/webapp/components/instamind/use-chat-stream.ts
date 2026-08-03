@@ -266,6 +266,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [messages, setMessages] = useState<MindMessage[]>([])
     const [status, setStatus] = useState<ChatStatus>('ready')
     const [error, setError] = useState<string | null>(null)
+    const [imageQuotaError, setImageQuotaError] = useState<string | null>(null)
     const [hydrationError, setHydrationError] = useState<string | null>(null)
     const [hydrationStatus, setHydrationStatus] = useState<ConversationHydrationStatus>('idle')
     const [readOnlyCacheMessage, setReadOnlyCacheMessage] = useState<string | null>(null)
@@ -904,6 +905,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         streamMessageStateRef.current = createStreamMessageState(nextMessages)
         setMessages(nextMessages)
         setError(null)
+        setImageQuotaError(null)
         setStatus('submitted')
         setStreamRecoveryStatus('idle')
         abortControllerRef.current = controller
@@ -1040,7 +1042,16 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 return true
             }
 
-            surfaceAssistantErrorReply((requestError as ChatRequestError).userMessage ?? getErrorMessage(requestError))
+            const errorMessage = (requestError as ChatRequestError).userMessage ?? getErrorMessage(requestError)
+
+            if (
+                (composer?.command?.name === 'image' || /^\s*\/image(?=\s|$)/u.test(input)) &&
+                (requestError as ChatRequestError).code === 'MODEL_PROVIDER_RATE_LIMITED'
+            ) {
+                setImageQuotaError(errorMessage)
+            }
+
+            surfaceAssistantErrorReply(errorMessage)
             setStatus('ready')
         } finally {
             // finish、error、abort 都会走 finally，再兜底 flush 一次，保证不会丢尾字符。
@@ -1246,6 +1257,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         messages,
         status,
         error,
+        imageQuotaError,
         hydrationError,
         hydrationStatus,
         readOnlyCacheMessage,

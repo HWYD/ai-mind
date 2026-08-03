@@ -62,4 +62,34 @@ describe('fixed image planning model', () => {
 
         expect(mocks.withStructuredOutput).toHaveBeenCalledWith(expect.anything(), { name: 'image_brief' })
     })
+
+    it('passes the bounded planning context to the structured model', async () => {
+        const planningModel = createImagePlanningModel()
+
+        await planningModel.invoke(
+            {
+                imageBrief: {
+                    aspectRatio: 'square',
+                    assumptions: [],
+                    avoid: ['human hands'],
+                    intent: 'cat eating noodles',
+                    mustInclude: ['cat holds phone with paws'],
+                    subjects: ['cat', 'phone'],
+                },
+                instruction: 'Inspect the supplied prompt.',
+                prompt: 'A cat holds a phone with its paws while eating noodles.',
+                rawDescription: '一只猫咪在吃面条，手上拿着手机。',
+                revisionInstruction: 'Keep the paws visible.',
+                schemaName: 'prompt_inspection',
+            },
+            { schema: z.object({ ok: z.boolean() }) }
+        )
+
+        const messages = mocks.invoke.mock.calls[0]?.[0]
+
+        expect(messages[1].content).toContain('"currentPrompt":"A cat holds a phone with its paws while eating noodles."')
+        expect(messages[1].content).toContain('"imageBrief"')
+        expect(messages[1].content).toContain('"revisionInstruction":"Keep the paws visible."')
+        expect(messages[1].content).toContain('"userDescription":"一只猫咪在吃面条，手上拿着手机。"')
+    })
 })

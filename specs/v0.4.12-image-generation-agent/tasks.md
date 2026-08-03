@@ -272,3 +272,9 @@ Then implementation:
 - [x] T066 Update `/api/chat` to pass the image route type through quota rollback, return localized image quota errors and avoid counting active-lease conflicts in `apps/webapp/app/api/chat/route.ts`.
 - [x] T067 Sync image quota configuration and operational boundary in `apps/webapp/.env.example`, `README.md`, `specs/v0.4.12-image-generation-agent/{spec,plan,data-model,quickstart,acceptance,decisions}.md`, and `docs/architecture/image-generation-agent.md`.
 - [x] T068 Run the quota test slice, webapp typecheck/lint and `git diff --check`; record the acceptance result and verify ordinary chat/tasklist/delivery regression behavior.
+
+## Phase 11: Convergence
+
+- [x] T069 Pass the bounded internal ImageBrief, current draft prompt and optional revision instruction to the fixed planning model so draft, inspection and single revision operate on the required facts per FR-052-007, FR-052-008 and FR-052-010 (contradicts).
+- [x] T070 Tighten PromptInspection validation and routing so a block requires a supported blocking issue, a revision requires a supported fixable issue plus instruction, and non-blocking findings cannot prevent generation per FR-052-009 and FR-052-027 (partial).
+- [x] T071 Add deterministic graph regression tests for Chinese ambiguity, planning-context propagation, genuine revision semantics and invalid inspection decisions per T016 and T023 (partial).

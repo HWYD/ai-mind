@@ -180,6 +180,7 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-stream', () => ({
             useChatStream: () => ({
+                imageQuotaError: '今日生图次数已用完（3 次）。',
                 messages: [],
                 status: 'streaming',
                 hydrationStatus: 'ready',
@@ -210,6 +211,8 @@ describe('InstantMindPage integration', () => {
         })
 
         expect(document.querySelector('[data-slot="alert"]')).toBeTruthy()
+        expect(screen.getByText('今日生图次数已达上限').textContent).toBe('今日生图次数已达上限')
+        expect(screen.getByText('今日生图次数已用完（3 次）。').textContent).toBe('今日生图次数已用完（3 次）。')
         expect(screen.getByText('会话列表暂时不可用').textContent).toBe('会话列表暂时不可用')
         expect(screen.getByText('Conversation registry is unavailable.').textContent).toBe('Conversation registry is unavailable.')
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-disabled')).toBe('true')

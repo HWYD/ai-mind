@@ -1,3 +1,4 @@
+import { hasBlockingPromptInspectionIssue, hasFixablePromptInspectionIssue } from '../../contract/image-generation-contracts'
 import { IMAGE_GENERATION_GRAPH_NODE_IDS } from '../graph-node-ids'
 import type { ImageGenerationGraphState } from '../graph-state'
 
@@ -11,11 +12,17 @@ export function routeAfterPromptInspection(state: ImageGenerationGraphState): Pr
         return IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
     }
 
-    if (state.prompt.inspection?.outcome === 'revise' && state.execution.promptRevisionCount === 0) {
-        return IMAGE_GENERATION_GRAPH_NODE_IDS.revisePrompt
+    const inspection = state.prompt.inspection
+
+    if (!inspection || hasBlockingPromptInspectionIssue(inspection)) {
+        return IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
     }
 
-    return state.prompt.inspection?.outcome === 'block'
-        ? IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
-        : IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady
+    if (inspection.outcome === 'revise' && hasFixablePromptInspectionIssue(inspection)) {
+        return state.execution.promptRevisionCount === 0
+            ? IMAGE_GENERATION_GRAPH_NODE_IDS.revisePrompt
+            : IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
+    }
+
+    return IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady
 }

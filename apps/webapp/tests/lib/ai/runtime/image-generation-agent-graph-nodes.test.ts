@@ -33,6 +33,48 @@ describe('image generation graph nodes', () => {
         expect(inspected.prompt.inspection).toMatchObject({ outcome: 'pass' })
     })
 
+    it('passes the ImageBrief and current prompt to planning instead of reinterpreting an ambiguous user description', async () => {
+        const rawDescription = '一只猫咪坐在餐厅里吃面条，手上拿着手机在玩耍，吃得很开心'
+        const model = createModel([
+            {
+                aspectRatio: 'square',
+                assumptions: [],
+                avoid: ['human hands'],
+                intent: 'A happy cat eating noodles while holding a phone with its paws',
+                mustInclude: ['cat holding phone in paws'],
+                subjects: ['cat', 'noodles', 'phone'],
+            },
+            { prompt: 'A happy cat uses its paws to hold a phone while eating noodles at a restaurant table.' },
+            { issues: [], outcome: 'pass' },
+        ])
+        const brief = await createImageBriefNode({
+            model,
+            state: createInitialImageGenerationGraphState({ rawDescription, runId: 'run-cat-paws' }),
+        })
+        const drafted = await createPromptDraftNode({ model, state: brief })
+        await inspectPromptNode({ model, state: drafted })
+
+        expect(model.invoke).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                imageBrief: expect.objectContaining({ mustInclude: ['cat holding phone in paws'] }),
+                rawDescription,
+                schemaName: 'ImagePromptDraft',
+            }),
+            expect.anything()
+        )
+        expect(model.invoke).toHaveBeenNthCalledWith(
+            3,
+            expect.objectContaining({
+                imageBrief: expect.objectContaining({ avoid: ['human hands'] }),
+                prompt: 'A happy cat uses its paws to hold a phone while eating noodles at a restaurant table.',
+                rawDescription,
+                schemaName: 'PromptInspection',
+            }),
+            expect.anything()
+        )
+    })
+
     it('counts a schema-invalid planning response then fails without a hidden repair call', async () => {
         const model = createModel([{ unsupported: true }])
         const state = await createImageBriefNode({
@@ -74,15 +116,44 @@ describe('image generation graph nodes', () => {
         expect(invalidRevision.invoke).toHaveBeenCalledTimes(4)
     })
 
-    it('allows one revision only', async () => {
+    it('uses the previous prompt and inspection instruction for the one permitted revision', async () => {
         const model = createModel([{ prompt: 'Corrected prompt' }])
-        const initial = createInitialImageGenerationGraphState({ rawDescription: 'a quiet lake', runId: 'run-1' })
+        const initial = {
+            ...createInitialImageGenerationGraphState({ rawDescription: 'a quiet lake', runId: 'run-1' }),
+            brief: {
+                internal: {
+                    aspectRatio: 'square' as const,
+                    assumptions: [],
+                    avoid: [],
+                    intent: 'lake',
+                    mustInclude: [],
+                    subjects: ['lake'],
+                },
+            },
+            prompt: {
+                inspection: {
+                    issues: [{ code: 'missing_constraint' as const, severity: 'fixable' as const }],
+                    outcome: 'revise' as const,
+                    revisionInstruction: 'Add the requested warm lighting.',
+                },
+                value: 'A lake at sunrise',
+            },
+        }
         const revised = await revisePromptNode({ model, state: initial })
         const blocked = await revisePromptNode({ model, state: revised })
 
         expect(revised.execution.promptRevisionCount).toBe(1)
         expect(blocked.output).toEqual({ failureCode: 'IMAGE_PROMPT_BLOCKED', status: 'blocked' })
         expect(model.invoke).toHaveBeenCalledTimes(1)
+        expect(model.invoke).toHaveBeenCalledWith(
+            expect.objectContaining({
+                imageBrief: expect.objectContaining({ intent: 'lake' }),
+                prompt: 'A lake at sunrise',
+                revisionInstruction: 'Add the requested warm lighting.',
+                schemaName: 'ImagePromptDraft',
+            }),
+            expect.anything()
+        )
     })
 
     it('runs the direct and one-revision paths within their fixed planning budgets', async () => {
@@ -94,7 +165,7 @@ describe('image generation graph nodes', () => {
         const revised = createModel([
             { aspectRatio: 'square', assumptions: [], avoid: [], intent: 'cat', mustInclude: [], subjects: ['cat'] },
             { prompt: 'A black cat' },
-            { issues: [], outcome: 'revise', revisionInstruction: 'Clarify lighting' },
+            { issues: [{ code: 'missing_constraint', severity: 'fixable' }], outcome: 'revise', revisionInstruction: 'Clarify lighting' },
             { prompt: 'A black cat in soft daylight' },
             { issues: [], outcome: 'pass' },
         ])

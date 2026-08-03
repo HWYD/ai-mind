@@ -111,6 +111,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const {
         messages,
         status,
+        imageQuotaError,
         hydrationStatus,
         readOnlyCacheMessage: threadReadOnlyCacheMessage,
         threadMemoryStatusHint,
@@ -270,6 +271,13 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                             onSelectConversation={selectConversation}
                             selectedConversationTitle={selectedConversationTitle}
                         />
+                        {imageQuotaError ? (
+                            <Alert variant="destructive" className="mb-4 rounded-2xl">
+                                <CircleAlert />
+                                <AlertTitle>今日生图次数已达上限</AlertTitle>
+                                <AlertDescription>{imageQuotaError}</AlertDescription>
+                            </Alert>
+                        ) : null}
                         {conversationError ? (
                             <Alert variant="destructive" className="mb-4 rounded-2xl border-destructive/20 bg-destructive/5">
                                 <CircleAlert className="size-4" />

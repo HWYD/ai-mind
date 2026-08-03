@@ -180,6 +180,7 @@ describe('useChatStream', () => {
         })
 
         expect(result.current.error).toBeNull()
+        expect(result.current.imageQuotaError).toBeNull()
         expect(result.current.messages).toHaveLength(2)
         expect(result.current.messages[0]?.role).toBe('user')
         expect(result.current.messages[1]?.role).toBe('assistant')
@@ -188,6 +189,48 @@ describe('useChatStream', () => {
 
         expect(textPart?.type).toBe('text')
         expect(textPart?.text).toBe('聊天请求已达到当前 IP 的当日上限（2 次）。')
+    })
+
+    it('/image 生图配额耗尽时会公开顶部提醒状态，同时保留 assistant 错误消息', async () => {
+        vi.stubGlobal(
+            'fetch',
+            withThreadHydration(
+                Response.json(
+                    {
+                        error: '今日生图次数已用完（3 次）。',
+                        code: 'MODEL_PROVIDER_RATE_LIMITED',
+                        limitKey: 'session',
+                    },
+                    { status: 429 }
+                )
+            )
+        )
+
+        const { result } = renderChatStreamHook()
+
+        await act(async () => {
+            await result.current.sendMessage('/image 一只橘猫', {
+                command: {
+                    label: '生成图片',
+                    name: 'image',
+                },
+                plainText: '一只橘猫',
+            })
+        })
+
+        await waitFor(() => {
+            expect(result.current.status).toBe('ready')
+        })
+
+        expect(result.current.imageQuotaError).toBe('今日生图次数已用完（3 次）。')
+        expect(result.current.messages).toHaveLength(2)
+        expect(result.current.messages[0]?.role).toBe('user')
+        expect(result.current.messages[1]?.role).toBe('assistant')
+
+        const textPart = result.current.messages[1]?.parts.find(part => part.type === 'text')
+
+        expect(textPart?.type).toBe('text')
+        expect(textPart?.text).toBe('今日生图次数已用完（3 次）。')
     })
 
     it('会把当前选中的 modelId 和 enableReasoning 放进聊天请求 options 中', async () => {

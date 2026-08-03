@@ -31,6 +31,37 @@ export const promptInspectionIssueSchema = z
     })
     .strict()
 
+export type PromptInspectionIssue = z.infer<typeof promptInspectionIssueSchema>
+
+type PromptInspectionDecision = {
+    issues: PromptInspectionIssue[]
+    outcome: 'block' | 'pass' | 'revise'
+    revisionInstruction?: string
+}
+
+export function hasBlockingPromptInspectionIssue(input: Pick<PromptInspectionDecision, 'issues'>) {
+    return input.issues.some(issue => issue.severity === 'blocking')
+}
+
+export function hasFixablePromptInspectionIssue(input: Pick<PromptInspectionDecision, 'issues'>) {
+    return input.issues.some(issue => issue.severity === 'fixable')
+}
+
+export function isPromptInspectionDecisionConsistent(input: PromptInspectionDecision) {
+    const hasBlockingIssue = hasBlockingPromptInspectionIssue(input)
+    const hasFixableIssue = hasFixablePromptInspectionIssue(input)
+
+    if (input.outcome === 'block') {
+        return hasBlockingIssue
+    }
+
+    if (input.outcome === 'revise') {
+        return hasFixableIssue && Boolean(input.revisionInstruction)
+    }
+
+    return !hasBlockingIssue && !hasFixableIssue
+}
+
 export const promptInspectionSchema = z
     .object({
         issues: z.array(promptInspectionIssueSchema).max(8),
@@ -38,6 +69,14 @@ export const promptInspectionSchema = z
         revisionInstruction: boundedString(500).optional(),
     })
     .strict()
+    .superRefine((value, context) => {
+        if (!isPromptInspectionDecisionConsistent(value)) {
+            context.addIssue({
+                code: 'custom',
+                message: 'Prompt inspection outcome must match its issue severity and revision instruction.',
+            })
+        }
+    })
 
 export type ImageBrief = z.infer<typeof imageBriefSchema>
 export type PublicImageBriefSummary = z.infer<typeof publicImageBriefSummarySchema>

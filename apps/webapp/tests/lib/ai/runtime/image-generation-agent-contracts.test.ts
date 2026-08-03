@@ -43,4 +43,32 @@ describe('image generation agent contracts', () => {
         )
         expect(promptInspectionSchema.safeParse({ issues: [], outcome: 'retry' }).success).toBe(false)
     })
+
+    it('rejects inspection outcomes that do not match their issue severity', () => {
+        expect(promptInspectionSchema.safeParse({ issues: [], outcome: 'block' }).success).toBe(false)
+        expect(
+            promptInspectionSchema.safeParse({
+                issues: [{ code: 'unsupported_assumption', severity: 'non_blocking' }],
+                outcome: 'block',
+            }).success
+        ).toBe(false)
+        expect(
+            promptInspectionSchema.safeParse({
+                issues: [{ code: 'missing_constraint', severity: 'fixable' }],
+                outcome: 'revise',
+            }).success
+        ).toBe(false)
+        expect(
+            promptInspectionSchema.safeParse({
+                issues: [{ code: 'missing_constraint', severity: 'fixable' }],
+                outcome: 'pass',
+            }).success
+        ).toBe(false)
+        expect(
+            promptInspectionSchema.safeParse({
+                issues: [{ code: 'unsupported_assumption', severity: 'non_blocking' }],
+                outcome: 'pass',
+            }).success
+        ).toBe(true)
+    })
 })

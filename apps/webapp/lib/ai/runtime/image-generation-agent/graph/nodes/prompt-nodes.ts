@@ -12,7 +12,8 @@ export async function createPromptDraftNode(input: {
     state: ImageGenerationGraphState
 }): Promise<ImageGenerationGraphState> {
     const result = await invokeStructuredPlanning({
-        instruction: 'Draft one image-generation prompt faithful to the supplied image brief.',
+        instruction:
+            'Draft one image-generation prompt from the supplied ImageBrief. Preserve its subjects, mustInclude and avoid constraints without adding unsupported capabilities.',
         model: input.model,
         schema: promptSchema,
         schemaName: 'ImagePromptDraft',
@@ -29,7 +30,8 @@ export async function inspectPromptNode(input: {
     state: ImageGenerationGraphState
 }): Promise<ImageGenerationGraphState> {
     const result = await invokeStructuredPlanning({
-        instruction: 'Classify the image prompt as pass, one repair, or block. Return no reasoning.',
+        instruction:
+            'Compare the supplied current image-generation prompt with the supplied ImageBrief. Do not reinterpret the raw user description in isolation. Return block only for an unresolved blocking issue, revise only for a fixable issue with one concrete repair instruction, otherwise pass. Return no reasoning.',
         model: input.model,
         schema: promptInspectionSchema,
         schemaName: 'PromptInspection',
@@ -49,7 +51,21 @@ export async function revisePromptNode(input: {
         return { ...input.state, output: { failureCode: 'IMAGE_PROMPT_BLOCKED', status: 'blocked' } }
     }
 
-    const result = await createPromptDraftNode(input)
+    const result = await invokeStructuredPlanning({
+        instruction:
+            'Revise the supplied current image-generation prompt once using the supplied ImageBrief and revision instruction. Resolve only the identified fixable issue while preserving the required subjects and constraints.',
+        model: input.model,
+        schema: promptSchema,
+        schemaName: 'ImagePromptDraft',
+        signal: input.signal,
+        state: input.state,
+    })
 
-    return result.output?.status === 'failed' ? result : { ...result, execution: { ...result.execution, promptRevisionCount: 1 } }
+    return 'failureCode' in result
+        ? result.state
+        : {
+              ...result.state,
+              execution: { ...result.state.execution, promptRevisionCount: 1 },
+              prompt: { ...result.state.prompt, value: result.output.prompt },
+          }
 }

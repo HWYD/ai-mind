@@ -11,11 +11,46 @@ describe('routeAfterPromptInspection', () => {
         expect(routeAfterPromptInspection({ ...state, prompt: { inspection: { issues: [], outcome: 'pass' } } })).toBe(
             IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady
         )
-        expect(routeAfterPromptInspection({ ...state, prompt: { inspection: { issues: [], outcome: 'revise' } } })).toBe(
-            IMAGE_GENERATION_GRAPH_NODE_IDS.revisePrompt
-        )
-        expect(routeAfterPromptInspection({ ...state, prompt: { inspection: { issues: [], outcome: 'block' } } })).toBe(
-            IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
-        )
+        expect(
+            routeAfterPromptInspection({
+                ...state,
+                prompt: {
+                    inspection: {
+                        issues: [{ code: 'missing_constraint', severity: 'fixable' }],
+                        outcome: 'revise',
+                        revisionInstruction: 'Add the requested lighting.',
+                    },
+                },
+            })
+        ).toBe(IMAGE_GENERATION_GRAPH_NODE_IDS.revisePrompt)
+        expect(
+            routeAfterPromptInspection({
+                ...state,
+                execution: { ...state.execution, promptRevisionCount: 1 },
+                prompt: {
+                    inspection: {
+                        issues: [{ code: 'missing_constraint', severity: 'fixable' }],
+                        outcome: 'revise',
+                        revisionInstruction: 'Add the requested lighting.',
+                    },
+                },
+            })
+        ).toBe(IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked)
+        expect(
+            routeAfterPromptInspection({
+                ...state,
+                prompt: {
+                    inspection: { issues: [{ code: 'capability_boundary', severity: 'blocking' }], outcome: 'block' },
+                },
+            })
+        ).toBe(IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked)
+        expect(
+            routeAfterPromptInspection({
+                ...state,
+                prompt: {
+                    inspection: { issues: [{ code: 'unsupported_assumption', severity: 'non_blocking' }], outcome: 'block' },
+                },
+            })
+        ).toBe(IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady)
     })
 })

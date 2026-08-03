@@ -1,12 +1,19 @@
 import type { ZodType } from 'zod'
 
+import type { ImageBrief } from '../../contract/image-generation-contracts'
 import { canCallPlanningModel, type ImageGenerationGraphFailureCode, type ImageGenerationGraphState } from '../graph-state'
 
+export interface ImagePlanningInput {
+    imageBrief?: ImageBrief
+    instruction: string
+    prompt?: string
+    rawDescription: string
+    revisionInstruction?: string
+    schemaName: string
+}
+
 export interface ImagePlanningModel {
-    invoke(
-        input: { instruction: string; rawDescription: string; schemaName: string },
-        options: { schema: ZodType<unknown>; signal?: AbortSignal }
-    ): Promise<unknown>
+    invoke(input: ImagePlanningInput, options: { schema: ZodType<unknown>; signal?: AbortSignal }): Promise<unknown>
 }
 
 export async function invokeStructuredPlanning<T>(input: {
@@ -36,7 +43,14 @@ export async function invokeStructuredPlanning<T>(input: {
 
     try {
         const rawOutput = await input.model.invoke(
-            { instruction: input.instruction, rawDescription: input.state.input.rawDescription, schemaName: input.schemaName },
+            {
+                imageBrief: input.state.brief.internal,
+                instruction: input.instruction,
+                prompt: input.state.prompt.value,
+                rawDescription: input.state.input.rawDescription,
+                revisionInstruction: input.state.prompt.inspection?.revisionInstruction,
+                schemaName: input.schemaName,
+            },
             { schema: input.schema, signal: input.signal }
         )
         const parsed = input.schema.safeParse(rawOutput)
