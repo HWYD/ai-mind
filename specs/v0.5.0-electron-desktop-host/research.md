@@ -361,3 +361,16 @@ References checked on 2026-08-07:
 - [TriliumNext Trilium explicit native allowlist](https://github.com/TriliumNext/Trilium/blob/5e63c96beaaf58d9ec5390d2070d0661b91ce84c/pnpm-workspace.yaml)
 - [Threema Desktop explicit native allowlist](https://github.com/threema-ch/threema-desktop/blob/9ae421c6b749f67e83b0ef7d1020490f848977a0/pnpm-workspace.yaml)
 - [ToolHive Studio explicit native allowlist](https://github.com/stacklok/toolhive-studio/blob/44b07f9a88b3b7bbc653c34e35bb348bd973b75c/pnpm-workspace.yaml)
+
+## CI Path Finding: `pnpm --dir` Artifact Inputs
+
+Run `31189411763`, job `92903055142`, proved that the native build remediation worked:
+clean installation, native module verification, desktop tests, integration tests, and Forge
+DMG make all passed. The final manifest step then received
+`apps/desktop/out/make/AI-Mind-Desktop-arm64.dmg` while executing the script through
+`pnpm --dir apps/desktop`. The changed working directory made that repository-relative input
+resolve as `apps/desktop/apps/desktop/out/...`.
+
+The CI boundary now discovers both the DMG and packaged app from an absolute workspace search
+root before invoking either desktop script. This keeps path ownership at the workflow boundary,
+does not alter artifact contents, and remains compatible with spaces in the checkout path.

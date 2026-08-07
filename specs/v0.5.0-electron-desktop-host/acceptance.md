@@ -143,16 +143,19 @@ that pnpm had ignored the build scripts for `macos-alias@0.2.12` and
 `fs-xattr@0.3.1`. This isolates the failure to the DMG dependency install policy; it is
 not evidence of a fuse, signing, application-package, or architecture failure.
 
-| Gate                                       | Result             | Evidence                                                                                                                    |
-| ------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| pnpm build-script policy                   | Remediated locally | `fs-xattr` and `macos-alias` are explicit enabled entries; wildcard build permissions remain rejected                       |
-| Platform-specific policy verification      | Pass locally       | Windows requires `electron`/`electron-winstaller`; macOS requires `electron`/`fs-xattr`/`macos-alias`                       |
-| macOS native module load before Forge make | CI re-run pending  | Native arm64 verifier must load both `xattr.node` and `volume.node`; a Windows host cannot provide this evidence            |
-| Existing CI workflow boundaries            | Unchanged          | No workflow topology, production secret, artifact upload, Forge fuse, codesign, Ubuntu, Windows, or Docker behavior changed |
+| Gate                                        | Result             | Evidence                                                                                                                     |
+| ------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| pnpm build-script policy                    | Remediated locally | `fs-xattr` and `macos-alias` are explicit enabled entries; wildcard build permissions remain rejected                        |
+| Platform-specific policy verification       | Pass locally       | Windows requires `electron`/`electron-winstaller`; macOS requires `electron`/`fs-xattr`/`macos-alias`                        |
+| macOS native module load before Forge make  | Pass               | Run `31189411763`, job `92903055142`, passed clean-install verification for both `xattr.node` and `volume.node`              |
+| macOS arm64 DMG make                        | Pass               | The same job completed the non-distributable Forge DMG maker before entering final artifact verification                     |
+| Absolute artifact path into desktop scripts | CI re-run pending  | The failed manifest call exposed a repository-relative path interpreted from the `pnpm --dir apps/desktop` working directory |
+| Existing CI workflow boundaries             | Unchanged          | No workflow topology, production secret, artifact upload, Forge fuse, codesign, Ubuntu, Windows, or Docker behavior changed  |
 
-The macOS arm64 result remains pending until a fresh native `macos-14` job completes
-clean installation, native-module verification, DMG creation, and package audit. This
-remediation does not authorize preview distribution or change T071/T072.
+The macOS arm64 result remains pending until a fresh native `macos-14` job completes the
+absolute-path manifest call and final package audit. Native-module compilation and DMG creation
+are now proven by CI. This remediation does not authorize preview distribution or change
+T071/T072.
 
 ## Release Decision
 

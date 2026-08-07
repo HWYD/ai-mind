@@ -103,6 +103,8 @@ test('keeps macOS arm64 desktop verification native, unsigned, and non-distribut
     assert.match(desktopMacos, /pnpm --filter @ai-mind\/desktop test:stable/)
     assert.match(desktopMacos, /pnpm --filter @ai-mind\/desktop test:integration/)
     assert.match(desktopMacos, /pnpm --filter @ai-mind\/desktop make:macos-arm64/)
+    assert.match(desktopMacos, /find "\$\(pwd\)\/apps\/desktop\/out\/make"/)
+    assert.match(desktopMacos, /find "\$\(pwd\)\/apps\/desktop\/out"/)
     assert.match(desktopMacos, /--platform darwin-arm64/)
     assert.match(desktopMacos, /file .*arm64/)
     assert.match(desktopMacos, /universal/)

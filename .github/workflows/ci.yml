@@ -211,9 +211,9 @@ jobs:
         run: pnpm --filter @ai-mind/desktop make:macos-arm64
       - name: Verify DMG architecture, hash, fuses, and contents
         run: |
-          artifact="$(find apps/desktop/out/make -type f -name '*.dmg' -print -quit)"
+          artifact="$(find "$(pwd)/apps/desktop/out/make" -type f -name '*.dmg' -print -quit)"
           test -n "$artifact"
-          package="$(find apps/desktop/out -maxdepth 1 -type d -name '*darwin-arm64' -print -quit)"
+          package="$(find "$(pwd)/apps/desktop/out" -maxdepth 1 -type d -name '*darwin-arm64' -print -quit)"
           test -n "$package"
           app="$package/AI Mind Desktop.app"
           executable="$app/Contents/MacOS/AI Mind Desktop"
