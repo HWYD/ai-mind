@@ -369,6 +369,8 @@ Phase 1 Setup
 
 - [x] T112 修复 run `31172141263` 暴露的跨平台 profile 路径错误：`path.win32.isAbsolute()` 会把 `/tmp/...` 和 `/Users/...` 同样识别为 Windows 绝对路径，导致 `resolveDesktopUserDataPath()` 在 Linux/macOS 生成反斜杠路径并让 Electron `app.setPath('userData', ...)` 抛出 `Path must be absolute`。路径解析现在优先保留 POSIX 绝对路径，其次处理 Windows/UNC 绝对路径，并拒绝相对路径；unit test 对 Windows、macOS、Linux 输出执行精确断言。相同失败 commit 已在 Linux/amd64 + Xvfb 一次性容器中复现为 16 pass / 4 fail，应用最小修复后 desktop stable 103/103、integration 20/20 通过（FR-011、FR-023、SC-012、SC-013）。
 
+- [x] T113 修复 run `31182847863` 的 macOS arm64 DMG 原生依赖构建失败：在 pnpm `allowBuilds` 中精确启用 Forge DMG 调用链所需的 `fs-xattr` 与 `macos-alias`，并让 `verify-pnpm-builds.mjs` 按平台检查必需 allowlist；macOS runner 在 Forge make 前必须实际加载 `xattr.node` 与 `volume.node`，避免安装脚本被跳过后延迟到 DMG 阶段才失败。保持 Windows/Ubuntu/Docker workflow、Forge fuse、ad-hoc codesign 与不上传制品边界不变（FR-011、FR-023、SC-012、SC-013）。
+
 **Checkpoint**: 审计发现的本地实现与 release-verifier 缺口已关闭；T071-T075 仍为未开始的唯一 operational release closing 路径，任何 server deploy、preview artifact、manifest/hash 或分发继续保持暂停。
 
 ---

@@ -134,6 +134,26 @@ ignored `apps/desktop/out/`; they are not preview candidates and were not upload
 distributed. The server-first production gate, T071/T072, and all manual smoke evidence
 remain unchanged.
 
+## macOS DMG Native Build Remediation Evidence: 2026-08-07
+
+GitHub Actions run `31182847863`, job `92880933374`, passed macOS packaging, fuse
+modification, and ad-hoc signing, then failed in Forge's DMG maker because
+`macos-alias` could not load `build/Release/volume.node`. The clean-install log showed
+that pnpm had ignored the build scripts for `macos-alias@0.2.12` and
+`fs-xattr@0.3.1`. This isolates the failure to the DMG dependency install policy; it is
+not evidence of a fuse, signing, application-package, or architecture failure.
+
+| Gate                                       | Result             | Evidence                                                                                                                    |
+| ------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| pnpm build-script policy                   | Remediated locally | `fs-xattr` and `macos-alias` are explicit enabled entries; wildcard build permissions remain rejected                       |
+| Platform-specific policy verification      | Pass locally       | Windows requires `electron`/`electron-winstaller`; macOS requires `electron`/`fs-xattr`/`macos-alias`                       |
+| macOS native module load before Forge make | CI re-run pending  | Native arm64 verifier must load both `xattr.node` and `volume.node`; a Windows host cannot provide this evidence            |
+| Existing CI workflow boundaries            | Unchanged          | No workflow topology, production secret, artifact upload, Forge fuse, codesign, Ubuntu, Windows, or Docker behavior changed |
+
+The macOS arm64 result remains pending until a fresh native `macos-14` job completes
+clean installation, native-module verification, DMG creation, and package audit. This
+remediation does not authorize preview distribution or change T071/T072.
+
 ## Release Decision
 
 | Gate                        | Required evidence                                                                                                   | Result                          | Evidence reference                                                                                                         |

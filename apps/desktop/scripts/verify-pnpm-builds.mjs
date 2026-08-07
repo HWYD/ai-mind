@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -7,6 +8,11 @@ import { spawn } from 'node:child_process'
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const repositoryRoot = path.resolve(scriptDirectory, '../../..')
 const desktopDirectory = path.join(repositoryRoot, 'apps', 'desktop')
+const requireFromDesktop = createRequire(path.join(desktopDirectory, 'package.json'))
+const requiredEnabledBuilds = {
+    'win32-x64': ['electron', 'electron-winstaller'],
+    'darwin-arm64': ['electron', 'fs-xattr', 'macos-alias'],
+}
 
 function parseArguments(argumentsList) {
     const options = { installLog: null, platform: null, report: null }
@@ -128,6 +134,25 @@ async function main() {
     if (broadAllowBuilds.length > 0) {
         throw new Error(`allowBuilds must not contain broad enabled entries: ${broadAllowBuilds.map(entry => entry.name).join(', ')}`)
     }
+    const allowBuildsByName = new Map(allowBuilds.map(entry => [entry.name, entry.enabled]))
+    const invalidRequiredBuilds = requiredEnabledBuilds[options.platform]
+        .filter(packageName => allowBuildsByName.get(packageName) !== true)
+        .map(packageName => `${packageName} (${allowBuildsByName.has(packageName) ? 'denied' : 'missing'})`)
+    if (invalidRequiredBuilds.length > 0) {
+        throw new Error(`Required ${options.platform} build scripts must be explicitly enabled: ${invalidRequiredBuilds.join(', ')}`)
+    }
+
+    const nativeModules = {}
+    if (options.platform === 'darwin-arm64') {
+        for (const packageName of ['fs-xattr', 'macos-alias']) {
+            const entryPath = requireFromDesktop.resolve(packageName)
+            requireFromDesktop(packageName)
+            nativeModules[packageName] = {
+                entry: path.relative(repositoryRoot, entryPath).split(path.sep).join('/'),
+                status: 'loaded',
+            }
+        }
+    }
 
     const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
     const [pnpmVersion, electronVersion, forgeVersion] = await Promise.all([
@@ -157,12 +182,14 @@ async function main() {
                 .map(entry => entry.name)
                 .sort(),
             broadEnabledEntries: broadAllowBuilds.map(entry => entry.name),
+            requiredEnabled: requiredEnabledBuilds[options.platform],
         },
         cleanInstall: lifecycleEvidence(installLog),
         executables: {
             electron: electronVersion,
             electronForge: forgeVersion,
         },
+        nativeModules,
     }
 
     if (reportPath) {

@@ -335,3 +335,29 @@ packaged executable therefore exits before the application main process starts. 
 an optional startup optimization rather than a required security hardening fuse. The
 release verifier must require the disabled wire state, and every package change requires
 both real-executable fuse inspection and a startup smoke test.
+
+## Package Compatibility Finding: pnpm 10 DMG Native Build Scripts
+
+GitHub Actions run `31182847863`, job `92880933374`, reached Forge's macOS arm64 DMG
+maker after packaging, fuse modification, and ad-hoc signing had all succeeded. DMG creation
+then failed because `macos-alias` could not load `build/Release/volume.node`. The clean-install
+log showed that pnpm had denied the build scripts for both `macos-alias@0.2.12` and
+`fs-xattr@0.3.1`.
+
+The dependency path is `@electron-forge/maker-dmg -> electron-installer-dmg -> appdmg`;
+`appdmg` directly uses `fs-xattr` and reaches `macos-alias` through `ds-store`. Both packages
+use `binding.gyp` to build the native modules required by the DMG maker. pnpm's documented
+`allowBuilds` policy is therefore kept fail closed while explicitly enabling only
+`fs-xattr` and `macos-alias` for this reviewed call chain. The macOS clean-install verifier
+must load both modules before Forge starts so an omitted or failed native build cannot pass
+the policy gate and fail later during DMG creation. Windows keeps its existing
+`electron`/`electron-winstaller` requirement; no fuse, signing, packaging, or workflow
+topology change is part of this remediation.
+
+References checked on 2026-08-07:
+
+- [pnpm `allowBuilds` settings](https://pnpm.io/settings#allowbuilds)
+- [Grafana k6 Studio explicit native allowlist](https://github.com/grafana/k6-studio/blob/5046db8c575a21ae4319923fe32897eaa0cad465/pnpm-workspace.yaml)
+- [TriliumNext Trilium explicit native allowlist](https://github.com/TriliumNext/Trilium/blob/5e63c96beaaf58d9ec5390d2070d0661b91ce84c/pnpm-workspace.yaml)
+- [Threema Desktop explicit native allowlist](https://github.com/threema-ch/threema-desktop/blob/9ae421c6b749f67e83b0ef7d1020490f848977a0/pnpm-workspace.yaml)
+- [ToolHive Studio explicit native allowlist](https://github.com/stacklok/toolhive-studio/blob/44b07f9a88b3b7bbc653c34e35bb348bd973b75c/pnpm-workspace.yaml)
