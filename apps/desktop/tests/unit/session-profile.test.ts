@@ -41,5 +41,6 @@ describe('desktop session profiles', () => {
         expect(resolveDesktopUserDataPath('C:\\Users\\Bo\\AppData\\Roaming')).not.toBe(
             resolveDesktopUserDataPath('C:\\Users\\Ada\\AppData\\Roaming')
         )
+        expect(resolveDesktopUserDataPath('/Users/Ada/Library/Application Support')).toContain(DESKTOP_USER_DATA_DIRECTORY)
     })
 })
