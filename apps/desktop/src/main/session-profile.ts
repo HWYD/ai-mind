@@ -9,9 +9,15 @@ export const RECOVERY_SESSION_PARTITION = 'ai-mind-desktop-recovery'
 export const DESKTOP_USER_DATA_DIRECTORY = DESKTOP_PRODUCT_ID
 
 export function resolveDesktopUserDataPath(appDataPath: string): string {
-    const pathApi = path.win32.isAbsolute(appDataPath) ? path.win32 : path
+    if (path.posix.isAbsolute(appDataPath)) {
+        return path.posix.join(appDataPath, DESKTOP_USER_DATA_DIRECTORY)
+    }
 
-    return pathApi.join(appDataPath, DESKTOP_USER_DATA_DIRECTORY)
+    if (path.win32.isAbsolute(appDataPath)) {
+        return path.win32.join(appDataPath, DESKTOP_USER_DATA_DIRECTORY)
+    }
+
+    throw new Error('Desktop appData path must be absolute.')
 }
 
 const workspaceDataTypes: NonNullable<ClearDataOptions['dataTypes']> = [

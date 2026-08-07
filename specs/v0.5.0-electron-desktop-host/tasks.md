@@ -367,6 +367,8 @@ Phase 1 Setup
 - [ ] T110 修复 Electron 43 打包可执行文件在主进程启动前退出的问题：禁用与缺失 `browser_v8_context_snapshot.bin` 不兼容的 `LoadBrowserProcessSpecificV8Snapshot`，让源配置、fuse unit/artifact verifier、canonical specs、ADR 与 architecture docs 一致；在可清理旧输出后重建 Windows package，并读取实际 fuse wire 和运行 startup smoke（FR-011、T068）。
 - [x] T111 修复 GitHub Actions 失败的 desktop 验证：Linux stateful integration 通过 Xvfb 启动 Electron，并在 Turborepo strict env mode 下用 `test:integration.passThroughEnv` 同时传入 `DISPLAY` 与 X11 鉴权所需的 `XAUTHORITY`；Squirrel.Windows 提供必填 NuGet authors/description；macOS 真实主进程 fixture 使用测试侧临时 app root 装配最小 Forge renderer、preload、图标和隔离 profile，不再依赖 clean runner 中不存在的 `.webpack/renderer`；macOS `BrowserWindow` 不接收仅 Windows 使用的开发态 `.ico` 路径；ASAR 审计在 Windows 上以原生分隔符读取条目；CI/release actions 使用 Node 24 runtime。为启动失败清理、嵌套 ASAR 遍历、Xvfb 环境透传和 CI workflow 契约补充回归覆盖，将不需要 Electron 的 lifecycle test 移出真实主进程 hooks，并让 Electron teardown 在短暂优雅退出失败后终止测试子进程（FR-011、FR-023、SC-012、SC-013）。
 
+- [x] T112 修复 run `31172141263` 暴露的跨平台 profile 路径错误：`path.win32.isAbsolute()` 会把 `/tmp/...` 和 `/Users/...` 同样识别为 Windows 绝对路径，导致 `resolveDesktopUserDataPath()` 在 Linux/macOS 生成反斜杠路径并让 Electron `app.setPath('userData', ...)` 抛出 `Path must be absolute`。路径解析现在优先保留 POSIX 绝对路径，其次处理 Windows/UNC 绝对路径，并拒绝相对路径；unit test 对 Windows、macOS、Linux 输出执行精确断言。相同失败 commit 已在 Linux/amd64 + Xvfb 一次性容器中复现为 16 pass / 4 fail，应用最小修复后 desktop stable 103/103、integration 20/20 通过（FR-011、FR-023、SC-012、SC-013）。
+
 **Checkpoint**: 审计发现的本地实现与 release-verifier 缺口已关闭；T071-T075 仍为未开始的唯一 operational release closing 路径，任何 server deploy、preview artifact、manifest/hash 或分发继续保持暂停。
 
 ---

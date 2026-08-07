@@ -33,7 +33,7 @@ describe('desktop session profiles', () => {
         })
     })
 
-    it('derives one stable userData directory from the product identity', () => {
+    it('derives one stable absolute userData directory for Windows and POSIX profiles', () => {
         expect(DESKTOP_USER_DATA_DIRECTORY).toBe('cloud.hwyblog.ai-mind.desktop')
         expect(resolveDesktopUserDataPath('C:\\Users\\Ada\\AppData\\Roaming')).toBe(
             'C:\\Users\\Ada\\AppData\\Roaming\\cloud.hwyblog.ai-mind.desktop'
@@ -41,6 +41,12 @@ describe('desktop session profiles', () => {
         expect(resolveDesktopUserDataPath('C:\\Users\\Bo\\AppData\\Roaming')).not.toBe(
             resolveDesktopUserDataPath('C:\\Users\\Ada\\AppData\\Roaming')
         )
-        expect(resolveDesktopUserDataPath('/Users/Ada/Library/Application Support')).toContain(DESKTOP_USER_DATA_DIRECTORY)
+        expect(resolveDesktopUserDataPath('/Users/Ada/Library/Application Support')).toBe(
+            '/Users/Ada/Library/Application Support/cloud.hwyblog.ai-mind.desktop'
+        )
+        expect(resolveDesktopUserDataPath('/tmp/ai-mind-desktop/app-data')).toBe(
+            '/tmp/ai-mind-desktop/app-data/cloud.hwyblog.ai-mind.desktop'
+        )
+        expect(() => resolveDesktopUserDataPath('relative/app-data')).toThrow('Desktop appData path must be absolute.')
     })
 })

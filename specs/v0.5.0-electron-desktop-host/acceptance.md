@@ -105,18 +105,29 @@ renderer/preload/icon assets, isolates `appData` and `userData`, and removes no 
 until Electron exits. Teardown waits for the actual child process and force-terminates
 only after a short graceful-close timeout.
 
-| Gate                                     | Result         | Evidence                                                                                                                                                               |
-| ---------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop typecheck and lint               | Pass           | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                                                                                  |
-| Desktop stable tests                     | Pass           | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                                                                                |
-| Development Electron integration         | Pass           | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                                                                            |
-| CI and governance validators             | Pass           | 22 Node governance tests (one Linux deployment-host test skipped by design)                                                                                            |
-| GitHub Actions runtime                   | Updated        | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime                                                     |
-| Non-distributable Windows package        | Pass locally   | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                                                                            |
-| Windows package fuse/hash/contents audit | Pass locally   | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                                                                         |
-| Windows GitHub job                       | Pass           | Run `31165837108` completed the desktop tests, Squirrel make, and fuse/hash/package audit                                                                              |
-| Stateful GitHub job                      | Re-run pending | Run `31167549129` confirmed `XAUTHORITY` was missing after `DISPLAY` passed through; the two-variable correction still needs Linux CI evidence                         |
-| macOS arm64 GitHub job                   | Re-run pending | Run `31167549129` failed before DMG creation because real-main fixtures lacked Forge renderer assets; the temporary app-root correction needs native arm64 CI evidence |
+Run `31172141263` confirmed the X11 remediation: Linux no longer reported a missing
+display or Xauthority failure. Linux and macOS then failed only the same four real-main
+fixtures. An exact Linux/amd64 + Xvfb reproduction exposed the original production
+exception hidden by the native-safe fallback: `resolveDesktopUserDataPath()` selected
+`path.win32` for POSIX `/tmp/...` and `/Users/...` paths because Node also considers
+those paths absolute under `path.win32`. The resulting backslash path made Electron
+throw `Path must be absolute`. The resolver now handles POSIX absolute paths before
+Windows/UNC paths and rejects relative input. On the failing commit the container
+reproduced 16 passing and 4 failing integration tests; after this minimal correction,
+desktop stable passed 103/103 and integration passed 20/20.
+
+| Gate                                     | Result         | Evidence                                                                                                                                                                     |
+| ---------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop typecheck and lint               | Pass           | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                                                                                        |
+| Desktop stable tests                     | Pass           | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                                                                                      |
+| Development Electron integration         | Pass           | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                                                                                  |
+| CI and governance validators             | Pass           | 22 Node governance tests (one Linux deployment-host test skipped by design)                                                                                                  |
+| GitHub Actions runtime                   | Updated        | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime                                                           |
+| Non-distributable Windows package        | Pass locally   | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                                                                                  |
+| Windows package fuse/hash/contents audit | Pass locally   | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                                                                               |
+| Windows GitHub job                       | Pass           | Run `31172141263` completed the desktop tests, Squirrel make, and fuse/hash/package audit                                                                                    |
+| Stateful GitHub job                      | Re-run pending | Run `31172141263` proved Xvfb authentication works and exposed the POSIX profile-path bug; the path correction passed Linux/Xvfb container tests and needs fresh CI evidence |
+| macOS arm64 GitHub job                   | Re-run pending | Run `31172141263` exposed the same POSIX profile-path failure before DMG creation; the deterministic path correction needs native arm64 CI evidence                          |
 
 The local package and manifest/hash are CI-equivalent, non-distributable test outputs under
 ignored `apps/desktop/out/`; they are not preview candidates and were not uploaded or
