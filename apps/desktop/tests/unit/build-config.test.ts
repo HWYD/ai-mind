@@ -21,7 +21,7 @@ describe('desktop build configuration', () => {
             compatibilityContractVersion: 1,
             compatibilityPath: '/api/desktop/compatibility',
             desktopVersion: '0.5.0',
-            distribution: 'internal-preview',
+            distribution: 'public-beta',
             productId: DESKTOP_PRODUCT_ID,
             signing: 'unsigned',
             trustedOrigin: PRODUCTION_TRUSTED_ORIGIN,

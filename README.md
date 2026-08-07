@@ -259,7 +259,15 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 v0.5.0 为既有在线 Web 应用增加 Windows x64 与 macOS arm64 Electron 桌面宿主。AI Runtime、会话、
 StreamRun recovery、图像和受控 Agent 仍由服务端与 Web 应用负责；桌面进程只承担固定 Origin 准入、
-本地恢复、profile 隔离和收紧的原生保存能力。本版是未签名的内部预览设计，不是公开桌面发行版。
+本地恢复、profile 隔离和收紧的原生保存能力。本版通过 GitHub Pre-release 提供公开的
+`Unsigned Experimental Preview`，制品未签名、在线运行且不支持自动更新。
+
+### Public Beta 下载
+
+请从仓库的 GitHub Pre-release 下载对应平台安装包：Windows x64 `Setup.exe` 或 macOS arm64 DMG。
+下载后先使用 Release 附带的 `desktop-release.json` 和 `.sha256` 校验文件核对 SHA-256。Windows
+可能出现 SmartScreen 未知发布者提示；macOS 首次启动可能需要在 Finder 中 Control-click 应用并选择“打开”。
+本版本不支持 Windows ARM64、macOS Intel/universal、Linux、离线运行或自动更新。
 任何预览制品生成或分发前，必须先通过线上 compatibility/header gate，并完成 Windows 与 macOS 的
 fresh install / overlay install smoke。详见 [v0.5.0 设计](./docs/versions/v0.5.0-electron-desktop-host.md)
 和[发布记录](./docs/releases/v0.5.0.md)。

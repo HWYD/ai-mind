@@ -331,7 +331,7 @@ Conversation B: 我喜欢吃什么
 
 ## v0.5.0 Desktop Server-First Gate
 
-Electron desktop internal preview is not a third production deployment flow. The webapp
+Electron desktop public beta is not a third production deployment flow. The webapp
 changes required by the desktop host are deployed only through one of the two existing
 server flows above. Before a Windows preview artifact is generated or distributed, the
 same candidate commit must pass the following production verification against the fixed
@@ -348,10 +348,10 @@ including nonce-restricted scripts and the scoped `style-src-attr` layout except
 candidate version is a release-verification input only. It is not a desktop runtime
 Origin override and must not be stored in a distributed artifact.
 
-Only after that server-first gate passes may the same commit produce a Windows x64
-unsigned internal-preview installer, `desktop-release.json`, and a SHA-256 file for the
-controlled internal channel. CI may run non-distributable `make:windows` package checks
-earlier, but must not generate, upload, or label a preview candidate.
+Only after that server-first gate passes may the same commit produce the public
+`Unsigned Experimental Preview` Windows x64 installer, macOS arm64 DMG, platform
+manifests, and SHA-256 files for a GitHub Pre-release. Ordinary CI may run package
+checks earlier, but must not create a public Release or access production secrets.
 
 If a server rollback removes the compatibility API or document security headers, suspend
 distribution of every affected preview candidate before the rollback. Installed clients

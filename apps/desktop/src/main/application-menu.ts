@@ -43,7 +43,7 @@ export function createApplicationMenu(input: { desktopVersion: string; trustedOr
                             `Electron：${process.versions.electron}`,
                             `Node.js：${process.versions.node}`,
                             `日期：${new Date().toLocaleDateString('zh-CN')}`,
-                            '分发渠道：internal-preview',
+                            '分发渠道：public-beta / Unsigned Experimental Preview',
                             '签名状态：unsigned',
                             `受信 Origin：${input.trustedOrigin}`,
                             `github：https://github.com/HWYD/ai-mind`,

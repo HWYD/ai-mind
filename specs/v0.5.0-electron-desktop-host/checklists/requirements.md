@@ -34,4 +34,4 @@
 ## Notes
 
 - v0.5.0 的关键产品选择已由用户确认：采用在线桌面端，而不是把完整服务端和本地数据 Runtime 打进安装包。
-- v0.5.0 平台范围已明确为 Windows x64 与 macOS arm64；Intel Mac、universal binary、签名/公证、自动更新与离线模式均已明确列入 Non-goals，不阻塞进入 `/speckit-plan`。
+- v0.5.0 平台范围已明确为 Windows x64 与 macOS arm64；Unsigned Experimental Preview、GitHub Pre-release、无签名、无自动更新与无离线模式边界已明确。

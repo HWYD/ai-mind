@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+const publicPreviewWorkflow = readFileSync(resolve(process.cwd(), '.github/workflows/desktop-public-preview.yml'), 'utf8')
 const turboConfig = JSON.parse(readFileSync(resolve(process.cwd(), 'turbo.json'), 'utf8'))
 
 function jobBlock(jobName) {
@@ -121,4 +122,19 @@ test('keeps macOS arm64 desktop verification native, unsigned, and non-distribut
         macosVerificationPositions
     )
     assert.doesNotMatch(desktopMacos, /preview:make|upload-artifact|deploy-production|TCR_|secrets\./)
+})
+
+test('keeps public beta publishing manual and gated on operator verification', () => {
+    assert.match(publicPreviewWorkflow, /workflow_dispatch:/)
+    assert.match(publicPreviewWorkflow, /production_verified:/)
+    assert.match(publicPreviewWorkflow, /contents: write/)
+    assert.match(publicPreviewWorkflow, /actions\/upload-artifact@v4/)
+    assert.match(publicPreviewWorkflow, /actions\/download-artifact@v4/)
+    assert.match(publicPreviewWorkflow, /gh release create/)
+    assert.match(publicPreviewWorkflow, /--prerelease/)
+    assert.match(publicPreviewWorkflow, /preview:make/)
+    assert.match(publicPreviewWorkflow, /preview:make:macos-arm64/)
+    assert.match(publicPreviewWorkflow, /Unsigned Experimental Preview/)
+    assert.doesNotMatch(publicPreviewWorkflow, /deploy-production|ssh|TCR_|secrets\./)
+    assert.match(publicPreviewWorkflow, /if: inputs\.production_verified == 'true'/)
 })

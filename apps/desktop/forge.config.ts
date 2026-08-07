@@ -69,7 +69,7 @@ const config: ForgeConfig = {
     makers: [
         new MakerSquirrel({
             authors: 'AI Mind',
-            description: 'AI Mind Desktop internal preview application.',
+            description: 'AI Mind Desktop Unsigned Experimental Preview.',
             name: 'ai_mind_desktop',
             setupIcon: desktopWindowsIconPath,
             setupExe: 'AI-Mind-Desktop-Setup.exe',
