@@ -1,6 +1,9 @@
 import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
+    expect: {
+        timeout: 10_000,
+    },
     forbidOnly: Boolean(process.env.CI),
     fullyParallel: false,
     reporter: process.env.CI ? 'github' : 'list',

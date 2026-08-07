@@ -1,5 +1,6 @@
 {
     "name": "@ai-mind/desktop",
+    "productName": "AI Mind Desktop",
     "version": "0.5.0",
     "private": true,
     "main": ".webpack/main",

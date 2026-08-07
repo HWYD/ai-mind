@@ -15,8 +15,13 @@ describe('Forge packaging policy', () => {
     })
 
     it('keeps a single fixed app identity', () => {
+        const packageJson = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../package.json'), 'utf8')) as {
+            productName?: string
+        }
+
         expect(config.packagerConfig?.appBundleId).toBe('cloud.hwyblog.ai-mind.desktop')
         expect(config.packagerConfig?.executableName).toBe('AI Mind Desktop')
+        expect(packageJson.productName).toBe('AI Mind Desktop')
     })
 
     it('embeds the AI Mind icon in packaged apps and the Windows installer', () => {
