@@ -39,14 +39,14 @@ same-commit Windows installer completes the manual smoke matrix.
 
 ## macOS arm64 Extension Evidence: 2026-08-06
 
-| Gate                                   | Result  | Evidence                                                                                     |
-| -------------------------------------- | ------- | -------------------------------------------------------------------------------------------- |
-| Locked dependency installation         | Pass    | `pnpm install --frozen-lockfile` completed with the DMG maker locked at 7.11.2               |
-| Desktop lint and typecheck             | Pass    | `pnpm --filter @ai-mind/desktop lint` and `typecheck` completed locally                      |
-| Desktop platform-policy tests          | Pass    | 11 test files and 77 tests passed, including manifest, diagnostics, and Forge maker policy   |
-| CI governance and test-lane validators | Pass    | macOS arm64 CI policy and managed test-lane validators passed locally                        |
-| macOS DMG/package audit                | Not run | Requires the native Apple Silicon `macos-14` CI runner; a Windows host is not valid evidence |
-| Preview distribution                   | Blocked | T071/T072 server-first deployment and production verification remain incomplete              |
+| Gate                                   | Result  | Evidence                                                                                         |
+| -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| Locked dependency installation         | Pass    | `pnpm install --frozen-lockfile` completed with the DMG maker locked at 7.11.2                   |
+| Desktop lint and typecheck             | Pass    | `pnpm --filter @ai-mind/desktop lint` and `typecheck` completed locally                          |
+| Desktop platform-policy tests          | Pass    | 11 test files and 77 tests passed, including manifest, diagnostics, and Forge maker policy       |
+| CI governance and test-lane validators | Pass    | macOS arm64 CI policy and managed test-lane validators passed locally                            |
+| macOS DMG/package audit                | Pass    | Run `31190520337`, job `92906756122`, completed DMG, architecture, hash, fuse, and content audit |
+| Preview distribution                   | Blocked | T071/T072 server-first deployment and production verification remain incomplete                  |
 
 The macOS implementation accepts only `darwin-arm64`; Intel and universal values are
 rejected. Its post-fuse `codesign --sign -` step is ad-hoc local re-signing, not a
@@ -116,18 +116,18 @@ Windows/UNC paths and rejects relative input. On the failing commit the containe
 reproduced 16 passing and 4 failing integration tests; after this minimal correction,
 desktop stable passed 103/103 and integration passed 20/20.
 
-| Gate                                     | Result         | Evidence                                                                                                                                                                     |
-| ---------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop typecheck and lint               | Pass           | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                                                                                        |
-| Desktop stable tests                     | Pass           | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                                                                                      |
-| Development Electron integration         | Pass           | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                                                                                  |
-| CI and governance validators             | Pass           | 22 Node governance tests (one Linux deployment-host test skipped by design)                                                                                                  |
-| GitHub Actions runtime                   | Updated        | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime                                                           |
-| Non-distributable Windows package        | Pass locally   | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                                                                                  |
-| Windows package fuse/hash/contents audit | Pass locally   | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                                                                               |
-| Windows GitHub job                       | Pass           | Run `31172141263` completed the desktop tests, Squirrel make, and fuse/hash/package audit                                                                                    |
-| Stateful GitHub job                      | Re-run pending | Run `31172141263` proved Xvfb authentication works and exposed the POSIX profile-path bug; the path correction passed Linux/Xvfb container tests and needs fresh CI evidence |
-| macOS arm64 GitHub job                   | Re-run pending | Run `31172141263` exposed the same POSIX profile-path failure before DMG creation; the deterministic path correction needs native arm64 CI evidence                          |
+| Gate                                     | Result       | Evidence                                                                                                             |
+| ---------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Desktop typecheck and lint               | Pass         | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                                |
+| Desktop stable tests                     | Pass         | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                              |
+| Development Electron integration         | Pass         | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                          |
+| CI and governance validators             | Pass         | 22 Node governance tests (one Linux deployment-host test skipped by design)                                          |
+| GitHub Actions runtime                   | Updated      | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime   |
+| Non-distributable Windows package        | Pass locally | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                          |
+| Windows package fuse/hash/contents audit | Pass locally | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                       |
+| Windows GitHub job                       | Pass         | Run `31190520337`, job `92906756031`, completed desktop tests, Squirrel make, and fuse/hash/package audit            |
+| Stateful GitHub job                      | Pass         | Run `31190520337`, job `92906756131`, completed the Xvfb-backed integration lane                                     |
+| macOS arm64 GitHub job                   | Pass         | Run `31190520337`, job `92906756122`, completed native build verification, tests, DMG make, and final artifact audit |
 
 The local package and manifest/hash are CI-equivalent, non-distributable test outputs under
 ignored `apps/desktop/out/`; they are not preview candidates and were not uploaded or
@@ -143,19 +143,19 @@ that pnpm had ignored the build scripts for `macos-alias@0.2.12` and
 `fs-xattr@0.3.1`. This isolates the failure to the DMG dependency install policy; it is
 not evidence of a fuse, signing, application-package, or architecture failure.
 
-| Gate                                        | Result             | Evidence                                                                                                                     |
-| ------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| pnpm build-script policy                    | Remediated locally | `fs-xattr` and `macos-alias` are explicit enabled entries; wildcard build permissions remain rejected                        |
-| Platform-specific policy verification       | Pass locally       | Windows requires `electron`/`electron-winstaller`; macOS requires `electron`/`fs-xattr`/`macos-alias`                        |
-| macOS native module load before Forge make  | Pass               | Run `31189411763`, job `92903055142`, passed clean-install verification for both `xattr.node` and `volume.node`              |
-| macOS arm64 DMG make                        | Pass               | The same job completed the non-distributable Forge DMG maker before entering final artifact verification                     |
-| Absolute artifact path into desktop scripts | CI re-run pending  | The failed manifest call exposed a repository-relative path interpreted from the `pnpm --dir apps/desktop` working directory |
-| Existing CI workflow boundaries             | Unchanged          | No workflow topology, production secret, artifact upload, Forge fuse, codesign, Ubuntu, Windows, or Docker behavior changed  |
+| Gate                                        | Result | Evidence                                                                                                                                 |
+| ------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| pnpm build-script policy                    | Pass   | Run `31190520337` used explicit `fs-xattr`/`macos-alias` entries while wildcard build permissions remained rejected                      |
+| Platform-specific policy verification       | Pass   | Windows and macOS jobs passed their distinct required-build checks                                                                       |
+| macOS native module load before Forge make  | Pass   | Job `92906756122` loaded both `xattr.node` and `volume.node` before packaging                                                            |
+| macOS arm64 DMG make                        | Pass   | The same job completed the non-distributable Forge DMG maker                                                                             |
+| Absolute artifact path into desktop scripts | Pass   | The same job completed manifest generation and final artifact verification with absolute DMG/package paths                               |
+| Existing CI workflow boundaries             | Pass   | Stable, Stateful, Windows, macOS, and Docker jobs all passed; no production secret, artifact upload, preview distribution, or deploy ran |
 
-The macOS arm64 result remains pending until a fresh native `macos-14` job completes the
-absolute-path manifest call and final package audit. Native-module compilation and DMG creation
-are now proven by CI. This remediation does not authorize preview distribution or change
-T071/T072.
+Run `31190520337` passed all five CI jobs. The native macOS arm64 job proved clean
+installation, native-module loading, development tests, DMG creation, architecture, manifest,
+hash, fuses, and package contents. This remediation does not authorize preview distribution or
+change T071/T072.
 
 ## Release Decision
 
@@ -164,7 +164,8 @@ T071/T072.
 | Scope                       | Windows x64 与 macOS arm64、online host、internal-preview、unsigned；无 auto-update、正式签名/公证或本地 AI Runtime | Pass (repository review)        | T069 audit; operational artifact evidence pending                                                                          |
 | Automated quality           | `pnpm lint`、`pnpm typecheck`、`pnpm test:stable`、`pnpm build` 通过                                                | Pass                            | Closing Evidence: 2026-08-05                                                                                               |
 | Desktop remediation quality | Current desktop typecheck/lint/stable/integration and governance tests pass                                         | Pass locally                    | Pre-release Audit Remediation Evidence: 2026-08-06                                                                         |
-| Windows desktop lane        | locked install、desktop unit、development Electron integration、不可分发 `make:windows`、fuse/package audit 通过    | Local pass; CI re-run pending   | CI Remediation Evidence: 2026-08-07                                                                                        |
+| Windows desktop lane        | locked install、desktop unit、development Electron integration、不可分发 `make:windows`、fuse/package audit 通过    | Pass                            | Run `31190520337`, job `92906756031`                                                                                       |
+| macOS arm64 desktop lane    | native locked install、desktop unit/integration、不可分发 DMG、architecture/fuse/package audit 通过                 | Pass                            | Run `31190520337`, job `92906756122`                                                                                       |
 | Server-first gate           | production compatibility API 与 document security headers 已由既有 server deploy route 上线并验证                   | Fail                            | Fixed-Origin probe on 2026-08-05: compatibility endpoint returned 404; `/` and `/instant-mind` lacked the required headers |
 | Preview artifact            | 仅在 server-first gate 通过后，生成同一 commit 的 `preview:make`、manifest 与 SHA-256                               | Not run                         | -                                                                                                                          |
 | Manual smoke                | fresh install、overlay install、核心场景和安全拒绝场景完成                                                          | Not run                         | -                                                                                                                          |
@@ -295,17 +296,17 @@ node apps/desktop/scripts/verify-pnpm-builds.mjs --platform darwin-arm64 --insta
 deploy/scripts/verify-production.sh
 ```
 
-| Command                                          | Platform                            | Result  | Evidence reference                                               |
-| ------------------------------------------------ | ----------------------------------- | ------- | ---------------------------------------------------------------- |
-| `pnpm lint`                                      | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                                     |
-| `pnpm typecheck`                                 | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                                     |
-| `pnpm test:stable`                               | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                                     |
-| `pnpm build`                                     | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                                     |
-| Desktop Windows lane                             | Windows x64                         | Not run | -                                                                |
-| Desktop macOS lane                               | macOS arm64                         | Not run | Native Apple Silicon CI is required; no local Windows substitute |
-| `verify-pnpm-builds.mjs --platform win32-x64`    | Windows x64 CI                      | Not run | CI keeps the report in the runner workspace; no artifact upload  |
-| `verify-pnpm-builds.mjs --platform darwin-arm64` | macOS arm64 CI                      | Not run | Native Apple Silicon CI is required; no local Windows substitute |
-| `verify-production.sh`                           | Production verification environment | Not run | -                                                                |
+| Command                                          | Platform                            | Result  | Evidence reference                                         |
+| ------------------------------------------------ | ----------------------------------- | ------- | ---------------------------------------------------------- |
+| `pnpm lint`                                      | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                               |
+| `pnpm typecheck`                                 | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                               |
+| `pnpm test:stable`                               | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                               |
+| `pnpm build`                                     | local Windows workspace             | Pass    | Closing Evidence: 2026-08-05                               |
+| Desktop Windows lane                             | Windows x64                         | Pass    | Run `31190520337`, job `92906756031`                       |
+| Desktop macOS lane                               | macOS arm64                         | Pass    | Run `31190520337`, job `92906756122`                       |
+| `verify-pnpm-builds.mjs --platform win32-x64`    | Windows x64 CI                      | Pass    | Job `92906756031`; report remained in the runner workspace |
+| `verify-pnpm-builds.mjs --platform darwin-arm64` | macOS arm64 CI                      | Pass    | Job `92906756122`; both required native modules loaded     |
+| `verify-production.sh`                           | Production verification environment | Not run | -                                                          |
 
 ## Final Acceptance Sign-off
 
