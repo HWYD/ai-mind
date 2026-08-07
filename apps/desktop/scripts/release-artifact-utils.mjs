@@ -20,7 +20,7 @@ const supportedPlatforms = new Set(['win32-x64', 'darwin-arm64'])
 export function createDesktopPreviewManifest(input) {
     return validateDesktopPreviewManifest({
         desktopVersion: input.desktopVersion,
-        distribution: 'internal-preview',
+        distribution: 'public-beta',
         electronVersion: input.electronVersion,
         platform: input.platform,
         sha256: sha256(input.artifact),
@@ -50,8 +50,8 @@ export function validateDesktopPreviewManifest(value) {
     if (typeof value.desktopVersion !== 'string' || !strictSemverPattern.test(value.desktopVersion)) {
         throw new Error('desktop-release.json desktopVersion must be strict semver')
     }
-    if (value.distribution !== 'internal-preview') {
-        throw new Error('desktop-release.json distribution must be internal-preview')
+    if (value.distribution !== 'public-beta') {
+        throw new Error('desktop-release.json distribution must be public-beta')
     }
     if (typeof value.electronVersion !== 'string' || !strictSemverPattern.test(value.electronVersion)) {
         throw new Error('desktop-release.json electronVersion must be strict semver')

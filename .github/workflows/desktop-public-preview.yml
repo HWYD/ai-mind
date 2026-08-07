@@ -1,0 +1,132 @@
+name: Desktop public beta release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full commit SHA to build
+        required: true
+        type: string
+      release_tag:
+        description: Git tag for the GitHub Pre-release
+        required: true
+        default: v0.5.0-public-beta
+        type: string
+      production_verified:
+        description: Confirm that production deployment and verify-production.sh passed
+        required: true
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    if: inputs.production_verified == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 10.34.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and audit Windows x64 package
+        shell: pwsh
+        run: |
+          pnpm --filter @ai-mind/desktop preview:make
+          $artifact = Get-ChildItem -Path apps/desktop/out/make -Recurse -File -Filter '*Setup.exe' | Select-Object -First 1
+          $package = Get-ChildItem -Path apps/desktop/out -Directory | Where-Object { $_.Name -like '*win32-x64' } | Select-Object -First 1
+          if (-not $artifact -or -not $package) { throw 'Windows public beta package was not produced.' }
+          $sha = git rev-parse HEAD
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Copy-Item $artifact.FullName 'release-assets/AI-Mind-Desktop-win32-x64-Setup.exe'
+          pnpm --dir apps/desktop exec node scripts/write-release-manifest.mjs --artifact (Resolve-Path 'release-assets/AI-Mind-Desktop-win32-x64-Setup.exe') --output (Join-Path (Get-Location) 'release-assets/desktop-release.json') --platform win32-x64 --source-commit $sha
+          pnpm --dir apps/desktop exec node scripts/verify-release-artifact.mjs --app (Join-Path $package.FullName 'AI Mind Desktop.exe') --artifact (Resolve-Path 'release-assets/AI-Mind-Desktop-win32-x64-Setup.exe') --manifest (Resolve-Path 'release-assets/desktop-release.json') --package-directory $package.FullName --platform win32-x64
+          Move-Item 'release-assets/desktop-release.json' 'release-assets/desktop-release-win32-x64.json'
+          Set-Content -Path 'release-assets/INSTALL-WINDOWS.md' -Value "# Windows x64\n\nUnsigned Experimental Preview. Windows SmartScreen may require selecting More info > Run anyway. Online-only; no auto-update."
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-public-preview-windows
+          path: release-assets/
+
+  macos:
+    if: inputs.production_verified == 'true'
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+      - name: Verify native Apple Silicon runner
+        run: test "$(uname -m)" = "arm64"
+      - uses: pnpm/action-setup@v4.4.0
+        with:
+          version: 10.34.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and audit macOS arm64 package
+        run: |
+          pnpm --filter @ai-mind/desktop preview:make:macos-arm64
+          artifact="$(find "$(pwd)/apps/desktop/out/make" -type f -name '*.dmg' -print -quit)"
+          package="$(find "$(pwd)/apps/desktop/out" -maxdepth 1 -type d -name '*darwin-arm64' -print -quit)"
+          test -n "$artifact" && test -n "$package"
+          executable="$package/AI Mind Desktop.app/Contents/MacOS/AI Mind Desktop"
+          file "$executable" | grep -q arm64
+          ! file "$executable" | grep -qi universal
+          mkdir -p release-assets
+          cp "$artifact" release-assets/AI-Mind-Desktop-darwin-arm64.dmg
+          sha="$(git rev-parse HEAD)"
+          pnpm --dir apps/desktop exec node scripts/write-release-manifest.mjs --artifact "$(pwd)/release-assets/AI-Mind-Desktop-darwin-arm64.dmg" --output "$(pwd)/release-assets/desktop-release.json" --platform darwin-arm64 --source-commit "$sha"
+          pnpm --dir apps/desktop exec node scripts/verify-release-artifact.mjs --app "$executable" --artifact "$(pwd)/release-assets/AI-Mind-Desktop-darwin-arm64.dmg" --manifest "$(pwd)/release-assets/desktop-release.json" --package-directory "$package" --platform darwin-arm64
+          mv release-assets/desktop-release.json release-assets/desktop-release-darwin-arm64.json
+          cat > release-assets/INSTALL-MACOS.md <<'EOF'
+          # macOS arm64
+
+          Unsigned Experimental Preview for Apple Silicon. If Gatekeeper blocks the first launch, use Finder: Control-click the app, choose Open, then confirm. Online-only; no auto-update.
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-public-preview-macos
+          path: release-assets/
+
+  release:
+    if: inputs.production_verified == 'true'
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-public-preview-*
+          path: release-assets
+          merge-multiple: true
+      - name: Create GitHub Pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: |
+          test -n "$RELEASE_TAG"
+          test -n "$SOURCE_COMMIT"
+          echo "$SOURCE_COMMIT" | grep -Eq '^[0-9a-f]{40,64}$'
+          cat > release-assets/README.md <<EOF
+          # AI Mind Desktop — Unsigned Experimental Preview
+
+          Public Beta for Windows x64 and macOS arm64. These packages are unsigned, online-only, and do not auto-update. Verify SHA-256 values in `desktop-release.json` and read the platform install notes before launching.
+
+          Source commit: `$SOURCE_COMMIT`
+          EOF
+          gh release create "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --title "AI Mind Desktop $RELEASE_TAG" --prerelease --generate-notes

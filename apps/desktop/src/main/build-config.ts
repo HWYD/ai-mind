@@ -11,7 +11,7 @@ export type DesktopBuildConfig = {
     compatibilityContractVersion: 1
     compatibilityPath: '/api/desktop/compatibility'
     desktopVersion: string
-    distribution: 'internal-preview'
+    distribution: 'public-beta'
     productId: typeof DESKTOP_PRODUCT_ID
     signing: 'unsigned'
     trustedOrigin: string
@@ -62,7 +62,7 @@ function createConfig(desktopVersion: string, channel: DesktopBuildConfig['chann
         compatibilityContractVersion: 1,
         compatibilityPath: '/api/desktop/compatibility',
         desktopVersion,
-        distribution: 'internal-preview',
+        distribution: 'public-beta',
         productId: DESKTOP_PRODUCT_ID,
         signing: 'unsigned',
         trustedOrigin,

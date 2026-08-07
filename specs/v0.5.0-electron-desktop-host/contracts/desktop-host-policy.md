@@ -43,7 +43,7 @@ Desktop Chrome is a packaged local renderer behind the platform title bar; it is
 | `copyDiagnostic()`                         | none                 | sender local + diagnostic allowlist              | write generated plain text only                   |
 | `exportDiagnostic()`                       | none                 | sender local + diagnostic allowlist              | native save dialog, `.txt` only                   |
 
-所有 handler 都拒绝错误 sender、错误 window kind、未知字段、无效状态和重复并发操作，并返回安全 enum，不返回文件路径、raw error、cookie 或内部对象。`manual_upgrade_required` 仅展示当前版本、最低支持版本和“从受控内部渠道获取较新内部预览制品”的说明；v0.5.0 没有 recovery 升级 URL 或对应 IPC。
+所有 handler 都拒绝错误 sender、错误 window kind、未知字段、无效状态和重复并发操作，并返回安全 enum，不返回文件路径、raw error、cookie 或内部对象。`manual_upgrade_required` 仅展示当前版本、最低支持版本和“从 GitHub Pre-release 获取较新 Unsigned Experimental Preview”的说明；v0.5.0 没有 recovery 升级 URL 或对应 IPC。
 
 ## Bootstrap Failure Handling
 
@@ -114,4 +114,4 @@ Blob URL 在 save dialog 确认前失效，或下载在此期间中断时，Desk
 
 ## Packaging Fuses
 
-v0.5.0 内部预览 artifact 必须启用 `EnableCookieEncryption`、`EnableEmbeddedAsarIntegrityValidation` 和 `OnlyLoadAppFromAsar`，并禁用 `RunAsNode`、`EnableNodeOptionsEnvironmentVariable` 与 `EnableNodeCliInspectArguments`。产物验证脚本读取实际 fuse 状态，并枚举每个 `app.asar` 的真实条目以拒绝 `.env`、私钥和签名凭据，而不只检查配置源文件；这些安全要求不因制品未签名而降低。
+v0.5.0 public-beta artifact 必须启用 `EnableCookieEncryption`、`EnableEmbeddedAsarIntegrityValidation` 和 `OnlyLoadAppFromAsar`，并禁用 `RunAsNode`、`EnableNodeOptionsEnvironmentVariable` 与 `EnableNodeCliInspectArguments`。产物验证脚本读取实际 fuse 状态，并枚举每个 `app.asar` 的真实条目以拒绝 `.env`、私钥和签名凭据，而不只检查配置源文件；这些安全要求不因制品未签名而降低。

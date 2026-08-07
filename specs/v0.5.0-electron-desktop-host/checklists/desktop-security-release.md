@@ -1,10 +1,10 @@
 # Desktop Security & Release Requirements Checklist: AI Mind Desktop Host
 
-**Purpose**: 以评审与内部预览发布为使用场景，检查 v0.5.0 桌面宿主的安全、恢复、发布要求是否完整、清晰且可验收。
+**Purpose**: 以评审与公开 Beta 发布为使用场景，检查 v0.5.0 桌面宿主的安全、恢复、发布要求是否完整、清晰且可验收。
 **Created**: 2026-08-03
 **Feature**: [spec.md](../spec.md) · [plan.md](../plan.md)
 
-**Depth**: Standard · **Actor/Timing**: PR reviewer / 内部预览候选发布前
+**Depth**: Standard · **Actor/Timing**: PR reviewer / public beta 发布前
 
 ## Requirement Completeness
 
@@ -15,7 +15,7 @@
 - [x] CHK005 - 外链允许范围中，pointer、keyboard、`window.open`、form target 与合成事件的处理要求是否完整覆盖？[Completeness, Resolved: Spec §FR-008; Contract: desktop-host-policy §Navigation and External Opening]
 - [x] CHK006 - 图像保存的来源、原生用户手势、redirect、URL chain、文件名、MIME 和用户保存选择等条件是否完整定义？[Completeness, Resolved: Spec §FR-016; Data Model §DesktopDownloadRequest; Contract: desktop-host-policy §Download Policy]
 - [x] CHK007 - CSP document、API、static 与 prefetch 的分路由边界，以及新增路由后的归属规则是否已定义？[Completeness, Resolved: Contract: web-security-headers §Route Scope]
-- [x] CHK008 - 内部预览候选的 server 前置发布、生产验证、artifact 证据、分发限制和 server rollback 顺序是否完整定义？[Completeness, Resolved: Contract: desktop-preview-release]
+- [x] CHK008 - Public Beta 候选的 server 前置发布、生产验证、artifact 证据、公开 Pre-release 和回退顺序是否完整定义？[Completeness, Resolved: Contract: desktop-preview-release]
 
 ## Requirement Clarity
 
@@ -23,7 +23,7 @@
 - [x] CHK010 - “可稳定辨识的外链交互”的判定证据、不可辨识时的用户可见结果和允许范围是否明确？[Clarity, Resolved: Spec §FR-008; Plan §8 external-opening feasibility gate]
 - [x] CHK011 - 5 秒总时限的起点、涵盖阶段、超时结果与旧 attempt 异步结果处理是否无歧义？[Clarity, Resolved: Spec §FR-014, SC-005; Data Model §DesktopHostState]
 - [x] CHK012 - “正常会话使用”哪些请求会续期 cookie、compatibility API 为什么例外，是否被明确限定？[Clarity, Resolved: Plan §5; Contract: desktop-host-policy §Session Persistence Boundary]
-- [x] CHK013 - “受控内部渠道”“暂停分发”和“内部预览候选”是否有明确责任主体与可审计含义？[Clarity, Resolved: Spec §FR-023; Contract: desktop-preview-release §Responsibilities and Audit Record]
+- [x] CHK013 - “GitHub Pre-release”“暂停发布”和“Unsigned Experimental Preview”是否有明确责任主体与可审计含义？[Clarity, Resolved: Spec §FR-001/FR-003; Contract: desktop-preview-release]
 - [x] CHK014 - 规格中的 `DownloadItem.hasUserGesture()` 是否有意作为不可替换的安全需求，而不是应下沉到 technical contract 的实现细节？[Clarity, Resolved: Spec §FR-016; Data Model §DesktopDownloadRequest]
 
 ## Requirement Consistency
@@ -31,7 +31,7 @@
 - [x] CHK015 - 不兼容状态仅显示内部渠道升级说明、不得应用内打开升级 URL 的要求是否在 User Story、Edge Case、FR-013 和 recovery contract 中一致？[Consistency, Resolved: Spec §User Story 5, Edge Cases, FR-013; Contract: desktop-host-policy]
 - [x] CHK016 - “连续 30 天未使用失效”的会话承诺是否与 profile reset、手动覆盖安装和普通网页端的说明一致？[Consistency, Resolved: Spec §FR-005, FR-015, SC-003; Data Model §Reset and Upgrade Semantics]
 - [x] CHK017 - 外链一律由系统浏览器处理、Electron 内不嵌入外站的要求是否与新窗口、重定向和 recovery 规则一致？[Consistency, Resolved: Spec §FR-007, FR-008; Contract: desktop-host-policy §Trust Zones]
-- [x] CHK018 - “不自动更新、未签名内部预览”的版本边界是否与 Squirrel metadata、手动覆盖安装和 hash manifest 的措辞一致？[Consistency, Resolved: Spec §FR-011, FR-022; Plan §7; Contract: desktop-preview-release]
+- [x] CHK018 - “不自动更新、Unsigned Experimental Preview”的版本边界是否与 Squirrel metadata、手动安装和 hash manifest 的措辞一致？[Consistency, Resolved: Spec §FR-004/FR-005; Plan §Data and Contract Changes; Contract: desktop-preview-release]
 - [x] CHK019 - service fail-closed、无 HTTP/Origin fallback 与 server rollback 的要求是否没有形成相互冲突的恢复承诺？[Consistency, Resolved: Spec §FR-014, FR-021, FR-023; Contract: desktop-preview-release §Rollback Rule]
 
 ## Acceptance Criteria Quality

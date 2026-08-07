@@ -16,7 +16,7 @@ import {
 const sourceCommit = 'a'.repeat(40)
 
 describe('desktop release artifact', () => {
-    it('creates a complete internal-preview manifest with an artifact SHA-256', () => {
+    it('creates a complete public-beta manifest with an artifact SHA-256', () => {
         const manifest = createDesktopPreviewManifest({
             artifact: Buffer.from('desktop-installer'),
             desktopVersion: '0.5.0',
@@ -27,7 +27,7 @@ describe('desktop release artifact', () => {
 
         expect(manifest).toEqual({
             desktopVersion: '0.5.0',
-            distribution: 'internal-preview',
+            distribution: 'public-beta',
             electronVersion: '43.2.0',
             platform: 'win32-x64',
             sha256: 'e73aa42ada9cffb57724a719a5da12ad388205ee4baab321a1a07c83290f29d2',

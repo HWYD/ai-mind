@@ -62,7 +62,7 @@ Examples:
 2. 每一次启动、重试或 reset 后的检查都创建一个 5 秒总 deadline。`ses.fetch()`、strict DTO 解析和后续首屏 `loadURL` 共享这一个 budget；兼容性请求只能使用当时剩余时间，不能单独再获得 5 秒。
 3. 校验 status、content type、strict JSON、`contractVersion === 1` 和 semver。`manual_upgrade_required.minimumDesktopVersion` 必须存在、是 strict semver 且严格高于当前 Desktop Release；缺失、格式错误或不高于当前版本均为 `COMPATIBILITY_CONTRACT_INVALID`。
 4. `compatible` 后才可 `loadURL(trustedOrigin)`。
-5. `manual_upgrade_required` 显示 packaged local recovery、minimum version 和“从受控内部渠道获取较新内部预览制品”的说明；v0.5.0 不显示或打开升级 URL。
+5. `manual_upgrade_required` 显示 packaged local recovery、minimum version 和“从 GitHub Pre-release 获取较新 Unsigned Experimental Preview”的说明；v0.5.0 不显示或打开升级 URL。
 6. HTTP/network/TLS/timeout/schema 或剩余 deadline 不足以完成首屏加载时均进入 packaged local recovery，绝不 HTTP 回退或忽略证书。
 7. 每个异步结果携带发起时的 `attemptId`；只有仍为 current attempt 且未超过 deadline 的结果可创建 workspace，旧请求/旧页面回调一律忽略。
 

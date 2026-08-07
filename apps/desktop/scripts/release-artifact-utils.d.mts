@@ -2,7 +2,7 @@ import type { FuseState } from '@electron/fuses'
 
 export type DesktopPreviewManifest = {
     desktopVersion: string
-    distribution: 'internal-preview'
+    distribution: 'public-beta'
     electronVersion: string
     platform: 'win32-x64' | 'darwin-arm64'
     sha256: string
