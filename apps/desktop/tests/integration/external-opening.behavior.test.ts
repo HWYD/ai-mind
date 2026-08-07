@@ -3,6 +3,8 @@ import path from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron, expect, test } from '@playwright/test'
 
+import { closeElectronApplication } from './electron-application'
+
 type ObservedOpen = {
     disposition: string
     postBodyItemCount: number
@@ -45,7 +47,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    if (application) await application.close()
+    await closeElectronApplication(application)
 })
 
 test('records the Windows window-open fields that constrain the external-opening allowlist', async () => {

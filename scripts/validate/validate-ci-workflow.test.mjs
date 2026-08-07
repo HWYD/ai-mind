@@ -50,8 +50,11 @@ test('keeps stateful CI work behind successful stable validation', () => {
         assert.notEqual(position, -1, `stateful integration must run ${setupSteps[index]}`)
     }
 
-    assert.deepEqual([...positions].sort((left, right) => left - right), positions)
-    assert.deepEqual(turboConfig.tasks['test:integration'].passThroughEnv, ['DISPLAY'])
+    assert.deepEqual(
+        [...positions].sort((left, right) => left - right),
+        positions
+    )
+    assert.deepEqual(turboConfig.tasks['test:integration'].passThroughEnv, ['DISPLAY', 'XAUTHORITY'])
     assert.doesNotMatch(docker, /^    needs:/m)
     assert.doesNotMatch(workflow, /pnpm test:external/)
 })
@@ -79,7 +82,10 @@ test('keeps Windows desktop verification isolated from production deploy and pre
         desktopWindows.indexOf('pnpm --filter @ai-mind/desktop make:windows'),
         desktopWindows.indexOf('verify-release-artifact.mjs'),
     ]
-    assert.deepEqual([...windowsVerificationPositions].sort((left, right) => left - right), windowsVerificationPositions)
+    assert.deepEqual(
+        [...windowsVerificationPositions].sort((left, right) => left - right),
+        windowsVerificationPositions
+    )
     assert.doesNotMatch(desktopWindows, /preview:make|upload-artifact|deploy-production|TCR_|secrets\./)
 })
 
@@ -108,6 +114,9 @@ test('keeps macOS arm64 desktop verification native, unsigned, and non-distribut
         desktopMacos.indexOf('pnpm --filter @ai-mind/desktop make:macos-arm64'),
         desktopMacos.indexOf('verify-release-artifact.mjs'),
     ]
-    assert.deepEqual([...macosVerificationPositions].sort((left, right) => left - right), macosVerificationPositions)
+    assert.deepEqual(
+        [...macosVerificationPositions].sort((left, right) => left - right),
+        macosVerificationPositions
+    )
     assert.doesNotMatch(desktopMacos, /preview:make|upload-artifact|deploy-production|TCR_|secrets\./)
 })

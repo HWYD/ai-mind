@@ -1,22 +1,22 @@
 import path from 'node:path'
 
 import type { ElectronApplication, Page } from '@playwright/test'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+
+import { closeElectronApplication, launchDesktopMainFixture } from './electron-application'
 
 let application: ElectronApplication
 let page: Page
 
 test.beforeEach(async () => {
-    application = await electron.launch({
-        args: [path.join(__dirname, 'fixtures', 'download-and-clipboard-main.mjs')],
-    })
+    application = await launchDesktopMainFixture(path.join(__dirname, 'fixtures', 'download-and-clipboard-main.mjs'))
     await expect.poll(async () => (await application.windows()).some(window => window.url().startsWith('http://127.0.0.1:'))).toBe(true)
     page = (await application.windows()).find(window => window.url().startsWith('http://127.0.0.1:'))!
     await expect(page.locator('#clipboard-read')).toBeVisible()
 })
 
 test.afterEach(async () => {
-    if (application) await application.close()
+    await closeElectronApplication(application)
 })
 
 test('allows only the trusted image Blob save-dialog path and denies unsafe downloads and clipboard reads', async () => {

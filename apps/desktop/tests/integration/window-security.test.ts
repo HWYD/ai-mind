@@ -3,6 +3,8 @@ import path from 'node:path'
 import type { ElectronApplication, Page } from '@playwright/test'
 import { _electron as electron, expect, test } from '@playwright/test'
 
+import { closeElectronApplication } from './electron-application'
+
 type SecurityFixtureState = {
     externalOpenCalls: string[]
     trustedOrigin: string
@@ -42,7 +44,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    if (application) await application.close()
+    await closeElectronApplication(application)
 })
 
 test('keeps a development workspace window isolated from navigation, popups, permissions, and external opens', async () => {

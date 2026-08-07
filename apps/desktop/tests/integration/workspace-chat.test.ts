@@ -1,22 +1,22 @@
 import path from 'node:path'
 
 import type { ElectronApplication, Page } from '@playwright/test'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+
+import { closeElectronApplication, launchDesktopMainFixture } from './electron-application'
 
 let application: ElectronApplication
 let page: Page
 
 test.beforeEach(async () => {
-    application = await electron.launch({
-        args: [path.join(__dirname, 'fixtures', 'workspace-chat-main.mjs')],
-    })
+    application = await launchDesktopMainFixture(path.join(__dirname, 'fixtures', 'workspace-chat-main.mjs'))
     await expect.poll(async () => (await application.windows()).some(window => window.url().startsWith('http://127.0.0.1:'))).toBe(true)
     page = (await application.windows()).find(window => window.url().startsWith('http://127.0.0.1:'))!
     await expect(page.locator('#chat-input')).toBeVisible()
 })
 
 test.afterEach(async () => {
-    if (application) await application.close()
+    await closeElectronApplication(application)
 })
 
 test('keeps normal chat, streaming, stop, and error feedback in the trusted web workspace', async () => {

@@ -1,9 +1,10 @@
 import path from 'node:path'
 
 import type { ElectronApplication } from '@playwright/test'
-import { _electron as electron, expect, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { startDesktopApplicationLifecycle } from '../../src/main/startup-lifecycle'
+import { closeElectronApplication, launchDesktopMainFixture } from './electron-application'
 
 type LifecycleApp = {
     on: (event: 'second-instance' | 'window-all-closed', listener: () => void) => void
@@ -122,14 +123,12 @@ test.describe('desktop application startup', () => {
     }
 
     test.beforeEach(async () => {
-        application = await electron.launch({
-            args: [path.join(__dirname, 'fixtures', 'desktop-startup-main.mjs')],
-        })
+        application = await launchDesktopMainFixture(path.join(__dirname, 'fixtures', 'desktop-startup-main.mjs'))
         await application.firstWindow()
     })
 
     test.afterEach(async () => {
-        if (application) await application.close()
+        await closeElectronApplication(application)
     })
 
     test('starts one isolated workspace below the local desktop chrome after compatibility', async () => {

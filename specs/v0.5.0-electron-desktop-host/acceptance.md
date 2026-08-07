@@ -94,26 +94,29 @@ Run `31165837108` confirmed the stable, Docker, and Windows desktop jobs pass, i
 the Windows Squirrel make and package audit. Its stateful job exposed one remaining
 environment boundary: Xvfb created `DISPLAY`, but Turborepo strict env mode did not pass
 that variable to the desktop workspace process. `turbo.json` now declares
-`test:integration.passThroughEnv: ["DISPLAY"]`; the workflow governance test locks this
-contract, and a Turbo dry run confirms the workspace task receives the variable. The
-same run's macOS job reached the real-main-process fixtures but timed out before the
-packaging step: the Dock icon lookup was guarded, while `BrowserWindow` still received a
-development icon derived from `app.getAppPath()`. The window icon is now Windows-only,
-matching Electron's platform behavior, and the pure lifecycle test no longer inherits
-real Electron startup/teardown hooks.
+`test:integration.passThroughEnv: ["DISPLAY"]`; the workflow governance test locked that
+first remediation. Run `31167549129` then proved `DISPLAY` alone was insufficient: Xvfb
+reported `Authorization required` because strict env mode also removed `XAUTHORITY`.
+The contract now passes both variables. The same run reduced macOS failures to the four
+fixtures that load the real `main.ts`: clean runners do not contain Forge's
+`.webpack/renderer`, so local Chrome bootstrap entered recovery before any workspace
+appeared. A shared test-side fixture now creates a temporary app root with minimal
+renderer/preload/icon assets, isolates `appData` and `userData`, and removes no files
+until Electron exits. Teardown waits for the actual child process and force-terminates
+only after a short graceful-close timeout.
 
-| Gate                                     | Result         | Evidence                                                                                                                                                |
-| ---------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop typecheck and lint               | Pass           | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                                                                   |
-| Desktop stable tests                     | Pass           | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                                                                 |
-| Development Electron integration         | Pass           | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                                                             |
-| CI and governance validators             | Pass           | 22 Node governance tests (one Linux deployment-host test skipped by design)                                                                             |
-| GitHub Actions runtime                   | Updated        | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime                                      |
-| Non-distributable Windows package        | Pass locally   | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                                                             |
-| Windows package fuse/hash/contents audit | Pass locally   | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                                                          |
-| Windows GitHub job                       | Pass           | Run `31165837108` completed the desktop tests, Squirrel make, and fuse/hash/package audit                                                               |
-| Stateful GitHub job                      | Re-run pending | Run `31165837108` predates the Turbo `DISPLAY` pass-through fix; the old failure cannot validate the corrected commit                                   |
-| macOS arm64 GitHub job                   | Re-run pending | Run `31165837108` failed in real-main-process Playwright fixture startup before DMG creation; the corrected commit still needs native arm64 CI evidence |
+| Gate                                     | Result         | Evidence                                                                                                                                                               |
+| ---------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop typecheck and lint               | Pass           | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                                                                                  |
+| Desktop stable tests                     | Pass           | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                                                                                |
+| Development Electron integration         | Pass           | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                                                                            |
+| CI and governance validators             | Pass           | 22 Node governance tests (one Linux deployment-host test skipped by design)                                                                                            |
+| GitHub Actions runtime                   | Updated        | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime                                                     |
+| Non-distributable Windows package        | Pass locally   | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                                                                            |
+| Windows package fuse/hash/contents audit | Pass locally   | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                                                                         |
+| Windows GitHub job                       | Pass           | Run `31165837108` completed the desktop tests, Squirrel make, and fuse/hash/package audit                                                                              |
+| Stateful GitHub job                      | Re-run pending | Run `31167549129` confirmed `XAUTHORITY` was missing after `DISPLAY` passed through; the two-variable correction still needs Linux CI evidence                         |
+| macOS arm64 GitHub job                   | Re-run pending | Run `31167549129` failed before DMG creation because real-main fixtures lacked Forge renderer assets; the temporary app-root correction needs native arm64 CI evidence |
 
 The local package and manifest/hash are CI-equivalent, non-distributable test outputs under
 ignored `apps/desktop/out/`; they are not preview candidates and were not uploaded or

@@ -21,7 +21,7 @@
             "cache": false,
             "outputs": [],
             "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"],
-            "passThroughEnv": ["DISPLAY"]
+            "passThroughEnv": ["DISPLAY", "XAUTHORITY"]
         },
         "make:windows": {
             "cache": false,
