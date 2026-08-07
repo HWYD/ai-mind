@@ -80,92 +80,94 @@ test('quits for Squirrel startup and focuses the existing host for a second inst
     expect(primary.quitCalls()).toBe(0)
 })
 
-let application: ElectronApplication
+test.describe('desktop application startup', () => {
+    let application: ElectronApplication
 
-async function executeInWorkspace<T>(script: string): Promise<T> {
-    return application.evaluate(async ({ BrowserWindow }, source) => {
-        const workspace = BrowserWindow.getAllWindows()[0]
-            ?.contentView.children.map(
-                view =>
-                    (
-                        view as unknown as {
-                            webContents: { executeJavaScript: (script: string) => Promise<unknown>; getURL: () => string }
-                        }
-                    ).webContents
-            )
-            .find(contents => contents.getURL().startsWith('http://127.0.0.1:'))
+    async function executeInWorkspace<T>(script: string): Promise<T> {
+        return application.evaluate(async ({ BrowserWindow }, source) => {
+            const workspace = BrowserWindow.getAllWindows()[0]
+                ?.contentView.children.map(
+                    view =>
+                        (
+                            view as unknown as {
+                                webContents: { executeJavaScript: (script: string) => Promise<unknown>; getURL: () => string }
+                            }
+                        ).webContents
+                )
+                .find(contents => contents.getURL().startsWith('http://127.0.0.1:'))
 
-        if (!workspace) {
-            throw new Error('Workspace view is unavailable.')
-        }
+            if (!workspace) {
+                throw new Error('Workspace view is unavailable.')
+            }
 
-        return workspace.executeJavaScript(source)
-    }, script) as Promise<T>
-}
+            return workspace.executeJavaScript(source)
+        }, script) as Promise<T>
+    }
 
-async function hasWorkspace(): Promise<boolean> {
-    return application.evaluate(
-        ({ BrowserWindow }) =>
-            BrowserWindow.getAllWindows()[0]?.contentView.children.some(view =>
-                (view as unknown as { webContents: { getURL: () => string } }).webContents.getURL().startsWith('http://127.0.0.1:')
-            ) ?? false
-    )
-}
+    async function hasWorkspace(): Promise<boolean> {
+        return application.evaluate(
+            ({ BrowserWindow }) =>
+                BrowserWindow.getAllWindows()[0]?.contentView.children.some(view =>
+                    (view as unknown as { webContents: { getURL: () => string } }).webContents.getURL().startsWith('http://127.0.0.1:')
+                ) ?? false
+        )
+    }
 
-async function workspaceUrl(): Promise<string | undefined> {
-    return application.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows()[0]
-            ?.contentView.children.map(view => (view as unknown as { webContents: { getURL: () => string } }).webContents.getURL())
-            .find(url => url.startsWith('http://127.0.0.1:'))
-    )
-}
+    async function workspaceUrl(): Promise<string | undefined> {
+        return application.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows()[0]
+                ?.contentView.children.map(view => (view as unknown as { webContents: { getURL: () => string } }).webContents.getURL())
+                .find(url => url.startsWith('http://127.0.0.1:'))
+        )
+    }
 
-test.beforeEach(async () => {
-    application = await electron.launch({
-        args: [path.join(__dirname, 'fixtures', 'desktop-startup-main.mjs')],
-    })
-    await application.firstWindow()
-})
-
-test.afterEach(async () => {
-    if (application) await application.close()
-})
-
-test('starts one isolated workspace below the local desktop chrome after compatibility', async () => {
-    await expect.poll(hasWorkspace).toBe(true)
-    await expect.poll(workspaceUrl).toMatch(/\/instant-mind$/)
-    expect(await executeInWorkspace<boolean>("Boolean(document.querySelector('#chat-input'))")).toBe(true)
-    const startupEvidence = await application.evaluate(() => {
-        type StartupEvidence = {
-            attemptStartedAt: number
-            compatibilityState: string
-            desktopRelease: string
-            platform: string
-            serverVersion: string
-        }
-
-        return (globalThis as typeof globalThis & { __aiMindDesktopStartupEvidence?: StartupEvidence }).__aiMindDesktopStartupEvidence
+    test.beforeEach(async () => {
+        application = await electron.launch({
+            args: [path.join(__dirname, 'fixtures', 'desktop-startup-main.mjs')],
+        })
+        await application.firstWindow()
     })
 
-    expect(startupEvidence).toMatchObject({
-        compatibilityState: 'compatible',
-        desktopRelease: '0.5.0',
-        platform: 'win32-x64',
-        serverVersion: 'fixture-compatibility-v1',
-    })
-    expect(Date.now() - (startupEvidence?.attemptStartedAt ?? Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(10_000)
-    await executeInWorkspace<void>("document.querySelector('#chat-input').value = 'desktop startup check'")
-
-    const shell = await application.evaluate(({ BrowserWindow, Menu }) => {
-        const window = BrowserWindow.getAllWindows()[0]
-
-        return {
-            browserWindowCount: BrowserWindow.getAllWindows().length,
-            hasApplicationMenu: Menu.getApplicationMenu() !== null,
-            menuBarVisible: window?.isMenuBarVisible(),
-        }
+    test.afterEach(async () => {
+        if (application) await application.close()
     })
 
-    expect(shell).toEqual({ browserWindowCount: 1, hasApplicationMenu: false, menuBarVisible: false })
-    await expect(application.windows()).toHaveLength(2)
+    test('starts one isolated workspace below the local desktop chrome after compatibility', async () => {
+        await expect.poll(hasWorkspace).toBe(true)
+        await expect.poll(workspaceUrl).toMatch(/\/instant-mind$/)
+        expect(await executeInWorkspace<boolean>("Boolean(document.querySelector('#chat-input'))")).toBe(true)
+        const startupEvidence = await application.evaluate(() => {
+            type StartupEvidence = {
+                attemptStartedAt: number
+                compatibilityState: string
+                desktopRelease: string
+                platform: string
+                serverVersion: string
+            }
+
+            return (globalThis as typeof globalThis & { __aiMindDesktopStartupEvidence?: StartupEvidence }).__aiMindDesktopStartupEvidence
+        })
+
+        expect(startupEvidence).toMatchObject({
+            compatibilityState: 'compatible',
+            desktopRelease: '0.5.0',
+            platform: 'win32-x64',
+            serverVersion: 'fixture-compatibility-v1',
+        })
+        expect(Date.now() - (startupEvidence?.attemptStartedAt ?? Number.MAX_SAFE_INTEGER)).toBeLessThanOrEqual(10_000)
+        await executeInWorkspace<void>("document.querySelector('#chat-input').value = 'desktop startup check'")
+
+        const shell = await application.evaluate(({ BrowserWindow, Menu }) => {
+            const window = BrowserWindow.getAllWindows()[0]
+
+            return {
+                browserWindowCount: BrowserWindow.getAllWindows().length,
+                hasApplicationMenu: Menu.getApplicationMenu() !== null,
+                menuBarVisible: window?.isMenuBarVisible(),
+            }
+        })
+
+        expect(shell).toEqual({ browserWindowCount: 1, hasApplicationMenu: false, menuBarVisible: false })
+        await expect(application.windows()).toHaveLength(2)
+    })
 })

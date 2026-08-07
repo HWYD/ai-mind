@@ -76,9 +76,7 @@ function createDesktopShell(input: {
     const browserWindow = new BrowserWindow({
         autoHideMenuBar: true,
         height: 800,
-        icon: app.isPackaged
-            ? undefined
-            : path.join(app.getAppPath(), 'assets', 'icons', process.platform === 'win32' ? 'ai-mind.ico' : 'ai-mind-icon.png'),
+        icon: !app.isPackaged && process.platform === 'win32' ? path.join(app.getAppPath(), 'assets', 'icons', 'ai-mind.ico') : undefined,
         minHeight: 480,
         minWidth: 720,
         show: false,

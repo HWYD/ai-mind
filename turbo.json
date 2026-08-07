@@ -20,7 +20,8 @@
             "dependsOn": ["^build"],
             "cache": false,
             "outputs": [],
-            "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"]
+            "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"],
+            "passThroughEnv": ["DISPLAY"]
         },
         "make:windows": {
             "cache": false,

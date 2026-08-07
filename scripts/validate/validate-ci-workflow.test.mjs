@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 const workflow = readFileSync(resolve(process.cwd(), '.github/workflows/ci.yml'), 'utf8')
+const turboConfig = JSON.parse(readFileSync(resolve(process.cwd(), 'turbo.json'), 'utf8'))
 
 function jobBlock(jobName) {
     const header = `\n  ${jobName}:\n`
@@ -50,6 +51,7 @@ test('keeps stateful CI work behind successful stable validation', () => {
     }
 
     assert.deepEqual([...positions].sort((left, right) => left - right), positions)
+    assert.deepEqual(turboConfig.tasks['test:integration'].passThroughEnv, ['DISPLAY'])
     assert.doesNotMatch(docker, /^    needs:/m)
     assert.doesNotMatch(workflow, /pnpm test:external/)
 })
