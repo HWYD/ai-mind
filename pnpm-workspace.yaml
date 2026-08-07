@@ -14,7 +14,11 @@ catalog:
 allowBuilds:
   '@nestjs/core': false
   '@prisma/engines': true
+  electron: true
+  electron-winstaller: true
   esbuild: true
+  fs-xattr: true
+  macos-alias: true
   msw: false
   prisma: false
   sharp: true

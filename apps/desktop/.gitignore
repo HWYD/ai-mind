@@ -1,0 +1,13 @@
+.webpack/
+.electron-zips/
+out/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+desktop-profile/
+*.pfx
+*.p12
+*.pem
+*.key

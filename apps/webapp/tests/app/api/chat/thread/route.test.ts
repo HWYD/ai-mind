@@ -43,7 +43,8 @@ describe('GET /api/chat/thread', () => {
         const body = await response.json()
 
         expect(response.status).toBe(404)
-        expect(response.headers.get('Set-Cookie')).toBeNull()
+        expect(response.headers.get('Set-Cookie')).toContain('ai-mind-session-id=')
+        expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
         expect(body).toEqual({
             code: 'CONVERSATION_NOT_FOUND',
             error: 'Conversation was not found in the current browser session registry.',
@@ -75,7 +76,8 @@ describe('GET /api/chat/thread', () => {
         )
         const body = await response.json()
 
-        expect(response.headers.get('Set-Cookie')).toBeNull()
+        expect(response.headers.get('Set-Cookie')).toContain(`ai-mind-session-id=${sessionId}`)
+        expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
         expect(body).toMatchObject({
             conversationId: 'conv-a',
             threadId,

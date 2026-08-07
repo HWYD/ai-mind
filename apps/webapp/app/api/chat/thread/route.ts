@@ -36,7 +36,14 @@ export async function GET(request: NextRequest) {
                 code: 'CONVERSATION_NOT_FOUND',
                 error: 'Conversation was not found in the current browser session registry.',
             },
-            { status: 404 }
+            {
+                headers: setCookie
+                    ? {
+                          'Set-Cookie': setCookie,
+                      }
+                    : undefined,
+                status: 404,
+            }
         )
     }
 

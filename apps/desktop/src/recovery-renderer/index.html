@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link href="./recovery/styles.css" rel="stylesheet" />
+        <title>AI Mind Desktop 恢复</title>
+    </head>
+    <body>
+        <main class="recovery-shell">
+            <p class="eyebrow">AI Mind Desktop</p>
+            <h1>无法打开工作区</h1>
+            <p id="recovery-description">桌面工作区暂不可用。请重试连接固定的受信服务，或在确认后重置本地数据。</p>
+            <dl class="recovery-details">
+                <div>
+                    <dt>安全错误代码</dt>
+                    <dd id="safe-error-code">NOT_CHECKED</dd>
+                </div>
+                <div>
+                    <dt>桌面版本</dt>
+                    <dd id="desktop-version">未知</dd>
+                </div>
+                <div>
+                    <dt>最低版本</dt>
+                    <dd id="minimum-version">无需指定</dd>
+                </div>
+            </dl>
+            <p id="upgrade-instruction" hidden>请从受控内部渠道获取更新的内部预览版本。AI Mind Desktop 不会打开升级链接。</p>
+            <div class="recovery-actions">
+                <button id="retry" type="button">重试</button>
+                <button id="reset-profile" type="button">重置本地数据</button>
+                <button id="copy-diagnostic" type="button">复制诊断</button>
+                <button id="export-diagnostic" type="button">导出诊断</button>
+            </div>
+            <output id="action-result" aria-live="polite"></output>
+        </main>
+    </body>
+</html>

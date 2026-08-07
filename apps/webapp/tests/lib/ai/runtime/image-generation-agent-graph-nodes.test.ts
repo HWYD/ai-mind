@@ -17,6 +17,36 @@ function createModel(outputs: unknown[]): ImagePlanningModel & { invoke: ReturnT
 }
 
 describe('image generation graph nodes', () => {
+    it('requests a Simplified Chinese public ImageBrief while preserving literal visible text', async () => {
+        const model = createModel([
+            {
+                aspectRatio: 'square',
+                assumptions: [],
+                avoid: [],
+                intent: '一只晒太阳的橘猫',
+                mustInclude: [],
+                subjects: ['橘猫'],
+                visibleText: ['AI Mind'],
+            },
+        ])
+
+        await createImageBriefNode({
+            model,
+            state: createInitialImageGenerationGraphState({
+                rawDescription: '一只晒太阳的橘猫，画面中写 AI Mind',
+                runId: 'run-chinese-brief',
+            }),
+        })
+
+        expect(model.invoke).toHaveBeenCalledWith(
+            expect.objectContaining({
+                instruction: expect.stringContaining('Use Simplified Chinese'),
+                schemaName: 'ImageBrief',
+            }),
+            expect.anything()
+        )
+    })
+
     it('uses exactly one structured call per node and keeps the internal prompt out of the public brief', async () => {
         const model = createModel([
             { aspectRatio: 'landscape', assumptions: [], avoid: [], intent: 'lake', mustInclude: [], subjects: ['lake'] },

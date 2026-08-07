@@ -1,0 +1,43 @@
+{
+    "name": "@ai-mind/desktop",
+    "productName": "AI Mind Desktop",
+    "version": "0.5.0",
+    "private": true,
+    "main": ".webpack/main",
+    "scripts": {
+        "start": "node scripts/start-forge.mjs",
+        "dev": "node scripts/start-forge.mjs",
+        "icons:generate": "node scripts/generate-app-icons.mjs",
+        "package": "electron-forge package",
+        "make": "electron-forge make",
+        "lint": "eslint .",
+        "typecheck": "tsc --noEmit",
+        "test:stable": "vitest run --config vitest.config.ts",
+        "test:integration": "playwright test --config playwright.config.ts --pass-with-no-tests",
+        "make:windows": "electron-forge make --platform=win32 --arch=x64",
+        "make:macos-arm64": "electron-forge make --platform=darwin --arch=arm64",
+        "preview:make": "electron-forge make --platform=win32 --arch=x64",
+        "preview:make:macos-arm64": "electron-forge make --platform=darwin --arch=arm64",
+        "verify:artifact": "node scripts/verify-release-artifact.mjs"
+    },
+    "devDependencies": {
+        "@electron-forge/cli": "7.11.2",
+        "@electron-forge/maker-dmg": "7.11.2",
+        "@electron-forge/maker-squirrel": "7.11.2",
+        "@electron-forge/plugin-webpack": "7.11.2",
+        "@electron-forge/shared-types": "7.11.2",
+        "@electron/asar": "3.4.1",
+        "@electron/fuses": "2.1.3",
+        "@playwright/test": "1.62.1",
+        "@types/node": "catalog:",
+        "electron": "43.2.0",
+        "sharp": "0.34.5",
+        "ts-loader": "9.5.4",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+        "webpack": "5.101.3"
+    },
+    "dependencies": {
+        "electron-squirrel-startup": "1.0.1"
+    }
+}

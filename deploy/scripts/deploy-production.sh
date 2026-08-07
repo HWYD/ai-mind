@@ -15,6 +15,7 @@ RELEASE_ENV_FILE="${DEPLOY_ROOT}/.release.env"
 RELEASE_ENV_PREVIOUS_FILE="${DEPLOY_ROOT}/.release.env.previous"
 TAG="${AI_MIND_IMAGE_TAG:-}"
 TCR_NAMESPACE="${TCR_NAMESPACE:-}"
+DESKTOP_CANDIDATE_VERSION="${AI_MIND_DESKTOP_CANDIDATE_VERSION:-}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -100,6 +101,7 @@ wait_healthy() {
 
 run_verify() {
     PROD_DOMAIN="${PROD_DOMAIN:-ai.hwyblog.cloud}" \
+    AI_MIND_DESKTOP_CANDIDATE_VERSION="$DESKTOP_CANDIDATE_VERSION" \
     AI_MIND_DEPLOY_ROOT="$DEPLOY_ROOT" \
     bash "${DEPLOY_ROOT}/scripts/verify-production.sh"
 }
@@ -172,6 +174,10 @@ rollback() {
 
 if ! printf '%s' "$TAG" | grep -Eq '^sha-[a-f0-9]{7,40}$'; then
     fail "AI_MIND_IMAGE_TAG 必须是 sha-<git-sha> 格式。"
+fi
+
+if ! printf '%s' "$DESKTOP_CANDIDATE_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    fail "AI_MIND_DESKTOP_CANDIDATE_VERSION must be strict semver"
 fi
 
 WEBAPP_TOKEN="$(read_required_token "$WEBAPP_ENV_FILE")" || fail "webapp.production.env 缺少 PROJECT_ASSISTANT_SERVICE_MCP_TOKEN。"

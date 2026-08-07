@@ -33,7 +33,7 @@ jobs:
             image_tag: ${{ steps.meta.outputs.image_tag }}
             repo_url: ${{ steps.meta.outputs.repo_url }}
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Resolve release metadata
               id: meta
@@ -61,7 +61,7 @@ jobs:
         timeout-minutes: 120
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Reject uncommitted working tree
               run: |
@@ -102,7 +102,7 @@ jobs:
         timeout-minutes: 120
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Reject uncommitted working tree
               run: |
@@ -147,7 +147,7 @@ jobs:
         timeout-minutes: 120
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v5
 
             - name: Reject uncommitted working tree
               run: |

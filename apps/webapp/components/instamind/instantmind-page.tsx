@@ -259,18 +259,18 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                 data-slot="chat-scroll-shell"
             >
                 <div className="px-4 pb-6 pt-0 sm:px-6 lg:px-8 lg:pt-8">
+                    <ConversationMobileSelector
+                        conversations={conversations}
+                        disabled={conversationControlsDisabled}
+                        onCreateConversation={handleCreateConversation}
+                        onDeleteConversation={handleDeleteConversation}
+                        onSelectConversation={selectConversation}
+                        selectedConversationTitle={selectedConversationTitle}
+                    />
                     <div
                         className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} min-h-[calc(100vh-var(--chat-bottom-spacing)-1.5rem)] lg:min-h-[calc(100vh-var(--chat-bottom-spacing)-3.5rem)]`}
                         data-slot="chat-main-column"
                     >
-                        <ConversationMobileSelector
-                            conversations={conversations}
-                            disabled={conversationControlsDisabled}
-                            onCreateConversation={handleCreateConversation}
-                            onDeleteConversation={handleDeleteConversation}
-                            onSelectConversation={selectConversation}
-                            selectedConversationTitle={selectedConversationTitle}
-                        />
                         {imageQuotaError ? (
                             <Alert variant="destructive" className="mb-4 rounded-2xl">
                                 <CircleAlert />

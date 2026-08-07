@@ -4,7 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const readOwnedResultMock = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/ai/rate-limit', () => ({
-    resolveSessionId: () => ({ sessionId: 'image-session', setCookie: 'sid=image-session' }),
+    resolveSessionId: () => ({
+        sessionId: 'image-session',
+        setCookie:
+            'ai-mind-session-id=image-session; Max-Age=2592000; Expires=Fri, 04 Sep 2026 00:00:00 GMT; HttpOnly; SameSite=Lax; Path=/',
+    }),
 }))
 
 vi.mock('@/lib/ai/runtime/image-generation-agent/temporary-image-content-service', () => ({
@@ -45,7 +49,8 @@ describe('GET /api/chat/runs/[runId]/image', () => {
         expect(response.headers.get('Cache-Control')).toBe('private, no-store')
         expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
         expect(response.headers.get('Content-Type')).toBe('image/jpeg')
-        expect(response.headers.get('Set-Cookie')).toBe('sid=image-session')
+        expect(response.headers.get('Set-Cookie')).toContain('ai-mind-session-id=image-session')
+        expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
         expect(new Uint8Array(await response.arrayBuffer())).toEqual(new Uint8Array([0xff, 0xd8, 0xff]))
     })
 

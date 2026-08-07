@@ -1,7 +1,13 @@
 import { NextRequest } from 'next/server'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const resolveSessionIdMock = vi.hoisted(() => vi.fn(() => ({ sessionId: 'test-session', setCookie: 'sid=test-session' })))
+const resolveSessionIdMock = vi.hoisted(() =>
+    vi.fn(() => ({
+        sessionId: 'test-session',
+        setCookie:
+            'ai-mind-session-id=test-session; Max-Age=2592000; Expires=Fri, 04 Sep 2026 00:00:00 GMT; HttpOnly; SameSite=Lax; Path=/',
+    }))
+)
 const coordinatorMocks = vi.hoisted(() => {
     class MockStreamExecutionCoordinatorError extends Error {
         readonly code: string
@@ -97,7 +103,8 @@ describe('POST /api/chat/runs/[runId]/cancel', () => {
             runId: 'run_1',
             status: 'cancel_requested',
         })
-        expect(response.headers.get('Set-Cookie')).toBe('sid=test-session')
+        expect(response.headers.get('Set-Cookie')).toContain('ai-mind-session-id=test-session')
+        expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
         expect(coordinatorMocks.requestCancelMock).toHaveBeenCalledWith(
             expect.objectContaining({
                 ownerSessionHash: expect.stringMatching(/^[a-f0-9]{64}$/),

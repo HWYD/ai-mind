@@ -90,7 +90,9 @@ describe('GET /api/chat/conversations', () => {
         )
         const body = await response.json()
 
-        expect(response.headers.get('Set-Cookie')).toBeNull()
+        expect(response.headers.get('Set-Cookie')).toContain(`ai-mind-session-id=${sessionId}`)
+        expect(response.headers.get('Set-Cookie')).toContain('Max-Age=2592000')
+        expect(response.headers.get('Set-Cookie')).toContain('HttpOnly')
         expect(body.selectedConversationId).toBe('conv-a')
         expect(body.conversations[0]).toMatchObject({ id: 'conv-b', selected: false })
         expect(body.conversations[1]).toMatchObject({ id: 'conv-a', selected: true })
