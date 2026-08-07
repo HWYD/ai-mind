@@ -166,7 +166,11 @@ test.describe('desktop application startup', () => {
             }
         })
 
-        expect(shell).toEqual({ browserWindowCount: 1, hasApplicationMenu: false, menuBarVisible: false })
+        expect(shell).toMatchObject({ browserWindowCount: 1, hasApplicationMenu: false })
+        if (process.platform !== 'darwin') {
+            // macOS 的系统菜单栏始终存在；这里仅校验 Windows/Linux 的窗口内 application menu 行。
+            expect(shell.menuBarVisible).toBe(false)
+        }
         await expect(application.windows()).toHaveLength(2)
     })
 })
