@@ -128,7 +128,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    await application.close()
+    if (application) await application.close()
 })
 
 test('starts one isolated workspace below the local desktop chrome after compatibility', async () => {

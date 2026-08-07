@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -104,6 +104,26 @@ describe('desktop release artifact', () => {
             await createPackageWithOptions(sourceDirectory, archivePath, { dot: true })
 
             await expect(inspectPackagedContents(packageDirectory)).rejects.toThrow('forbidden filename')
+        } finally {
+            await Promise.all([
+                rm(packageDirectory, { force: true, recursive: true }),
+                rm(sourceDirectory, { force: true, recursive: true }),
+            ])
+        }
+    })
+
+    it('inspects every entry in a clean app.asar archive', async () => {
+        const packageDirectory = await mkdtemp(path.join(tmpdir(), 'ai-mind-release-artifact-'))
+        const sourceDirectory = await mkdtemp(path.join(tmpdir(), 'ai-mind-release-artifact-source-'))
+        const archivePath = path.join(packageDirectory, 'app.asar')
+
+        try {
+            await writeFile(path.join(sourceDirectory, 'main.js'), "console.log('desktop')\n", 'utf8')
+            await mkdir(path.join(sourceDirectory, 'nested'))
+            await writeFile(path.join(sourceDirectory, 'nested', 'main.js'), "console.log('nested desktop')\n", 'utf8')
+            await createPackageWithOptions(sourceDirectory, archivePath, { dot: true })
+
+            await expect(inspectPackagedContents(packageDirectory)).resolves.toBeUndefined()
         } finally {
             await Promise.all([
                 rm(packageDirectory, { force: true, recursive: true }),

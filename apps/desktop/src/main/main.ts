@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 import { app, dialog, Menu, nativeTheme, powerMonitor, protocol, session } from 'electron'
@@ -20,8 +21,9 @@ const lifecycleState = startDesktopApplicationLifecycle({
     onReady: async () => {
         try {
             nativeTheme.themeSource = 'light'
-            if (process.platform === 'darwin' && !app.isPackaged) {
-                app.dock?.setIcon(path.join(app.getAppPath(), 'assets', 'icons', 'ai-mind-icon.png'))
+            const dockIconPath = path.join(app.getAppPath(), 'assets', 'icons', 'ai-mind-icon.png')
+            if (process.platform === 'darwin' && !app.isPackaged && existsSync(dockIconPath)) {
+                app.dock?.setIcon(dockIconPath)
             }
             const config = createDesktopBuildConfig({
                 desktopVersion: app.getVersion(),

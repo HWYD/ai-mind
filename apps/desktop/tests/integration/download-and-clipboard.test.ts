@@ -16,7 +16,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    await application.close()
+    if (application) await application.close()
 })
 
 test('allows only the trusted image Blob save-dialog path and denies unsafe downloads and clipboard reads', async () => {

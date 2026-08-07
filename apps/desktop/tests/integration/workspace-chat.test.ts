@@ -16,7 +16,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    await application.close()
+    if (application) await application.close()
 })
 
 test('keeps normal chat, streaming, stop, and error feedback in the trusted web workspace', async () => {

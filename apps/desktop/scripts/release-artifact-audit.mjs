@@ -43,6 +43,7 @@ function inspectAsarContents(archivePath) {
 
     for (const archiveEntry of archiveEntries) {
         const normalizedEntry = archiveEntry.replaceAll('\\', '/').replace(/^\/+|\/+$/gu, '')
+        const asarEntry = archiveEntry.replace(/^[/\\]+/u, '')
         if (hasForbiddenArtifactName(normalizedEntry)) {
             throw new Error('Packaged app resources contain a forbidden filename')
         }
@@ -53,11 +54,11 @@ function inspectAsarContents(archivePath) {
         let entryMetadata
         let content
         try {
-            entryMetadata = statFile(archivePath, archiveEntry)
+            entryMetadata = statFile(archivePath, asarEntry)
             if ('files' in entryMetadata || 'link' in entryMetadata) {
                 continue
             }
-            content = extractFile(archivePath, archiveEntry)
+            content = extractFile(archivePath, asarEntry)
         } catch {
             throw new Error('Packaged app resources could not be inspected')
         }

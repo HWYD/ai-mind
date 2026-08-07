@@ -365,6 +365,7 @@ Phase 1 Setup
 - [x] T109 运行 desktop typecheck、lint、stable/integration tests 与 governance validators，记录当前 Windows 环境跳过 Linux-only production verifier behavior test；同步 canonical spec、plan、tasks、data model、contracts、ADR 与 architecture docs。`bash -n` 因本机 WSL Bash service `E_ACCESSDENIED` 未运行，production script 的实际执行仍仅属于 T072（FR-014、FR-023）。
 
 - [ ] T110 修复 Electron 43 打包可执行文件在主进程启动前退出的问题：禁用与缺失 `browser_v8_context_snapshot.bin` 不兼容的 `LoadBrowserProcessSpecificV8Snapshot`，让源配置、fuse unit/artifact verifier、canonical specs、ADR 与 architecture docs 一致；在可清理旧输出后重建 Windows package，并读取实际 fuse wire 和运行 startup smoke（FR-011、T068）。
+- [x] T111 修复 GitHub Actions 失败的 desktop 验证：Linux stateful integration 通过 Xvfb 启动 Electron；Squirrel.Windows 提供必填 NuGet authors/description；macOS fixture 遇到缺失的开发态 Dock 图标时不阻断主进程；ASAR 审计在 Windows 上以原生分隔符读取条目；CI/release actions 使用 Node 24 runtime。为启动失败清理、嵌套 ASAR 遍历和 CI workflow 契约补充回归覆盖，并以本地非分发 Windows 制包、fuse/hash/contents 审计验证（FR-011、FR-023、SC-012、SC-013）。
 
 **Checkpoint**: 审计发现的本地实现与 release-verifier 缺口已关闭；T071-T075 仍为未开始的唯一 operational release closing 路径，任何 server deploy、preview artifact、manifest/hash 或分发继续保持暂停。
 

@@ -76,12 +76,36 @@ the packaged runtime contained only `v8_context_snapshot.bin`, not the required 
 snapshot. The source baseline and actual-artifact verifier now require this optional fuse to
 be disabled; the Node/ASAR security fuse baseline remains unchanged.
 
-| Gate                              | Result          | Evidence                                                                                                                                                                                  |
-| --------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop stable tests              | Pass            | `pnpm --filter @ai-mind/desktop test:stable`: 14 files / 102 tests                                                                                                                        |
-| Desktop typecheck                 | Pass            | `pnpm --filter @ai-mind/desktop typecheck`                                                                                                                                                |
-| Desktop lint                      | Pass            | `pnpm --filter @ai-mind/desktop lint`                                                                                                                                                     |
-| Rebuilt package and startup smoke | Blocked locally | The prior `app.asar` is locked by Trae CN; close the lock holder before deleting only `apps/desktop/out` and rebuilding. No preview artifact, manifest, hash, or distribution is created. |
+| Gate                               | Result       | Evidence                                                                                                                                                                                          |
+| ---------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Desktop stable tests               | Pass         | `pnpm --filter @ai-mind/desktop test:stable`: 14 files / 102 tests                                                                                                                                |
+| Desktop typecheck                  | Pass         | `pnpm --filter @ai-mind/desktop typecheck`                                                                                                                                                        |
+| Desktop lint                       | Pass         | `pnpm --filter @ai-mind/desktop lint`                                                                                                                                                             |
+| Rebuilt package and artifact audit | Pass locally | A clean non-distributable Windows package was rebuilt; its installer hash, Fuse wire, and actual package contents passed verification. Packaged startup smoke remains manual acceptance evidence. |
+
+## CI Remediation Evidence: 2026-08-07
+
+GitHub Actions run `31163422022` exposed three independent desktop-verification failures:
+the Ubuntu integration runner had no X server, Squirrel.Windows lacked required NuGet
+metadata, and macOS Playwright fixtures could not find the development Dock icon. Local
+CI-equivalent packaging then exposed a fourth issue: Windows ASAR entry enumeration uses
+native separators, while the audit passed slash-normalized paths back to the ASAR reader.
+
+| Gate                                     | Result         | Evidence                                                                                                           |
+| ---------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Desktop typecheck and lint               | Pass           | `pnpm --filter @ai-mind/desktop typecheck` and `lint`                                                              |
+| Desktop stable tests                     | Pass           | 14 files / 103 tests; includes nested clean-ASAR traversal and forbidden-entry coverage                            |
+| Development Electron integration         | Pass           | `pnpm --filter @ai-mind/desktop test:integration`: 20 tests                                                        |
+| CI and governance validators             | Pass           | 22 Node governance tests (one Linux deployment-host test skipped by design)                                        |
+| GitHub Actions runtime                   | Updated        | `checkout@v5`, `setup-node@v5`, and `pnpm/action-setup@v4.4.0` run on Node 24; Node 22 remains the project runtime |
+| Non-distributable Windows package        | Pass locally   | `pnpm --filter @ai-mind/desktop make:windows` completed after Squirrel metadata remediation                        |
+| Windows package fuse/hash/contents audit | Pass locally   | `verify-release-artifact.mjs` passed against the generated `win32-x64` package                                     |
+| Stateful, Windows and macOS GitHub jobs  | Re-run pending | The failed run predates this remediation; its state is not evidence for the corrected commit                       |
+
+The local package and manifest/hash are CI-equivalent, non-distributable test outputs under
+ignored `apps/desktop/out/`; they are not preview candidates and were not uploaded or
+distributed. The server-first production gate, T071/T072, and all manual smoke evidence
+remain unchanged.
 
 ## Release Decision
 
@@ -90,7 +114,7 @@ be disabled; the Node/ASAR security fuse baseline remains unchanged.
 | Scope                       | Windows x64 与 macOS arm64、online host、internal-preview、unsigned；无 auto-update、正式签名/公证或本地 AI Runtime | Pass (repository review)        | T069 audit; operational artifact evidence pending                                                                          |
 | Automated quality           | `pnpm lint`、`pnpm typecheck`、`pnpm test:stable`、`pnpm build` 通过                                                | Pass                            | Closing Evidence: 2026-08-05                                                                                               |
 | Desktop remediation quality | Current desktop typecheck/lint/stable/integration and governance tests pass                                         | Pass locally                    | Pre-release Audit Remediation Evidence: 2026-08-06                                                                         |
-| Windows desktop lane        | locked install、desktop unit、development Electron integration、不可分发 `make:windows`、fuse/package audit 通过    | Not run                         | -                                                                                                                          |
+| Windows desktop lane        | locked install、desktop unit、development Electron integration、不可分发 `make:windows`、fuse/package audit 通过    | Local pass; CI re-run pending   | CI Remediation Evidence: 2026-08-07                                                                                        |
 | Server-first gate           | production compatibility API 与 document security headers 已由既有 server deploy route 上线并验证                   | Fail                            | Fixed-Origin probe on 2026-08-05: compatibility endpoint returned 404; `/` and `/instant-mind` lacked the required headers |
 | Preview artifact            | 仅在 server-first gate 通过后，生成同一 commit 的 `preview:make`、manifest 与 SHA-256                               | Not run                         | -                                                                                                                          |
 | Manual smoke                | fresh install、overlay install、核心场景和安全拒绝场景完成                                                          | Not run                         | -                                                                                                                          |

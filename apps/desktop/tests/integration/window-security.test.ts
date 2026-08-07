@@ -42,7 +42,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    await application.close()
+    if (application) await application.close()
 })
 
 test('keeps a development workspace window isolated from navigation, popups, permissions, and external opens', async () => {

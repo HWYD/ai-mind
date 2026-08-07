@@ -41,7 +41,7 @@ test('keeps stateful CI work behind successful stable validation', () => {
         'pnpm --filter @ai-mind/database db:generate',
         'pnpm --filter @ai-mind/database db:migrate:deploy',
         'pnpm --dir apps/webapp db:runtime-checkpoints:setup',
-        'pnpm test:integration',
+        'xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" pnpm test:integration',
     ]
     const positions = setupSteps.map(step => statefulIntegration.indexOf(step))
 

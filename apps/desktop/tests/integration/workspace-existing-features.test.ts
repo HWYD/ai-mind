@@ -19,7 +19,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    await application.close()
+    if (application) await application.close()
 })
 
 test('reuses webapp image, Agent, conversation list, and existing session flows without desktop business IPC', async () => {

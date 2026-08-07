@@ -45,7 +45,7 @@ test.beforeEach(async () => {
 })
 
 test.afterEach(async () => {
-    await application.close()
+    if (application) await application.close()
 })
 
 test('records the Windows window-open fields that constrain the external-opening allowlist', async () => {
