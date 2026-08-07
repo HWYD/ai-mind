@@ -110,6 +110,121 @@ jobs:
       - name: Test integration lane
         run: pnpm test:integration
 
+  desktop-windows:
+    name: Windows desktop verification
+    needs: stable-validation
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install locked dependencies and capture install evidence
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .artifacts/desktop | Out-Null
+          $installLog = Join-Path (Get-Location) '.artifacts/desktop/pnpm-install.log'
+          & pnpm install --frozen-lockfile *> $installLog
+          $exitCode = $LASTEXITCODE
+          Get-Content $installLog
+          if ($exitCode -ne 0) { exit $exitCode }
+
+      - name: Verify Node and pnpm versions
+        shell: pwsh
+        run: |
+          node --version
+          if ((pnpm --version) -ne '10.34.0') { throw 'CI requires pnpm 10.34.0.' }
+
+      - name: Verify clean-install build policy
+        run: pnpm --dir apps/desktop exec node scripts/verify-pnpm-builds.mjs --platform win32-x64 --install-log .artifacts/desktop/pnpm-install.log --report .artifacts/desktop/pnpm-builds-win32-x64.json
+
+      - name: Test desktop policies
+        run: pnpm --filter @ai-mind/desktop test:stable
+      - name: Test development Electron integration
+        run: pnpm --filter @ai-mind/desktop test:integration
+      - name: Make non-distributable Windows test package
+        run: pnpm --filter @ai-mind/desktop make:windows
+      - name: Verify package hash, fuses, and contents
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem -Path apps/desktop/out/make -Recurse -File -Filter '*Setup.exe' | Select-Object -First 1
+          if (-not $artifact) { throw 'Windows make did not produce a Squirrel setup executable.' }
+
+          $package = Get-ChildItem -Path apps/desktop/out -Directory | Where-Object { $_.Name -like '*win32-x64' } | Select-Object -First 1
+          if (-not $package) { throw 'Windows make did not produce a win32-x64 package directory.' }
+
+          $sourceCommit = git rev-parse HEAD
+          $manifest = Join-Path $env:RUNNER_TEMP 'desktop-release.json'
+          pnpm --dir apps/desktop exec node scripts/write-release-manifest.mjs --artifact $artifact.FullName --output $manifest --platform win32-x64 --source-commit $sourceCommit
+          pnpm --dir apps/desktop exec node scripts/verify-release-artifact.mjs --app (Join-Path $package.FullName 'AI Mind Desktop.exe') --artifact $artifact.FullName --manifest $manifest --package-directory $package.FullName --platform win32-x64
+
+  desktop-macos-arm64:
+    name: macOS arm64 desktop verification
+    needs: stable-validation
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify native Apple Silicon runner
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install locked dependencies and capture install evidence
+        run: |
+          set -o pipefail
+          mkdir -p .artifacts/desktop
+          pnpm install --frozen-lockfile 2>&1 | tee .artifacts/desktop/pnpm-install.log
+
+      - name: Verify Node and pnpm versions
+        run: |
+          node --version
+          test "$(pnpm --version)" = "10.34.0"
+
+      - name: Verify clean-install build policy
+        run: pnpm --dir apps/desktop exec node scripts/verify-pnpm-builds.mjs --platform darwin-arm64 --install-log .artifacts/desktop/pnpm-install.log --report .artifacts/desktop/pnpm-builds-darwin-arm64.json
+      - name: Test desktop policies
+        run: pnpm --filter @ai-mind/desktop test:stable
+      - name: Test development Electron integration
+        run: pnpm --filter @ai-mind/desktop test:integration
+      - name: Make non-distributable macOS arm64 test package
+        run: pnpm --filter @ai-mind/desktop make:macos-arm64
+      - name: Verify DMG architecture, hash, fuses, and contents
+        run: |
+          artifact="$(find apps/desktop/out/make -type f -name '*.dmg' -print -quit)"
+          test -n "$artifact"
+          package="$(find apps/desktop/out -maxdepth 1 -type d -name '*darwin-arm64' -print -quit)"
+          test -n "$package"
+          app="$package/AI Mind Desktop.app"
+          executable="$app/Contents/MacOS/AI Mind Desktop"
+          test -x "$executable"
+          file "$executable" | grep -q 'arm64'
+          ! file "$executable" | grep -qi 'universal'
+          source_commit="$(git rev-parse HEAD)"
+          manifest="$RUNNER_TEMP/desktop-release.json"
+          pnpm --dir apps/desktop exec node scripts/write-release-manifest.mjs --artifact "$artifact" --output "$manifest" --platform darwin-arm64 --source-commit "$source_commit"
+          pnpm --dir apps/desktop exec node scripts/verify-release-artifact.mjs --app "$executable" --artifact "$artifact" --manifest "$manifest" --package-directory "$package" --platform darwin-arm64
+
   docker:
     name: Docker build checks
     runs-on: ubuntu-latest

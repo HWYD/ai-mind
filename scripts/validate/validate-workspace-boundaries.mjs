@@ -6,7 +6,7 @@ const repositoryRoot = process.cwd()
 const dependencyFields = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies']
 const internalPackagePrefix = '@ai-mind/'
 const sourceExtensions = new Set(['.cjs', '.cts', '.js', '.jsx', '.mjs', '.mts', '.ts', '.tsx'])
-const skippedDirectories = new Set(['.next', '.turbo', 'build', 'coverage', 'dist', 'generated', 'node_modules', 'out'])
+const skippedDirectories = new Set(['.next', '.turbo', '.webpack', 'build', 'coverage', 'dist', 'generated', 'node_modules', 'out'])
 
 function isInsidePath(candidate, parent) {
     const relative = path.relative(parent, candidate)

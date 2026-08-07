@@ -19,6 +19,13 @@ test('rejects database tests outside the integration lane', () => {
     )
 })
 
+test('keeps desktop integration tests out of the external smoke lane', () => {
+    assert.throws(
+        () => classifyTestFile('@ai-mind/desktop', 'apps/desktop/tests/integration/packaged-smoke.test.ts'),
+        /desktop integration must not use the external smoke naming convention/
+    )
+})
+
 test('discovers and classifies the repository test suites', () => {
     const testFiles = validateTestLanes()
 
@@ -26,6 +33,14 @@ test('discovers and classifies the repository test suites', () => {
     assert.ok(testFiles.some(testFile => testFile.workspace === '@ai-mind/database' && testFile.lane === 'integration'))
     assert.ok(testFiles.some(testFile => testFile.workspace === '@ai-mind/webapp' && testFile.lane === 'external'))
     assert.ok(testFiles.some(testFile => testFile.lane === 'stable'))
+    assert.ok(
+        testFiles.some(
+            testFile =>
+                testFile.workspace === '@ai-mind/desktop' &&
+                testFile.lane === 'integration' &&
+                testFile.filePath.endsWith('session-continuity.test.ts')
+        )
+    )
 })
 
 test('rejects test files outside a workspace managed test root', () => {

@@ -353,6 +353,8 @@ describe('InstantMindPage integration', () => {
         expect(scrollShell?.className).toContain('pb-[var(--chat-bottom-spacing)]')
         expect(scrollShell?.className).toContain('transition-[padding-left]')
         expect(composerShell?.className).toContain('transition-[left]')
+        expect(mainColumn?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(false)
+        expect(scrollShell?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(true)
         expect((document.querySelector('main') as HTMLElement | null)?.style.getPropertyValue('--chat-bottom-spacing')).toBe('24px')
         fireEvent.click(screen.getByRole('button', { name: '折叠会话侧边栏' }))
 

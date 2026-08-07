@@ -10,6 +10,12 @@ COMPOSE_FILE="${DEPLOY_ROOT}/compose.production.yml"
 RELEASE_ENV_FILE="${DEPLOY_ROOT}/.release.env"
 PROD_DOMAIN="${PROD_DOMAIN:-ai.hwyblog.cloud}"
 TIMEOUT_SECONDS="${AI_MIND_VERIFY_TIMEOUT_SECONDS:-10}"
+CANDIDATE_VERSION="${AI_MIND_DESKTOP_CANDIDATE_VERSION:-}"
+
+if ! printf '%s' "$CANDIDATE_VERSION" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
+    echo "FAIL AI_MIND_DESKTOP_CANDIDATE_VERSION must be strict semver"
+    exit 1
+fi
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -28,6 +34,89 @@ check() {
     fi
 }
 
+header_value() {
+    local header_name="$1"
+    local header_file="$2"
+
+    awk -v key="$header_name" '
+        BEGIN { key = tolower(key) }
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            separator = index(line, ":")
+            if (separator == 0 || tolower(substr(line, 1, separator - 1)) != key) {
+                next
+            }
+
+            value = substr(line, separator + 1)
+            sub(/^[[:space:]]*/, "", value)
+            print value
+            exit
+        }
+    ' "$header_file"
+}
+
+verify_compatibility_api() {
+    local header_file="$VERIFY_ROOT/compatibility.headers"
+    local body_file="$VERIFY_ROOT/compatibility.body"
+
+    curl -sS -D "$header_file" -o "$body_file" --max-time "$TIMEOUT_SECONDS" \
+        -H 'Accept: application/vnd.ai-mind.desktop-compatibility+json; version=1' \
+        -H "X-AI-Mind-Desktop-Version: $CANDIDATE_VERSION" \
+        -H 'Cookie: ai-mind-session-id=production-verification-probe' \
+        "https://${PROD_DOMAIN}/api/desktop/compatibility" >/dev/null 2>&1 || return 1
+
+    local status="$(awk 'NR == 1 { print $2 }' "$header_file")"
+    local cache_control="$(header_value 'Cache-Control' "$header_file")"
+    local set_cookie="$(header_value 'Set-Cookie' "$header_file")"
+    local content_type="$(header_value 'Content-Type' "$header_file")"
+    local body="$(tr -d '[:space:]' < "$body_file")"
+
+    [ "$status" = "200" ] || return 1
+    [ "$cache_control" = "no-store" ] || return 1
+    [ -z "$set_cookie" ] || return 1
+    printf '%s' "$content_type" | grep -qi '^application/json' || return 1
+    printf '%s' "$body" | grep -Eq '^\{"contractVersion":1,"status":"compatible"\}$|^\{"contractVersion":1,"minimumDesktopVersion":"[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?","status":"manual_upgrade_required"\}$' || return 1
+    if printf '%s' "$body" | grep -Eiq 'cookie|secret|token|upgradeUrl'; then
+        return 1
+    fi
+}
+
+verify_document_headers() {
+    local pathname="$1"
+    local safe_name="${pathname#/}"
+    safe_name="${safe_name//\//-}"
+    local header_file="$VERIFY_ROOT/document-${safe_name:-root}.headers"
+
+    curl -sS -D "$header_file" -o /dev/null --max-time "$TIMEOUT_SECONDS" \
+        -H 'Accept: text/html' \
+        "https://${PROD_DOMAIN}${pathname}" >/dev/null 2>&1 || return 1
+
+    local status="$(awk 'NR == 1 { print $2 }' "$header_file")"
+    local csp="$(header_value 'Content-Security-Policy' "$header_file")"
+    local permissions="$(header_value 'Permissions-Policy' "$header_file")"
+    local referrer="$(header_value 'Referrer-Policy' "$header_file")"
+    local nosniff="$(header_value 'X-Content-Type-Options' "$header_file")"
+    local frame="$(header_value 'X-Frame-Options' "$header_file")"
+
+    [ "$status" = "200" ] || return 1
+    printf '%s' "$csp" | grep -Eq "script-src 'nonce-[A-Za-z0-9]+' 'strict-dynamic'" || return 1
+    printf '%s' "$csp" | grep -Eq "(^|;[[:space:]]*)style-src 'self' 'unsafe-inline'(;|$)" || return 1
+    if printf '%s' "$csp" | grep -Eiq "style-src[^;]*(nonce-|sha[0-9]+-)|style-src-attr"; then
+        return 1
+    fi
+    printf '%s' "$csp" | grep -q "object-src 'none'" || return 1
+    printf '%s' "$csp" | grep -q "frame-ancestors 'none'" || return 1
+    if printf '%s' "$csp" | grep -Eiq "script-src[^;]*unsafe-inline|unsafe-eval"; then
+        return 1
+    fi
+    printf '%s' "$permissions" | grep -q 'camera=()' || return 1
+    printf '%s' "$permissions" | grep -q 'clipboard-read=()' || return 1
+    [ "$referrer" = "strict-origin-when-cross-origin" ] || return 1
+    [ "$nosniff" = "nosniff" ] || return 1
+    [ "$frame" = "DENY" ] || return 1
+}
+
 info() {
     echo "info $*"
 }
@@ -38,6 +127,9 @@ compose() {
 
 [ -f "$COMPOSE_FILE" ] || { echo "FAIL 找不到 compose.production.yml：$COMPOSE_FILE"; exit 1; }
 [ -f "$RELEASE_ENV_FILE" ] || { echo "FAIL 找不到 .release.env：$RELEASE_ENV_FILE"; exit 1; }
+
+VERIFY_ROOT="$(mktemp -d)"
+trap 'rm -rf "$VERIFY_ROOT"' EXIT
 
 CONFIG_OUTPUT="$(compose config 2>/dev/null)" || {
     echo "FAIL docker compose config 解析失败"
@@ -95,6 +187,24 @@ check "http://${PROD_DOMAIN} 301 跳转到 https" "$( [ "$HTTP_STATUS" = "301" ]
 
 MCP_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SECONDS" "https://${PROD_DOMAIN}/mcp" || true)"
 check "https://${PROD_DOMAIN}/mcp 返回 404" "$( [ "$MCP_STATUS" = "404" ] && echo ok || echo fail )"
+
+if verify_compatibility_api; then
+    check "desktop compatibility API strict candidate response" ok
+else
+    check "desktop compatibility API strict candidate response" fail
+fi
+
+if verify_document_headers '/'; then
+    check "document security headers /" ok
+else
+    check "document security headers /" fail
+fi
+
+if verify_document_headers '/instant-mind'; then
+    check "document security headers /instant-mind" ok
+else
+    check "document security headers /instant-mind" fail
+fi
 
 API_HEALTH_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' --max-time "$TIMEOUT_SECONDS" "https://${PROD_DOMAIN}/api/health" || true)"
 if [ "$API_HEALTH_STATUS" = "200" ]; then

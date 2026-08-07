@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前版本：`v0.4.12`。
+当前阶段：`Runtime Skeleton / MVP`，当前开发版本：`v0.5.0 Electron Desktop Host`。
 
 已经验证：
 
@@ -255,7 +255,26 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.4.12
+## 当前开发版本：v0.5.0 Electron Desktop Host
+
+v0.5.0 为既有在线 Web 应用增加 Windows x64 与 macOS arm64 Electron 桌面宿主。AI Runtime、会话、
+StreamRun recovery、图像和受控 Agent 仍由服务端与 Web 应用负责；桌面进程只承担固定 Origin 准入、
+本地恢复、profile 隔离和收紧的原生保存能力。本版是未签名的内部预览设计，不是公开桌面发行版。
+任何预览制品生成或分发前，必须先通过线上 compatibility/header gate，并完成 Windows 与 macOS 的
+fresh install / overlay install smoke。详见 [v0.5.0 设计](./docs/versions/v0.5.0-electron-desktop-host.md)
+和[发布记录](./docs/releases/v0.5.0.md)。
+
+桌面端开发建议使用根脚本，它会先准备本地数据库，再同时启动 Web 服务和 Electron：
+
+```powershell
+pnpm dev:desktop
+```
+
+未打包的桌面启动器默认连接 `http://localhost:3000`。如需使用其他 loopback Origin，可复制
+`apps/desktop/.env.example` 为 `.env.local`，仅修改 `AI_MIND_DESKTOP_DEV_ORIGIN`，或在当前 shell
+设置该变量。该文件不会被 `make`、`preview:make` 或已打包的 Electron 进程读取；生产 Origin 始终固定在应用代码中。
+
+## Previous Version: v0.4.12
 
 这版的主线是 `Image Generation Agent`：通过显式 `/image` 把单张文生图与普通聊天分流，并以受控 LangGraph 图完成 ImageBrief、提示词检查与最多一次自动修正。
 

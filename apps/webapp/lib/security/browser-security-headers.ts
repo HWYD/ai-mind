@@ -1,0 +1,35 @@
+export function createDocumentSecurityHeaders(nonce: string): Record<string, string> {
+    return {
+        'Content-Security-Policy': [
+            "default-src 'self'",
+            `script-src 'nonce-${nonce}' 'strict-dynamic' 'self'`,
+            "style-src 'self' 'unsafe-inline'",
+            "img-src 'self' blob:",
+            "font-src 'self'",
+            "connect-src 'self'",
+            "media-src 'none'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+            "frame-src 'none'",
+            "worker-src 'none'",
+        ].join('; '),
+        'Permissions-Policy': [
+            'accelerometer=()',
+            'camera=()',
+            'clipboard-read=()',
+            'display-capture=()',
+            'geolocation=()',
+            'gyroscope=()',
+            'hid=()',
+            'microphone=()',
+            'payment=()',
+            'serial=()',
+            'usb=()',
+        ].join(', '),
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+    }
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>External opening behavior fixture</title>
+    </head>
+    <body>
+        <a id="pointer-link" href="https://example.com/pointer" target="_blank">Pointer target blank</a>
+        <a id="keyboard-link" href="https://example.com/keyboard" target="_blank">Keyboard target blank</a>
+        <button id="window-open" type="button">Window open</button>
+        <a id="synthetic-link" href="https://example.com/synthetic" target="_blank">Synthetic target blank</a>
+        <form action="https://example.com/form" id="external-form" method="post" target="_blank">
+            <input name="mode" type="hidden" value="form" />
+            <button id="form-submit" type="submit">Form target blank</button>
+        </form>
+        <script>
+            document.querySelector('#window-open').addEventListener('click', () => {
+                window.open('https://example.com/window-open', '_blank', 'noopener')
+            })
+        </script>
+    </body>
+</html>

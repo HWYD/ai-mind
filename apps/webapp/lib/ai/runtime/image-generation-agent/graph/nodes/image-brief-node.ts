@@ -8,7 +8,8 @@ export async function createImageBriefNode(input: {
     state: ImageGenerationGraphState
 }): Promise<ImageGenerationGraphState> {
     const result = await invokeStructuredPlanning({
-        instruction: 'Create a bounded image brief from the immutable user description. Do not add unsupported capabilities.',
+        instruction:
+            'Create a bounded image brief from the immutable user description. Do not add unsupported capabilities. Use Simplified Chinese for intent, subjects, mustInclude, avoid, assumptions, composition, lightingAndColor, scene, and style so the public summary is Chinese. Preserve requested literal visibleText exactly.',
         model: input.model,
         schema: imageBriefSchema,
         schemaName: 'ImageBrief',

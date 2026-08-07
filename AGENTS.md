@@ -136,6 +136,7 @@
 - 类型守卫、安全校验、复杂策略和边界适配可保留独立函数；避免无收益的 helper 转发链。
 - 同组映射逻辑保持一致，避免一部分内联、一部分抽函数。
 - 测试优先覆盖公开入口、核心行为和模块边界，不为测试私有简单逻辑改变生产结构。
+- 测试生成的边界、文案断言与验收场景规则见 `.agents/rules/engineering/testing.md`。
 - 不得为了测试在生产代码中加入仅测试使用的分支、配置、模式、provider/store kind、deterministic helper、隐藏开关或特殊回退链路。测试替身、fake、mock、fixture adapter 应停留在测试侧或明确的测试装配层。
 - 如果某段代码新增抽象、参数或分支的主要价值只是“更容易测”，而不服务真实业务语义、运行时边界或副作用隔离，则不应进入正式实现；优先改测试方式，而不是污染生产代码。
 - 交付前检查新增的 `toXxx`、`resolveXxx`、`buildXxx` 是否具有业务语义、边界价值、类型收窄或真实复用；否则优先内联。
@@ -184,6 +185,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/v0.4.12-image-generation-agent/plan.md
+at specs/v0.5.0-electron-desktop-host/plan.md
 
 <!-- SPECKIT END -->

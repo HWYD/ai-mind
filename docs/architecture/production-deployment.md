@@ -329,6 +329,35 @@ Conversation B: 我喜欢吃什么
 - B 不应推荐香菜。
 - webapp 日志不应持续出现 `put-failed` 或 `retrieve-failed`。
 
+## v0.5.0 Desktop Server-First Gate
+
+Electron desktop internal preview is not a third production deployment flow. The webapp
+changes required by the desktop host are deployed only through one of the two existing
+server flows above. Before a Windows preview artifact is generated or distributed, the
+same candidate commit must pass the following production verification against the fixed
+origin:
+
+```text
+AI_MIND_DESKTOP_CANDIDATE_VERSION=<strict-semver> \
+  /srv/ai-mind/scripts/verify-production.sh
+```
+
+The script checks the desktop compatibility response, `Cache-Control: no-store`, the
+absence of `Set-Cookie`, and the CSP/security headers for `/` and `/instant-mind`,
+including nonce-restricted scripts and the scoped `style-src-attr` layout exception. The
+candidate version is a release-verification input only. It is not a desktop runtime
+Origin override and must not be stored in a distributed artifact.
+
+Only after that server-first gate passes may the same commit produce a Windows x64
+unsigned internal-preview installer, `desktop-release.json`, and a SHA-256 file for the
+controlled internal channel. CI may run non-distributable `make:windows` package checks
+earlier, but must not generate, upload, or label a preview candidate.
+
+If a server rollback removes the compatibility API or document security headers, suspend
+distribution of every affected preview candidate before the rollback. Installed clients
+remain fail-closed in local recovery; do not add an HTTP fallback, alternate Origin, or
+remote upgrade URL.
+
 ## Change Rules
 
 修改以下任意内容时，必须同步检查本文档：

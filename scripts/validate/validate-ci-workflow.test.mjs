@@ -53,3 +53,59 @@ test('keeps stateful CI work behind successful stable validation', () => {
     assert.doesNotMatch(docker, /^    needs:/m)
     assert.doesNotMatch(workflow, /pnpm test:external/)
 })
+
+test('keeps Windows desktop verification isolated from production deploy and preview distribution', () => {
+    const desktopWindows = jobBlock('desktop-windows')
+
+    assert.match(desktopWindows, /^    needs: stable-validation$/m)
+    assert.match(desktopWindows, /^    runs-on: windows-latest$/m)
+    assert.match(desktopWindows, /pnpm install --frozen-lockfile/)
+    assert.match(desktopWindows, /pnpm --version/)
+    assert.match(desktopWindows, /verify-pnpm-builds\.mjs --platform win32-x64/)
+    assert.match(desktopWindows, /--install-log \.artifacts\/desktop\/pnpm-install\.log/)
+    assert.match(desktopWindows, /--report \.artifacts\/desktop\/pnpm-builds-win32-x64\.json/)
+    assert.match(desktopWindows, /pnpm --filter @ai-mind\/desktop test:stable/)
+    assert.match(desktopWindows, /pnpm --filter @ai-mind\/desktop test:integration/)
+    assert.match(desktopWindows, /pnpm --filter @ai-mind\/desktop make:windows/)
+    assert.match(desktopWindows, /write-release-manifest\.mjs/)
+    assert.match(desktopWindows, /verify-release-artifact\.mjs/)
+    const windowsVerificationPositions = [
+        desktopWindows.indexOf('pnpm install --frozen-lockfile'),
+        desktopWindows.indexOf('verify-pnpm-builds.mjs --platform win32-x64'),
+        desktopWindows.indexOf('pnpm --filter @ai-mind/desktop test:stable'),
+        desktopWindows.indexOf('pnpm --filter @ai-mind/desktop test:integration'),
+        desktopWindows.indexOf('pnpm --filter @ai-mind/desktop make:windows'),
+        desktopWindows.indexOf('verify-release-artifact.mjs'),
+    ]
+    assert.deepEqual([...windowsVerificationPositions].sort((left, right) => left - right), windowsVerificationPositions)
+    assert.doesNotMatch(desktopWindows, /preview:make|upload-artifact|deploy-production|TCR_|secrets\./)
+})
+
+test('keeps macOS arm64 desktop verification native, unsigned, and non-distributable', () => {
+    const desktopMacos = jobBlock('desktop-macos-arm64')
+
+    assert.match(desktopMacos, /^    needs: stable-validation$/m)
+    assert.match(desktopMacos, /^    runs-on: macos-14$/m)
+    assert.match(desktopMacos, /uname -m.*arm64/)
+    assert.match(desktopMacos, /pnpm install --frozen-lockfile/)
+    assert.match(desktopMacos, /pnpm --version/)
+    assert.match(desktopMacos, /verify-pnpm-builds\.mjs --platform darwin-arm64/)
+    assert.match(desktopMacos, /--install-log \.artifacts\/desktop\/pnpm-install\.log/)
+    assert.match(desktopMacos, /--report \.artifacts\/desktop\/pnpm-builds-darwin-arm64\.json/)
+    assert.match(desktopMacos, /pnpm --filter @ai-mind\/desktop test:stable/)
+    assert.match(desktopMacos, /pnpm --filter @ai-mind\/desktop test:integration/)
+    assert.match(desktopMacos, /pnpm --filter @ai-mind\/desktop make:macos-arm64/)
+    assert.match(desktopMacos, /--platform darwin-arm64/)
+    assert.match(desktopMacos, /file .*arm64/)
+    assert.match(desktopMacos, /universal/)
+    const macosVerificationPositions = [
+        desktopMacos.indexOf('pnpm install --frozen-lockfile'),
+        desktopMacos.indexOf('verify-pnpm-builds.mjs --platform darwin-arm64'),
+        desktopMacos.indexOf('pnpm --filter @ai-mind/desktop test:stable'),
+        desktopMacos.indexOf('pnpm --filter @ai-mind/desktop test:integration'),
+        desktopMacos.indexOf('pnpm --filter @ai-mind/desktop make:macos-arm64'),
+        desktopMacos.indexOf('verify-release-artifact.mjs'),
+    ]
+    assert.deepEqual([...macosVerificationPositions].sort((left, right) => left - right), macosVerificationPositions)
+    assert.doesNotMatch(desktopMacos, /preview:make|upload-artifact|deploy-production|TCR_|secrets\./)
+})

@@ -1,0 +1,90 @@
+:root {
+    color-scheme: light;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+body {
+    margin: 0;
+    overflow: hidden;
+}
+
+.desktop-chrome {
+    background: #f7f8fa;
+    border-bottom: 1px solid #d9dee7;
+    box-sizing: border-box;
+    color: #273244;
+    display: block;
+    height: 40px;
+    position: relative;
+    user-select: none;
+}
+
+.title-bar-drag-region {
+    inset: 0 148px 0 0;
+    position: absolute;
+    -webkit-app-region: drag;
+}
+
+.chrome-content {
+    align-items: center;
+    /* 仅菜单和品牌不可拖动，剩余标题栏由下层 drag region 接管。 */
+    display: inline-flex;
+    height: 100%;
+    padding: 0 0 0 12px;
+    position: relative;
+    z-index: 1;
+    -webkit-app-region: no-drag;
+}
+
+:root[data-platform='macos'] .title-bar-drag-region {
+    inset: 0 0 0 78px;
+}
+
+:root[data-platform='macos'] .chrome-content {
+    padding: 0 0 0 86px;
+}
+
+.brand {
+    align-items: center;
+    display: flex;
+    font-size: 13px;
+    font-weight: 600;
+    gap: 8px;
+    margin-right: 20px;
+    white-space: nowrap;
+}
+
+.brand-mark {
+    align-items: center;
+    background: #293a55;
+    border-radius: 4px;
+    color: #ffffff;
+    display: inline-flex;
+    font-size: 10px;
+    font-weight: 800;
+    height: 20px;
+    justify-content: center;
+    width: 20px;
+}
+
+.menu-list {
+    align-items: stretch;
+    display: flex;
+    height: 100%;
+}
+
+.menu-list button {
+    background: transparent;
+    border: 0;
+    color: #3d4b60;
+    cursor: default;
+    font: inherit;
+    font-size: 13px;
+    padding: 0 10px;
+}
+
+.menu-list button:hover,
+.menu-list button:focus-visible {
+    background: #e7ebf1;
+    outline: none;
+}

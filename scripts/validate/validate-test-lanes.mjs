@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 const workspaceTestRoots = [
     { directory: 'scripts/validate', testDirectory: 'scripts/validate', workspace: '@ai-mind/workspace' },
     { directory: 'apps/webapp', testDirectory: 'apps/webapp/tests', workspace: '@ai-mind/webapp' },
+    { directory: 'apps/desktop', testDirectory: 'apps/desktop/tests', workspace: '@ai-mind/desktop' },
     { directory: 'packages/database', testDirectory: 'packages/database/tests', workspace: '@ai-mind/database' },
     { directory: 'packages/stream-core', testDirectory: 'packages/stream-core/tests', workspace: '@ai-mind/stream-core' },
     {
@@ -23,6 +24,7 @@ function isInsidePath(candidate, parent) {
 }
 
 export function classifyTestFile(workspace, filePath) {
+    const isDesktopIntegration = workspace === '@ai-mind/desktop' && /[\\/]tests[\\/]integration[\\/]/.test(filePath)
     const normalizedPath = filePath.replaceAll('\\', '/')
     const isExternal = /-smoke\.test\.(cjs|cts|js|jsx|mjs|mts|ts|tsx)$/.test(normalizedPath)
     const isIntegration = /\.integration\.test\.(cjs|cts|js|jsx|mjs|mts|ts|tsx)$/.test(normalizedPath)
@@ -35,11 +37,15 @@ export function classifyTestFile(workspace, filePath) {
         throw new Error(`database test must use the integration naming convention: ${filePath}`)
     }
 
+    if (workspace === '@ai-mind/desktop' && isExternal && /[\\/]tests[\\/]integration[\\/]/.test(filePath)) {
+        throw new Error(`desktop integration must not use the external smoke naming convention: ${filePath}`)
+    }
+
     if (isExternal) {
         return 'external'
     }
 
-    return isIntegration ? 'integration' : 'stable'
+    return isIntegration || isDesktopIntegration ? 'integration' : 'stable'
 }
 
 function collectTestFiles(directory) {

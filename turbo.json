@@ -22,6 +22,18 @@
             "outputs": [],
             "env": ["AI_MIND_*", "DATABASE_URL", "PROJECT_ASSISTANT_SERVICE_*"]
         },
+        "make:windows": {
+            "cache": false,
+            "outputs": ["out/**"]
+        },
+        "preview:make": {
+            "cache": false,
+            "outputs": ["out/**"]
+        },
+        "verify:artifact": {
+            "cache": false,
+            "outputs": []
+        },
         "test:external": {
             "cache": false,
             "outputs": [],

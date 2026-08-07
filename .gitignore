@@ -89,9 +89,13 @@ private-folder/*
 .trae/*
 
 .codex/tmp/
+/.tmp-instant-mind-*.png
 
 # spec-kit local state
 .specify/feature.json
+
+# local desktop verification evidence
+/.artifacts/
 
 # test
 # **.test.ts

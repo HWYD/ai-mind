@@ -1,0 +1,82 @@
+:root {
+    color-scheme: light;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #f5f7fa;
+    color: #1b2430;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+}
+
+.recovery-shell {
+    box-sizing: border-box;
+    margin: 0 auto;
+    max-width: 720px;
+    padding: 72px 32px;
+}
+
+.eyebrow {
+    color: #526171;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+h1 {
+    font-size: 2rem;
+    line-height: 1.15;
+    margin: 12px 0 16px;
+}
+
+.recovery-details {
+    border-top: 1px solid #d5dce5;
+    margin: 28px 0;
+}
+
+.recovery-details div {
+    border-bottom: 1px solid #d5dce5;
+    display: flex;
+    gap: 24px;
+    justify-content: space-between;
+    padding: 12px 0;
+}
+
+dt {
+    color: #526171;
+}
+
+dd {
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    margin: 0;
+    text-align: right;
+}
+
+.recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+button {
+    background: #ffffff;
+    border: 1px solid #9ba8b6;
+    border-radius: 4px;
+    color: #1b2430;
+    cursor: pointer;
+    font: inherit;
+    min-height: 40px;
+    padding: 0 14px;
+}
+
+button:hover {
+    background: #eaf0f5;
+}
+
+#action-result {
+    display: block;
+    margin-top: 18px;
+    min-height: 1.4em;
+}
