@@ -21,7 +21,21 @@ case "$*" in
     *" ps")
         printf '%s\\n' 'postgres healthy 5432/tcp' 'project-assistant-service healthy 8788/tcp' 'webapp healthy'
         ;;
-    *" port postgres 5432"|*" port project-assistant-service 8788")
+    *" port postgres 5432")
+        if [ "\${FAKE_POSTGRES_PORT:-}" = 'published' ]; then
+            printf '%s\\n' '0.0.0.0:5432'
+        else
+            printf '%s\\n' 'invalid IP:0'
+            exit 1
+        fi
+        ;;
+    *" port project-assistant-service 8788")
+        if [ "\${FAKE_PROJECT_ASSISTANT_SERVICE_PORT:-}" = 'published' ]; then
+            printf '%s\\n' '0.0.0.0:8788'
+        else
+            printf '%s\\n' 'invalid IP:0'
+            exit 1
+        fi
         ;;
     *" port webapp 3000")
         printf '%s\\n' '127.0.0.1:3000'
@@ -106,12 +120,9 @@ test(
             writeFile(path.join(deployRoot, 'compose.production.yml'), 'services: {}\n', 'utf8'),
             writeFile(path.join(deployRoot, '.release.env'), 'RELEASE=test\n', 'utf8'),
         ])
-        await Promise.all([
-            chmod(path.join(binDirectory, 'docker'), 0o755),
-            chmod(path.join(binDirectory, 'curl'), 0o755),
-        ])
+        await Promise.all([chmod(path.join(binDirectory, 'docker'), 0o755), chmod(path.join(binDirectory, 'curl'), 0o755)])
 
-        const runVerifier = documentCsp =>
+        const runVerifier = (documentCsp, environment = {}) =>
             execFileAsync('bash', [verificationScript], {
                 cwd: repositoryRoot,
                 env: {
@@ -120,18 +131,28 @@ test(
                     AI_MIND_DESKTOP_CANDIDATE_VERSION: '0.5.0',
                     FAKE_DOCUMENT_CSP: documentCsp,
                     PATH: `${binDirectory}${path.delimiter}${process.env.PATH}`,
+                    ...environment,
                 },
             })
 
         await assert.doesNotReject(() => runVerifier(supportedDocumentCsp))
         await assert.rejects(
+            () => runVerifier(supportedDocumentCsp, { FAKE_POSTGRES_PORT: 'published' }),
+            error => /postgres.*5432/.test(error.stdout)
+        )
+        await assert.rejects(
+            () => runVerifier(supportedDocumentCsp, { FAKE_PROJECT_ASSISTANT_SERVICE_PORT: 'published' }),
+            error => /project-assistant-service.*8788/.test(error.stdout)
+        )
+        await assert.rejects(
             () => runVerifier(`${supportedDocumentCsp}; style-src-attr 'unsafe-inline'`),
             error => /document security headers/.test(error.stdout)
         )
         await assert.rejects(
-            () => runVerifier(
-                "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self'; style-src 'self' 'nonce-style123' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
-            ),
+            () =>
+                runVerifier(
+                    "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self'; style-src 'self' 'nonce-style123' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+                ),
             error => /document security headers/.test(error.stdout)
         )
     }

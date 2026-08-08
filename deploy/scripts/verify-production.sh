@@ -125,6 +125,18 @@ compose() {
     docker compose --env-file "$RELEASE_ENV_FILE" -f "$COMPOSE_FILE" "$@"
 }
 
+published_port() {
+    local service="$1"
+    local container_port="$2"
+    local output
+
+    # 某些 Docker Compose 版本在服务仅使用 expose 时会输出错误文本但退出失败；
+    # 失败输出不是宿主机端口映射，只有成功结果才参与安全判断。
+    if output="$(compose port "$service" "$container_port" 2>/dev/null)"; then
+        printf '%s' "$output"
+    fi
+}
+
 [ -f "$COMPOSE_FILE" ] || { echo "FAIL 找不到 compose.production.yml：$COMPOSE_FILE"; exit 1; }
 [ -f "$RELEASE_ENV_FILE" ] || { echo "FAIL 找不到 .release.env：$RELEASE_ENV_FILE"; exit 1; }
 
@@ -162,14 +174,14 @@ check "postgres healthy" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'postgres.+hea
 check "project-assistant-service healthy" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'project-assistant-service.+healthy' && echo ok || echo fail)"
 check "webapp healthy" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'webapp.+healthy' && echo ok || echo fail)"
 
-POSTGRES_PORT_OUTPUT="$(compose port postgres 5432 2>/dev/null || true)"
+POSTGRES_PORT_OUTPUT="$(published_port postgres 5432)"
 check "postgres 没有宿主机 5432 端口映射" "$( [ -z "$POSTGRES_PORT_OUTPUT" ] && echo ok || echo fail )"
 check "postgres 仅在容器内 expose 5432/tcp" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'postgres.+5432/tcp' && echo ok || echo fail)"
 
 WEBAPP_BIND="$(compose port webapp 3000 2>/dev/null | head -1 || true)"
 check "webapp 只绑定 127.0.0.1:3000->3000" "$(printf '%s\n' "$WEBAPP_BIND" | grep -Eq '^127\.0\.0\.1:3000$' && echo ok || echo fail)"
 
-PAS_PORT_OUTPUT="$(compose port project-assistant-service 8788 2>/dev/null || true)"
+PAS_PORT_OUTPUT="$(published_port project-assistant-service 8788)"
 check "project-assistant-service 没有宿主机 8788 端口映射" "$( [ -z "$PAS_PORT_OUTPUT" ] && echo ok || echo fail )"
 check "project-assistant-service 仅在容器内 expose 8788/tcp" "$(printf '%s\n' "$PS_OUTPUT" | grep -Eq 'project-assistant-service.+8788/tcp' && echo ok || echo fail)"
 
