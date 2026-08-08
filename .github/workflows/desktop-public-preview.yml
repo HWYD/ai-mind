@@ -129,4 +129,4 @@ jobs:
 
           Source commit: `$SOURCE_COMMIT`
           EOF
-          gh release create "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --title "AI Mind Desktop $RELEASE_TAG" --prerelease --generate-notes
+          gh release create "$RELEASE_TAG" release-assets/* --repo "$GITHUB_REPOSITORY" --target "$SOURCE_COMMIT" --title "AI Mind Desktop $RELEASE_TAG" --prerelease --generate-notes
