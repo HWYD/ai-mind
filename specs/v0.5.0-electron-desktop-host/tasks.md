@@ -330,6 +330,7 @@ Phase 1 Setup
 - [x] T113 修复 run `31182847863` 的 macOS arm64 DMG 原生依赖构建失败：在 pnpm `allowBuilds` 中精确启用 Forge DMG 调用链所需的 `fs-xattr` 与 `macos-alias`，并让 `verify-pnpm-builds.mjs` 按平台检查必需 allowlist；macOS runner 在 Forge make 前必须实际加载 `xattr.node` 与 `volume.node`，避免安装脚本被跳过后延迟到 DMG 阶段才失败。保持 Windows/Ubuntu/Docker workflow、Forge fuse、ad-hoc codesign 与不上传制品边界不变（FR-011、FR-023、SC-012、SC-013）。
 
 - [x] T114 修复 run `31189411763` 在 DMG make 成功后的 manifest 路径失败：macOS workflow 从绝对 workspace root 查找 DMG 和 `darwin-arm64` package directory，再将绝对路径传给以 `pnpm --dir apps/desktop` 执行的 manifest/artifact verifier；CI governance test 锁定该 cwd 边界。保持 artifact 内容、上传/分发、签名和其他 job 不变（FR-011、FR-023、SC-012、SC-013）。
+- [x] T120 修复生产服务器实测发现的 port-probe 误判：当 Docker Compose 对仅 `expose` 的 PostgreSQL `5432` 或 project-assistant-service `8788` 输出 `invalid IP:0` 并以失败状态退出时，`verify-production.sh` 只忽略该失败输出，仍拒绝任何成功返回的宿主机端口映射；补充 Linux deployment-host regression test 和生产部署文档，且不修改 Compose 网络边界或生产 env（FR-023）。
 
 **Checkpoint**: 审计发现的本地实现与 release-verifier 缺口已关闭；公开发布仍必须等待维护者部署、production verifier 与双平台 fresh-install smoke。
 

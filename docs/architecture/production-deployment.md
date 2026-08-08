@@ -344,9 +344,12 @@ AI_MIND_DESKTOP_CANDIDATE_VERSION=<strict-semver> \
 
 The script checks the desktop compatibility response, `Cache-Control: no-store`, the
 absence of `Set-Cookie`, and the CSP/security headers for `/` and `/instant-mind`,
-including nonce-restricted scripts and the scoped `style-src-attr` layout exception. The
-candidate version is a release-verification input only. It is not a desktop runtime
-Origin override and must not be stored in a distributed artifact.
+including nonce-restricted scripts and the scoped `style-src-attr` layout exception. It
+also verifies that PostgreSQL `5432` and project-assistant-service `8788` have no host
+port mapping; only a successful `docker compose port` result counts as a mapping, so a
+Compose failure message is never misread as one. The candidate version is a
+release-verification input only. It is not a desktop runtime Origin override and must not
+be stored in a distributed artifact.
 
 Only after that server-first gate passes may the same commit produce a Windows x64 and
 macOS arm64 unsigned public Beta installer/DMG, platform-specific `desktop-release.json`

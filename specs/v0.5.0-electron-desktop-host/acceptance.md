@@ -160,6 +160,12 @@ change T071/T072.
 - 2026-08-05 的 `404` 探测保留为历史证据，不作为当前公开 Beta 候选的生产验证结果。
 - 2026-08-08 已重新通过 `pnpm --filter @ai-mind/desktop test:stable`（103 tests）和 `node --test scripts/validate/validate-ci-workflow.test.mjs`（4 tests）。
 
+## Production Verifier Port-Probe Remediation: 2026-08-08
+
+维护者在固定 production Origin 执行 T072 前的 `verify-production.sh` 时，所有容器健康、Desktop compatibility API 和 document security headers 均已通过。`docker compose ps` 与渲染后的 Compose 配置显示 PostgreSQL 仅为 `5432/tcp`、project-assistant-service 仅为 `8788/tcp`，二者没有 `host->container` 端口映射；但该服务器的 Docker Compose 在查询仅 `expose` 的端口时输出 `invalid IP:0` 并以失败状态退出。旧 verifier 保留了这段失败 stdout，因而把它误判为宿主机映射。
+
+该探测是脚本误报，不构成 T072 通过证据，也不记录任何环境变量或 secret。T120 将端口探测改为只接受 `docker compose port` 的成功输出，并以 Linux regression test 锁定“CLI 失败无映射、成功映射仍失败”的行为。维护者需将包含 T120 的同一候选重新部署后，再运行 T072。
+
 ## Public Beta Spec Recovery Validation: 2026-08-08
 
 | Gate                           | Result | Evidence                                                                                |
