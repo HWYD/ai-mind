@@ -1,6 +1,6 @@
 # Contract: Desktop Host Security Policy
 
-**Feature**: v0.5.0 Electron Desktop Host  
+**Feature**: v0.5.0 Electron Desktop Host
 **Status**: Planned v1 host policy
 
 ## Trust Zones
@@ -114,4 +114,4 @@ Blob URL 在 save dialog 确认前失效，或下载在此期间中断时，Desk
 
 ## Packaging Fuses
 
-v0.5.0 public-beta artifact 必须启用 `EnableCookieEncryption`、`EnableEmbeddedAsarIntegrityValidation` 和 `OnlyLoadAppFromAsar`，并禁用 `RunAsNode`、`EnableNodeOptionsEnvironmentVariable` 与 `EnableNodeCliInspectArguments`。产物验证脚本读取实际 fuse 状态，并枚举每个 `app.asar` 的真实条目以拒绝 `.env`、私钥和签名凭据，而不只检查配置源文件；这些安全要求不因制品未签名而降低。
+v0.5.0 公开 Beta artifact 必须启用 `EnableCookieEncryption`、`EnableEmbeddedAsarIntegrityValidation` 和 `OnlyLoadAppFromAsar`，并禁用 `RunAsNode`、`EnableNodeOptionsEnvironmentVariable` 与 `EnableNodeCliInspectArguments`。产物验证脚本读取实际 fuse 状态，并枚举每个 `app.asar` 的真实条目以拒绝 `.env`、私钥和签名凭据，而不只检查配置源文件；这些安全要求不因制品未签名而降低。

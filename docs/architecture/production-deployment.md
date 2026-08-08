@@ -333,7 +333,7 @@ Conversation B: 我喜欢吃什么
 
 Electron desktop public beta is not a third production deployment flow. The webapp
 changes required by the desktop host are deployed only through one of the two existing
-server flows above. Before a Windows preview artifact is generated or distributed, the
+server flows above. Before a public Beta release is created, the
 same candidate commit must pass the following production verification against the fixed
 origin:
 
@@ -348,13 +348,14 @@ including nonce-restricted scripts and the scoped `style-src-attr` layout except
 candidate version is a release-verification input only. It is not a desktop runtime
 Origin override and must not be stored in a distributed artifact.
 
-Only after that server-first gate passes may the same commit produce the public
-`Unsigned Experimental Preview` Windows x64 installer, macOS arm64 DMG, platform
-manifests, and SHA-256 files for a GitHub Pre-release. Ordinary CI may run package
-checks earlier, but must not create a public Release or access production secrets.
+Only after that server-first gate passes may the same commit produce a Windows x64 and
+macOS arm64 unsigned public Beta installer/DMG, platform-specific `desktop-release.json`
+files, and SHA-256 files for a GitHub Pre-release. CI may run non-distributable
+`make:windows` package checks earlier, but must not generate, upload, or label public
+release assets.
 
 If a server rollback removes the compatibility API or document security headers, suspend
-distribution of every affected preview candidate before the rollback. Installed clients
+distribution of every affected GitHub Pre-release before the rollback. Installed clients
 remain fail-closed in local recovery; do not add an HTTP fallback, alternate Origin, or
 remote upgrade URL.
 
