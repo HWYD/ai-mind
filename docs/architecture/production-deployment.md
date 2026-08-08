@@ -346,8 +346,8 @@ The script checks the desktop compatibility response, `Cache-Control: no-store`,
 absence of `Set-Cookie`, and the CSP/security headers for `/` and `/instant-mind`,
 including nonce-restricted scripts and the scoped `style-src-attr` layout exception. It
 also verifies that PostgreSQL `5432` and project-assistant-service `8788` have no host
-port mapping; only a successful `docker compose port` result counts as a mapping, so a
-Compose failure message is never misread as one. The candidate version is a
+port mapping; only output matching a real `host:port` binding counts as a mapping, so a
+Compose diagnostic such as `invalid IP:0` is never misread as one. The candidate version is a
 release-verification input only. It is not a desktop runtime Origin override and must not
 be stored in a distributed artifact.
 

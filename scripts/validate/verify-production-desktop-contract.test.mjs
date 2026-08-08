@@ -26,7 +26,6 @@ case "$*" in
             printf '%s\\n' '0.0.0.0:5432'
         else
             printf '%s\\n' 'invalid IP:0'
-            exit 1
         fi
         ;;
     *" port project-assistant-service 8788")
@@ -34,7 +33,6 @@ case "$*" in
             printf '%s\\n' '0.0.0.0:8788'
         else
             printf '%s\\n' 'invalid IP:0'
-            exit 1
         fi
         ;;
     *" port webapp 3000")
@@ -101,7 +99,7 @@ const supportedDocumentCsp =
     "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 
 test(
-    'production verifier accepts only the current document CSS CSP policy',
+    'production verifier enforces the document CSS and host-port policies',
     { skip: process.platform === 'win32' ? 'production verifier runs on the Linux deployment host' : false },
     async t => {
         const testDirectory = await mkdtemp(path.join(tmpdir(), 'ai-mind-production-verifier-'))
