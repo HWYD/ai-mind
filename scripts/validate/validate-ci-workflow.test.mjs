@@ -132,6 +132,7 @@ test('keeps public beta publishing manual and gated on operator verification', (
     assert.match(publicPreviewWorkflow, /actions\/download-artifact@v4/)
     assert.match(publicPreviewWorkflow, /gh release create/)
     assert.match(publicPreviewWorkflow, /--prerelease/)
+    assert.match(publicPreviewWorkflow, /--target "\$SOURCE_COMMIT"/)
     assert.match(publicPreviewWorkflow, /preview:make/)
     assert.match(publicPreviewWorkflow, /preview:make:macos-arm64/)
     assert.match(publicPreviewWorkflow, /Unsigned Experimental Preview/)
