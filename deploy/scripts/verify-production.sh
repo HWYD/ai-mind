@@ -130,10 +130,12 @@ published_port() {
     local container_port="$2"
     local output
 
-    # 某些 Docker Compose 版本在服务仅使用 expose 时会输出错误文本但退出失败；
-    # 失败输出不是宿主机端口映射，只有成功结果才参与安全判断。
+    # 某些 Docker Compose 版本在服务仅使用 expose 时会输出 invalid IP:0；
+    # 只有符合 host:port 的结果才算宿主机端口映射。
     if output="$(compose port "$service" "$container_port" 2>/dev/null)"; then
-        printf '%s' "$output"
+        if printf '%s\n' "$output" | grep -Eq '^([0-9A-Fa-f:.]+|\[[0-9A-Fa-f:]+\]):[0-9]+$'; then
+            printf '%s' "$output"
+        fi
     fi
 }
 
