@@ -1,7 +1,7 @@
 # Contract: Desktop Host Security Policy
 
 **Feature**: v0.5.0 Electron Desktop Host
-**Status**: Planned v1 host policy
+**Status**: Implemented v1 host policy; packaged manual acceptance evidence pending
 
 ## Trust Zones
 

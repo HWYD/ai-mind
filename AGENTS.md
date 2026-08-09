@@ -43,7 +43,6 @@
 - `docs/adr/` 和 `docs/architecture/` 是长期架构约束区，不只是展示文档。
 - `docs/versions/`、`docs/releases/`、`docs/tasklists/` 是公开展示区，不是默认开发任务源。
 - `private-folder/` 是草稿、历史、个人内部材料和博客 / 面试素材区，不是默认开发事实源。
-- 如果本地维护 `project-agent-config.yaml`，其中的 `current_version` 表示最近收口版本，不等于当前一定正在开发的版本。
 - tasklist 的 `[x]` 是开发记录，不单独构成完成证据；仍要看 spec、实现、测试和实际 diff。
 
 ## 开始大改前先读什么
@@ -85,7 +84,6 @@
 - `docs/adr/` 与 `docs/architecture/`：长期架构决策和当前架构事实。
 - `docs/versions/`、`docs/releases/`、`docs/tasklists/`：公开展示文档。
 - `private-folder/`：草稿、历史、个人内部材料、博客素材和面试素材；默认不作为正式开发事实源。
-- `private-folder/study/`：面试材料与答题卡约束。
 - `docs/`：公开文档同步与公开化清理。
 
 专项长文规则统一放在 `.agents/rules/`，由各层 `AGENTS.md` 引用。
@@ -99,7 +97,7 @@
 3. 只实现当前 Step 所需的最小改动，并验证普通问答、状态洁净及相关旧链路不退化。
 4. 改动影响版本定位、能力边界、协议、数据库、GraphState、API 或对外理解时，同步 specs、ADR、architecture docs 和公开 docs。
 5. 版本功能和规格资产收口后，检查根 `README.md` 是否仍与真实实现一致。
-6. 正式版本收口时同步 package version；如果本地维护 `project-agent-config.yaml`，同时同步其中的 `current_version`。
+6. 正式版本收口时同步 lockstep package version。
 
 说明：
 

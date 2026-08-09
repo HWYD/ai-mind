@@ -198,7 +198,7 @@
 
 ### Foundational and Story Dependencies
 
-**Current execution order overrides historical task-number order**: complete Phase 1-9, the T070 convergence baseline, Phase 11 development follow-up (T076-T077, T086-T105), Phase 12 macOS arm64 extension, and Phase 12.5 pre-release audit remediation before starting Phase 13. T071-T075 are final operational release gates despite their lower numeric IDs.
+**Current execution order overrides historical task-number order**: complete Phase 1-9, the T070 convergence baseline, Phase 11 development follow-up (T076-T077, T086-T105), Phase 12 macOS arm64 extension, and Phase 12.5 pre-release audit remediation before Phase 13 can be accepted. T071-T075 are final operational release gates despite their lower numeric IDs; a published public preview does not mark any of them complete without the required evidence.
 
 ```text
 Phase 9 repository release preparation
@@ -338,7 +338,9 @@ Phase 1 Setup
 
 ## Phase 13: Final Operational Public Beta Release Closing
 
-**Purpose**: 全部代码、配置与平台扩展完成后，维护者完成同一 source commit 的部署、生产验证、公开 GitHub Pre-release 和双平台 fresh-install 证据链。任一 gate 未通过时不得创建或保留公开 Release。
+**Purpose**: 全部代码、配置与平台扩展完成后，维护者完成同一 source commit 的部署、生产验证、公开 GitHub Pre-release 和双平台 fresh-install 证据链，并据此完成 release closing。任一 gate 未通过或证据缺失时，公开 Release 不得被标记为已验收；若 server contract 缺失或回退，必须暂停对应 Release。
+
+**Observed external state (2026-08-08)**: `v0.5.0-public-beta` 已在 GitHub 公开发布，目标 commit 为 `a39dc9f4f7424dbf787a3df6219a93a069b82326`，见 <https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>。该事实只记录可下载预览资产；production verifier、双平台 fresh-install/overlay-install 矩阵和最终 sign-off 尚未在 acceptance ledger 中形成通过证据，T071-T075 必须保持未勾选。
 
 - [ ] T071 在不混入无关工作树变更的前提下，将包含公开 Beta Workflow 的 v0.5.0 source commit 合并到 `main`，并通过既有 GitHub Actions Release (TCR) 或 Local PowerShell Ops -> TCR -> server 路径部署同一 commit；不得创建第三条 deploy route 或读取/输出生产 secret（FR-002、FR-011、FR-013；external owner）。
 - [ ] T072 在 fixed production Origin 对 T071 的同一 candidate 运行 `/srv/ai-mind/scripts/verify-production.sh`，传入严格 semver `AI_MIND_DESKTOP_CANDIDATE_VERSION=0.5.0`；记录脱敏 API/CSP/header 结果。未通过时不得创建公开 Release（FR-013、SC-011；external owner）。

@@ -23,7 +23,7 @@
 
 ## 改动前优先看
 
-- 对应版本的 `private-folder/plans/` 和 `private-folder/tasklists/`
+- 对应 canonical `specs/<version-topic>/` 中的 `spec.md`、`plan.md` 与 `tasks.md`
 - `apps/webapp/lib/ai/runtime/`
 - `apps/webapp/lib/ai/model-provider/`
 - 如涉及 Agent：`apps/webapp/lib/ai/runtime/version-plan-tasklist-agent/`

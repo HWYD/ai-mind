@@ -155,9 +155,11 @@ change T071/T072.
 
 ## Current Public Beta Status
 
-- 维护者已将此前 v0.5.0 桌面宿主代码合并到 `main` 并部署线上。
-- 当前分支的 `public-beta` metadata、公开发布 Workflow 与本次规格恢复仍待合并；它们部署后才构成可运行生产 verifier 的同一候选 commit。
-- 2026-08-05 的 `404` 探测保留为历史证据，不作为当前公开 Beta 候选的生产验证结果。
+- `v0.5.0-public-beta` 已于 2026-08-08 发布为公开 GitHub Pre-release，目标 commit 为 `a39dc9f4f7424dbf787a3df6219a93a069b82326`：<https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>。
+- 发布页包含 9 个 assets：Windows x64 安装器、macOS arm64 DMG、每个平台的 manifest 与 SHA-256、安装说明和 README。它们是未签名的 `Unsigned Experimental Preview`，不包含自动更新或正式签名承诺。
+- 2026-08-05 的 `404` 探测保留为历史证据，不作为当前公开预览的 production verification 结果；它也不会因后续资产发布而自动变为通过。
+- 用户于 2026-08-09 提供的 Windows 桌面截图显示，已安装应用能进入工作区并显示既有 Agent Graph 执行过程。这是 UI 可见性的部分观察，未记录 Windows 版本、安装器 hash、fresh/overlay 安装步骤、恢复或安全拒绝结果，不能替代 T074 手工矩阵。
+- 当前 acceptance ledger 未记录同一候选的 production verifier 结果、Windows/macOS arm64 fresh-install 与 overlay-install 手工矩阵，或最终角色 sign-off。因此公开预览已可获得，但 v0.5.0 release closing 仍为 **Not accepted**。
 - 2026-08-08 已重新通过 `pnpm --filter @ai-mind/desktop test:stable`（103 tests）和 `node --test scripts/validate/validate-ci-workflow.test.mjs`（4 tests）。
 
 ## Production Verifier Port-Probe Remediation: 2026-08-08
@@ -180,19 +182,19 @@ change T071/T072.
 
 ## Release Decision
 
-| Gate                        | Required evidence                                                                                                  | Result                          | Evidence reference                                                                                          |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Scope                       | Windows x64 与 macOS arm64、online host、`public-beta`、`unsigned`；无 auto-update、正式签名/公证或本地 AI Runtime | Pass (repository review)        | T069 audit; T115-T119 public Beta release workflow; operational evidence pending                            |
-| Automated quality           | `pnpm lint`、`pnpm typecheck`、`pnpm test:stable`、`pnpm build` 通过                                               | Pass                            | Closing Evidence: 2026-08-05                                                                                |
-| Desktop remediation quality | Current desktop typecheck/lint/stable/integration and governance tests pass                                        | Pass locally                    | Pre-release Audit Remediation Evidence: 2026-08-06                                                          |
-| Windows desktop lane        | locked install、desktop unit、development Electron integration、不可分发 `make:windows`、fuse/package audit 通过   | Pass                            | Run `31190520337`, job `92906756031`                                                                        |
-| macOS arm64 desktop lane    | native locked install、desktop unit/integration、不可分发 DMG、architecture/fuse/package audit 通过                | Pass                            | Run `31190520337`, job `92906756122`                                                                        |
-| Server-first gate           | production compatibility API 与 document security headers 已由既有 server deploy route 上线并验证                  | Not run for current candidate   | Historical 2026-08-05 probe returned 404; re-run T072 after merging and deploying the public Beta candidate |
-| Public Beta assets          | 仅在 server-first gate 通过后，创建同一 commit 的 GitHub Pre-release、安装器、平台 manifest 与 SHA-256             | Not run                         | -                                                                                                           |
-| Manual smoke                | fresh install、overlay install、核心场景和安全拒绝场景完成                                                         | Not run                         | -                                                                                                           |
-| Spec closing                | T068 spec drift 同步、`speckit-analyze`、阶段工程审计和 `speckit-converge` 已完成                                  | Pass with operational follow-up | T069; Phase 10 T070-T075                                                                                    |
+| Gate                        | Required evidence                                                                                                  | Result                          | Evidence reference                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Scope                       | Windows x64 与 macOS arm64、online host、`public-beta`、`unsigned`；无 auto-update、正式签名/公证或本地 AI Runtime | Pass (repository review)        | T069 audit; T115-T119 public Beta release workflow; operational evidence pending                                                                     |
+| Automated quality           | `pnpm lint`、`pnpm typecheck`、`pnpm test:stable`、`pnpm build` 通过                                               | Pass                            | Closing Evidence: 2026-08-05                                                                                                                         |
+| Desktop remediation quality | Current desktop typecheck/lint/stable/integration and governance tests pass                                        | Pass locally                    | Pre-release Audit Remediation Evidence: 2026-08-06                                                                                                   |
+| Windows desktop lane        | locked install、desktop unit、development Electron integration、不可分发 `make:windows`、fuse/package audit 通过   | Pass                            | Run `31190520337`, job `92906756031`                                                                                                                 |
+| macOS arm64 desktop lane    | native locked install、desktop unit/integration、不可分发 DMG、architecture/fuse/package audit 通过                | Pass                            | Run `31190520337`, job `92906756122`                                                                                                                 |
+| Server-first gate           | production compatibility API 与 document security headers 已由既有 server deploy route 上线并验证                  | Not accepted                    | 当前 acceptance ledger 没有同一候选的 T072 production verifier record；2026-08-05 404 仅为历史失败证据                                               |
+| Public Beta assets          | 同一 commit 的 GitHub Pre-release、安装器、平台 manifest 与 SHA-256                                                | Published, not accepted         | [`v0.5.0-public-beta`](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta), target `a39dc9f4f7424dbf787a3df6219a93a069b82326`, 9 assets |
+| Manual smoke                | fresh install、overlay install、核心场景和安全拒绝场景完成                                                         | Not run                         | -                                                                                                                                                    |
+| Spec closing                | T068 spec drift 同步、`speckit-analyze`、阶段工程审计和 `speckit-converge` 已完成                                  | Pass with operational follow-up | T069; Phase 10 T070-T075                                                                                                                             |
 
-**Release decision**: 在所有门禁通过且证据已关联前，不得手动创建公开 GitHub Pre-release。
+**Release decision**: 公开 `v0.5.0-public-beta` 的存在不等于 release closing 已通过。只有所有门禁通过且证据已关联后，才可将该预览标记为已验收；在此之前，它必须保持未签名实验预览定位。若 server contract 缺失或回退，必须先暂停对应 Pre-release。
 
 ## Environment Record
 
@@ -206,20 +208,22 @@ change T071/T072.
 
 每个公开 Beta 候选只记录必要的 release 审计字段。三个角色可以由同一获授权人员承担，但都必须明确记录；不记录用户名、cookie、聊天、Prompt、secret、原始错误或文件路径。
 
-| Source commit | Version owner role | Server deploy operator role | GitHub Pre-release publisher role | Installer | Manifest | SHA-256 file | Release URL | Result  |
-| ------------- | ------------------ | --------------------------- | --------------------------------- | --------- | -------- | ------------ | ----------- | ------- |
-| -             | -                  | -                           | -                                 | -         | -        | -            | -           | Not run |
+| Source commit                              | Version owner role | Server deploy operator role | GitHub Pre-release publisher role | Installer         | Manifest              | SHA-256 file         | Release URL                                                                           | Result                  |
+| ------------------------------------------ | ------------------ | --------------------------- | --------------------------------- | ----------------- | --------------------- | -------------------- | ------------------------------------------------------------------------------------- | ----------------------- |
+| -                                          | -                  | -                           | -                                 | -                 | -                     | -                    | -                                                                                     | Not run                 |
+| `a39dc9f4f7424dbf787a3df6219a93a069b82326` | Not recorded       | Not recorded                | Not recorded                      | Windows x64 Setup | win32-x64 manifest    | win32-x64 SHA-256    | [v0.5.0-public-beta](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) | Published, not accepted |
+| `a39dc9f4f7424dbf787a3df6219a93a069b82326` | Not recorded       | Not recorded                | Not recorded                      | macOS arm64 DMG   | darwin-arm64 manifest | darwin-arm64 SHA-256 | [v0.5.0-public-beta](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) | Published, not accepted |
 
 ## Success-Criteria Evaluation Set
 
 对每个候选，SC-001、SC-003、SC-007 与 SC-011 必须按照 `spec.md` 的固定样本集逐行记录；所有列均为 Pass 才能将相应的“100%”或启动目标视为达成。
 
-| Criterion | Required sample                                                                              | Evidence reference | Result  |
-| --------- | -------------------------------------------------------------------------------------------- | ------------------ | ------- |
-| SC-001    | Fresh install + fresh desktop profile on a recorded Windows x64 host                         | -                  | Not run |
-| SC-003    | New/existing desktop session, existing web session, rejected or expired session              | -                  | Not run |
-| SC-007    | Fresh install, same-product overlay install, confirmed reset, reset recheck                  | -                  | Not run |
-| SC-011    | Installer, manifest, SHA-256, GitHub Pre-release URL and native About use one commit/version | -                  | Not run |
+| Criterion | Required sample                                                                              | Evidence reference                                                                                     | Result       |
+| --------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------ |
+| SC-001    | Fresh install + fresh desktop profile on a recorded Windows x64 host                         | -                                                                                                      | Not run      |
+| SC-003    | New/existing desktop session, existing web session, rejected or expired session              | -                                                                                                      | Not run      |
+| SC-007    | Fresh install, same-product overlay install, confirmed reset, reset recheck                  | -                                                                                                      | Not run      |
+| SC-011    | Installer, manifest, SHA-256, GitHub Pre-release URL and native About use one commit/version | Public assets are published; native About and full cross-platform acceptance evidence are not recorded | Not accepted |
 
 ## Automated Acceptance
 

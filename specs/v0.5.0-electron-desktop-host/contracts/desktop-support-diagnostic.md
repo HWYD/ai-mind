@@ -1,7 +1,7 @@
 # Contract: Desktop Support Diagnostic
 
 **Feature**: v0.5.0 Electron Desktop Host  
-**Status**: Planned v1 local-only contract
+**Status**: Implemented v1 local-only contract; packaged manual acceptance evidence pending
 
 ## Purpose
 

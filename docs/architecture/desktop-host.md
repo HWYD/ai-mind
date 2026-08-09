@@ -39,11 +39,11 @@ v0.5.0 为既有在线 AI Mind Web 应用增加 Windows x64 与 macOS arm64 的 
 
 ## 发布边界
 
-应用使用 Electron Forge Webpack、Windows x64 的 Squirrel.Windows 和 macOS arm64 的 DMG maker。fuses 在打包后写入，并针对真实 executable 验证。macOS `.app` 在修改 fuse 后仅进行 ad-hoc re-sign，以保持本地可执行；这不是 Developer ID 签名。v0.5.0 制品未签名，以 `Unsigned Experimental Preview` 的公开 Beta 形式随平台化 `desktop-release.json` 和 SHA-256 在 GitHub Pre-release 提供；拒绝 macOS Intel 与 universal binary。
+应用使用 Electron Forge Webpack、Windows x64 的 Squirrel.Windows 和 macOS arm64 的 DMG maker。fuses 在打包后写入，并针对真实 executable 验证。macOS `.app` 在修改 fuse 后仅进行 ad-hoc re-sign，以保持本地可执行；这不是 Developer ID 签名。`v0.5.0-public-beta` 已以 `Unsigned Experimental Preview` 的公开 Beta 形式随平台化 `desktop-release.json` 和 SHA-256 在 GitHub Pre-release 提供：<https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>；拒绝 macOS Intel 与 universal binary。
 
 发布 fuse baseline 同时禁用 `LoadBrowserProcessSpecificV8Snapshot`：Electron 43 提供 `v8_context_snapshot.bin`，未提供启用 browser-specific mode 所需的 `browser_v8_context_snapshot.bin`。这项可选优化会导致应用在 main process 执行前退出，因此真实 executable 的 fuse 检查必须拒绝其启用状态。
 
-服务端 compatibility 和 document headers 必须先部署并验证；contract 缺失或回退会暂停相关 GitHub Pre-release，客户端保持 fail closed。生产验证器只接受 `style-src 'self' 'unsafe-inline'`，并拒绝 style nonce、hash 和 `style-src-attr`。制品可被接受前，验证器还会枚举每个真实 `app.asar` 条目，拒绝敏感文件名与禁止的发布内容，而不把 archive 当作不透明文本。
+服务端 compatibility 和 document headers 必须先部署并验证；contract 缺失或回退会暂停相关 GitHub Pre-release，客户端保持 fail closed。生产验证器只接受 `style-src 'self' 'unsafe-inline'`，并拒绝 style nonce、hash 和 `style-src-attr`。制品可被接受前，验证器还会枚举每个真实 `app.asar` 条目，拒绝敏感文件名与禁止的发布内容，而不把 archive 当作不透明文本。当前公开预览的 production verifier、双平台 fresh-install/overlay-install 与最终 sign-off 证据尚未在验收台账中通过，因此公开可获得不等于 release closing 已完成。
 
 ## 参考资料
 

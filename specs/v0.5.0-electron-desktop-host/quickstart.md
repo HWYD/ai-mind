@@ -35,12 +35,12 @@
 在实际 package script 落地后，保持下列命令语义。这里的命令名是目标接口；若现有 monorepo script 命名要求调整，必须同步本文件、根脚本与 CI。
 
 ```powershell
-# 现有线上服务开发栈
-pnpm dev:webapp:db
+# 推荐的桌面联调入口：准备本地数据库并同时启动 Webapp 与 Electron
+pnpm dev:desktop
 
-# 另一个终端：默认连接本机开发服务
+# 仅启动 Electron；前提是兼容的 Webapp 已经监听在开发 Origin（默认 http://localhost:3000）
 pnpm --filter @ai-mind/desktop start
-# Forge Webpack renderer dev server uses http://localhost:3001; the webapp remains on port 3000.
+# Forge renderer dev server 由 Forge 管理，与 Webapp 开发端口分离；不要把它作为 Webapp Origin。
 
 # desktop 单元/集成验证与不可分发的 Windows/macOS package 检查
 pnpm --filter @ai-mind/desktop test:stable
@@ -79,6 +79,14 @@ fail-closed; do not add an alternate Origin, HTTP fallback, or upgrade URL.
 `start` 与 `dev` 通过 Node 22 原生 `process.loadEnvFile()` 加载可选的 `apps/desktop/.env.local`，并在该文件或 shell 变量均未设置时只为 Forge 开发进程使用 `http://localhost:3000`。从 `apps/desktop/.env.example` 复制该文件后，可将 `AI_MIND_DESKTOP_DEV_ORIGIN` 改为另一 localhost/127.0.0.1 HTTP Origin；shell 变量优先，现有 build config 会拒绝其他值。Electron Forge 本身不自动加载 `.env`。该文件不由 `make`、`preview:make` 或 packaged Electron 读取，不能作为 production Origin override。
 
 不要用 `NODE_TLS_REJECT_UNAUTHORIZED=0`、`--ignore-certificate-errors`、`--no-sandbox`、production URL env override 或任意 Node HTTP client 绕过桌面网络测试。
+
+### Current Public Preview Status
+
+`v0.5.0-public-beta` 已于 2026-08-08 以公开 GitHub Pre-release 发布，目标 commit 为
+`a39dc9f4f7424dbf787a3df6219a93a069b82326`：<https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>。
+它提供 Windows x64 安装器、macOS arm64 DMG、平台 manifest、SHA-256 与安装说明，但不表示
+release closing 已通过。production verifier、双平台 fresh-install/overlay-install 手工证据和最终
+sign-off 仍未记录为通过；预览制品仍是未签名的 `Unsigned Experimental Preview`。
 
 ## 5. Mandatory Automated Verification
 

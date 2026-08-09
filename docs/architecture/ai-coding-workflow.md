@@ -158,7 +158,7 @@ Spec Kit full skills 是复杂变更的默认执行入口，不是所有任务�
 - 当前版本 docs 和 release note 反映真实行为。
 - 架构决策已有 ADR。
 - README 已评估是否需要更新当前版本、能力和 Roadmap。
-- package version 与本地维护的 `project-agent-config.yaml` 在 release 版本中保持同步。
+- lockstep package version 在 release 版本中保持同步。
 - 已知验证缺口被明确记录。
 
 ## 常见判断

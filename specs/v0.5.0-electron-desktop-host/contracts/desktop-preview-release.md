@@ -1,11 +1,13 @@
 # Contract: Desktop Public Beta Release
 
 **Feature**: v0.5.0 Electron Desktop Host
-**Status**: 公开发布 Workflow 已实现；运营证据待维护者完成
+**Status**: `v0.5.0-public-beta` 已发布；release-closing 运营证据仍未验收
 
 ## Scope
 
 此契约适用于 Windows x64 与 macOS arm64 的 v0.5.0 `Unsigned Experimental Preview`。Windows 产出 Squirrel 安装包，macOS 产出 DMG；制品通过公开 GitHub Pre-release 提供，均为未签名且不启用自动更新、Apple Developer ID 签名或 notarization。macOS 为保留 Electron fuses 而进行的 ad-hoc 重签名不构成发布者签名。
+
+已观察到的公开预览是 `v0.5.0-public-beta`，发布于 2026-08-08，目标 commit 为 `a39dc9f4f7424dbf787a3df6219a93a069b82326`：<https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>。该发布包含 9 个 assets，覆盖两种平台制品、平台 manifest、SHA-256、安装说明和 README；它不替代 production verifier、双平台手工 smoke 与最终 sign-off 的验收记录。
 
 ## Responsibilities and Audit Record
 

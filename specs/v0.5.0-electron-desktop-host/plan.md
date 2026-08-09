@@ -234,13 +234,19 @@ CI 维持现有 Ubuntu web 车道，并新增 Windows x64 与 macOS arm64 deskto
 6. Phase 14：完成 public-beta metadata、公开发布 Workflow、中文文档和本地验证（T115-T119）。
 7. Phase 13：仅在前述代码和质量门禁全部完成后，由维护者执行 source commit 合并、既有 server deploy、production verification、公开 GitHub Pre-release、双平台 fresh-install smoke 和最终 sign-off（T071-T075）。
 
-T071-T075 的编号保留为历史追溯标识，不能据编号跳过 Phase 11、Phase 12、remediation 或 Phase 14；它们是当前版本唯一尚未开始的运营发布路径。
+T071-T075 的编号保留为历史追溯标识，不能据编号跳过 Phase 11、Phase 12、remediation 或 Phase 14；它们是当前版本唯一尚未验收的运营 release-closing gates。公开预览资产已经发布这一外部事实，不等同于这些 gates 已通过。
 
 ### Current Evidence Status
 
-维护者已将此前 v0.5.0 代码合并到 `main` 并部署线上；本工作区新增的 public-beta
-metadata 与公开发布 Workflow 尚待合并和部署。当前生产 verifier、公开 GitHub
-Pre-release 与 Windows/macOS arm64 fresh-install 证据均未执行。只有包含 T115-T119
-的同一 candidate 被部署并通过 `verify-production.sh` 后，维护者才能手动创建公开 Release。
+`v0.5.0-public-beta` 已于 2026-08-08 发布为公开 GitHub Pre-release，目标 commit 为
+`a39dc9f4f7424dbf787a3df6219a93a069b82326`，包含 Windows x64 安装器、macOS arm64 DMG、
+平台 manifest、SHA-256、安装说明和 README 共 9 个 assets：
+<https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>。
+
+该发布记录只证明预览资产可获得，不替代 T071-T075 所要求的证据链。当前 acceptance ledger
+尚未记录同一候选的 production verifier 结果、Windows/macOS arm64 fresh-install 与
+overlay-install 手工矩阵，以及最终角色 sign-off；因此 v0.5.0 release closing 仍为
+**Not accepted**。若 production compatibility 或 document-header contract 缺失或回退，
+必须暂停对应 Pre-release，已安装客户端继续 fail closed。
 
 无宪法例外。`apps/desktop` 是 v0.5.0 的产品边界，不是为了抽象而新增的通用 Runtime；本地恢复页与远程工作页分开是限制特权暴露所必需的安全隔离。

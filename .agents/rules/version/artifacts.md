@@ -50,7 +50,6 @@
 - 根 `package.json`
 - `apps/*/package.json`
 - `packages/*/package.json`
-- `private-folder/agent-config/project-agent-config.yaml` 的 `current_version`（如果本地维护该配置）
 
 格式约定：
 

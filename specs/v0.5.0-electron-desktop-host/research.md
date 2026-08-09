@@ -330,8 +330,14 @@ Webpack configuration changes are only applied when the Forge development proces
   v0.5.0 CSP/security headers. This proves the existing production server has not yet
   received the server-side v0.5.0 change; it is not a client compatibility fallback case.
 - The earlier implementation workspace was not yet committed at the time of this evidence.
-  Public Beta asset creation remains deferred until the manifest, installer, and
-  server-first verification reference one immutable source commit.
+  At that time, Public Beta asset creation remained deferred until the manifest, installer, and
+  server-first verification referenced one immutable source commit.
+
+**Superseded release-status note (2026-08-09)**: `v0.5.0-public-beta` was subsequently published
+on 2026-08-08 with target commit `a39dc9f4f7424dbf787a3df6219a93a069b82326`:
+<https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta>. This later publication does
+not make the historical 404 probe pass and does not replace the still-unaccepted production
+verifier, dual-platform manual smoke, or final sign-off evidence.
 
 涓嬪垪浜嬮」涓嶆敼鍙樻湰璁捐锛屼絾瀹炵幇鏃跺繀椤昏褰曚负鍙噸澶嶉獙璇佺殑浜嬪疄锛?
 

@@ -1,7 +1,7 @@
 # Contract: Web Security Headers
 
 **Feature**: v0.5.0 Electron Desktop Host  
-**Status**: Planned production web contract
+**Status**: Implemented production web contract; fixed-Origin verifier evidence pending
 
 ## Purpose
 

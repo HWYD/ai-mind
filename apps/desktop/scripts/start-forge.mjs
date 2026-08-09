@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
+const require = createRequire(import.meta.url)
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const desktopDirectory = path.resolve(scriptDirectory, '..')
-const forgeCli = path.join(desktopDirectory, 'node_modules', '@electron-forge', 'cli', 'dist', 'electron-forge.js')
+const forgeCli = require.resolve('@electron-forge/cli/dist/electron-forge.js')
 const localEnvironmentFile = path.join(desktopDirectory, '.env.local')
 
 if (existsSync(localEnvironmentFile)) {

@@ -1,7 +1,7 @@
 # Contract: Desktop Compatibility API
 
 **Feature**: v0.5.0 Electron Desktop Host  
-**Status**: Planned v1 public contract
+**Status**: Implemented v1 public contract; production acceptance evidence pending
 
 ## Purpose
 

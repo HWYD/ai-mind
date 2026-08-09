@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> v0.4.9：Monorepo Boundary and CI Validation Governance。在 v0.4.8 工程基线上，把 workspace 依赖/导入边界、稳定/集成/外部测试分层和 CI 先稳定后有状态的顺序固化为可执行约束，同时保持业务 Runtime 与生产部署契约不变。
+> v0.5.0：Electron Desktop Host。为既有在线 AI Mind Web 应用增加 Windows x64 与 macOS arm64 的受限 Electron 宿主；公开 [`v0.5.0-public-beta`](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) 提供未签名预览制品，但 production verifier、双平台手工安装证据和最终 sign-off 尚未完成，因此它不是已验收的正式桌面发行。
 
 ## 项目解决的问题
 
@@ -259,8 +259,10 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 v0.5.0 为既有在线 Web 应用增加 Windows x64 与 macOS arm64 Electron 桌面宿主。AI Runtime、会话、
 StreamRun recovery、图像和受控 Agent 仍由服务端与 Web 应用负责；桌面进程只承担固定 Origin 准入、
-本地恢复、profile 隔离和收紧的原生保存能力。本版通过 GitHub Pre-release 提供公开的
-`Unsigned Experimental Preview`，制品未签名、在线运行且不支持自动更新。
+本地恢复、profile 隔离和收紧的原生保存能力。公开
+[`v0.5.0-public-beta`](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) 目标 commit 为
+`a39dc9f4f7424dbf787a3df6219a93a069b82326`，提供 Windows x64 安装器、macOS arm64 DMG、平台 manifest、
+SHA-256、安装说明和 README，共 9 个 assets；制品未签名、在线运行且不支持自动更新。
 
 ### Public Beta 下载
 
@@ -268,8 +270,9 @@ StreamRun recovery、图像和受控 Agent 仍由服务端与 Web 应用负责�
 下载后先使用 Release 附带的 `desktop-release.json` 和 `.sha256` 校验文件核对 SHA-256。Windows
 可能出现 SmartScreen 未知发布者提示；macOS 首次启动可能需要在 Finder 中 Control-click 应用并选择“打开”。
 本版本不支持 Windows ARM64、macOS Intel/universal、Linux、离线运行或自动更新。
-任何预览制品生成或分发前，必须先通过线上 compatibility/header gate，并完成 Windows 与 macOS 的
-fresh install / overlay install smoke。详见 [v0.5.0 设计](./docs/versions/v0.5.0-electron-desktop-host.md)
+发布策略要求线上 compatibility/header gate、Windows/macOS 的 fresh install / overlay install smoke 和最终
+sign-off 均有可追溯证据。当前这些运营验收记录尚未完成，因而公开资产只能称为 `Unsigned Experimental Preview`，
+不能称为正式已验收发行。详见 [v0.5.0 设计](./docs/versions/v0.5.0-electron-desktop-host.md)
 和[发布记录](./docs/releases/v0.5.0.md)。
 
 桌面端开发建议使用根脚本，它会先准备本地数据库，再同时启动 Web 服务和 Electron：
@@ -281,6 +284,9 @@ pnpm dev:desktop
 未打包的桌面启动器默认连接 `http://localhost:3000`。如需使用其他 loopback Origin，可复制
 `apps/desktop/.env.example` 为 `.env.local`，仅修改 `AI_MIND_DESKTOP_DEV_ORIGIN`，或在当前 shell
 设置该变量。该文件不会被 `make`、`preview:make` 或已打包的 Electron 进程读取；生产 Origin 始终固定在应用代码中。
+
+`pnpm --filter @ai-mind/desktop start` 只启动 Electron。只有兼容的 Webapp 已在该 Origin 提供
+`/api/desktop/compatibility` 时，它才会进入工作区；单独执行且本地 Webapp 未运行时，应用按设计停在本地 recovery。
 
 ## Previous Version: v0.4.12
 
@@ -771,6 +777,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.10 | Resumable Agent Streams                            | 为普通聊天、Tasklist Agent 和 Delivery Chain 增加固定 envelope、幂等提交、同页断线恢复、显式取消和 bounded event retention                                                      |
 | v0.4.11 | Structured Supervisor Review Loop                  | 将 `/delivery-chain` 演进为拥有严格 Contract、Runtime 强制 Review Group 和一次受控返修的 ControlledDeliverySupervisor                                                           |
 | v0.4.12 | Image Generation Agent                             | 通过显式 `/image` 增加受控单张文生图：独立 LangGraph 图、固定 Provider、临时同源预览与下载                                                                                      |
+| v0.5.0  | Electron Desktop Host                              | 增加固定 Origin 的 Windows x64 / macOS arm64 Electron 宿主与公开未签名预览；生产与双平台手工验收仍在收口                                                                        |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

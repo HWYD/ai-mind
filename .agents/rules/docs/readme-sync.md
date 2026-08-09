@@ -159,12 +159,10 @@ README 应保留核心设计说明，至少覆盖：
 - 根 `package.json`
 - `apps/*/package.json`
 - `packages/*/package.json`
-- `private-folder/agent-config/project-agent-config.yaml` 的 `current_version`（如果本地维护该配置）
 
 同步规则：
 
 - 文档、release、runtime note、README 中使用 `vX.Y.Z`。
-- 如果本地维护 `project-agent-config.yaml`，其 `current_version` 使用 `vX.Y.Z`。
 - `package.json` 的 `version` 使用不带 `v` 的 `X.Y.Z`。
 - 未进入正式版本收口时，不提前 bump package version。
 - 历史文档、历史 fixture、mock 样例数据和明确描述旧版本能力的代码注释，不因为当前版本收口而批量改写。
@@ -329,6 +327,6 @@ README 应保留问答式设计说明，面向技术读者和技术面试官。
 - 是否没有 HelpKnow.ai、个人简历、用户数、Star 数等与项目无关或不可验证信息。
 - Roadmap 是否没有把计划项写成完成项。
 - 当前状态是否与最新 release / docs / 代码实现一致。
-- package versions 是否与当前版本一致；如果本地维护 `project-agent-config.yaml`，其 current_version 是否同步。
+- package versions 是否与当前版本一致。
 - 示例问题是否能被当前实现稳定触发。
 - docs / release / README 中的当前版本、能力边界和验证命令是否一致。
