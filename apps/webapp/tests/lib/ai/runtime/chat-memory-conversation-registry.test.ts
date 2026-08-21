@@ -111,18 +111,9 @@ describe('runtime/chat-memory conversation registry', () => {
         const registry = await service.ensureRegistry(sessionId)
 
         expect(registry.conversations).toHaveLength(CHAT_CONVERSATION_REGISTRY_LIMIT)
-        expect(registry.conversations.map(conversation => conversation.id)).toEqual([
-            'conv-10',
-            'conv-9',
-            'conv-8',
-            'conv-7',
-            'conv-6',
-            'conv-5',
-            'conv-4',
-            'conv-3',
-            'conv-2',
-            'conv-1',
-        ])
+        expect(registry.conversations.map(conversation => conversation.id)).toEqual(
+            Array.from({ length: CHAT_CONVERSATION_REGISTRY_LIMIT }, (_, index) => `conv-${CHAT_CONVERSATION_REGISTRY_LIMIT - index}`)
+        )
     })
 
     it('falls back to the conversation matching registry updatedAt when the stored selectedConversationId is stale', async () => {
@@ -169,25 +160,16 @@ describe('runtime/chat-memory conversation registry', () => {
                 lastActiveAt: `2026-07-04T08:${index.toString().padStart(2, '0')}:00.000Z`,
                 hasMessages: true,
             })),
-            updatedAt: '2026-07-04T08:10:00.000Z',
+            updatedAt: `2026-07-04T08:${CHAT_CONVERSATION_REGISTRY_LIMIT.toString().padStart(2, '0')}:00.000Z`,
         })
 
         const registry = await service.ensureRegistry(sessionId)
 
         expect(registry.conversations).toHaveLength(CHAT_CONVERSATION_REGISTRY_LIMIT)
-        expect(registry.conversations.map(conversation => conversation.id)).toEqual([
-            'conv-10',
-            'conv-9',
-            'conv-8',
-            'conv-7',
-            'conv-6',
-            'conv-5',
-            'conv-4',
-            'conv-3',
-            'conv-2',
-            'conv-1',
-        ])
-        expect(registry.selectedConversationId).toBe('conv-10')
+        expect(registry.conversations.map(conversation => conversation.id)).toEqual(
+            Array.from({ length: CHAT_CONVERSATION_REGISTRY_LIMIT }, (_, index) => `conv-${CHAT_CONVERSATION_REGISTRY_LIMIT - index}`)
+        )
+        expect(registry.selectedConversationId).toBe(`conv-${CHAT_CONVERSATION_REGISTRY_LIMIT}`)
     })
 
     it('drops legacy empty conversation entries instead of letting them stay in the persisted registry', async () => {

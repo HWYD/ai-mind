@@ -1,23 +1,55 @@
 'use client'
 
-import { Download, ImageIcon } from 'lucide-react'
+import { Download, ImageIcon, ImageOff } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
+import { readLocalImageResultCache, writeLocalImageResultCache } from '@/components/instamind/local-chat-persistence/store'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { AspectRatio } from '@/components/ui/aspect-ratio'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Skeleton } from '@/components/ui/skeleton'
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import type { ImageBriefPart, ImageResultPart as ImageResultPartModel } from '@/lib/ai/types/message'
+
+import { ImageGenerationPreviewPlaceholder } from './image-generation-preview-placeholder'
 
 type ResultState =
     | { status: 'idle' | 'loading' }
-    | { objectUrl: string; status: 'ready' }
+    | { objectUrl: string; source: 'cache' | 'temporary'; status: 'ready' }
     | { message: string; status: 'error' }
     | { status: 'expired' }
 
-export function ImageResultPart({ brief, enabled, part }: { brief?: ImageBriefPart; enabled: boolean; part: ImageResultPartModel }) {
+export function ImageGenerationLoadingResultCard({
+    aspectRatio,
+    height,
+    width,
+}: {
+    aspectRatio?: ImageBriefPart['summary']['aspectRatio']
+    height?: number
+    width?: number
+}) {
+    return (
+        <Card size="sm" className="mb-3 border-border/60 bg-card">
+            <ImageResultCardHeader cached={false} />
+            <CardContent>
+                <ImageGenerationPreviewPlaceholder aspectRatio={aspectRatio} className="mb-0" height={height} width={width} />
+            </CardContent>
+        </Card>
+    )
+}
+
+export function ImageResultPart({
+    brief,
+    conversationId,
+    enabled,
+    part,
+}: {
+    brief?: ImageBriefPart
+    conversationId?: string
+    enabled: boolean
+    part: ImageResultPartModel
+}) {
     const [state, setState] = useState<ResultState>({ status: 'idle' })
     const alt = useMemo(() => createSafeImageAlt(brief), [brief])
 
@@ -32,12 +64,24 @@ export function ImageResultPart({ brief, enabled, part }: { brief?: ImageBriefPa
                 return
             }
 
+            setState({ status: 'loading' })
+
+            const cachedResult = await readLocalImageResultCache(part.runId, conversationId)
+
+            if (!active) {
+                return
+            }
+
+            if (cachedResult.status === 'valid') {
+                objectUrl = URL.createObjectURL(cachedResult.data.blob)
+                setState({ objectUrl, source: 'cache', status: 'ready' })
+                return
+            }
+
             if (Date.parse(part.expiresAt) <= Date.now()) {
                 setState({ status: 'expired' })
                 return
             }
-
-            setState({ status: 'loading' })
 
             try {
                 const response = await fetch(part.contentPath, { signal: controller.signal })
@@ -52,7 +96,26 @@ export function ImageResultPart({ brief, enabled, part }: { brief?: ImageBriefPa
                 }
 
                 objectUrl = URL.createObjectURL(blob)
-                setState({ objectUrl, status: 'ready' })
+                setState({ objectUrl, source: 'temporary', status: 'ready' })
+
+                const mimeType = resolveImageMimeType(part, blob)
+
+                if (!mimeType) {
+                    return
+                }
+
+                void writeLocalImageResultCache({
+                    blob,
+                    conversationId,
+                    mimeType,
+                    runId: part.runId,
+                }).then(result => {
+                    if (active && result.status === 'written') {
+                        setState(current =>
+                            current.status === 'ready' && current.objectUrl === objectUrl ? { ...current, source: 'cache' } : current
+                        )
+                    }
+                })
             } catch (error) {
                 if (!active || (error instanceof DOMException && error.name === 'AbortError')) {
                     return
@@ -73,33 +136,24 @@ export function ImageResultPart({ brief, enabled, part }: { brief?: ImageBriefPa
                 URL.revokeObjectURL(objectUrl)
             }
         }
-    }, [enabled, part.contentPath, part.expiresAt])
+    }, [conversationId, enabled, part.contentPath, part.expiresAt, part.mimeType, part.runId])
+
+    if (state.status === 'idle' || state.status === 'loading') {
+        return <ImageGenerationLoadingResultCard aspectRatio={brief?.summary.aspectRatio} height={part.height} width={part.width} />
+    }
+
+    const cached = state.status === 'ready' && state.source === 'cache'
 
     return (
         <Card size="sm" className="mb-3 border-border/60 bg-card">
-            <CardHeader className="gap-2">
-                <div className="flex items-center gap-2">
-                    <ImageIcon className="size-4 text-sky-600" aria-hidden="true" />
-                    <CardTitle>生成结果</CardTitle>
-                    <Badge variant="outline">临时结果</Badge>
-                </div>
-                <p className="text-sm text-muted-foreground">请及时下载；关闭或刷新页面后不保证恢复。</p>
-            </CardHeader>
+            <ImageResultCardHeader cached={cached} />
             <CardContent>
                 {state.status === 'ready' ? (
-                    <AspectRatio ratio={previewRatio(part)} className="overflow-hidden rounded-lg bg-muted">
+                    <AspectRatio ratio={previewRatio(part, brief?.summary.aspectRatio)} className="overflow-hidden rounded-lg bg-muted">
                         <img src={state.objectUrl} alt={alt} className="size-full object-cover" />
                     </AspectRatio>
                 ) : null}
-                {state.status === 'idle' || state.status === 'loading' ? (
-                    <div className="space-y-3" role="status" aria-live="polite">
-                        <Skeleton className="aspect-square w-full rounded-lg sm:aspect-video" />
-                        <p className="text-sm text-muted-foreground">
-                            {enabled ? '正在准备临时图片预览…' : '图像生成完成后将准备临时预览。'}
-                        </p>
-                    </div>
-                ) : null}
-                {state.status === 'expired' ? <ExpiredImageAlert /> : null}
+                {state.status === 'expired' ? <ExpiredImagePlaceholder part={part} /> : null}
                 {state.status === 'error' ? <ImageErrorAlert message={state.message} /> : null}
             </CardContent>
             {state.status === 'ready' ? (
@@ -116,6 +170,33 @@ export function ImageResultPart({ brief, enabled, part }: { brief?: ImageBriefPa
     )
 }
 
+function ImageResultCardHeader({ cached }: { cached: boolean }) {
+    return (
+        <CardHeader className="gap-2">
+            <div className="flex items-center gap-2">
+                <ImageIcon className="size-4 text-sky-600" aria-hidden="true" />
+                <CardTitle>生成结果</CardTitle>
+                {cached ? <LocalCacheBadge /> : <Badge variant="outline">临时结果</Badge>}
+            </div>
+        </CardHeader>
+    )
+}
+
+function LocalCacheBadge() {
+    return (
+        <HoverCard openDelay={0}>
+            <HoverCardTrigger asChild>
+                <Badge variant="outline" tabIndex={0}>
+                    本地缓存
+                </Badge>
+            </HoverCardTrigger>
+            <HoverCardContent className="w-auto max-w-xs px-3 py-2 text-xs">
+                已保存在当前浏览器；清除本地数据或缓存淘汰后将无法恢复。
+            </HoverCardContent>
+        </HoverCard>
+    )
+}
+
 export function createSafeImageAlt(brief?: ImageBriefPart): string {
     if (!brief) {
         return 'AI Mind 生成的图片'
@@ -126,16 +207,31 @@ export function createSafeImageAlt(brief?: ImageBriefPart): string {
     return `AI Mind 生成的图片：${subjects}${scene}`
 }
 
-function previewRatio(part: ImageResultPartModel): number {
-    return part.width && part.height ? part.width / part.height : 1
+function previewRatio(part: ImageResultPartModel, aspectRatio?: ImageBriefPart['summary']['aspectRatio']): number {
+    return part.width && part.height
+        ? part.width / part.height
+        : aspectRatio === 'landscape'
+          ? 4 / 3
+          : aspectRatio === 'portrait'
+            ? 3 / 4
+            : 1
 }
 
-function ExpiredImageAlert() {
+function resolveImageMimeType(part: ImageResultPartModel, blob: Blob): 'image/jpeg' | 'image/png' | 'image/webp' | null {
+    const mimeType = part.mimeType ?? blob.type
+
+    return mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp' ? mimeType : null
+}
+
+function ExpiredImagePlaceholder({ part }: { part: ImageResultPartModel }) {
     return (
-        <Alert variant="destructive">
-            <AlertTitle>临时图片已过期</AlertTitle>
-            <AlertDescription>请重新发起 /image 生成新图片。</AlertDescription>
-        </Alert>
+        <AspectRatio ratio={previewRatio(part)} className="overflow-hidden rounded-lg border border-dashed border-border bg-muted/50">
+            <div className="flex size-full flex-col items-center justify-center gap-2 px-6 text-center" role="alert">
+                <ImageOff className="size-8 text-muted-foreground" aria-hidden="true" />
+                <p className="font-medium text-foreground">图片已失效</p>
+                <p className="text-sm text-muted-foreground">本地缓存已被清理，且临时图片已过期。请重新发起 /image。</p>
+            </div>
+        </AspectRatio>
     )
 }
 

@@ -2,16 +2,24 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { type LocalConversationMetadata, localConversationSnapshotSchema } from '@/components/instamind/local-chat-persistence/schema'
+import {
+    LOCAL_CHAT_RECENT_LIMIT,
+    type LocalConversationMetadata,
+    localConversationSnapshotSchema,
+} from '@/components/instamind/local-chat-persistence/schema'
 import { createLocalConversationSnapshot, projectRecoverableMessages } from '@/components/instamind/local-chat-persistence/stable-snapshot'
 import {
     createIndexFromRegistry,
     deleteLocalConversationSnapshots,
+    deleteLocalImageResultCaches,
+    LOCAL_IMAGE_RESULT_CACHE_MAX_COUNT,
     readLocalConversationIndex,
     readLocalConversationSnapshot,
+    readLocalImageResultCache,
     reconcileLocalConversationIndex,
     writeLocalConversationIndex,
     writeLocalConversationSnapshot,
+    writeLocalImageResultCache,
 } from '@/components/instamind/local-chat-persistence/store'
 import type { MindMessage } from '@/lib/ai/types/message'
 
@@ -56,12 +64,28 @@ function installFakeIndexedDB() {
             return request
         }
 
+        getAll() {
+            const request = {} as IDBRequest<unknown[]>
+
+            queueMicrotask(() => {
+                Object.assign(request, { result: Array.from(stores.get(this.name)?.values() ?? []) })
+                request.onsuccess?.(new Event('success') as Event & { target: IDBRequest<unknown[]> })
+                this.transaction.complete()
+            })
+
+            return request
+        }
+
         put(value: unknown, key?: string) {
             const request = {} as IDBRequest<IDBValidKey>
 
             queueMicrotask(() => {
                 const store = stores.get(this.name) ?? new Map<string, unknown>()
-                const storeKey = key ?? (value as { conversationId?: string }).conversationId
+                const storeKey =
+                    key ??
+                    (this.name === 'image-results'
+                        ? (value as { runId?: string }).runId
+                        : (value as { conversationId?: string }).conversationId)
 
                 if (typeof storeKey === 'string') {
                     store.set(storeKey, value)
@@ -214,7 +238,7 @@ describe('local chat persistence schema and projection', () => {
         expect(localConversationSnapshotSchema.safeParse({ ...snapshot, rawGraphState: {} }).success).toBe(false)
     })
 
-    it('excludes transient image parts from snapshots and rejects an injected image result', () => {
+    it('persists public image metadata but rejects Blob and object URL injection', () => {
         const messages: MindMessage[] = [
             createTextMessage('user-1', 'user', 'Generate an image'),
             {
@@ -253,17 +277,19 @@ describe('local chat persistence schema and projection', () => {
             snapshotAt: '2026-07-05T10:00:02.000Z',
         })
 
-        expect(snapshot?.messages.map(message => message.id)).toEqual(['user-1'])
+        expect(snapshot?.messages.map(message => message.id)).toEqual(['user-1', 'assistant-image'])
+        expect(snapshot?.messages[1]?.parts.map(part => part.type)).toEqual(['image-brief', 'image-result'])
         expect(
             localConversationSnapshotSchema.safeParse({
                 ...snapshot,
                 messages: [
                     {
-                        ...snapshot?.messages[0],
+                        ...snapshot?.messages[1],
                         parts: [
                             {
                                 contentPath: '/api/chat/runs/run-1/image',
                                 expiresAt: '2026-07-05T10:10:00.000Z',
+                                id: 'image-result-run-1',
                                 objectUrl: 'blob:private-image',
                                 runId: 'run-1',
                                 suggestedFileName: 'ai-mind-image-run-1.jpg',
@@ -305,6 +331,91 @@ describe('local chat persistence store', () => {
             'conv-a',
             'conv-b',
         ])
+    })
+
+    it('keeps up to fifty recent conversations while remaining compatible with ten-entry local indexes', async () => {
+        installFakeIndexedDB()
+
+        const legacyIndex = createIndexFromRegistry({
+            conversations: Array.from({ length: 10 }, (_, index) => createConversation(`conv-legacy-${index}`)),
+            isDraft: false,
+            selectedConversationId: 'conv-legacy-0',
+        })
+        const recentIndex = createIndexFromRegistry({
+            conversations: Array.from({ length: LOCAL_CHAT_RECENT_LIMIT + 1 }, (_, index) => {
+                const timestamp = `2026-07-05T10:${(LOCAL_CHAT_RECENT_LIMIT - index).toString().padStart(2, '0')}:00.000Z`
+
+                return {
+                    ...createConversation(`conv-${LOCAL_CHAT_RECENT_LIMIT - index}`),
+                    createdAt: timestamp,
+                    lastActiveAt: timestamp,
+                }
+            }),
+            isDraft: false,
+            previousRevision: legacyIndex.revision,
+            selectedConversationId: `conv-${LOCAL_CHAT_RECENT_LIMIT}`,
+        })
+
+        await expect(writeLocalConversationIndex(legacyIndex)).resolves.toMatchObject({ status: 'written' })
+        await expect(readLocalConversationIndex()).resolves.toMatchObject({
+            data: expect.objectContaining({ conversations: expect.arrayContaining([expect.objectContaining({ id: 'conv-legacy-0' })]) }),
+            status: 'valid',
+        })
+        await expect(writeLocalConversationIndex(recentIndex)).resolves.toMatchObject({ status: 'written' })
+
+        const result = await readLocalConversationIndex()
+
+        expect(result.status === 'valid' ? result.data.conversations : []).toHaveLength(LOCAL_CHAT_RECENT_LIMIT)
+        expect(result.status === 'valid' ? result.data.conversations.map(conversation => conversation.id) : []).toEqual(
+            Array.from({ length: LOCAL_CHAT_RECENT_LIMIT }, (_, index) => `conv-${LOCAL_CHAT_RECENT_LIMIT - index}`)
+        )
+    })
+
+    it('stores image Blobs independently and evicts the least recently used result at the count limit', async () => {
+        installFakeIndexedDB()
+
+        for (let index = 0; index <= LOCAL_IMAGE_RESULT_CACHE_MAX_COUNT; index += 1) {
+            await expect(
+                writeLocalImageResultCache({
+                    blob: new Blob([String(index)], { type: 'image/jpeg' }),
+                    conversationId: 'conv-images',
+                    mimeType: 'image/jpeg',
+                    runId: `run-${index}`,
+                })
+            ).resolves.toEqual({ status: 'written' })
+        }
+
+        await expect(readLocalImageResultCache('run-0')).resolves.toEqual({ status: 'missing' })
+        await expect(readLocalImageResultCache(`run-${LOCAL_IMAGE_RESULT_CACHE_MAX_COUNT}`)).resolves.toMatchObject({
+            data: {
+                conversationId: 'conv-images',
+                mimeType: 'image/jpeg',
+                runId: `run-${LOCAL_IMAGE_RESULT_CACHE_MAX_COUNT}`,
+            },
+            status: 'valid',
+        })
+    })
+
+    it('removes cached image results when their confirmed conversation is deleted', async () => {
+        installFakeIndexedDB()
+
+        await writeLocalImageResultCache({
+            blob: new Blob(['first'], { type: 'image/png' }),
+            conversationId: 'conv-delete',
+            mimeType: 'image/png',
+            runId: 'run-delete',
+        })
+        await writeLocalImageResultCache({
+            blob: new Blob(['second'], { type: 'image/png' }),
+            conversationId: 'conv-retain',
+            mimeType: 'image/png',
+            runId: 'run-retain',
+        })
+
+        await deleteLocalImageResultCaches(['conv-delete'])
+
+        await expect(readLocalImageResultCache('run-delete')).resolves.toEqual({ status: 'missing' })
+        await expect(readLocalImageResultCache('run-retain')).resolves.toMatchObject({ status: 'valid' })
     })
 
     it('keeps newer same-conversation snapshots and rejects stale writes', async () => {

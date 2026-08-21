@@ -1,12 +1,12 @@
 import { END, START, StateGraph } from '@langchain/langgraph'
 
-import { routeAfterPromptInspection } from './edges/route-after-prompt-inspection'
+import { routeAfterPromptBlockConfirmation, routeAfterPromptInspection } from './edges/route-after-prompt-inspection'
 import { IMAGE_GENERATION_GRAPH_NODE_IDS, type ImageGenerationGraphNodeId } from './graph-node-ids'
 import { type ImageGenerationGraphState, ImageGenerationGraphStateAnnotation } from './graph-state'
 import { completeBlockedPromptNode, completeReadyPromptNode } from './nodes/final-nodes'
 import { createImageBriefNode } from './nodes/image-brief-node'
 import type { ImagePlanningModel } from './nodes/planning-model'
-import { createPromptDraftNode, inspectPromptNode, revisePromptNode } from './nodes/prompt-nodes'
+import { confirmPromptBlockNode, createPromptDraftNode, inspectPromptNode, revisePromptNode } from './nodes/prompt-nodes'
 
 export interface ImageGenerationGraphNodeEvent {
     nodeId: ImageGenerationGraphNodeId
@@ -57,6 +57,10 @@ export function createImageGenerationGraph(options: CreateImageGenerationGraphOp
             runNode(nodeIds.inspectPrompt, state => inspectPromptNode(nodeOptions(state)))
         )
         .addNode(
+            nodeIds.confirmPromptBlock,
+            runNode(nodeIds.confirmPromptBlock, state => confirmPromptBlockNode(nodeOptions(state)))
+        )
+        .addNode(
             nodeIds.revisePrompt,
             runNode(nodeIds.revisePrompt, state => revisePromptNode(nodeOptions(state)))
         )
@@ -66,10 +70,12 @@ export function createImageGenerationGraph(options: CreateImageGenerationGraphOp
         .addConditionalEdges(nodeIds.createImageBrief, state => (state.output ? END : nodeIds.draftPrompt), [nodeIds.draftPrompt, END])
         .addConditionalEdges(nodeIds.draftPrompt, state => (state.output ? END : nodeIds.inspectPrompt), [nodeIds.inspectPrompt, END])
         .addConditionalEdges(nodeIds.inspectPrompt, routeAfterPromptInspection, [
+            nodeIds.confirmPromptBlock,
             nodeIds.finishBlocked,
             nodeIds.finishReady,
             nodeIds.revisePrompt,
         ])
+        .addConditionalEdges(nodeIds.confirmPromptBlock, routeAfterPromptBlockConfirmation, [nodeIds.finishBlocked, nodeIds.finishReady])
         .addConditionalEdges(nodeIds.revisePrompt, state => (state.output ? END : nodeIds.inspectPrompt), [nodeIds.inspectPrompt, END])
         .addEdge(nodeIds.finishBlocked, END)
         .addEdge(nodeIds.finishReady, END)

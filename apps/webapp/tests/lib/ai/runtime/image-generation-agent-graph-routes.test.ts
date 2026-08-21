@@ -5,7 +5,7 @@ import { IMAGE_GENERATION_GRAPH_NODE_IDS } from '@/lib/ai/runtime/image-generati
 import { createInitialImageGenerationGraphState } from '@/lib/ai/runtime/image-generation-agent/graph/graph-state'
 
 describe('routeAfterPromptInspection', () => {
-    it('routes pass, the one permitted revision, and a blocking result deterministically', () => {
+    it('routes pass, the one permitted revision, and a blocking result through confirmation deterministically', () => {
         const state = createInitialImageGenerationGraphState({ rawDescription: 'a quiet lake', runId: 'run-1' })
 
         expect(routeAfterPromptInspection({ ...state, prompt: { inspection: { issues: [], outcome: 'pass' } } })).toBe(
@@ -43,7 +43,7 @@ describe('routeAfterPromptInspection', () => {
                     inspection: { issues: [{ code: 'capability_boundary', severity: 'blocking' }], outcome: 'block' },
                 },
             })
-        ).toBe(IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked)
+        ).toBe(IMAGE_GENERATION_GRAPH_NODE_IDS.confirmPromptBlock)
         expect(
             routeAfterPromptInspection({
                 ...state,

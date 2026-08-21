@@ -1,0 +1,112 @@
+.preview {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    background:
+        radial-gradient(circle at 72% 24%, color-mix(in oklch, var(--composer-focus) 12%, var(--muted)) 0%, transparent 38%),
+        linear-gradient(
+            135deg,
+            color-mix(in oklch, var(--composer-focus) 7%, var(--muted)) 0%,
+            var(--muted) 52%,
+            color-mix(in oklch, var(--composer-focus) 4%, var(--muted)) 100%
+        );
+}
+
+.surface {
+    position: relative;
+    z-index: 0;
+}
+
+.preview::after {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    content: '';
+    pointer-events: none;
+    background-image: linear-gradient(
+        104deg,
+        transparent 34%,
+        color-mix(in oklch, var(--background) 90%, var(--muted)) 50%,
+        transparent 66%
+    );
+    background-repeat: no-repeat;
+    background-position: 110% 0;
+    background-size: 240% 100%;
+    opacity: 0.72;
+    animation: image-generation-preview-sheen 2.1s ease-in-out infinite;
+    will-change: background-position;
+}
+
+.art {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+}
+
+.iconFrame {
+    position: relative;
+    display: grid;
+    width: 3.25rem;
+    height: 3.25rem;
+    place-items: center;
+    border: 1px solid color-mix(in oklch, var(--composer-focus) 20%, var(--border));
+    border-radius: 1rem;
+    background: color-mix(in oklch, var(--background) 72%, var(--muted));
+    color: color-mix(in oklch, var(--composer-focus) 48%, var(--muted-foreground));
+    box-shadow: 0 12px 28px color-mix(in oklch, var(--composer-focus) 8%, transparent);
+    animation: image-generation-preview-breathe 1.8s ease-in-out infinite;
+    will-change: transform, opacity;
+}
+
+.icon {
+    width: 1.35rem;
+    height: 1.35rem;
+}
+
+.sparkle {
+    position: absolute;
+    top: -0.28rem;
+    right: -0.3rem;
+    width: 0.85rem;
+    height: 0.85rem;
+    color: color-mix(in oklch, var(--composer-focus) 64%, var(--background));
+}
+
+@keyframes image-generation-preview-sheen {
+    from {
+        background-position: 110% 0;
+    }
+
+    to {
+        background-position: -130% 0;
+    }
+}
+
+@keyframes image-generation-preview-breathe {
+    0%,
+    100% {
+        opacity: 0.66;
+        transform: scale(0.96);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .preview::after {
+        background-position: 50% 0;
+        animation: none;
+        will-change: auto;
+    }
+
+    .iconFrame {
+        animation: none;
+        will-change: auto;
+    }
+}

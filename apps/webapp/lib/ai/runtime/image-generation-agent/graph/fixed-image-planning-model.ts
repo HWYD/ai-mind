@@ -16,7 +16,8 @@ export function createImagePlanningModel(): ImagePlanningModel {
     const modelHandle = createChatModel({
         config: getModelProviderConfig(),
         enableReasoning: false,
-        maxRetries: 0,
+        maxRetries: 2,
+        retryableErrorsOnly: true,
         resolvedModelSelection: resolveModelSelection({ modelId: IMAGE_PLANNING_MODEL_ID, routeType: 'image' }),
         streaming: false,
         temperature: 0,

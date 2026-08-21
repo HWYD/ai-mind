@@ -10,7 +10,7 @@ on:
       release_tag:
         description: Git tag for the GitHub Pre-release
         required: true
-        default: v0.5.0-public-beta
+        default: v0.5.1-public-beta
         type: string
       production_verified:
         description: Confirm that production deployment and verify-production.sh passed

@@ -1,4 +1,4 @@
-import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
+import type { ImageBriefPart, ImageResultPart, MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
 import {
     LOCAL_CHAT_MAX_MESSAGES_PER_SNAPSHOT,
@@ -7,7 +7,18 @@ import {
     type LocalConversationSnapshot,
 } from './schema'
 
-const RECOVERABLE_PART_TYPES = new Set(['agent-step', 'prompt', 'reasoning', 'resource', 'skill', 'text', 'tool', 'workflow-progress'])
+const RECOVERABLE_PART_TYPES = new Set([
+    'agent-step',
+    'image-brief',
+    'image-result',
+    'prompt',
+    'reasoning',
+    'resource',
+    'skill',
+    'text',
+    'tool',
+    'workflow-progress',
+])
 
 function isRecoverablePart(part: MindMessagePart) {
     if (!RECOVERABLE_PART_TYPES.has(part.type)) {
@@ -25,11 +36,54 @@ function isRecoverableArtifact(artifact: NonNullable<MindMessage['artifacts']>[n
     return artifact.status === 'completed' || artifact.status === 'failed'
 }
 
+function projectRecoverablePart(part: MindMessagePart): MindMessagePart | null {
+    if (!isRecoverablePart(part)) {
+        return null
+    }
+
+    if (part.type === 'image-brief') {
+        return {
+            id: part.id,
+            runId: part.runId,
+            summary: {
+                ...part.summary,
+                assumptions: [...part.summary.assumptions],
+                avoid: [...part.summary.avoid],
+                mustInclude: [...part.summary.mustInclude],
+                subjects: [...part.summary.subjects],
+                ...(part.summary.visibleText ? { visibleText: [...part.summary.visibleText] } : {}),
+            },
+            type: 'image-brief',
+        } satisfies ImageBriefPart
+    }
+
+    if (part.type === 'image-result') {
+        return {
+            contentPath: part.contentPath,
+            expiresAt: part.expiresAt,
+            ...(part.height ? { height: part.height } : {}),
+            id: part.id,
+            ...(part.mimeType ? { mimeType: part.mimeType } : {}),
+            runId: part.runId,
+            suggestedFileName: part.suggestedFileName,
+            temporary: true,
+            type: 'image-result',
+            ...(part.width ? { width: part.width } : {}),
+        } satisfies ImageResultPart
+    }
+
+    return part
+}
+
 export function projectRecoverableMessages(messages: MindMessage[]): MindMessage[] {
     return messages
         .filter(message => (message.role === 'user' || message.role === 'assistant') && (!message.status || message.status === 'completed'))
         .map(message => {
-            const parts = message.parts.filter(isRecoverablePart)
+            const parts = message.parts.flatMap(part => {
+                const recoverablePart = projectRecoverablePart(part)
+
+                return recoverablePart ? [recoverablePart] : []
+            })
             const artifacts = message.artifacts?.filter(isRecoverableArtifact)
 
             return {

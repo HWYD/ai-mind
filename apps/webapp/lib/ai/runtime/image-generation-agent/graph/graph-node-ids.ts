@@ -1,5 +1,6 @@
 export const IMAGE_GENERATION_GRAPH_NODE_IDS = {
     createImageBrief: 'createImageBrief',
+    confirmPromptBlock: 'confirmPromptBlock',
     draftPrompt: 'draftPrompt',
     inspectPrompt: 'inspectPrompt',
     revisePrompt: 'revisePrompt',

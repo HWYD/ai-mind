@@ -16,7 +16,7 @@ export const CHAT_MEMORY_SUMMARY_PREVIEW_LIMIT = 240 // 摘要预览上限
 export const CHAT_MEMORY_SUMMARY_TARGET_LIMIT = 2500 // 摘要目标上限
 export const CHAT_MEMORY_PINNED_DECISION_LIMIT = 20 // 关键决策上限
 export const CHAT_MEMORY_PINNED_DECISION_TEXT_LIMIT = 300 // 单条关键决策文本上限
-export const CHAT_CONVERSATION_REGISTRY_LIMIT = 10 // recent 会话注册表上限，仅统计正式 conversation
+export const CHAT_CONVERSATION_REGISTRY_LIMIT = 50 // recent 会话注册表上限，仅统计正式 conversation
 export const CHAT_CONVERSATION_TITLE_LIMIT = 80 // 会话标题上限
 export const DEFAULT_CHAT_CONVERSATION_TITLE = '新会话' // 首条用户消息落库前的草稿标题占位
 

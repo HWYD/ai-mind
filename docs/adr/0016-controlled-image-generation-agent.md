@@ -1,6 +1,6 @@
 # ADR-0016：受控图像生成 Agent
 
-状态：Accepted  
+状态：Accepted；2026-08-21 由 v0.5.1 修订
 日期：2026-08-01
 
 ## 背景
@@ -12,9 +12,11 @@ AI Mind 需要一个可直接验证 Agent 边界的生图链路，但首版不�
 - 只接受首个非空白 token 为 `/image` 的显式入口；普通“帮我画图”仍走普通聊天。
 - 使用独立的 LangGraph `StateGraph` 运行 ImageBrief、提示词草拟、检查和最多一次修正。图只保存可序列化领域状态，不保存 Provider client、Prompt 输出、密钥、writer 或 Prisma client。
 - 图像模型固定为 `doubao-seedream-5.0-lite`，固定 Agent Plan endpoint 仅由服务端配置模块持有；继续复用现有 `AI_MIND_DOUBAO_API_KEY`，不新增客户端或图片专用 secret。
-- 单次 run 只允许一次图像生成、最多五次规划模型调用和最多一次提示词修正。结构化输出校验失败直接安全失败，不做隐藏的模型修复或重试。
+- 单次 run 只允许一次图像生成、最多五个逻辑规划节点调用和最多一次提示词修正。每个规划节点只产生一次逻辑结构化结果，并仅对 timeout、rate-limit、connection 错误最多执行三次底层模型请求；结构化输出校验失败直接安全失败，不启动修复模型或开放式循环。
+- 首次 Prompt `block` 会额外执行一次字面冲突复核；只有能定位原始描述中的明确互斥要求才终止。图片 Provider 仅对确定的 HTTP `429` 与 `5xx` 最多请求三次，未知投递状态不重试。
 - 不启用 checkpoint、resume、HITL 或多 Agent 协作。该图的职责是受控规划，不是可恢复的通用工作流。
 - Provider 返回的临时 URL 只保存在受所有权保护的服务端记录中。浏览器仅接收同源内容路径、过期时间、尺寸和 MIME 等安全元数据，并通过同源代理读取预览/下载字节。
+- 浏览器可在当前 trusted Origin profile 的 IndexedDB 缓存已验证的图片 Blob（最多 30 张或 100 MiB，LRU 淘汰），用于刷新后的预览与下载；Provider URL、Base64 和 Object URL 不持久化。
 - 图像进度使用既有 `workflow-progress-*` 与新的安全 image chunks；阶段与总耗时允许进入公开流，但内部 Prompt、检查细节、Provider URL、图片字节、密钥和原始错误不得进入流或浏览器快照。
 
 ## 后果
@@ -28,7 +30,7 @@ AI Mind 需要一个可直接验证 Agent 边界的生图链路，但首版不�
 代价与限制：
 
 - 首版仅支持单张文生图；编辑、局部重绘、扩图、去背景、参考图和多图均明确拒绝。
-- 不提供 Prompt 编辑、人工确认、自动重试、成本估算、OSS/对象存储、历史结果恢复或长期图片保存。
+- 不提供 Prompt 编辑、人工确认、对未知投递状态的自动重试、成本估算、服务端对象存储、跨设备历史结果恢复或长期媒体库。
 - Stream 的可恢复性不等于 Provider 调用可恢复；进程崩溃后不会续跑或重复图像生成。
 
 ## 备选方案
@@ -42,3 +44,4 @@ AI Mind 需要一个可直接验证 Agent 边界的生图链路，但首版不�
 - [Image Generation Agent Architecture](../architecture/image-generation-agent.md)
 - [Stream Recovery Architecture](../architecture/stream-recovery.md)
 - [v0.4.12 version document](../versions/v0.4.12-image-generation-agent.md)
+- [v0.5.1 version document](../versions/v0.5.1-chat-experience-reliability.md)

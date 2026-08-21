@@ -45,7 +45,8 @@ describe('fixed image planning model', () => {
         expect(mocks.createChatModel).toHaveBeenCalledWith(
             expect.objectContaining({
                 enableReasoning: false,
-                maxRetries: 0,
+                maxRetries: 2,
+                retryableErrorsOnly: true,
                 streaming: false,
                 temperature: 0,
             })

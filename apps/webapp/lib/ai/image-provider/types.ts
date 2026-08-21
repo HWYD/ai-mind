@@ -9,14 +9,25 @@ export const imageProviderErrorCodes = [
 
 export type ImageProviderErrorCode = (typeof imageProviderErrorCodes)[number]
 
+export interface ImageProviderErrorOptions {
+    retryAfterMs?: number
+    status?: number
+}
+
 export class ImageProviderError extends Error {
     constructor(
         readonly code: ImageProviderErrorCode,
-        message: string
+        message: string,
+        options: ImageProviderErrorOptions = {}
     ) {
         super(message)
         this.name = 'ImageProviderError'
+        this.retryAfterMs = options.retryAfterMs
+        this.status = options.status
     }
+
+    readonly retryAfterMs: number | undefined
+    readonly status: number | undefined
 }
 
 export interface ImageGenerationInput {

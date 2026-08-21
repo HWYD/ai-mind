@@ -20,7 +20,7 @@ import { AgentTracePanel } from '../parts/agent-trace-panel'
 import { canRenderDeliveryChainReport } from '../parts/delivery-chain-report-parser'
 import { DeliveryChainReportView } from '../parts/delivery-chain-report-view'
 import { ImageBriefPart as ImageBriefPartView } from '../parts/image-brief-part'
-import { ImageResultPart as ImageResultPartView } from '../parts/image-result-part'
+import { ImageGenerationLoadingResultCard, ImageResultPart as ImageResultPartView } from '../parts/image-result-part'
 import { PromptPanel, ResourcePanel, SkillPanel, ToolPanel } from '../parts/part-panels'
 import { ReasoningPanel } from '../parts/reasoning-panel'
 import { TextPartView } from '../parts/text-part'
@@ -212,6 +212,7 @@ function DeliveryChainContextSummaryPanel({
 
 export function AssistantMessage({
     combinedReasoning,
+    conversationId,
     contentParts,
     feedbackState,
     hasTextContent,
@@ -229,6 +230,7 @@ export function AssistantMessage({
     showFollowUpSuggestions,
 }: {
     combinedReasoning: string
+    conversationId?: string
     contentParts: MindMessagePart[]
     feedbackState: AssistantFeedback
     hasTextContent: boolean
@@ -260,6 +262,29 @@ export function AssistantMessage({
                 : undefined,
         [contentParts, isDeliveryChainMessage]
     )
+    const imageGenerationPreview = useMemo(() => {
+        const workflow = contentParts.find(
+            (part): part is WorkflowProgressPart =>
+                part.type === 'workflow-progress' &&
+                part.workflowKind === 'image_generation' &&
+                part.status === 'running' &&
+                part.steps.some(step => step.id === 'generation' && step.status !== 'cancelled' && step.status !== 'failed')
+        )
+
+        if (!workflow) {
+            return null
+        }
+
+        const brief = contentParts.find(
+            (part): part is ImageBriefPart => part.type === 'image-brief' && workflow.workflowId === `image-generation-${part.runId}`
+        )
+
+        if (!brief || contentParts.some(part => part.type === 'image-result' && part.runId === brief.runId)) {
+            return null
+        }
+
+        return brief
+    }, [contentParts])
     const deliveryChainEntryUris = useMemo(() => {
         if (!isDeliveryChainMessage) {
             return new Set<string>()
@@ -336,7 +361,14 @@ export function AssistantMessage({
                     }
 
                     if (part.type === 'image-brief') {
-                        return <ImageBriefPartView key={`${message.id}:image-brief:${part.runId}`} part={part} />
+                        return (
+                            <div key={`${message.id}:image-brief:${part.runId}`}>
+                                <ImageBriefPartView part={part} />
+                                {imageGenerationPreview?.runId === part.runId ? (
+                                    <ImageGenerationLoadingResultCard aspectRatio={part.summary.aspectRatio} />
+                                ) : null}
+                            </div>
+                        )
                     }
 
                     if (part.type === 'image-result') {
@@ -348,6 +380,7 @@ export function AssistantMessage({
                             <ImageResultPartView
                                 key={`${message.id}:image-result:${part.runId}`}
                                 brief={brief}
+                                conversationId={conversationId}
                                 enabled={isAssistantReplyCompleted}
                                 part={part}
                             />

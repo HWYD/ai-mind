@@ -1,6 +1,6 @@
 import { Annotation } from '@langchain/langgraph'
 
-import type { ImageBrief, PromptInspection, PublicImageBriefSummary } from '../contract/image-generation-contracts'
+import type { ImageBrief, PromptBlockConfirmation, PromptInspection, PublicImageBriefSummary } from '../contract/image-generation-contracts'
 
 export const imageGenerationGraphLimits = {
     maxImageGenerations: 1,
@@ -31,6 +31,7 @@ export interface ImageGenerationGraphState {
         status: 'blocked' | 'failed' | 'ready'
     }
     prompt: {
+        blockConfirmation?: PromptBlockConfirmation
         inspection?: PromptInspection
         value?: string
     }

@@ -13,4 +13,11 @@ describe('normalizeImageProviderError', () => {
     ] as const)('maps status %s to a safe domain code', (status, code) => {
         expect(normalizeImageProviderError(status, 'safe message').code).toBe(code)
     })
+
+    it('preserves retry metadata without exposing it to public DTOs', () => {
+        expect(normalizeImageProviderError(503, 'safe message', { retryAfterMs: 2_000 })).toMatchObject({
+            retryAfterMs: 2_000,
+            status: 503,
+        })
+    })
 })

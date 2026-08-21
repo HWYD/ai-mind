@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTr
 import { cn } from '@/lib/utils'
 
 import { ConversationRowActions } from './conversation-row-actions'
+import { ProjectLinkMenu, VisitorAvatar } from './project-link-menu'
 import { truncateConversationTitle } from './truncate-conversation-title'
 import type { ConversationListItem as ConversationListItemValue } from './types'
 
@@ -20,6 +21,8 @@ interface ConversationMobileSelectorProps {
     disabled?: boolean
     onCreateConversation: () => Promise<boolean> | boolean
     onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
+    onProjectLinkCopied?: () => void
+    onProjectLinkCopyFailed?: () => void
     onSelectConversation: (conversationId: string) => Promise<boolean> | boolean
     selectedConversationTitle: string
 }
@@ -29,11 +32,13 @@ export function ConversationMobileSelector({
     disabled = false,
     onCreateConversation,
     onDeleteConversation = () => false,
+    onProjectLinkCopied,
+    onProjectLinkCopyFailed,
     onSelectConversation,
     selectedConversationTitle,
 }: ConversationMobileSelectorProps) {
     const [open, setOpen] = useState(false)
-    const recentConversations = conversations.filter(conversation => conversation.hasMessages).slice(0, 10)
+    const recentConversations = conversations.filter(conversation => conversation.hasMessages)
 
     async function handleCreateConversation() {
         const accepted = await onCreateConversation()
@@ -81,12 +86,12 @@ export function ConversationMobileSelector({
                     </Button>
                 </div>
 
-                <SheetContent side="left" className="bg-sidebar text-sidebar-foreground">
+                <SheetContent side="left" className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
                     <SheetHeader className="sr-only">
                         <SheetTitle>会话抽屉</SheetTitle>
                         <SheetDescription>选择最近会话或创建一个新聊天。</SheetDescription>
                     </SheetHeader>
-                    <div>
+                    <div className="flex min-h-0 flex-1 flex-col">
                         <a
                             href="/"
                             className="mx-3 mb-3 mr-10 mt-1 flex min-w-0 items-center gap-3 rounded-xl px-1 py-1 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -109,7 +114,7 @@ export function ConversationMobileSelector({
                         <Separator className="my-3 bg-sidebar-border" />
 
                         <div className="px-3 pb-2 text-xs font-medium text-sidebar-foreground/60">最近</div>
-                        <ScrollArea className="max-h-[calc(100vh-9.5rem)] min-w-0 max-w-full overflow-hidden pr-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
+                        <ScrollArea className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden pr-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
                             <div className="flex w-full min-w-0 max-w-full flex-col gap-1 overflow-hidden">
                                 {recentConversations.map(conversation => (
                                     <div key={conversation.id} className="group relative min-w-0">
@@ -150,6 +155,28 @@ export function ConversationMobileSelector({
                                 ))}
                             </div>
                         </ScrollArea>
+                    </div>
+                    <div data-slot="mobile-project-menu" className="mt-3 border-t border-sidebar-border pt-2">
+                        <ProjectLinkMenu
+                            onProjectLinkCopied={() => {
+                                setOpen(false)
+                                onProjectLinkCopied?.()
+                            }}
+                            onProjectLinkCopyFailed={() => {
+                                setOpen(false)
+                                onProjectLinkCopyFailed?.()
+                            }}
+                        >
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                aria-label="打开访客菜单"
+                                className="h-10 w-full justify-start rounded-[10px] px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                            >
+                                <VisitorAvatar />
+                                <span>访客用户</span>
+                            </Button>
+                        </ProjectLinkMenu>
                     </div>
                 </SheetContent>
             </Sheet>

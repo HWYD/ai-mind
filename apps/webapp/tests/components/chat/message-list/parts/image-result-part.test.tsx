@@ -1,14 +1,20 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ImageBriefPart } from '@/components/chat/message-list/parts/image-brief-part'
 import { ImageResultPart } from '@/components/chat/message-list/parts/image-result-part'
 import type { ImageBriefPart as ImageBriefPartModel, ImageResultPart as ImageResultPartModel } from '@/lib/ai/types/message'
 
+const localImageCacheMocks = vi.hoisted(() => ({
+    readLocalImageResultCache: vi.fn(),
+    writeLocalImageResultCache: vi.fn(),
+}))
 const createObjectUrlMock = vi.fn(() => 'blob:preview')
 const revokeObjectUrlMock = vi.fn()
+
+vi.mock('@/components/instamind/local-chat-persistence/store', () => localImageCacheMocks)
 
 function createBrief(): ImageBriefPartModel {
     return {
@@ -43,6 +49,11 @@ afterEach(() => {
     vi.restoreAllMocks()
 })
 
+beforeEach(() => {
+    localImageCacheMocks.readLocalImageResultCache.mockResolvedValue({ status: 'missing' })
+    localImageCacheMocks.writeLocalImageResultCache.mockResolvedValue({ status: 'written' })
+})
+
 describe('image message parts', () => {
     it('renders only the public image generation summary', () => {
         render(<ImageBriefPart part={createBrief()} />)
@@ -64,24 +75,84 @@ describe('image message parts', () => {
             revokeObjectURL: revokeObjectUrlMock,
         })
 
-        const { unmount } = render(<ImageResultPart brief={createBrief()} enabled part={createResult()} />)
+        const { unmount } = render(<ImageResultPart brief={createBrief()} conversationId="conv-1" enabled part={createResult()} />)
 
         await waitFor(() => expect(screen.getByRole('img', { name: 'AI Mind 生成的图片：橘猫，场景：窗边' })).toBeTruthy())
         expect(fetchMock).toHaveBeenCalledTimes(1)
         expect(fetchMock).toHaveBeenCalledWith('/api/chat/runs/run-1/image', { signal: expect.any(AbortSignal) })
         expect(screen.getByRole('link', { name: '下载生成图片' }).getAttribute('href')).toBe('blob:preview')
-        expect(screen.getByText('临时结果')).toBeTruthy()
+        const localCacheBadge = screen.getByText('本地缓存')
+        expect(localCacheBadge).toBeTruthy()
+        expect(screen.queryByText('已保存在当前浏览器；清除本地数据或缓存淘汰后将无法恢复。')).toBeNull()
+        fireEvent.pointerEnter(localCacheBadge, { pointerType: 'mouse' })
+        await waitFor(() => expect(screen.getByText('已保存在当前浏览器；清除本地数据或缓存淘汰后将无法恢复。')).toBeTruthy())
+        expect(localImageCacheMocks.writeLocalImageResultCache).toHaveBeenCalledWith(
+            expect.objectContaining({ conversationId: 'conv-1', mimeType: 'image/jpeg', runId: 'run-1' })
+        )
 
         unmount()
         expect(revokeObjectUrlMock).toHaveBeenCalledWith('blob:preview')
     })
 
-    it('shows a semantic expiry alert without fetching expired results', async () => {
+    it('keeps the result card and flow placeholder visible until the Blob is ready', async () => {
+        let resolveResponse: (response: Response) => void = () => undefined
+        const fetchMock = vi.fn<typeof fetch>(() => new Promise<Response>(resolve => (resolveResponse = resolve)))
+        vi.stubGlobal('fetch', fetchMock)
+        vi.stubGlobal('URL', {
+            ...URL,
+            createObjectURL: createObjectUrlMock,
+            revokeObjectURL: revokeObjectUrlMock,
+        })
+
+        const { container } = render(<ImageResultPart brief={createBrief()} enabled part={createResult()} />)
+
+        await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+        expect(screen.getByText('生成结果')).toBeTruthy()
+        expect(screen.getByText('临时结果')).toBeTruthy()
+        expect(container.querySelector('[data-slot="image-generation-preview-placeholder"]')).toBeTruthy()
+        expect(screen.queryByText('图片读取成功后会保存在当前浏览器。')).toBeNull()
+        expect(screen.queryByText(/正在准备临时图片预览|图像生成完成后将准备临时预览/)).toBeNull()
+
+        resolveResponse(new Response('image', { status: 200, headers: { 'content-type': 'image/jpeg' } }))
+
+        await waitFor(() => expect(screen.getByRole('img')).toBeTruthy())
+        expect(container.querySelector('[data-slot="image-generation-preview-placeholder"]')).toBeNull()
+    })
+
+    it('uses a cached Blob without refetching an expired result', async () => {
+        const cachedBlob = new Blob(['cached'], { type: 'image/jpeg' })
+        localImageCacheMocks.readLocalImageResultCache.mockResolvedValue({
+            data: {
+                blob: cachedBlob,
+                byteLength: cachedBlob.size,
+                conversationId: 'conv-1',
+                createdAt: '2026-07-05T10:00:00.000Z',
+                lastAccessedAt: '2026-07-05T10:00:00.000Z',
+                mimeType: 'image/jpeg',
+                runId: 'run-1',
+            },
+            status: 'valid',
+        })
+        vi.stubGlobal('fetch', vi.fn())
+        vi.stubGlobal('URL', {
+            ...URL,
+            createObjectURL: createObjectUrlMock,
+            revokeObjectURL: revokeObjectUrlMock,
+        })
+
+        render(<ImageResultPart brief={createBrief()} enabled part={{ ...createResult(), expiresAt: '2000-01-01T00:00:00.000Z' }} />)
+
+        await waitFor(() => expect(screen.getByRole('img')).toBeTruthy())
+        expect(fetch).not.toHaveBeenCalled()
+        expect(screen.getByText('本地缓存')).toBeTruthy()
+    })
+
+    it('shows an expired placeholder without fetching when neither cache nor temporary result is available', async () => {
         vi.stubGlobal('fetch', vi.fn())
 
         render(<ImageResultPart brief={createBrief()} enabled part={{ ...createResult(), expiresAt: '2000-01-01T00:00:00.000Z' }} />)
 
-        await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('临时图片已过期'))
+        await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('图片已失效'))
         expect(screen.getByText(/重新发起 \/image/)).toBeTruthy()
         expect(fetch).not.toHaveBeenCalled()
     })

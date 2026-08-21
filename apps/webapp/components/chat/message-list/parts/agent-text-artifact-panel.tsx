@@ -6,8 +6,9 @@ import { Streamdown } from 'streamdown'
 
 import { Button } from '@/components/ui/button'
 import type { AgentTextArtifactViewModel } from '@/lib/ai/types/message'
+import { copyTextToClipboard } from '@/lib/browser/copy-text-to-clipboard'
 
-import { copyTextToClipboard, getCopiedButtonClassName } from '../shared/message-list-utils'
+import { getCopiedButtonClassName } from '../shared/message-list-utils'
 
 function getArtifactKindLabel(kind: AgentTextArtifactViewModel['artifactKind']) {
     switch (kind) {

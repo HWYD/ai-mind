@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { MindMessage } from '@/lib/ai/types/message'
 
 export const LOCAL_CHAT_SCHEMA_VERSION = 1
-export const LOCAL_CHAT_RECENT_LIMIT = 10
+export const LOCAL_CHAT_RECENT_LIMIT = 50
 export const LOCAL_CHAT_MAX_MESSAGES_PER_SNAPSHOT = 120
 
 export const localConversationMetadataSchema = z
@@ -33,13 +33,55 @@ const recoverablePartSchema = z
     })
     .passthrough()
 
+const recoverableImageBriefPartSchema = z
+    .object({
+        id: z.string().min(1),
+        runId: z.string().min(1),
+        summary: z
+            .object({
+                aspectRatio: z.enum(['square', 'landscape', 'portrait']).optional(),
+                assumptions: z.array(z.string().min(1)),
+                avoid: z.array(z.string().min(1)),
+                composition: z.string().min(1).optional(),
+                intent: z.string().min(1),
+                lightingAndColor: z.string().min(1).optional(),
+                mustInclude: z.array(z.string().min(1)),
+                scene: z.string().min(1).optional(),
+                style: z.string().min(1).optional(),
+                subjects: z.array(z.string().min(1)),
+                visibleText: z.array(z.string().min(1)).optional(),
+            })
+            .strict(),
+        type: z.literal('image-brief'),
+    })
+    .strict()
+
+const recoverableImageResultPartSchema = z
+    .object({
+        contentPath: z.string().regex(/^\/api\/chat\/runs\/[^/]+\/image$/),
+        expiresAt: z.string().datetime({ offset: true }),
+        height: z.number().int().positive().optional(),
+        id: z.string().min(1),
+        mimeType: z.enum(['image/jpeg', 'image/png', 'image/webp']).optional(),
+        runId: z.string().min(1),
+        suggestedFileName: z
+            .string()
+            .min(1)
+            .max(160)
+            .regex(/^[^\\/]+$/),
+        temporary: z.literal(true),
+        type: z.literal('image-result'),
+        width: z.number().int().positive().optional(),
+    })
+    .strict()
+
 const recoverableMessageSchema: z.ZodType<MindMessage> = z
     .object({
         artifacts: z.array(z.record(z.string(), z.unknown())).optional(),
         composer: z.record(z.string(), z.unknown()).optional(),
         createdAt: z.string().datetime(),
         id: z.string().min(1),
-        parts: z.array(recoverablePartSchema).min(1),
+        parts: z.array(z.union([recoverablePartSchema, recoverableImageBriefPartSchema, recoverableImageResultPartSchema])).min(1),
         role: z.union([z.literal('user'), z.literal('assistant')]),
         status: z.literal('completed').optional(),
     })

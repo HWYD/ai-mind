@@ -3,6 +3,7 @@ import { IMAGE_GENERATION_GRAPH_NODE_IDS } from '../graph-node-ids'
 import type { ImageGenerationGraphState } from '../graph-state'
 
 export type PromptInspectionRoute =
+    | typeof IMAGE_GENERATION_GRAPH_NODE_IDS.confirmPromptBlock
     | typeof IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
     | typeof IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady
     | typeof IMAGE_GENERATION_GRAPH_NODE_IDS.revisePrompt
@@ -15,7 +16,7 @@ export function routeAfterPromptInspection(state: ImageGenerationGraphState): Pr
     const inspection = state.prompt.inspection
 
     if (!inspection || hasBlockingPromptInspectionIssue(inspection)) {
-        return IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
+        return IMAGE_GENERATION_GRAPH_NODE_IDS.confirmPromptBlock
     }
 
     if (inspection.outcome === 'revise' && hasFixablePromptInspectionIssue(inspection)) {
@@ -25,4 +26,14 @@ export function routeAfterPromptInspection(state: ImageGenerationGraphState): Pr
     }
 
     return IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady
+}
+
+export function routeAfterPromptBlockConfirmation(state: ImageGenerationGraphState): PromptInspectionRoute {
+    if (state.output?.status === 'failed' || state.output?.status === 'blocked') {
+        return IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
+    }
+
+    return state.prompt.blockConfirmation?.outcome === 'block'
+        ? IMAGE_GENERATION_GRAPH_NODE_IDS.finishBlocked
+        : IMAGE_GENERATION_GRAPH_NODE_IDS.finishReady
 }

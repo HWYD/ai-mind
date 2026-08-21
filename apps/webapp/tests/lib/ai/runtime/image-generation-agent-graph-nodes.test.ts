@@ -209,4 +209,42 @@ describe('image generation graph nodes', () => {
             output: { status: 'ready' },
         })
     })
+
+    it('continues after a blocking inspection when strict confirmation finds no literal conflict', async () => {
+        const model = createModel([
+            { aspectRatio: 'square', assumptions: [], avoid: [], intent: 'cat', mustInclude: [], subjects: ['cat'] },
+            { prompt: 'A ginger cat sleeping on a sunny beach' },
+            { issues: [{ code: 'conflict', severity: 'blocking' }], outcome: 'block' },
+            { conflictingRequirements: ['蓝色', '红色'], outcome: 'block' },
+        ])
+
+        await expect(
+            runImageGenerationGraph({ model, rawDescription: '一只橘猫在阳光明媚的沙滩上睡觉', runId: 'run-confirm-pass' })
+        ).resolves.toMatchObject({
+            execution: { planningModelCalls: 4 },
+            output: { status: 'ready' },
+        })
+        expect(model.invoke).toHaveBeenLastCalledWith(expect.objectContaining({ schemaName: 'PromptBlockConfirmation' }), expect.anything())
+    })
+
+    it('keeps a block only when confirmation cites two literal conflicting requirements', async () => {
+        const model = createModel([
+            { aspectRatio: 'square', assumptions: [], avoid: [], intent: 'cat', mustInclude: [], subjects: ['cat'] },
+            { prompt: 'A cat' },
+            { issues: [{ code: 'conflict', severity: 'blocking' }], outcome: 'block' },
+            { conflictingRequirements: ['纯黑色', '纯白色'], outcome: 'block' },
+        ])
+
+        const result = await runImageGenerationGraph({
+            model,
+            rawDescription: '仅生成一只纯黑色猫，并且这只猫必须纯白色。',
+            runId: 'run-confirm-block',
+        })
+
+        expect(result.prompt.blockConfirmation).toEqual({ conflictingRequirements: ['纯黑色', '纯白色'], outcome: 'block' })
+        expect(result).toMatchObject({
+            execution: { planningModelCalls: 4 },
+            output: { failureCode: 'IMAGE_PROMPT_BLOCKED', status: 'blocked' },
+        })
+    })
 })

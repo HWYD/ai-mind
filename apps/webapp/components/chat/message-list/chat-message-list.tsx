@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type { MindMessage, ReasoningPart } from '@/lib/ai/types/message'
+import { copyTextToClipboard } from '@/lib/browser/copy-text-to-clipboard'
 
 import { AssistantMessage } from './messages/assistant-message'
 import { UserMessage } from './messages/user-message'
@@ -11,7 +12,6 @@ import {
     type AssistantFeedback,
     buildCombinedReasoning,
     type ChatListStatus,
-    copyTextToClipboard,
     getMessageCopyText,
     getMessageTextContent,
     hasVisibleContent,
@@ -21,6 +21,7 @@ import type { EmptyStateSuggestion } from './suggestions/empty-state-suggestion-
 import { EmptyStateSuggestions } from './suggestions/empty-state-suggestions'
 
 const ChatMessageItem = memo(function ChatMessageItem({
+    conversationId,
     enableReasoning,
     feedbackState,
     isAssistantReplyCompleted,
@@ -37,6 +38,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     onSelectFollowUpQuestion,
     showFollowUpSuggestions,
 }: {
+    conversationId?: string
     enableReasoning: boolean
     feedbackState: AssistantFeedback
     isAssistantReplyCompleted: boolean
@@ -94,6 +96,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
 
     return (
         <AssistantMessage
+            conversationId={conversationId}
             message={message}
             requestComposer={requestComposer}
             combinedReasoning={combinedReasoning}
@@ -116,6 +119,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
 
 export function ChatMessageList({
     actionsDisabled = false,
+    conversationId,
     messages,
     status,
     enableReasoning,
@@ -126,6 +130,7 @@ export function ChatMessageList({
     onSelectSuggestion,
 }: {
     actionsDisabled?: boolean
+    conversationId?: string
     enableReasoning: boolean
     messages: MindMessage[]
     status: ChatListStatus
@@ -240,6 +245,7 @@ export function ChatMessageList({
                 return (
                     <ChatMessageItem
                         key={message.id}
+                        conversationId={conversationId}
                         enableReasoning={enableReasoning}
                         message={message}
                         requestComposer={requestComposer}

@@ -23,7 +23,7 @@ function packagedExecutablePath(outputPath: string, platform: string): string {
         return path.join(outputPath, `${DESKTOP_EXECUTABLE_NAME}.app`, 'Contents', 'MacOS', DESKTOP_EXECUTABLE_NAME)
     }
 
-    throw new Error(`AI Mind Desktop v0.5.0 does not support ${platform} packaging.`)
+    throw new Error(`AI Mind Desktop v0.5.1 does not support ${platform} packaging.`)
 }
 
 const config: ForgeConfig = {
@@ -47,7 +47,7 @@ const config: ForgeConfig = {
                 (packageResult.platform === 'darwin' && packageResult.arch === 'arm64')
 
             if (!supportedTarget) {
-                throw new Error('AI Mind Desktop v0.5.0 packages only Windows x64 and macOS arm64 artifacts.')
+                throw new Error('AI Mind Desktop v0.5.1 packages only Windows x64 and macOS arm64 artifacts.')
             }
 
             for (const outputPath of packageResult.outputPaths) {

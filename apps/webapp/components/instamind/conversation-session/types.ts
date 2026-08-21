@@ -9,6 +9,6 @@ export interface ConversationListItem {
 
 export interface ConversationRegistryPayload {
     conversations: ConversationListItem[]
-    limit: 10
+    limit: 50
     selectedConversationId: string | null
 }

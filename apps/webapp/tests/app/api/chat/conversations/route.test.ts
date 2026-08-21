@@ -60,7 +60,7 @@ describe('GET /api/chat/conversations', () => {
         expect(response.status).toBe(200)
         expect(response.headers.get('Set-Cookie')).toContain('ai-mind-session-id=')
         expect(body).toEqual({
-            limit: 10,
+            limit: 50,
             selectedConversationId: null,
             conversations: [],
         })

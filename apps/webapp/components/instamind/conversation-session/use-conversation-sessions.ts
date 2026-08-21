@@ -10,6 +10,7 @@ import {
 import {
     createIndexFromRegistry,
     deleteLocalConversationSnapshots,
+    deleteLocalImageResultCaches,
     readLocalConversationIndex,
     reconcileLocalConversationIndex,
     writeLocalConversationIndex,
@@ -29,7 +30,7 @@ function isConversationRegistryPayload(value: unknown): value is ConversationReg
     return (
         (typeof payload.selectedConversationId === 'string' || payload.selectedConversationId === null) &&
         Array.isArray(payload.conversations) &&
-        payload.limit === 10
+        payload.limit === 50
     )
 }
 
@@ -140,7 +141,10 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
 
             if (writeResult.status === 'written') {
                 localIndexRevisionRef.current = writeResult.revision
-                await deleteLocalConversationSnapshots(conversationIdsToDelete)
+                await Promise.all([
+                    deleteLocalConversationSnapshots(conversationIdsToDelete),
+                    deleteLocalImageResultCaches(conversationIdsToDelete),
+                ])
             }
         },
         []

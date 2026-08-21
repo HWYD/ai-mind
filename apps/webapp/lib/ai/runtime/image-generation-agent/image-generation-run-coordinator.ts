@@ -1,6 +1,6 @@
 import type { WriteChunk } from '@ai-mind/stream-core'
 
-import { type ImageGenerationProvider, ImageProviderError, SeedreamImageProvider } from '@/lib/ai/image-provider'
+import { type ImageGenerationInput, type ImageGenerationProvider, ImageProviderError, SeedreamImageProvider } from '@/lib/ai/image-provider'
 import { throwIfAborted } from '@/lib/ai/runtime/stream-errors'
 
 import { createImagePlanningModel } from './graph/fixed-image-planning-model'
@@ -137,12 +137,12 @@ export class ImageGenerationRunCoordinator {
                 return
             }
 
-            const providerResult = await this.imageProvider.generate(
+            const providerResult = await this.generateImageWithRetry(
                 {
                     aspectRatio: graphState.brief.internal?.aspectRatio ?? 'square',
                     prompt: graphState.prompt.value,
                 },
-                { signal: signal ?? new AbortController().signal }
+                signal ?? new AbortController().signal
             )
 
             throwIfAborted(signal)
@@ -230,6 +230,64 @@ export class ImageGenerationRunCoordinator {
             stage: 'runtime',
         })
     }
+
+    private async generateImageWithRetry(input: ImageGenerationInput, signal: AbortSignal) {
+        let lastError: unknown
+
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+            throwIfAborted(signal)
+
+            try {
+                return await this.imageProvider.generate(input, { signal })
+            } catch (error) {
+                lastError = error
+
+                if (!shouldRetryImageProvider(error) || attempt === 3) {
+                    throw error
+                }
+
+                await waitForImageProviderRetry(retryDelayMs(error, attempt), signal)
+            }
+        }
+
+        throw lastError
+    }
+}
+
+function shouldRetryImageProvider(error: unknown): error is ImageProviderError {
+    return (
+        error instanceof ImageProviderError &&
+        (error.status === 429 || (error.status !== undefined && error.status >= 500 && error.status <= 599))
+    )
+}
+
+function retryDelayMs(error: ImageProviderError, attempt: number): number {
+    if (error.retryAfterMs !== undefined && error.retryAfterMs >= 1_000 && error.retryAfterMs <= 10_000) {
+        return error.retryAfterMs
+    }
+
+    const baseDelay = attempt === 1 ? 1_000 : 2_000
+    return baseDelay + Math.floor(Math.random() * baseDelay)
+}
+
+function waitForImageProviderRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
+        return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'))
+    }
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort)
+            resolve()
+        }, delayMs)
+
+        const onAbort = () => {
+            clearTimeout(timeout)
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+        }
+
+        signal.addEventListener('abort', onAbort, { once: true })
+    })
 }
 
 function isAbortError(error: unknown, signal?: AbortSignal): boolean {

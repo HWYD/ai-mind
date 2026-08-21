@@ -40,7 +40,7 @@ function currentDesktopRuntime(): Pick<DesktopSupportDiagnostic, 'architecture' 
         return { architecture: 'arm64', platform: 'darwin' }
     }
 
-    throw new Error('AI Mind Desktop v0.5.0 only supports Windows x64 and macOS arm64.')
+    throw new Error('AI Mind Desktop v0.5.1 only supports Windows x64 and macOS arm64.')
 }
 
 export function createWorkspaceWindow(input: { session: Electron.Session; trustedOrigin: string }): Electron.BrowserWindow {

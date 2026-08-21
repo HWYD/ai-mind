@@ -42,7 +42,9 @@ export class SeedreamImageProvider implements ImageGenerationProvider {
         }
 
         if (!response.ok) {
-            throw normalizeImageProviderError(response.status, 'Image provider rejected the request.')
+            throw normalizeImageProviderError(response.status, 'Image provider rejected the request.', {
+                retryAfterMs: parseRetryAfterMs(response.headers.get('retry-after')),
+            })
         }
 
         let payload: unknown
@@ -64,6 +66,21 @@ export class SeedreamImageProvider implements ImageGenerationProvider {
             providerUrl,
         }
     }
+}
+
+function parseRetryAfterMs(value: string | null, now = Date.now()): number | undefined {
+    if (!value) {
+        return undefined
+    }
+
+    const seconds = Number(value)
+
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.round(seconds * 1_000)
+    }
+
+    const retryAt = Date.parse(value)
+    return Number.isNaN(retryAt) ? undefined : Math.max(0, retryAt - now)
 }
 
 function getSingleProviderUrl(payload: unknown): string | undefined {

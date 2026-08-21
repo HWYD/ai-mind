@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowDown, CircleAlert } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { ChatComposer } from '@/components/chat/composer/chat-composer'
 import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
@@ -16,6 +16,7 @@ import { ConversationMobileSelector } from './conversation-session/conversation-
 import { ConversationSidebar } from './conversation-session/conversation-sidebar'
 import { useConversationSessions } from './conversation-session/use-conversation-sessions'
 import { HumanReviewComposerPanel } from './human-review/human-review-composer-panel'
+import { ProjectLinkNotice, type ProjectLinkNoticeType } from './project-link-notice'
 import { ThreadMemoryStatusHint } from './thread-memory-status-hint'
 import { useChatAutoScroll } from './use-chat-auto-scroll'
 import { useChatModels } from './use-chat-models'
@@ -81,6 +82,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const [enableReasoning, setEnableReasoning] = useState(false)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const [interactionLocked, setInteractionLocked] = useState(false)
+    const [projectLinkNotice, setProjectLinkNotice] = useState<{ id: number; type: ProjectLinkNoticeType } | null>(null)
     const {
         hasAvailableModels,
         isLoading: isModelLoading,
@@ -231,6 +233,17 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         return registryRetryAccepted || hydrationRetryAccepted
     }
 
+    const dismissProjectLinkNotice = useCallback(() => {
+        setProjectLinkNotice(null)
+    }, [])
+
+    function showProjectLinkNotice(type: ProjectLinkNoticeType) {
+        setProjectLinkNotice(current => ({
+            id: (current?.id ?? 0) + 1,
+            type,
+        }))
+    }
+
     const conversationControlsDisabled = nextInteractionLocked || interactionDisabled || isReadOnlyCache
 
     return (
@@ -250,6 +263,8 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                     void handleCreateConversation()
                 }}
                 onDeleteConversation={handleDeleteConversation}
+                onProjectLinkCopied={() => showProjectLinkNotice('copied')}
+                onProjectLinkCopyFailed={() => showProjectLinkNotice('copy-failed')}
                 onSelectConversation={handleSelectConversation}
                 onToggleCollapsed={() => setSidebarCollapsed(current => !current)}
             />
@@ -264,6 +279,8 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                         disabled={conversationControlsDisabled}
                         onCreateConversation={handleCreateConversation}
                         onDeleteConversation={handleDeleteConversation}
+                        onProjectLinkCopied={() => showProjectLinkNotice('copied')}
+                        onProjectLinkCopyFailed={() => showProjectLinkNotice('copy-failed')}
                         onSelectConversation={selectConversation}
                         selectedConversationTitle={selectedConversationTitle}
                     />
@@ -271,6 +288,13 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                         className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} min-h-[calc(100vh-var(--chat-bottom-spacing)-1.5rem)] lg:min-h-[calc(100vh-var(--chat-bottom-spacing)-3.5rem)]`}
                         data-slot="chat-main-column"
                     >
+                        {projectLinkNotice ? (
+                            <ProjectLinkNotice
+                                key={projectLinkNotice.id}
+                                notice={projectLinkNotice.type}
+                                onDismiss={dismissProjectLinkNotice}
+                            />
+                        ) : null}
                         {imageQuotaError ? (
                             <Alert variant="destructive" className="mb-4 rounded-2xl">
                                 <CircleAlert />
@@ -320,6 +344,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                         ) : null}
                         {!conversationHydrationPending && !conversationHydrationFailed ? (
                             <ChatMessageList
+                                conversationId={selectedConversationId ?? undefined}
                                 messages={messages}
                                 status={status}
                                 enableReasoning={enableReasoning}

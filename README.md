@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> v0.5.0：Electron Desktop Host。为既有在线 AI Mind Web 应用增加 Windows x64 与 macOS arm64 的受限 Electron 宿主；公开 [`v0.5.0-public-beta`](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) 提供未签名预览制品，但 production verifier、双平台手工安装证据和最终 sign-off 尚未完成，因此它不是已验收的正式桌面发行。
+> 当前发布候选为 v0.5.1：Chat Experience & Image Reliability。它在既有 Windows x64 / macOS arm64 Electron 宿主与 Web 应用边界内，扩容近期会话、完善图像生成反馈与当前 profile 的图片恢复，并补充桌面/移动项目入口。提交后仍需由 GitHub Actions 完成 macOS arm64 打包验证；[`v0.5.0-public-beta`](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) 继续作为上一版未签名桌面预览的历史记录。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前开发版本：`v0.5.0 Electron Desktop Host`。
+当前阶段：`Runtime Skeleton / MVP`，当前发布候选：`v0.5.1 Chat Experience & Image Reliability`。
 
 已经验证：
 
@@ -255,7 +255,18 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前开发版本：v0.5.0 Electron Desktop Host
+## 当前发布候选：v0.5.1 Chat Experience & Image Reliability
+
+v0.5.1 是既有 Web 体验与图像生成可靠性的小版本，已达到提交候选状态：
+
+- 近期会话统一保留 50 条；桌面端长标题在溢出时按需单次展示完整内容。
+- 已验证的图片 Blob 仅缓存于当前浏览器或 Electron profile，刷新后可恢复预览与下载；上限为 30 张或 100 MiB。
+- 图像生成与结果读取使用同一流光占位；图像规划和 Provider 仅对确定的瞬时故障有限重试。
+- 桌面侧栏和移动抽屉提供访客项目菜单：浏览器新开 GitHub，Electron 复制链接。
+
+本版本不提供无限历史、跨设备图片同步、服务端图片库、图片编辑或新的 Electron IPC。详细设计见 [v0.5.1 Version](./docs/versions/v0.5.1-chat-experience-reliability.md)、[Release Note](./docs/releases/v0.5.1.md) 和 [Tasklist](./docs/tasklists/v0.5.1-chat-experience-reliability-tasklist.md)。
+
+## 上一版本：v0.5.0 Electron Desktop Host
 
 v0.5.0 为既有在线 Web 应用增加 Windows x64 与 macOS arm64 Electron 桌面宿主。AI Runtime、会话、
 StreamRun recovery、图像和受控 Agent 仍由服务端与 Web 应用负责；桌面进程只承担固定 Origin 准入、
@@ -295,9 +306,9 @@ pnpm dev:desktop
 v0.4.12 的边界非常明确：
 
 - 固定使用服务端 `doubao-seedream-5.0-lite` Provider，复用已有 Doubao Key；前端不选择模型，也不接触 endpoint 或密钥。
-- 每次运行最多五次规划调用、一次 Prompt 修正和一次外部图像生成；无 HITL、checkpoint、resume、隐藏重试或开放式循环。
-- Provider URL 仅保留在服务端临时记录。浏览器只通过同源内容路由预览和下载经过验证的临时图片。
-- 不做编辑、局部重绘、扩图、去背景、参考图、多图、成本估算、对象存储或长期图片历史。
+- 每次运行最多五个逻辑规划节点、一次 Prompt 修正和一次外部图像生成；每个规划节点仅对瞬时故障最多请求三次，无 HITL、checkpoint、resume 或开放式循环。
+- Provider URL 仅保留在服务端临时记录。浏览器通过同源内容路由预览和下载经过验证的临时图片，并可在当前 profile 使用受限 Blob 缓存恢复。
+- 不做编辑、局部重绘、扩图、去背景、参考图、多图、成本估算、服务端对象存储、跨设备历史或长期媒体库。
 
 详细设计见 [AI Mind v0.4.12](./docs/versions/v0.4.12-image-generation-agent.md)、[v0.4.12 Release Note](./docs/releases/v0.4.12.md)、[v0.4.12 Tasklist](./docs/tasklists/v0.4.12-image-generation-agent-tasklist.md)、[Image Generation Agent Architecture](./docs/architecture/image-generation-agent.md) 和 [ADR-0016](./docs/adr/0016-controlled-image-generation-agent.md)。
 
@@ -778,6 +789,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.11 | Structured Supervisor Review Loop                  | 将 `/delivery-chain` 演进为拥有严格 Contract、Runtime 强制 Review Group 和一次受控返修的 ControlledDeliverySupervisor                                                           |
 | v0.4.12 | Image Generation Agent                             | 通过显式 `/image` 增加受控单张文生图：独立 LangGraph 图、固定 Provider、临时同源预览与下载                                                                                      |
 | v0.5.0  | Electron Desktop Host                              | 增加固定 Origin 的 Windows x64 / macOS arm64 Electron 宿主与公开未签名预览；生产与双平台手工验收仍在收口                                                                        |
+| v0.5.1  | Chat Experience & Image Reliability                | 扩容近期会话、改进标题与加载反馈、增加受限本地图片恢复和分层重试，并补充桌面/移动项目菜单                                                                                       |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

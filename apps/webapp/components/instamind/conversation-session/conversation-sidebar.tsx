@@ -1,11 +1,13 @@
 'use client'
 
 import { MessageSquarePlus, MessageSquareText, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useState } from 'react'
 
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
     Sidebar,
     SidebarContent,
+    SidebarFooter,
     SidebarGroup,
     SidebarGroupContent,
     SidebarGroupLabel,
@@ -20,11 +22,9 @@ import {
 import { cn } from '@/lib/utils'
 
 import { ConversationRowActions } from './conversation-row-actions'
-import { truncateConversationTitle } from './truncate-conversation-title'
+import { ConversationTitleMarquee } from './conversation-title-marquee'
+import { ProjectLinkMenu, VisitorAvatar } from './project-link-menu'
 import type { ConversationListItem as ConversationListItemValue } from './types'
-
-const DESKTOP_CONVERSATION_TITLE_MAX_UNITS = 26
-const DESKTOP_CONVERSATION_TITLE_ACTION_MAX_UNITS = 24
 
 interface ConversationSidebarProps {
     collapsed?: boolean
@@ -32,6 +32,8 @@ interface ConversationSidebarProps {
     disabled?: boolean
     onCreateConversation: () => void
     onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
+    onProjectLinkCopied?: () => void
+    onProjectLinkCopyFailed?: () => void
     onSelectConversation: (conversationId: string) => void
     onToggleCollapsed?: () => void
 }
@@ -42,10 +44,14 @@ export function ConversationSidebar({
     disabled = false,
     onCreateConversation,
     onDeleteConversation = () => false,
+    onProjectLinkCopied,
+    onProjectLinkCopyFailed,
     onSelectConversation,
     onToggleCollapsed,
 }: ConversationSidebarProps) {
-    const recentConversations = conversations.filter(conversation => conversation.hasMessages).slice(0, 10)
+    const [focusedConversationId, setFocusedConversationId] = useState<string | null>(null)
+    const [hoveredConversationId, setHoveredConversationId] = useState<string | null>(null)
+    const recentConversations = conversations.filter(conversation => conversation.hasMessages)
 
     return (
         <SidebarProvider
@@ -129,7 +135,24 @@ export function ConversationSidebar({
                                     <ScrollArea className="h-full min-w-0 max-w-full overflow-hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
                                         <SidebarMenu className="box-border w-full min-w-0 max-w-full gap-1 overflow-hidden px-2 pr-3">
                                             {recentConversations.map(conversation => (
-                                                <SidebarMenuItem key={conversation.id} className="group relative min-w-0 max-w-full">
+                                                <SidebarMenuItem
+                                                    key={conversation.id}
+                                                    className="group relative min-w-0 max-w-full"
+                                                    onBlurCapture={event => {
+                                                        if (!event.currentTarget.contains(event.relatedTarget)) {
+                                                            setFocusedConversationId(currentId =>
+                                                                currentId === conversation.id ? null : currentId
+                                                            )
+                                                        }
+                                                    }}
+                                                    onFocusCapture={() => setFocusedConversationId(conversation.id)}
+                                                    onPointerEnter={() => setHoveredConversationId(conversation.id)}
+                                                    onPointerLeave={() =>
+                                                        setHoveredConversationId(currentId =>
+                                                            currentId === conversation.id ? null : currentId
+                                                        )
+                                                    }
+                                                >
                                                     <SidebarMenuButton
                                                         type="button"
                                                         aria-current={conversation.selected ? 'page' : undefined}
@@ -144,18 +167,13 @@ export function ConversationSidebar({
                                                             conversation.selected && 'bg-sidebar-accent text-sidebar-accent-foreground'
                                                         )}
                                                     >
-                                                        <span className="block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left [text-overflow:clip] group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden">
-                                                            {truncateConversationTitle(
-                                                                conversation.title,
-                                                                DESKTOP_CONVERSATION_TITLE_MAX_UNITS
-                                                            )}
-                                                        </span>
-                                                        <span className="hidden min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left [text-overflow:clip] group-hover:block group-focus-within:block group-has-[[data-state=open]]:block">
-                                                            {truncateConversationTitle(
-                                                                conversation.title,
-                                                                DESKTOP_CONVERSATION_TITLE_ACTION_MAX_UNITS
-                                                            )}
-                                                        </span>
+                                                        <ConversationTitleMarquee
+                                                            active={
+                                                                focusedConversationId === conversation.id ||
+                                                                hoveredConversationId === conversation.id
+                                                            }
+                                                            title={conversation.title}
+                                                        />
                                                     </SidebarMenuButton>
                                                     {!disabled ? (
                                                         <>
@@ -183,6 +201,19 @@ export function ConversationSidebar({
                         </div>
                     </SidebarGroup>
                 </SidebarContent>
+
+                <SidebarFooter className="shrink-0 border-t border-sidebar-border p-2">
+                    <SidebarMenu>
+                        <SidebarMenuItem>
+                            <ProjectLinkMenu onProjectLinkCopied={onProjectLinkCopied} onProjectLinkCopyFailed={onProjectLinkCopyFailed}>
+                                <SidebarMenuButton type="button" size="lg" aria-label="打开访客菜单" className="cursor-pointer rounded-xl">
+                                    <VisitorAvatar />
+                                    <span className={cn(collapsed && 'sr-only')}>访客用户</span>
+                                </SidebarMenuButton>
+                            </ProjectLinkMenu>
+                        </SidebarMenuItem>
+                    </SidebarMenu>
+                </SidebarFooter>
             </Sidebar>
         </SidebarProvider>
     )

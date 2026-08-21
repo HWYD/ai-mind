@@ -78,6 +78,22 @@ export const promptInspectionSchema = z
         }
     })
 
+export const promptBlockConfirmationSchema = z
+    .object({
+        conflictingRequirements: z.array(boundedString(120)).length(2).optional(),
+        outcome: z.enum(['block', 'pass']),
+    })
+    .strict()
+    .superRefine((value, context) => {
+        if (value.outcome === 'block' && !value.conflictingRequirements) {
+            context.addIssue({
+                code: 'custom',
+                message: 'Blocking confirmation requires two literal conflicting requirements.',
+            })
+        }
+    })
+
 export type ImageBrief = z.infer<typeof imageBriefSchema>
 export type PublicImageBriefSummary = z.infer<typeof publicImageBriefSummarySchema>
 export type PromptInspection = z.infer<typeof promptInspectionSchema>
+export type PromptBlockConfirmation = z.infer<typeof promptBlockConfirmationSchema>

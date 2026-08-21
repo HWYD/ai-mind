@@ -24,11 +24,122 @@ const localPersistenceMocks = vi.hoisted(() => ({
             updatedAt: '2026-07-05T10:00:00.000Z',
         })
     ),
+    deleteLocalImageResultCaches: vi.fn(),
     deleteLocalConversationSnapshots: vi.fn(),
     reconcileLocalConversationIndex: vi.fn(),
     readLocalConversationIndex: vi.fn(),
     writeLocalConversationIndex: vi.fn(),
 }))
+
+const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth')
+const originalScrollWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth')
+const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate')
+const originalNavigatorUserAgent = Object.getOwnPropertyDescriptor(window.navigator, 'userAgent')
+const originalNavigatorClipboard = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard')
+const resizeObserverCallbacks = new Set<ResizeObserverCallback>()
+let conversationTitleViewportWidth = 0
+let conversationTitleScrollWidth = 0
+const cancelConversationTitleAnimation = vi.fn()
+const startConversationTitleAnimation = vi.fn(() => ({ cancel: cancelConversationTitleAnimation }))
+
+class ConversationTitleResizeObserver {
+    constructor(private readonly callback: ResizeObserverCallback) {
+        resizeObserverCallbacks.add(callback)
+    }
+
+    disconnect() {
+        resizeObserverCallbacks.delete(this.callback)
+    }
+
+    observe() {
+        this.callback([], this as unknown as ResizeObserver)
+    }
+
+    unobserve() {}
+}
+
+function mockConversationTitleMeasurements(viewportWidth: number, scrollWidth: number) {
+    conversationTitleViewportWidth = viewportWidth
+    conversationTitleScrollWidth = scrollWidth
+    vi.stubGlobal('ResizeObserver', ConversationTitleResizeObserver)
+
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+        configurable: true,
+        get() {
+            return this.classList.contains('conversation-title-marquee') ? conversationTitleViewportWidth : 0
+        },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', {
+        configurable: true,
+        get() {
+            return this.classList.contains('conversation-title-marquee') ? conversationTitleScrollWidth : 0
+        },
+    })
+    Object.defineProperty(HTMLElement.prototype, 'animate', {
+        configurable: true,
+        value: startConversationTitleAnimation,
+    })
+}
+
+function notifyConversationTitleResize() {
+    for (const callback of resizeObserverCallbacks) {
+        callback([], {} as ResizeObserver)
+    }
+}
+
+function restoreConversationTitleMeasurements() {
+    resizeObserverCallbacks.clear()
+
+    if (originalClientWidth) {
+        Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth)
+    } else {
+        delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+    }
+
+    if (originalScrollWidth) {
+        Object.defineProperty(HTMLElement.prototype, 'scrollWidth', originalScrollWidth)
+    } else {
+        delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth
+    }
+
+    if (originalAnimate) {
+        Object.defineProperty(HTMLElement.prototype, 'animate', originalAnimate)
+    } else {
+        delete (HTMLElement.prototype as { animate?: HTMLElement['animate'] }).animate
+    }
+
+    cancelConversationTitleAnimation.mockClear()
+    startConversationTitleAnimation.mockClear()
+    vi.useRealTimers()
+}
+
+function setNavigatorUserAgent(userAgent: string) {
+    Object.defineProperty(window.navigator, 'userAgent', {
+        configurable: true,
+        value: userAgent,
+    })
+}
+
+function setNavigatorClipboard(writeText: (text: string) => Promise<void>) {
+    Object.defineProperty(window.navigator, 'clipboard', {
+        configurable: true,
+        value: { writeText },
+    })
+}
+
+function restoreNavigator() {
+    if (originalNavigatorUserAgent) {
+        Object.defineProperty(window.navigator, 'userAgent', originalNavigatorUserAgent)
+    } else {
+        delete (window.navigator as { userAgent?: string }).userAgent
+    }
+
+    if (originalNavigatorClipboard) {
+        Object.defineProperty(window.navigator, 'clipboard', originalNavigatorClipboard)
+    } else {
+        delete (window.navigator as { clipboard?: Clipboard }).clipboard
+    }
+}
 
 vi.mock('@/components/instamind/local-chat-persistence/store', () => localPersistenceMocks)
 
@@ -48,7 +159,7 @@ function createRegistryPayload(options: {
     conversations: ConversationListItem[]
 }): ConversationRegistryPayload {
     return {
-        limit: 10,
+        limit: 50,
         selectedConversationId: options.selectedConversationId,
         conversations: options.conversations,
     }
@@ -56,6 +167,9 @@ function createRegistryPayload(options: {
 
 afterEach(() => {
     window.localStorage.clear()
+    restoreConversationTitleMeasurements()
+    restoreNavigator()
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     cleanup()
 })
@@ -65,6 +179,7 @@ beforeEach(() => {
     localPersistenceMocks.readLocalConversationIndex.mockResolvedValue({ status: 'missing' })
     localPersistenceMocks.writeLocalConversationIndex.mockResolvedValue({ revision: 1, status: 'written' })
     localPersistenceMocks.reconcileLocalConversationIndex.mockResolvedValue({ revision: 1, status: 'written' })
+    localPersistenceMocks.deleteLocalImageResultCaches.mockResolvedValue(undefined)
     localPersistenceMocks.deleteLocalConversationSnapshots.mockResolvedValue(undefined)
 })
 
@@ -380,6 +495,7 @@ describe('useConversationSessions', () => {
         )
         await waitFor(() => {
             expect(localPersistenceMocks.deleteLocalConversationSnapshots).toHaveBeenCalledWith(['conv-b'])
+            expect(localPersistenceMocks.deleteLocalImageResultCaches).toHaveBeenCalledWith(['conv-b'])
         })
         expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['conv-a'])
     })
@@ -477,6 +593,56 @@ describe('useConversationSessions', () => {
 })
 
 describe('conversation session UI', () => {
+    it('uses the full desktop title and only enables marquee behavior for measured overflow', () => {
+        const title = 'AI Mind 侧栏会话标题在悬浮时需要完整展示的中英文混排内容'
+
+        mockConversationTitleMeasurements(100, 240)
+        vi.useFakeTimers()
+
+        const { rerender } = render(
+            <ConversationSidebar
+                conversations={[createConversation('conv-a', title, true)]}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+            />
+        )
+
+        const marquee = document.querySelector('.conversation-title-marquee')
+
+        expect(marquee?.textContent).toBe(title)
+        expect(marquee?.getAttribute('data-overflowing')).toBe('true')
+        expect(screen.getByRole('button', { name: title }).getAttribute('aria-current')).toBe('page')
+
+        fireEvent.pointerEnter(screen.getByRole('button', { name: title }))
+        act(() => {
+            vi.advanceTimersByTime(400)
+        })
+
+        expect(startConversationTitleAnimation).toHaveBeenCalledWith(
+            [{ transform: 'translateX(0)' }, { transform: 'translateX(-140px)' }],
+            expect.objectContaining({ duration: expect.any(Number), easing: 'linear', fill: 'forwards' })
+        )
+
+        conversationTitleScrollWidth = 100
+        act(() => {
+            notifyConversationTitleResize()
+        })
+
+        expect(marquee?.getAttribute('data-overflowing')).toBeNull()
+        expect(cancelConversationTitleAnimation).toHaveBeenCalledTimes(1)
+
+        rerender(
+            <ConversationMobileSelector
+                conversations={[createConversation('conv-mobile', title, true)]}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                selectedConversationTitle={title}
+            />
+        )
+
+        expect(document.querySelector('.conversation-title-marquee')).toBeNull()
+    })
+
     it('renders the desktop sidebar with a filtered recent list and forwards create/select actions', () => {
         const onCreateConversation = vi.fn()
         const onSelectConversation = vi.fn()
@@ -512,6 +678,190 @@ describe('conversation session UI', () => {
         )
         expect(onCreateConversation).toHaveBeenCalledTimes(1)
         expect(onSelectConversation).toHaveBeenCalledWith('conv-b')
+    })
+
+    it('keeps the visitor project menu fixed below the desktop conversation scroller', () => {
+        render(
+            <ConversationSidebar
+                conversations={[createConversation('conv-a', 'Conversation A', true)]}
+                disabled
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+            />
+        )
+
+        const footer = document.querySelector('[data-slot="sidebar-footer"]')
+        const desktopScrollArea = document.querySelector('[data-slot="scroll-area"]')
+
+        expect(footer?.parentElement).toBe(document.querySelector('[data-slot="sidebar"]'))
+        expect(footer?.contains(desktopScrollArea)).toBe(false)
+        expect(screen.getByRole('button', { name: '打开访客菜单' })).toBeTruthy()
+        expect(screen.getByText('访客用户')).toBeTruthy()
+        expect(screen.queryByText('访', { exact: true })).toBeNull()
+
+        fireEvent.pointerDown(screen.getByRole('button', { name: '打开访客菜单' }))
+
+        expect(screen.getByRole('menu').getAttribute('data-side')).toBe('top')
+        expect(screen.getByRole('menuitem', { name: 'GitHub 项目' }).getAttribute('title')).toBe('https://github.com/HWYD/ai-mind')
+    })
+
+    it('opens the project page in a new browser tab without copying the address', () => {
+        const openProjectPage = vi.spyOn(window, 'open').mockReturnValue(null)
+        const copyAddress = vi.fn().mockResolvedValue(undefined)
+
+        setNavigatorUserAgent('Mozilla/5.0')
+        setNavigatorClipboard(copyAddress)
+        render(
+            <ConversationSidebar
+                conversations={[]}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                onProjectLinkCopied={vi.fn()}
+                onProjectLinkCopyFailed={vi.fn()}
+            />
+        )
+
+        fireEvent.pointerDown(screen.getByRole('button', { name: '打开访客菜单' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'GitHub 项目' }))
+
+        expect(openProjectPage).toHaveBeenCalledWith('https://github.com/HWYD/ai-mind', '_blank', 'noopener,noreferrer')
+        expect(copyAddress).not.toHaveBeenCalled()
+    })
+
+    it('copies the project address in Electron and reports the copy result to the page', async () => {
+        const openProjectPage = vi.spyOn(window, 'open').mockReturnValue(null)
+        const copyAddress = vi.fn().mockResolvedValue(undefined)
+        const onProjectLinkCopied = vi.fn()
+        const onProjectLinkCopyFailed = vi.fn()
+
+        setNavigatorUserAgent('Mozilla/5.0 Electron/37.0.0')
+        setNavigatorClipboard(copyAddress)
+        render(
+            <ConversationSidebar
+                conversations={[]}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                onProjectLinkCopied={onProjectLinkCopied}
+                onProjectLinkCopyFailed={onProjectLinkCopyFailed}
+            />
+        )
+
+        fireEvent.pointerDown(screen.getByRole('button', { name: '打开访客菜单' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'GitHub 项目' }))
+
+        await waitFor(() => {
+            expect(copyAddress).toHaveBeenCalledWith('https://github.com/HWYD/ai-mind')
+        })
+        expect(openProjectPage).not.toHaveBeenCalled()
+        expect(onProjectLinkCopied).toHaveBeenCalledTimes(1)
+        expect(onProjectLinkCopyFailed).not.toHaveBeenCalled()
+    })
+
+    it('reports Electron clipboard failures without showing a copied result', async () => {
+        const copyAddress = vi.fn().mockRejectedValue(new Error('clipboard denied'))
+        const onProjectLinkCopied = vi.fn()
+        const onProjectLinkCopyFailed = vi.fn()
+
+        setNavigatorUserAgent('Mozilla/5.0 Electron/37.0.0')
+        setNavigatorClipboard(copyAddress)
+        render(
+            <ConversationSidebar
+                conversations={[]}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                onProjectLinkCopied={onProjectLinkCopied}
+                onProjectLinkCopyFailed={onProjectLinkCopyFailed}
+            />
+        )
+
+        fireEvent.pointerDown(screen.getByRole('button', { name: '打开访客菜单' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'GitHub 项目' }))
+
+        await waitFor(() => {
+            expect(onProjectLinkCopyFailed).toHaveBeenCalledTimes(1)
+        })
+        expect(onProjectLinkCopied).not.toHaveBeenCalled()
+    })
+
+    it('renders every recent conversation returned by the 50-item registry in desktop and mobile navigation', async () => {
+        const conversations = Array.from({ length: 11 }, (_, index) =>
+            createConversation(`conv-${index}`, `Conversation ${index}`, index === 0)
+        )
+        const { unmount } = render(
+            <ConversationSidebar conversations={conversations} onCreateConversation={vi.fn()} onSelectConversation={vi.fn()} />
+        )
+
+        expect(screen.getByRole('button', { name: 'Conversation 10' })).toBeTruthy()
+
+        unmount()
+
+        render(
+            <ConversationMobileSelector
+                conversations={conversations}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                selectedConversationTitle="Conversation 0"
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: '打开会话抽屉' }))
+
+        expect(await screen.findByRole('button', { name: 'Conversation 10' })).toBeTruthy()
+    })
+
+    it('keeps the visitor project menu fixed below the mobile conversation scroller', async () => {
+        render(
+            <ConversationMobileSelector
+                conversations={[createConversation('conv-a', 'Conversation A', true)]}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                selectedConversationTitle="Conversation A"
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: '打开会话抽屉' }))
+
+        const visitorMenuButton = await screen.findByRole('button', { name: '打开访客菜单' })
+        const projectMenuFooter = document.querySelector('[data-slot="mobile-project-menu"]')
+        const mobileScrollArea = document.querySelector('[data-slot="scroll-area"]')
+
+        expect(projectMenuFooter?.parentElement).toBe(document.querySelector('[data-slot="sheet-content"]'))
+        expect(projectMenuFooter?.contains(mobileScrollArea)).toBe(false)
+        expect(visitorMenuButton).toBeTruthy()
+
+        fireEvent.pointerDown(visitorMenuButton)
+
+        expect(screen.getByRole('menu').getAttribute('data-side')).toBe('top')
+        expect(screen.getByRole('menuitem', { name: 'GitHub 项目' }).getAttribute('title')).toBe('https://github.com/HWYD/ai-mind')
+    })
+
+    it('closes the mobile drawer after Electron copies the project address', async () => {
+        const copyAddress = vi.fn().mockResolvedValue(undefined)
+        const onProjectLinkCopied = vi.fn()
+
+        setNavigatorUserAgent('Mozilla/5.0 Electron/37.0.0')
+        setNavigatorClipboard(copyAddress)
+        render(
+            <ConversationMobileSelector
+                conversations={[]}
+                onCreateConversation={vi.fn()}
+                onProjectLinkCopied={onProjectLinkCopied}
+                onSelectConversation={vi.fn()}
+                selectedConversationTitle="新聊天"
+            />
+        )
+
+        fireEvent.click(screen.getByRole('button', { name: '打开会话抽屉' }))
+        fireEvent.pointerDown(await screen.findByRole('button', { name: '打开访客菜单' }))
+        fireEvent.click(screen.getByRole('menuitem', { name: 'GitHub 项目' }))
+
+        await waitFor(() => {
+            expect(copyAddress).toHaveBeenCalledWith('https://github.com/HWYD/ai-mind')
+        })
+        expect(onProjectLinkCopied).toHaveBeenCalledTimes(1)
+        await waitFor(() => {
+            expect(document.querySelector('[data-slot="sheet-content"]')).toBeNull()
+        })
     })
 
     it('renders the mobile drawer with filtered recent conversations and closes it after accepted actions', async () => {
@@ -646,7 +996,8 @@ describe('conversation session UI', () => {
         expect((initialCreateButtons[1] as HTMLButtonElement).disabled).toBe(true)
         expect((initialConversationButtons[0] as HTMLButtonElement).disabled).toBe(true)
         expect((screen.getByRole('button', { name: '打开会话抽屉' }) as HTMLButtonElement).disabled).toBe(false)
-        expect(document.querySelectorAll('button[aria-haspopup="menu"]')).toHaveLength(0)
+        expect((screen.getByRole('button', { name: '打开访客菜单' }) as HTMLButtonElement).disabled).toBe(false)
+        expect(document.querySelectorAll('button[aria-haspopup="menu"]')).toHaveLength(1)
 
         fireEvent.click(screen.getByRole('button', { name: '打开会话抽屉' }))
 
@@ -662,7 +1013,9 @@ describe('conversation session UI', () => {
         expect((drawerCreateButtons[0] as HTMLButtonElement).disabled).toBe(true)
 
         const allConversationButtons = screen.getAllByRole('button', { name: 'Conversation A' })
-        const mobileActionButtons = document.querySelectorAll('button[aria-haspopup="menu"]')
+        const mobileActionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="menu"]')).filter(
+            button => button.getAttribute('aria-label')?.startsWith('操作会话：')
+        )
 
         expect(allConversationButtons).toHaveLength(1)
         expect((allConversationButtons[0] as HTMLButtonElement).disabled).toBe(true)

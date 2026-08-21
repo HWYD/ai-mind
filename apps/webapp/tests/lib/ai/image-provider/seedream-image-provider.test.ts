@@ -61,4 +61,19 @@ describe('SeedreamImageProvider', () => {
             )
         ).rejects.toMatchObject({ code: 'IMAGE_PROVIDER_INVALID_RESULT' })
     })
+
+    it('preserves the retry metadata for definite provider responses', async () => {
+        const fetcher = vi.fn<typeof fetch>(async () => new Response('', { headers: { 'Retry-After': '3' }, status: 429 }))
+
+        await expect(
+            new SeedreamImageProvider('test-key', fetcher).generate(
+                { aspectRatio: 'square', prompt: 'x' },
+                { signal: new AbortController().signal }
+            )
+        ).rejects.toMatchObject({
+            code: 'IMAGE_PROVIDER_BUSY',
+            retryAfterMs: 3_000,
+            status: 429,
+        })
+    })
 })

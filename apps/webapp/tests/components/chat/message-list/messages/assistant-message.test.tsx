@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantMessage } from '@/components/chat/message-list/messages/assistant-message'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
-import type { MindMessage, WorkflowProgressPart } from '@/lib/ai/types/message'
+import type { ImageBriefPart, MindMessage, WorkflowProgressPart } from '@/lib/ai/types/message'
 
 afterEach(() => {
     cleanup()
@@ -93,6 +93,72 @@ function createWorkflowProgressPart(overrides: Partial<WorkflowProgressPart> = {
         visibility: 'expanded' as const,
         ...overrides,
     }
+}
+
+function createImageWorkflowProgressPart(overrides: Partial<WorkflowProgressPart> = {}): WorkflowProgressPart {
+    return {
+        id: 'image-workflow-progress-part',
+        type: 'workflow-progress',
+        workflowId: 'image-generation-run-1',
+        workflowKind: 'image_generation',
+        title: '图像生成',
+        status: 'running',
+        steps: [
+            {
+                id: 'generation',
+                title: '正在生成图片',
+                status: 'running',
+                details: [],
+            },
+        ],
+        visibility: 'expanded',
+        ...overrides,
+    }
+}
+
+function createImageBriefPart(aspectRatio?: ImageBriefPart['summary']['aspectRatio']): ImageBriefPart {
+    return {
+        id: 'image-brief-part',
+        type: 'image-brief',
+        runId: 'run-1',
+        summary: {
+            assumptions: [],
+            avoid: [],
+            intent: '插画',
+            mustInclude: ['橘猫'],
+            scene: '窗边',
+            subjects: ['橘猫'],
+            ...(aspectRatio ? { aspectRatio } : {}),
+        },
+    }
+}
+
+function renderImageGenerationMessage(parts: MindMessage['parts']) {
+    const message: MindMessage = {
+        id: 'assistant-image-generation',
+        role: 'assistant',
+        createdAt: '2026-08-20T10:00:00.000Z',
+        parts,
+    }
+
+    return render(
+        <AssistantMessage
+            message={message}
+            combinedReasoning=""
+            contentParts={message.parts}
+            feedbackState={null}
+            hasTextContent={false}
+            isAssistantReplyCompleted={false}
+            isCopied={false}
+            isLatestAssistantMessage={true}
+            isThinking={false}
+            onCopy={vi.fn()}
+            onFeedbackChange={vi.fn()}
+            onRegenerateLastTurn={vi.fn()}
+            onSelectFollowUpQuestion={vi.fn()}
+            showFollowUpSuggestions={false}
+        />
+    )
 }
 
 describe('AssistantMessage', () => {
@@ -398,5 +464,60 @@ describe('AssistantMessage', () => {
         expect(screen.queryByRole('status')).toBeNull()
         expect(screen.queryByText('上下文已自动压缩')).toBeNull()
         expect(screen.queryByText('摘要 128 字 · 关键决策 2 条')).toBeNull()
+    })
+
+    it('在生成图片步骤开始后直接显示包含流光占位的结果卡片', () => {
+        const { container } = renderImageGenerationMessage([createImageWorkflowProgressPart(), createImageBriefPart('landscape')])
+        const placeholder = container.querySelector<HTMLElement>('[data-slot="image-generation-preview-placeholder"]')
+        const ratioWrapper = placeholder?.querySelector<HTMLElement>('[data-radix-aspect-ratio-wrapper]')
+        const skeleton = placeholder?.querySelector<HTMLElement>('[data-slot="skeleton"]')
+
+        expect(placeholder?.querySelector('p')).toBeNull()
+        expect(placeholder?.querySelector('.sr-only')?.textContent).toBe('正在生成图片')
+        expect(screen.getByText('生成结果')).toBeTruthy()
+        expect(screen.getByText('临时结果')).toBeTruthy()
+        expect(skeleton).toBeTruthy()
+        expect(skeleton?.className).toContain('animate-none')
+        expect(placeholder?.querySelectorAll('[data-slot="image-generation-preview-art"] svg')).toHaveLength(2)
+        expect(Number.parseFloat(ratioWrapper?.style.paddingBottom ?? '')).toBeCloseTo(75, 2)
+    })
+
+    it.each([
+        ['portrait', 133.333],
+        [undefined, 100],
+    ] as const)('为 %s 画幅保留正确的预览比例', (aspectRatio, expectedPaddingBottom) => {
+        const { container } = renderImageGenerationMessage([createImageWorkflowProgressPart(), createImageBriefPart(aspectRatio)])
+        const ratioWrapper = container.querySelector<HTMLElement>(
+            '[data-slot="image-generation-preview-placeholder"] [data-radix-aspect-ratio-wrapper]'
+        )
+
+        expect(Number.parseFloat(ratioWrapper?.style.paddingBottom ?? '')).toBeCloseTo(expectedPaddingBottom, 2)
+    })
+
+    it('在前置步骤或终态时不显示生成预览骨架', () => {
+        const cases: MindMessage['parts'][] = [
+            [
+                createImageWorkflowProgressPart({
+                    steps: [{ id: 'brief', title: '正在整理画面需求', status: 'running', details: [] }],
+                }),
+                createImageBriefPart(),
+            ],
+            [createImageWorkflowProgressPart({ status: 'failed' }), createImageBriefPart()],
+            [createImageWorkflowProgressPart({ status: 'cancelled' }), createImageBriefPart()],
+            [
+                createImageWorkflowProgressPart({
+                    steps: [{ id: 'generation', title: '正在生成图片', status: 'failed', details: [] }],
+                }),
+                createImageBriefPart(),
+            ],
+        ]
+
+        for (const parts of cases) {
+            const { container, unmount } = renderImageGenerationMessage(parts)
+
+            expect(container.querySelector('[data-slot="image-generation-preview-placeholder"]')).toBeNull()
+
+            unmount()
+        }
     })
 })

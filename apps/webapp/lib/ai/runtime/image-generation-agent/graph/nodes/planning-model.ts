@@ -59,7 +59,7 @@ export async function invokeStructuredPlanning<T>(input: {
             return { output: parsed.data, state }
         }
     } catch {
-        // 规划调用只允许一次；失败不启动结构修复或重试。
+        // 底层瞬时重试由固定规划模型处理；本节点不额外启动结构修复。
     }
 
     return {
