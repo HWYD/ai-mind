@@ -1,8 +1,16 @@
 export function createDocumentSecurityHeaders(nonce: string): Record<string, string> {
+    return createSecurityHeaders(`script-src 'nonce-${nonce}' 'strict-dynamic' 'self'`)
+}
+
+export function createStaticLandingSecurityHeaders(): Record<string, string> {
+    return createSecurityHeaders("script-src 'self' 'unsafe-inline'")
+}
+
+function createSecurityHeaders(scriptSource: string): Record<string, string> {
     return {
         'Content-Security-Policy': [
             "default-src 'self'",
-            `script-src 'nonce-${nonce}' 'strict-dynamic' 'self'`,
+            scriptSource,
             "style-src 'self' 'unsafe-inline'",
             "img-src 'self' blob:",
             "font-src 'self'",

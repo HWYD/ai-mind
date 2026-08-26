@@ -13,18 +13,19 @@ function createDocumentRequest(pathname: string) {
 }
 
 describe('browser security headers', () => {
-    it.each(['/', '/instant-mind'])('adds a per-document nonce CSP and browser hardening headers: %s', pathname => {
-        const response = proxy(createDocumentRequest(pathname))
+    it('keeps the landing page static-compatible while retaining browser hardening headers', () => {
+        const response = proxy(createDocumentRequest('/'))
         const csp = response.headers.get('Content-Security-Policy')
 
-        expect(csp).toMatch(/script-src 'nonce-[A-Za-z0-9]+' 'strict-dynamic'/u)
+        expect(csp).toContain("script-src 'self' 'unsafe-inline'")
         expect(csp).toContain("style-src 'self' 'unsafe-inline'")
         expect(csp).not.toMatch(/style-src[^;]*nonce-/u)
         expect(csp).not.toContain('style-src-attr')
         expect(csp).toContain("object-src 'none'")
         expect(csp).toContain("frame-ancestors 'none'")
-        expect(csp).not.toMatch(/script-src[^;]*unsafe-inline/u)
         expect(csp).not.toContain('unsafe-eval')
+        expect(response.headers.get('x-middleware-request-x-nonce')).toBeNull()
+        expect(response.headers.get('x-middleware-request-content-security-policy')).toBeNull()
         expect(response.headers.get('Permissions-Policy')).toContain('camera=()')
         expect(response.headers.get('Permissions-Policy')).toContain('clipboard-read=()')
         expect(response.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin')
@@ -32,11 +33,18 @@ describe('browser security headers', () => {
         expect(response.headers.get('X-Frame-Options')).toBe('DENY')
     })
 
-    it('creates a new nonce for each document response', () => {
-        const first = proxy(createDocumentRequest('/')).headers.get('Content-Security-Policy')
-        const second = proxy(createDocumentRequest('/')).headers.get('Content-Security-Policy')
+    it('uses a fresh nonce CSP for the interactive chat page and forwards it to Next rendering', () => {
+        const first = proxy(createDocumentRequest('/instant-mind'))
+        const second = proxy(createDocumentRequest('/instant-mind'))
+        const firstCsp = first.headers.get('Content-Security-Policy')
+        const secondCsp = second.headers.get('Content-Security-Policy')
 
-        expect(first).not.toBe(second)
+        expect(firstCsp).toMatch(/script-src 'nonce-[A-Za-z0-9]+' 'strict-dynamic'/u)
+        expect(firstCsp).not.toMatch(/script-src[^;]*unsafe-inline/u)
+        expect(firstCsp).not.toContain('unsafe-eval')
+        expect(first.headers.get('x-middleware-request-x-nonce')).toMatch(/[A-Za-z0-9]+/u)
+        expect(first.headers.get('x-middleware-request-content-security-policy')).toBe(firstCsp)
+        expect(firstCsp).not.toBe(secondCsp)
     })
 
     it.each([

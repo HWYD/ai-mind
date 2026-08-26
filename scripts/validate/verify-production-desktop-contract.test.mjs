@@ -85,7 +85,12 @@ if [[ "$url" == *'/api/desktop/compatibility' ]]; then
 fi
 
 if [ -n "$headers" ]; then
-    printf '%s\\n' 'HTTP/2 200' "content-security-policy: $FAKE_DOCUMENT_CSP" 'permissions-policy: camera=(), clipboard-read=()' 'referrer-policy: strict-origin-when-cross-origin' 'x-content-type-options: nosniff' 'x-frame-options: DENY' > "$headers"
+    document_csp="$FAKE_LANDING_DOCUMENT_CSP"
+    if [[ "$url" == *'/instant-mind' ]]; then
+        document_csp="$FAKE_INSTANT_MIND_DOCUMENT_CSP"
+    fi
+
+    printf '%s\\n' 'HTTP/2 200' "content-security-policy: $document_csp" 'permissions-policy: camera=(), clipboard-read=()' 'referrer-policy: strict-origin-when-cross-origin' 'x-content-type-options: nosniff' 'x-frame-options: DENY' > "$headers"
     exit 0
 fi
 
@@ -95,11 +100,13 @@ case "$url" in
 esac
 `
 
-const supportedDocumentCsp =
+const supportedLandingCsp =
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+const supportedInstantMindCsp =
     "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
 
 test(
-    'production verifier enforces the document CSS and host-port policies',
+    'production verifier enforces route-specific document CSP and host-port policies',
     { skip: process.platform === 'win32' ? 'production verifier runs on the Linux deployment host' : false },
     async t => {
         const testDirectory = await mkdtemp(path.join(tmpdir(), 'ai-mind-production-verifier-'))
@@ -120,37 +127,68 @@ test(
         ])
         await Promise.all([chmod(path.join(binDirectory, 'docker'), 0o755), chmod(path.join(binDirectory, 'curl'), 0o755)])
 
-        const runVerifier = (documentCsp, environment = {}) =>
+        const runVerifier = (
+            { landing = supportedLandingCsp, instantMind = supportedInstantMindCsp } = {},
+            environment = {}
+        ) =>
             execFileAsync('bash', [verificationScript], {
                 cwd: repositoryRoot,
                 env: {
                     ...process.env,
                     AI_MIND_DEPLOY_ROOT: deployRoot,
                     AI_MIND_DESKTOP_CANDIDATE_VERSION: '0.5.0',
-                    FAKE_DOCUMENT_CSP: documentCsp,
+                    FAKE_LANDING_DOCUMENT_CSP: landing,
+                    FAKE_INSTANT_MIND_DOCUMENT_CSP: instantMind,
                     PATH: `${binDirectory}${path.delimiter}${process.env.PATH}`,
                     ...environment,
                 },
             })
 
-        await assert.doesNotReject(() => runVerifier(supportedDocumentCsp))
+        await assert.doesNotReject(() => runVerifier())
         await assert.rejects(
-            () => runVerifier(supportedDocumentCsp, { FAKE_POSTGRES_PORT: 'published' }),
+            () => runVerifier(undefined, { FAKE_POSTGRES_PORT: 'published' }),
             error => /postgres.*5432/.test(error.stdout)
         )
         await assert.rejects(
-            () => runVerifier(supportedDocumentCsp, { FAKE_PROJECT_ASSISTANT_SERVICE_PORT: 'published' }),
+            () => runVerifier(undefined, { FAKE_PROJECT_ASSISTANT_SERVICE_PORT: 'published' }),
             error => /project-assistant-service.*8788/.test(error.stdout)
         )
         await assert.rejects(
-            () => runVerifier(`${supportedDocumentCsp}; style-src-attr 'unsafe-inline'`),
+            () => runVerifier({ instantMind: `${supportedInstantMindCsp}; style-src-attr 'unsafe-inline'` }),
             error => /document security headers/.test(error.stdout)
         )
         await assert.rejects(
             () =>
                 runVerifier(
-                    "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self'; style-src 'self' 'nonce-style123' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+                    {
+                        instantMind:
+                            "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self'; style-src 'self' 'nonce-style123' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+                    }
                 ),
+            error => /document security headers/.test(error.stdout)
+        )
+        await assert.rejects(
+            () => runVerifier({ landing: supportedInstantMindCsp }),
+            error => /document security headers/.test(error.stdout)
+        )
+        await assert.rejects(
+            () => runVerifier({ instantMind: supportedLandingCsp }),
+            error => /document security headers/.test(error.stdout)
+        )
+        await assert.rejects(
+            () =>
+                runVerifier({
+                    instantMind:
+                        "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self' https://untrusted.example; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+                }),
+            error => /document security headers/.test(error.stdout)
+        )
+        await assert.rejects(
+            () =>
+                runVerifier({
+                    instantMind:
+                        "default-src 'self'; script-src 'nonce-abc123' 'strict-dynamic' 'self' *; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+                }),
             error => /document security headers/.test(error.stdout)
         )
     }

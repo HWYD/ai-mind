@@ -100,16 +100,23 @@ verify_document_headers() {
     local frame="$(header_value 'X-Frame-Options' "$header_file")"
 
     [ "$status" = "200" ] || return 1
-    printf '%s' "$csp" | grep -Eq "script-src 'nonce-[A-Za-z0-9]+' 'strict-dynamic'" || return 1
+    if [ "$pathname" = "/" ]; then
+        printf '%s' "$csp" | grep -Eq "(^|;[[:space:]]*)script-src 'self' 'unsafe-inline'(;|$)" || return 1
+        if printf '%s' "$csp" | grep -Eiq "script-src[^;]*(nonce-|strict-dynamic|unsafe-eval)"; then
+            return 1
+        fi
+    else
+        printf '%s' "$csp" | grep -Eq "(^|;[[:space:]]*)script-src 'nonce-[A-Za-z0-9]+' 'strict-dynamic' 'self'(;|$)" || return 1
+        if printf '%s' "$csp" | grep -Eiq "script-src[^;]*unsafe-inline|unsafe-eval"; then
+            return 1
+        fi
+    fi
     printf '%s' "$csp" | grep -Eq "(^|;[[:space:]]*)style-src 'self' 'unsafe-inline'(;|$)" || return 1
     if printf '%s' "$csp" | grep -Eiq "style-src[^;]*(nonce-|sha[0-9]+-)|style-src-attr"; then
         return 1
     fi
     printf '%s' "$csp" | grep -q "object-src 'none'" || return 1
     printf '%s' "$csp" | grep -q "frame-ancestors 'none'" || return 1
-    if printf '%s' "$csp" | grep -Eiq "script-src[^;]*unsafe-inline|unsafe-eval"; then
-        return 1
-    fi
     printf '%s' "$permissions" | grep -q 'camera=()' || return 1
     printf '%s' "$permissions" | grep -q 'clipboard-read=()' || return 1
     [ "$referrer" = "strict-origin-when-cross-origin" ] || return 1

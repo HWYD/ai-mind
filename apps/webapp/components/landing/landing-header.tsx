@@ -60,7 +60,7 @@ export function LandingHeader() {
                     </nav>
 
                     <div className="flex shrink-0 items-center gap-2">
-                        <Link
+                        <a
                             href={INSTANT_MIND_URL}
                             className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[var(--landing-brand)] px-4 text-sm font-semibold whitespace-nowrap text-white shadow-sm transition hover:brightness-95 lg:h-12 lg:gap-2 lg:px-5 lg:text-base lg:shadow-md lg:shadow-blue-600/20"
                             onClick={() => setOpen(false)}
@@ -68,7 +68,7 @@ export function LandingHeader() {
                             <Rocket className="size-4 shrink-0" strokeWidth={2.3} />
                             <span>立即体验</span>
                             <ArrowRight className="hidden size-4 shrink-0 lg:block" strokeWidth={2.4} />
-                        </Link>
+                        </a>
 
                         <CollapsibleTrigger asChild>
                             <button
