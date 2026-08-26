@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -161,8 +161,11 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
             useChatAutoScroll: () => ({
-                inputContainerRef: { current: null },
-                bottomSpacing: 24,
+                composerContainerRef: { current: null },
+                composerOverlayInset: 144,
+                messageContentRef: { current: null },
+                scrollViewportRef: { current: null },
+                cancelConversationEntryPositioning: vi.fn(),
                 showScrollToBottom: false,
                 resetAutoScrollForNewTurn: vi.fn(),
                 restoreAutoFollowAndScrollToBottom: vi.fn(),
@@ -184,6 +187,7 @@ describe('InstantMindPage integration', () => {
                 messages: [],
                 status: 'streaming',
                 hydrationStatus: 'ready',
+                messageConversationId: 'conv-a',
                 threadMemoryStatusHint: null,
                 pendingInterrupt: null,
                 sendMessage: vi.fn(),
@@ -283,8 +287,11 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
             useChatAutoScroll: () => ({
-                inputContainerRef: { current: null },
-                bottomSpacing: 24,
+                composerContainerRef: { current: null },
+                composerOverlayInset: 144,
+                messageContentRef: { current: null },
+                scrollViewportRef: { current: null },
+                cancelConversationEntryPositioning: vi.fn(),
                 showScrollToBottom: false,
                 resetAutoScrollForNewTurn: vi.fn(),
                 restoreAutoFollowAndScrollToBottom: vi.fn(),
@@ -305,6 +312,7 @@ describe('InstantMindPage integration', () => {
                 messages: [],
                 status: 'ready',
                 hydrationStatus: 'idle',
+                messageConversationId: null,
                 threadMemoryStatusHint: null,
                 pendingInterrupt: null,
                 sendMessage: vi.fn(),
@@ -344,18 +352,28 @@ describe('InstantMindPage integration', () => {
         const mainColumn = document.querySelector('[data-slot="chat-main-column"]')
         const composerColumn = document.querySelector('[data-slot="chat-composer-column"]')
         const composerShell = document.querySelector('[data-slot="chat-composer-shell"]')
-        const scrollShell = document.querySelector('[data-slot="chat-scroll-shell"]')
+        const messageContent = document.querySelector('[data-slot="chat-message-content"]') as HTMLElement | null
+        const messageViewport = document.querySelector('[data-slot="chat-message-viewport"]') as HTMLElement | null
 
         expect(mainColumn?.className).toContain('max-w-[var(--chat-content-column-width)]')
-        expect(mainColumn?.className).toContain('min-h-[calc(100vh-var(--chat-bottom-spacing)-1.5rem)]')
         expect(composerColumn?.className).toContain('max-w-[var(--chat-content-column-width)]')
         expect(composerColumn?.parentElement?.className).not.toContain('max-w-4xl')
-        expect(scrollShell?.className).toContain('pb-[var(--chat-bottom-spacing)]')
-        expect(scrollShell?.className).toContain('transition-[padding-left]')
+        expect(messageViewport?.className).toContain('h-full')
+        expect(messageViewport?.className).toContain('overflow-y-auto')
+        expect(messageViewport?.style.getPropertyValue('scrollbar-gutter')).toBe('stable')
+        expect(composerShell?.className).toContain('fixed')
+        expect(composerShell?.className).toContain('bottom-0')
+        expect(composerShell?.className).toContain('right-[var(--chat-scrollbar-width)]')
+        expect(composerShell?.className).toContain('bg-gradient-to-t')
+        expect(composerShell?.className).toContain('pt-12')
         expect(composerShell?.className).toContain('transition-[left]')
-        expect(mainColumn?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(false)
-        expect(scrollShell?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(true)
-        expect((document.querySelector('main') as HTMLElement | null)?.style.getPropertyValue('--chat-bottom-spacing')).toBe('24px')
+        expect(composerShell?.firstElementChild?.className).toContain('pointer-events-none')
+        expect(composerColumn?.className).toContain('pointer-events-auto')
+        expect((document.querySelector('main') as HTMLElement | null)?.className).toContain('h-dvh')
+        expect((document.querySelector('main') as HTMLElement | null)?.className).toContain('overflow-hidden')
+        expect((document.querySelector('main') as HTMLElement | null)?.style.getPropertyValue('--chat-scrollbar-width')).toBe('0px')
+        expect(messageViewport?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(true)
+        expect(messageContent?.style.paddingBottom).toBe('198px')
         fireEvent.click(screen.getByRole('button', { name: '折叠会话侧边栏' }))
 
         await waitFor(() => {
@@ -395,8 +413,9 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
             useChatAutoScroll: () => ({
-                inputContainerRef: { current: null },
-                bottomSpacing: 24,
+                composerContainerRef: { current: null },
+                scrollViewportRef: { current: null },
+                cancelConversationEntryPositioning: vi.fn(),
                 showScrollToBottom: false,
                 resetAutoScrollForNewTurn: vi.fn(),
                 restoreAutoFollowAndScrollToBottom: vi.fn(),
@@ -417,6 +436,7 @@ describe('InstantMindPage integration', () => {
                 messages: [],
                 status: 'ready',
                 hydrationStatus: 'loading',
+                messageConversationId: null,
                 threadMemoryStatusHint: null,
                 pendingInterrupt: null,
                 sendMessage: vi.fn(),
@@ -503,8 +523,9 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
             useChatAutoScroll: () => ({
-                inputContainerRef: { current: null },
-                bottomSpacing: 24,
+                composerContainerRef: { current: null },
+                scrollViewportRef: { current: null },
+                cancelConversationEntryPositioning: vi.fn(),
                 showScrollToBottom: false,
                 resetAutoScrollForNewTurn: vi.fn(),
                 restoreAutoFollowAndScrollToBottom: vi.fn(),
@@ -525,6 +546,7 @@ describe('InstantMindPage integration', () => {
                 messages: [],
                 status: 'ready',
                 hydrationStatus: 'failed',
+                messageConversationId: null,
                 threadMemoryStatusHint: null,
                 pendingInterrupt: null,
                 sendMessage: vi.fn(),
@@ -606,14 +628,18 @@ describe('InstantMindPage integration', () => {
             ConversationSidebar: (props: Record<string, unknown>) =>
                 React.createElement('div', {
                     'data-testid': 'conversation-sidebar',
-                    'data-disabled': String(props.disabled),
+                    'data-create-disabled': String(props.createDisabled),
+                    'data-delete-disabled': String(props.deleteDisabled),
+                    'data-selection-disabled': String(props.disabled),
                 }),
         }))
         vi.doMock('@/components/instamind/conversation-session/conversation-mobile-selector', () => ({
             ConversationMobileSelector: (props: Record<string, unknown>) =>
                 React.createElement('div', {
                     'data-testid': 'conversation-mobile-selector',
-                    'data-disabled': String(props.disabled),
+                    'data-create-disabled': String(props.createDisabled),
+                    'data-delete-disabled': String(props.deleteDisabled),
+                    'data-selection-disabled': String(props.disabled),
                 }),
         }))
         vi.doMock('@/components/instamind/human-review/human-review-composer-panel', () => ({
@@ -624,8 +650,9 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
             useChatAutoScroll: () => ({
-                inputContainerRef: { current: null },
-                bottomSpacing: 24,
+                composerContainerRef: { current: null },
+                scrollViewportRef: { current: null },
+                cancelConversationEntryPositioning: vi.fn(),
                 showScrollToBottom: false,
                 resetAutoScrollForNewTurn: vi.fn(),
                 restoreAutoFollowAndScrollToBottom: vi.fn(),
@@ -646,6 +673,7 @@ describe('InstantMindPage integration', () => {
                 messages: [],
                 status: 'ready',
                 hydrationStatus: 'ready',
+                messageConversationId: 'conv-a',
                 readOnlyCacheMessage: '当前显示的是浏览器本地只读缓存，服务端会话上下文暂时不可用。',
                 threadMemoryStatusHint: null,
                 pendingInterrupt: null,
@@ -700,8 +728,12 @@ describe('InstantMindPage integration', () => {
         expect(screen.getByText('当前显示的是浏览器本地只读缓存，服务端会话上下文暂时不可用。').textContent).toContain(
             '服务端会话上下文暂时不可用'
         )
-        expect(screen.getByTestId('conversation-sidebar').getAttribute('data-disabled')).toBe('true')
-        expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-disabled')).toBe('true')
+        expect(screen.getByTestId('conversation-sidebar').getAttribute('data-selection-disabled')).toBe('false')
+        expect(screen.getByTestId('conversation-sidebar').getAttribute('data-create-disabled')).toBe('true')
+        expect(screen.getByTestId('conversation-sidebar').getAttribute('data-delete-disabled')).toBe('true')
+        expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-selection-disabled')).toBe('false')
+        expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-create-disabled')).toBe('true')
+        expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-delete-disabled')).toBe('true')
         expect(screen.getByTestId('chat-composer').getAttribute('data-submit-disabled')).toBe('true')
         expect(screen.getByRole('button', { name: '重试连接服务端' })).toBeTruthy()
         expect(screen.getByRole('button', { name: '重试连接服务端' }).getAttribute('aria-describedby')).toBe(
@@ -712,5 +744,162 @@ describe('InstantMindPage integration', () => {
 
         expect(retryRecovery).toHaveBeenCalledTimes(1)
         expect(retryHydration).toHaveBeenCalledTimes(1)
+    })
+
+    it('positions a newly hydrated current conversation before revealing its history', async () => {
+        const cancelConversationEntryPositioning = vi.fn()
+        let finishEntryPositioning: (() => void) | undefined
+        let startEntryPositioning: FrameRequestCallback | undefined
+        const positionConversationEntryAtBottom = vi.fn((onPositioned?: () => void) => {
+            finishEntryPositioning = onPositioned
+        })
+        let selectedConversationId = 'conv-entry-a'
+        const scrollViewportRef = { current: null as HTMLDivElement | null }
+
+        vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+            startEntryPositioning = callback
+            return 1
+        })
+        vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+
+        vi.doUnmock('@/components/instamind/instantmind-page')
+        vi.doMock('@/components/chat/composer/chat-composer', () => ({
+            ChatComposer: () => React.createElement('div', { 'data-testid': 'chat-composer' }),
+        }))
+        vi.doMock('@/components/chat/message-list/chat-message-list', () => ({
+            ChatMessageList: () => React.createElement('div', { 'data-testid': 'chat-message-list' }),
+        }))
+        vi.doMock('@/components/instamind/conversation-session/conversation-sidebar', () => ({
+            ConversationSidebar: () => React.createElement('div'),
+        }))
+        vi.doMock('@/components/instamind/conversation-session/conversation-mobile-selector', () => ({
+            ConversationMobileSelector: () => React.createElement('div'),
+        }))
+        vi.doMock('@/components/instamind/human-review/human-review-composer-panel', () => ({
+            HumanReviewComposerPanel: () => null,
+        }))
+        vi.doMock('@/components/instamind/thread-memory-status-hint', () => ({
+            ThreadMemoryStatusHint: () => null,
+        }))
+        vi.doMock('@/components/instamind/use-chat-auto-scroll', () => ({
+            useChatAutoScroll: () => ({
+                composerContainerRef: { current: null },
+                scrollViewportRef,
+                cancelConversationEntryPositioning,
+                positionConversationEntryAtBottom,
+                resetAutoScrollForNewTurn: vi.fn(),
+                restoreAutoFollowAndScrollToBottom: vi.fn(),
+                showScrollToBottom: false,
+            }),
+        }))
+        vi.doMock('@/components/instamind/use-chat-models', () => ({
+            useChatModels: () => ({
+                hasAvailableModels: true,
+                isLoading: false,
+                model: 'qwen/qwen3.6-flash',
+                modelError: null,
+                modelGroups: [],
+                setModel: vi.fn(),
+            }),
+        }))
+        vi.doMock('@/components/instamind/use-chat-stream', () => ({
+            useChatStream: () => ({
+                cancel: vi.fn(),
+                deleteUserTurn: vi.fn(),
+                historyEntryReady: {
+                    conversationId: selectedConversationId,
+                    sequence: selectedConversationId === 'conv-entry-a' ? 1 : 2,
+                },
+                hydrationStatus: 'ready',
+                imageQuotaError: null,
+                messageConversationId: selectedConversationId,
+                messages: [],
+                pendingInterrupt: null,
+                readOnlyCacheMessage: null,
+                regenerateLastTurn: vi.fn(),
+                resumeAgentRun: vi.fn(),
+                retryHydration: vi.fn(),
+                sendMessage: vi.fn(),
+                status: 'ready',
+                threadMemoryStatusHint: null,
+            }),
+        }))
+        vi.doMock('@/components/instamind/conversation-session/use-conversation-sessions', () => ({
+            useConversationSessions: () => ({
+                conversations: [],
+                createConversation: vi.fn(),
+                deleteConversation: vi.fn(),
+                error: null,
+                handleConversationPromoted: vi.fn(),
+                interactionDisabled: false,
+                isDraft: false,
+                isLoading: false,
+                isMutating: false,
+                isReadOnlyCache: false,
+                readOnlyCacheMessage: null,
+                retryRecovery: vi.fn(),
+                selectedConversation: {
+                    id: selectedConversationId,
+                    title: 'Entry',
+                    selected: true,
+                    hasMessages: true,
+                    createdAt: '2026-08-21T10:00:00.000Z',
+                    lastActiveAt: '2026-08-21T10:00:00.000Z',
+                },
+                selectedConversationId,
+                selectConversation: vi.fn(),
+            }),
+        }))
+
+        const { default: InstantMindPage } = await import('@/components/instamind/instantmind-page')
+
+        const page = render(React.createElement(InstantMindPage, { initialChatModelsState }))
+
+        expect(positionConversationEntryAtBottom).not.toHaveBeenCalled()
+        expect(document.querySelector('[data-slot="conversation-history-presentation"]')?.getAttribute('data-entry-positioned')).toBe(
+            'false'
+        )
+
+        act(() => {
+            startEntryPositioning?.(0)
+        })
+
+        expect(positionConversationEntryAtBottom).toHaveBeenCalledTimes(1)
+        expect(positionConversationEntryAtBottom).toHaveBeenCalledWith(expect.any(Function))
+        expect(document.querySelector('[data-slot="conversation-history-end-anchor"]')).toBeNull()
+        expect(cancelConversationEntryPositioning).toHaveBeenCalledTimes(1)
+        expect(document.querySelector('[data-slot="conversation-history-presentation"]')?.getAttribute('data-entry-positioned')).toBe(
+            'false'
+        )
+        expect(screen.getByTestId('chat-message-list')).toBeTruthy()
+
+        act(() => {
+            finishEntryPositioning?.()
+        })
+
+        expect(document.querySelector('[data-slot="conversation-history-presentation"]')?.getAttribute('data-entry-positioned')).toBe(
+            'true'
+        )
+
+        const messageViewport = document.querySelector('[data-slot="chat-message-viewport"]') as HTMLElement
+        Object.defineProperties(messageViewport, {
+            clientWidth: { configurable: true, value: 985 },
+            offsetWidth: { configurable: true, value: 1000 },
+        })
+        selectedConversationId = 'conv-entry-b'
+        page.rerender(React.createElement(InstantMindPage, { initialChatModelsState }))
+
+        expect(cancelConversationEntryPositioning).toHaveBeenCalledTimes(2)
+        expect((document.querySelector('main') as HTMLElement).style.getPropertyValue('--chat-scrollbar-width')).toBe('15px')
+        expect(positionConversationEntryAtBottom).toHaveBeenCalledTimes(1)
+
+        act(() => {
+            startEntryPositioning?.(0)
+        })
+
+        expect(positionConversationEntryAtBottom).toHaveBeenCalledTimes(2)
+        expect(cancelConversationEntryPositioning.mock.invocationCallOrder[1]).toBeLessThan(
+            positionConversationEntryAtBottom.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY
+        )
     })
 })

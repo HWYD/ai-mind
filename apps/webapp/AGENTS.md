@@ -21,6 +21,12 @@
 - UI 展示逻辑不要偷偷承担 runtime 规则判断。
 - 涉及 `app/api/**/route.ts` 的改动，优先确认错误码、响应字段和现有 stream 协议是否兼容。
 
+## React / Next.js Skill Gate
+
+- 编写、修改、重构或审查 React 组件、Next.js 页面/API route、前端数据获取、渲染性能或 bundle 相关代码前，必须使用 `vercel-react-best-practices` 完成设计与检查，并在交付中说明关键适用结论。
+- 当任务涉及可复用组件 API、Context、compound component、render props，或新增多个行为型 boolean props 时，必须额外使用 `vercel-composition-patterns`；简单局部组件改动不得为满足该规则而引入不必要抽象。
+- Skill 建议不替代项目既有架构、协议、安全、Spec Kit 与最小抽象规则；冲突时以本项目规则和当前版本 spec 为准。
+
 ## 改动前优先看
 
 - 对应 canonical `specs/<version-topic>/` 中的 `spec.md`、`plan.md` 与 `tasks.md`

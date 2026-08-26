@@ -68,11 +68,13 @@ export function FollowUpSuggestions({
     seed,
     questions: explicitQuestions,
     className,
+    disabled = false,
     onSelectQuestion,
 }: {
     seed: string
     questions?: readonly string[]
     className?: string
+    disabled?: boolean
     onSelectQuestion: (question: string) => void
 }) {
     const questions = useMemo(() => explicitQuestions ?? pickStableQuestions(seed), [explicitQuestions, seed])
@@ -84,6 +86,7 @@ export function FollowUpSuggestions({
                     key={question}
                     type="button"
                     variant="ghost"
+                    disabled={disabled}
                     onClick={() => onSelectQuestion(question)}
                     className="group/button h-auto max-w-full cursor-pointer justify-start rounded-2xl border border-transparent bg-muted/65 px-4 py-2.5 text-left text-sm font-medium text-foreground shadow-none transition-[background-color,border-color,box-shadow,transform] hover:translate-x-1 hover:border-[var(--composer-focus-border)] hover:bg-[var(--composer-focus-soft)] hover:shadow-sm active:translate-x-0.5"
                 >

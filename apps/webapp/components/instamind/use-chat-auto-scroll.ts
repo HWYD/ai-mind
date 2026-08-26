@@ -1,29 +1,22 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 type UseChatAutoScrollOptions = {
     isStreamingOutput: boolean
     contentSignal: unknown
 }
 
-// 输入框固定在页面底部；这里给主内容额外留白，让最后一段回答滚到底时仍和输入框保持 128px 的舒适距离。
-// 调大：底部空白更明显、触底滚动更不贴边；调小：页面更紧凑，但最后内容更容易贴近输入框。
-const EXTRA_BOTTOM_SCROLL_SPACING = 128
-
-// 首帧还没测到 Composer 真实高度时，先用估算高度占位，避免页面内容短暂贴到底部。
-const ESTIMATED_COMPOSER_HEIGHT = 220
-
 // 用户离开底部超过 120px 时显示“回到底部”按钮，避免只差几像素时按钮反复闪烁。
-// 调大：按钮出现更晚；调小：按钮更敏感。
 const SCROLL_TO_BOTTOM_THRESHOLD = 120
 
-// 自动跟随的最小滚动间隔。流式 Markdown 可能一帧内多次增高，64ms 可以合并滚动请求，减少视觉抖动。
-// 调大：滚动频率更低但跟随略滞后；调小：跟随更即时但更容易抖。
+// 只有真正贴底才会因 Composer 尺寸变化再次对齐，避免打扰正在阅读历史的用户。
+const PINNED_TO_END_THRESHOLD = 1
+
+// 流式 Markdown 可能一帧内多次增高，64ms 可以合并滚动请求，减少视觉抖动。
 const AUTO_SCROLL_MIN_INTERVAL_MS = 64
 
-// 距离底部超过 64px 才真正执行自动滚动，让一两行新增内容先消耗底部缓冲，避免每来一点内容就滚一次。
-// 调大：自动滚动更少、更稳；调小：更贴底但滚动更频繁。
+// 距离底部超过 64px 才真正执行自动跟随，让一两行新增内容先消耗底部缓冲。
 const AUTO_SCROLL_DISTANCE_THRESHOLD = 64
 
 // 流式自动跟随直接对齐底部，避免内容持续增高时反复取消、重启缓动动画。
@@ -33,25 +26,14 @@ const AUTO_SCROLL_ANIMATION_DURATION_MS = 0
 const SCROLL_TO_BOTTOM_CLICK_ANIMATION_DURATION_MS = 180
 
 // wheel/touchmove/键盘滚动与 scroll 事件不是同一时刻触发；保留 160ms 意图窗口，用于判断后续 scroll 是否来自用户。
-// 调大：更容易识别为用户滚动；调小：可能漏判慢一点的触控板/移动端滚动。
 const USER_SCROLL_INTENT_RESET_DELAY = 160
 
-// 聊天页保留浏览器整页滚动，不引入内部滚动容器，因此滚动目标统一收口到 document.scrollingElement。
-function getPageScroller() {
-    return document.scrollingElement ?? document.documentElement
+function getDistanceFromBottom(viewport: HTMLElement) {
+    return Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight)
 }
 
-function getPageBottomScrollTop() {
-    const scroller = getPageScroller()
-
-    return Math.max(0, scroller.scrollHeight - scroller.clientHeight)
-}
-
-function scrollPageToBottom(behavior: ScrollBehavior = 'auto') {
-    window.scrollTo({
-        top: getPageBottomScrollTop(),
-        behavior,
-    })
+function getBottomScrollTop(viewport: HTMLElement) {
+    return Math.max(0, viewport.scrollHeight - viewport.clientHeight)
 }
 
 // 输入框内部滚动不应该被当作“用户正在浏览历史消息”，否则输入多行文本时会误锁自动跟随。
@@ -69,7 +51,7 @@ function isEditableTarget(target: EventTarget | null) {
     return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT'
 }
 
-// 只识别会移动整页阅读位置的按键，普通输入和快捷键不参与自动滚动锁定。
+// 只识别会移动消息阅读位置的按键，普通输入和快捷键不参与自动滚动锁定。
 function isScrollNavigationKey(event: KeyboardEvent) {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isEditableTarget(event.target)) {
         return false
@@ -94,7 +76,6 @@ interface ScrollSyncDecisionOptions {
 }
 
 // 只做“是否自动跟随、是否显示回到底部按钮”的策略判断，不读取 DOM，也不执行真实滚动。
-// DOM 测量和滚动副作用留在 scheduleScrollSync，便于把调度逻辑和决策逻辑分开读。
 function resolveScrollSyncDecision({
     autoScrollLockedForCurrentTurn,
     distanceFromBottom,
@@ -110,66 +91,33 @@ function resolveScrollSyncDecision({
     }
 }
 
-function useChatComposerBottomSpacing() {
-    const inputContainerRef = useRef<HTMLDivElement>(null)
-    const inputHeightRef = useRef<number | null>(null)
-    const [bottomSpacing, setBottomSpacing] = useState(ESTIMATED_COMPOSER_HEIGHT + EXTRA_BOTTOM_SCROLL_SPACING)
-
-    useEffect(() => {
-        if (!inputContainerRef.current) {
-            return
-        }
-
-        // 输入框高度会随着多行输入、工具栏状态变化而改变，底部留白必须同步更新。
-        const updateSpacing = () => {
-            const height = inputContainerRef.current?.offsetHeight ?? 0
-
-            if (inputHeightRef.current === height) {
-                return
-            }
-
-            inputHeightRef.current = height
-            setBottomSpacing(height + EXTRA_BOTTOM_SCROLL_SPACING)
-        }
-
-        updateSpacing()
-
-        const observer = new ResizeObserver(() => {
-            updateSpacing()
-        })
-
-        observer.observe(inputContainerRef.current)
-
-        return () => observer.disconnect()
-    }, [])
-
-    return {
-        inputContainerRef,
-        bottomSpacing,
-    }
-}
-
 export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatAutoScrollOptions) {
-    const { inputContainerRef, bottomSpacing } = useChatComposerBottomSpacing()
-    // 用户滚动意图与程序滚动分开记录，防止 window.scrollTo 触发 scroll 后被误判成用户手动浏览。
+    const scrollViewportRef = useRef<HTMLDivElement>(null)
+    const composerContainerRef = useRef<HTMLDivElement>(null)
+    const messageContentRef = useRef<HTMLDivElement>(null)
     const userScrollIntentRef = useRef(false)
     const userScrollIntentTimeoutRef = useRef<number | null>(null)
     const autoScrollLockedForCurrentTurnRef = useRef(false)
     const programmaticScrollRef = useRef(false)
     const programmaticScrollResetRafRef = useRef<number | null>(null)
+    const isPinnedToEndRef = useRef(true)
     // 高频滚动调度状态全部放在 ref，避免每次流式增量或 scroll 事件都推动 React 重渲染。
     const lastAutoScrollAtRef = useRef(0)
     const pendingAutoScrollTimeoutRef = useRef<number | null>(null)
     const scrollAnimationRafRef = useRef<number | null>(null)
     const scrollSyncRafRef = useRef<number | null>(null)
-    // 同一帧内可能同时收到消息增量、Composer 高度变化和 resize；只要其中一次允许跟随，本帧就保留自动跟随请求。
     const scrollSyncAutoFollowRef = useRef(false)
     const finishScrollRafRef = useRef<number | null>(null)
     const restoreAutoFollowRafRef = useRef<number | null>(null)
+    const conversationEntryRafRef = useRef<number | null>(null)
+    const conversationEntryPositionedCallbackRef = useRef<(() => void) | null>(null)
+    const composerResizeRafRef = useRef<number | null>(null)
+    const composerOverlayInsetRef = useRef(0)
+    const previousComposerOverlayInsetRef = useRef<number | null>(null)
     const [showScrollToBottom, setShowScrollToBottom] = useState(false)
+    const [composerOverlayInset, setComposerOverlayInset] = useState(0)
     // 事件监听和 rAF 回调不会随每次 render 重新创建，用 ref 读取最新流式状态。
     const isStreamingOutputRef = useRef(isStreamingOutput)
-    // 记录上一次 render 同步后的流式状态，用来识别“刚从输出中变为结束”的时刻。
     const wasStreamingOutputRef = useRef(isStreamingOutput)
 
     useEffect(() => {
@@ -230,6 +178,24 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
         restoreAutoFollowRafRef.current = null
     }, [])
 
+    const clearComposerResizePositioning = useCallback(() => {
+        if (composerResizeRafRef.current === null) {
+            return
+        }
+
+        window.cancelAnimationFrame(composerResizeRafRef.current)
+        composerResizeRafRef.current = null
+    }, [])
+
+    const cancelConversationEntryPositioning = useCallback(() => {
+        if (conversationEntryRafRef.current !== null) {
+            window.cancelAnimationFrame(conversationEntryRafRef.current)
+            conversationEntryRafRef.current = null
+        }
+
+        conversationEntryPositionedCallbackRef.current = null
+    }, [])
+
     const markProgrammaticScroll = useCallback(() => {
         programmaticScrollRef.current = true
         clearProgrammaticScrollReset()
@@ -243,32 +209,42 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
         })
     }, [clearProgrammaticScrollReset])
 
-    const scrollPageToBottomFromCode = useCallback(
+    const scrollViewportToBottomFromCode = useCallback(
         (durationMs = AUTO_SCROLL_ANIMATION_DURATION_MS) => {
             clearScrollAnimation()
-            markProgrammaticScroll()
 
-            const startTop = getPageScroller().scrollTop
-            const targetTop = getPageBottomScrollTop()
+            const viewport = scrollViewportRef.current
+
+            if (!viewport) {
+                return
+            }
+
+            markProgrammaticScroll()
+            isPinnedToEndRef.current = true
+            const startTop = viewport.scrollTop
+            const targetTop = getBottomScrollTop(viewport)
             const distance = targetTop - startTop
 
             if (durationMs <= 0 || Math.abs(distance) < 1) {
-                scrollPageToBottom()
+                viewport.scrollTop = targetTop
                 return
             }
 
             const startedAt = performance.now()
 
             const step = (timestamp: number) => {
+                const activeViewport = scrollViewportRef.current
+
+                if (!activeViewport) {
+                    scrollAnimationRafRef.current = null
+                    return
+                }
+
                 const progress = Math.min(1, (timestamp - startedAt) / durationMs)
-                // 自动跟随只做短促缓动，过长动画会和持续增长的内容高度互相追逐，反而更容易卡顿。
                 const easedProgress = 1 - (1 - progress) ** 3
 
                 markProgrammaticScroll()
-                window.scrollTo({
-                    top: startTop + distance * easedProgress,
-                    behavior: 'auto',
-                })
+                activeViewport.scrollTop = startTop + distance * easedProgress
 
                 if (progress < 1) {
                     scrollAnimationRafRef.current = window.requestAnimationFrame(step)
@@ -277,7 +253,8 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
 
                 scrollAnimationRafRef.current = null
                 markProgrammaticScroll()
-                scrollPageToBottom()
+                activeViewport.scrollTop = getBottomScrollTop(activeViewport)
+                isPinnedToEndRef.current = true
             }
 
             scrollAnimationRafRef.current = window.requestAnimationFrame(step)
@@ -287,7 +264,6 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
 
     const scheduleScrollSync = useCallback(
         (allowAutoFollow = false) => {
-            // 多个 contentSignal/bottomSpacing/resize 变化会合并到同一帧处理，先测量，再决定是否滚动。
             scrollSyncAutoFollowRef.current = scrollSyncAutoFollowRef.current || allowAutoFollow
 
             if (scrollSyncRafRef.current !== null) {
@@ -298,9 +274,14 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
                 scrollSyncRafRef.current = null
                 const requestedAutoFollow = scrollSyncAutoFollowRef.current
                 scrollSyncAutoFollowRef.current = false
+                const viewport = scrollViewportRef.current
 
-                const scroller = getPageScroller()
-                const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+                if (!viewport) {
+                    return
+                }
+
+                const distanceFromBottom = getDistanceFromBottom(viewport)
+                isPinnedToEndRef.current = distanceFromBottom <= PINNED_TO_END_THRESHOLD
                 const decision = resolveScrollSyncDecision({
                     autoScrollLockedForCurrentTurn: autoScrollLockedForCurrentTurnRef.current,
                     distanceFromBottom,
@@ -309,9 +290,9 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
                     requestedAutoFollow,
                 })
 
-                setShowScrollToBottom(current => {
-                    return current === decision.shouldShowScrollToBottom ? current : decision.shouldShowScrollToBottom
-                })
+                setShowScrollToBottom(current =>
+                    current === decision.shouldShowScrollToBottom ? current : decision.shouldShowScrollToBottom
+                )
 
                 if (!decision.shouldScrollToBottom) {
                     return
@@ -330,16 +311,14 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
                                 return
                             }
 
-                            const latestScroller = getPageScroller()
-                            const latestDistanceFromBottom =
-                                latestScroller.scrollHeight - latestScroller.scrollTop - latestScroller.clientHeight
+                            const latestViewport = scrollViewportRef.current
 
-                            if (latestDistanceFromBottom <= AUTO_SCROLL_DISTANCE_THRESHOLD) {
+                            if (!latestViewport || getDistanceFromBottom(latestViewport) <= AUTO_SCROLL_DISTANCE_THRESHOLD) {
                                 return
                             }
 
                             lastAutoScrollAtRef.current = performance.now()
-                            scrollPageToBottomFromCode()
+                            scrollViewportToBottomFromCode()
                             setShowScrollToBottom(current => (current ? false : current))
                         }, remainingAutoScrollDelay)
                     }
@@ -349,12 +328,36 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
 
                 clearPendingAutoScroll()
                 lastAutoScrollAtRef.current = now
-                scrollPageToBottomFromCode()
+                scrollViewportToBottomFromCode()
                 setShowScrollToBottom(current => (current ? false : current))
             })
         },
-        [clearPendingAutoScroll, scrollPageToBottomFromCode]
+        [clearPendingAutoScroll, scrollViewportToBottomFromCode]
     )
+
+    const schedulePinnedViewportPositioning = useCallback(() => {
+        const viewport = scrollViewportRef.current
+
+        if (!viewport || !isPinnedToEndRef.current || composerResizeRafRef.current !== null) {
+            return
+        }
+
+        const scrollTopBeforeResize = viewport.scrollTop
+
+        composerResizeRafRef.current = window.requestAnimationFrame(() => {
+            composerResizeRafRef.current = null
+
+            const activeViewport = scrollViewportRef.current
+
+            // Resize 之后、下一帧之前用户若已上滑，保留新的阅读位置而不是按旧贴底状态回贴。
+            if (!activeViewport || Math.abs(activeViewport.scrollTop - scrollTopBeforeResize) > PINNED_TO_END_THRESHOLD) {
+                return
+            }
+
+            scrollViewportToBottomFromCode()
+            setShowScrollToBottom(current => (current ? false : current))
+        })
+    }, [scrollViewportToBottomFromCode])
 
     // 新一轮请求开始前恢复自动跟随；用户上一轮的手动浏览锁定不带到下一轮。
     const resetAutoScrollForNewTurn = useCallback(() => {
@@ -369,7 +372,7 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
         clearUserScrollIntentTimeout()
     }, [clearFinishScroll, clearPendingAutoScroll, clearRestoreAutoFollowScroll, clearScrollAnimation, clearUserScrollIntentTimeout])
 
-    // 用户点击“回到底部”是明确的恢复跟随意图，因此清掉本轮锁定并立即对齐页面底部。
+    // 用户点击“回到底部”是明确的恢复跟随意图，因此清掉本轮锁定并立即对齐消息视口底部。
     const restoreAutoFollowAndScrollToBottom = useCallback(() => {
         autoScrollLockedForCurrentTurnRef.current = false
         userScrollIntentRef.current = false
@@ -378,15 +381,106 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
         clearUserScrollIntentTimeout()
         clearRestoreAutoFollowScroll()
 
-        scrollPageToBottomFromCode(SCROLL_TO_BOTTOM_CLICK_ANIMATION_DURATION_MS)
+        scrollViewportToBottomFromCode(SCROLL_TO_BOTTOM_CLICK_ANIMATION_DURATION_MS)
         setShowScrollToBottom(current => (current ? false : current))
 
         restoreAutoFollowRafRef.current = window.requestAnimationFrame(() => {
             restoreAutoFollowRafRef.current = null
-            scrollPageToBottomFromCode(SCROLL_TO_BOTTOM_CLICK_ANIMATION_DURATION_MS)
+            scrollViewportToBottomFromCode(SCROLL_TO_BOTTOM_CLICK_ANIMATION_DURATION_MS)
             setShowScrollToBottom(current => (current ? false : current))
         })
-    }, [clearFinishScroll, clearPendingAutoScroll, clearRestoreAutoFollowScroll, clearUserScrollIntentTimeout, scrollPageToBottomFromCode])
+    }, [
+        clearFinishScroll,
+        clearPendingAutoScroll,
+        clearRestoreAutoFollowScroll,
+        clearUserScrollIntentTimeout,
+        scrollViewportToBottomFromCode,
+    ])
+
+    // 历史会话首次可见前直接对齐消息视口底部；独立于流式自动跟随与用户手动“回到底部”的缓动反馈。
+    const positionConversationEntryAtBottom = useCallback(
+        (onPositioned?: () => void) => {
+            cancelConversationEntryPositioning()
+            conversationEntryPositionedCallbackRef.current = onPositioned ?? null
+
+            const positionEntry = () => {
+                scrollViewportToBottomFromCode()
+            }
+
+            positionEntry()
+            setShowScrollToBottom(current => (current ? false : current))
+
+            // 消息卡片的本地测量可能在同一帧内补齐，首帧绘制前再校正一次。
+            conversationEntryRafRef.current = window.requestAnimationFrame(() => {
+                conversationEntryRafRef.current = null
+                positionEntry()
+                setShowScrollToBottom(current => (current ? false : current))
+                const positionedCallback = conversationEntryPositionedCallbackRef.current
+                conversationEntryPositionedCallbackRef.current = null
+                positionedCallback?.()
+            })
+        },
+        [cancelConversationEntryPositioning, scrollViewportToBottomFromCode]
+    )
+
+    // Composer 悬浮在消息视口上方；真实高度同时决定消息末尾安全区。只有变化前已经贴底，才在下一帧重新对齐最新消息。
+    useLayoutEffect(() => {
+        const composer = composerContainerRef.current
+        const messageContent = messageContentRef.current
+
+        if (!composer && !messageContent) {
+            return
+        }
+
+        const syncComposerOverlayInset = () => {
+            if (!composer) {
+                return false
+            }
+
+            const nextInset = Math.ceil(composer.getBoundingClientRect().height)
+
+            if (composerOverlayInsetRef.current === nextInset) {
+                return false
+            }
+
+            composerOverlayInsetRef.current = nextInset
+            setComposerOverlayInset(nextInset)
+
+            return true
+        }
+
+        syncComposerOverlayInset()
+
+        const observer = new ResizeObserver(entries => {
+            const composerInsetChanged = entries.some(entry => entry.target === composer) && syncComposerOverlayInset()
+
+            if (!composerInsetChanged && entries.some(entry => entry.target === messageContent)) {
+                schedulePinnedViewportPositioning()
+            }
+        })
+
+        if (composer) {
+            observer.observe(composer)
+        }
+
+        if (messageContent) {
+            observer.observe(messageContent)
+        }
+
+        return () => observer.disconnect()
+    }, [schedulePinnedViewportPositioning])
+
+    // Composer 的安全区先提交为消息内容的 padding，再排队校正；避免按旧 scrollHeight 对齐后漏掉这次真实末尾变化。
+    useLayoutEffect(() => {
+        const previousInset = previousComposerOverlayInsetRef.current
+        previousComposerOverlayInsetRef.current = composerOverlayInset
+
+        if (previousInset === null || previousInset === composerOverlayInset) {
+            return
+        }
+
+        schedulePinnedViewportPositioning()
+    }, [composerOverlayInset, schedulePinnedViewportPositioning])
 
     // 这个 effect 本体不启动新任务，只登记统一清理逻辑；卸载或依赖变化时取消尚未完成的异步滚动任务。
     useEffect(() => {
@@ -401,9 +495,13 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
             clearScrollAnimation()
             clearFinishScroll()
             clearRestoreAutoFollowScroll()
+            clearComposerResizePositioning()
+            cancelConversationEntryPositioning()
             clearUserScrollIntentTimeout()
         }
     }, [
+        cancelConversationEntryPositioning,
+        clearComposerResizePositioning,
         clearFinishScroll,
         clearPendingAutoScroll,
         clearProgrammaticScrollReset,
@@ -414,18 +512,26 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
 
     useEffect(() => {
         const handleResize = () => {
+            if (isPinnedToEndRef.current) {
+                schedulePinnedViewportPositioning()
+                return
+            }
+
             scheduleScrollSync(false)
         }
 
-        handleResize()
         window.addEventListener('resize', handleResize)
 
-        return () => {
-            window.removeEventListener('resize', handleResize)
-        }
-    }, [scheduleScrollSync])
+        return () => window.removeEventListener('resize', handleResize)
+    }, [schedulePinnedViewportPositioning, scheduleScrollSync])
 
     useEffect(() => {
+        const viewport = scrollViewportRef.current
+
+        if (!viewport) {
+            return
+        }
+
         const scheduleUserScrollIntentReset = () => {
             clearUserScrollIntentTimeout()
 
@@ -452,10 +558,7 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
             }
 
             clearScrollAnimation()
-
-            if (isStreamingOutputRef.current) {
-                markUserScrollIntent()
-            }
+            markUserScrollIntent()
         }
 
         const handleTouchMove = (event: TouchEvent) => {
@@ -464,10 +567,7 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
             }
 
             clearScrollAnimation()
-
-            if (isStreamingOutputRef.current) {
-                markUserScrollIntent()
-            }
+            markUserScrollIntent()
         }
 
         const handleKeyDown = (event: KeyboardEvent) => {
@@ -476,13 +576,11 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
             }
 
             clearScrollAnimation()
-
-            if (isStreamingOutputRef.current) {
-                markUserScrollIntent()
-            }
+            markUserScrollIntent()
         }
 
         const handleScroll = () => {
+            isPinnedToEndRef.current = getDistanceFromBottom(viewport) <= PINNED_TO_END_THRESHOLD
             const isProgrammaticScroll = programmaticScrollRef.current && !userScrollIntentRef.current
 
             if (isProgrammaticScroll) {
@@ -498,7 +596,7 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
                 return
             }
 
-            if (!isProgrammaticScroll && userScrollIntentRef.current) {
+            if (userScrollIntentRef.current) {
                 // 只有“用户输入事件之后发生的 scroll”才视为手动滚动，程序触底滚动不会触发本轮锁定。
                 autoScrollLockedForCurrentTurnRef.current = true
                 clearPendingAutoScroll()
@@ -509,23 +607,22 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
             scheduleScrollSync(false)
         }
 
-        window.addEventListener('wheel', handleWheel, { passive: true })
-        window.addEventListener('touchmove', handleTouchMove, { passive: true })
-        window.addEventListener('keydown', handleKeyDown)
-        window.addEventListener('scroll', handleScroll, { passive: true })
+        viewport.addEventListener('wheel', handleWheel, { passive: true })
+        viewport.addEventListener('touchmove', handleTouchMove, { passive: true })
+        viewport.addEventListener('keydown', handleKeyDown)
+        viewport.addEventListener('scroll', handleScroll, { passive: true })
 
         return () => {
-            window.removeEventListener('wheel', handleWheel)
-            window.removeEventListener('touchmove', handleTouchMove)
-            window.removeEventListener('keydown', handleKeyDown)
-            window.removeEventListener('scroll', handleScroll)
+            viewport.removeEventListener('wheel', handleWheel)
+            viewport.removeEventListener('touchmove', handleTouchMove)
+            viewport.removeEventListener('keydown', handleKeyDown)
+            viewport.removeEventListener('scroll', handleScroll)
         }
     }, [clearPendingAutoScroll, clearScrollAnimation, clearUserScrollIntentTimeout, scheduleScrollSync])
 
     useEffect(() => {
-        // 任何消息增量、输入框高度或流式状态变化，都只调度一次页面级滚动同步。
         scheduleScrollSync(isStreamingOutput)
-    }, [bottomSpacing, contentSignal, isStreamingOutput, scheduleScrollSync])
+    }, [contentSignal, isStreamingOutput, scheduleScrollSync])
 
     useEffect(() => {
         const wasStreamingOutput = wasStreamingOutputRef.current
@@ -546,16 +643,20 @@ export function useChatAutoScroll({ isStreamingOutput, contentSignal }: UseChatA
             }
 
             // 流结束后再对齐一次底部，覆盖最后一批 Markdown 渲染导致的高度补涨。
-            scrollPageToBottomFromCode()
+            scrollViewportToBottomFromCode()
             setShowScrollToBottom(current => (current ? false : current))
         })
-    }, [clearFinishScroll, clearPendingAutoScroll, isStreamingOutput, scrollPageToBottomFromCode])
+    }, [clearFinishScroll, clearPendingAutoScroll, isStreamingOutput, scrollViewportToBottomFromCode])
 
     return {
-        inputContainerRef,
-        bottomSpacing,
+        composerContainerRef,
+        composerOverlayInset,
+        messageContentRef,
+        scrollViewportRef,
         showScrollToBottom,
         resetAutoScrollForNewTurn,
         restoreAutoFollowAndScrollToBottom,
+        positionConversationEntryAtBottom,
+        cancelConversationEntryPositioning,
     }
 }

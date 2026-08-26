@@ -8,13 +8,29 @@ import { getMessageCopyText } from '@/components/chat/message-list/shared/messag
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type { MindMessage } from '@/lib/ai/types/message'
 
-afterEach(() => {
-    cleanup()
+const assistantMessageRenderSpy = vi.hoisted(() => vi.fn())
+
+vi.mock('@/components/chat/message-list/messages/assistant-message', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/components/chat/message-list/messages/assistant-message')>()
+    const react = await import('react')
+
+    return {
+        ...actual,
+        AssistantMessage(props: Parameters<typeof actual.AssistantMessage>[0]) {
+            assistantMessageRenderSpy(props)
+            return react.createElement(actual.AssistantMessage, props)
+        },
+    }
 })
 
-function createAssistantMessage(): MindMessage {
+afterEach(() => {
+    cleanup()
+    assistantMessageRenderSpy.mockClear()
+})
+
+function createAssistantMessage(id = 'assistant-reasoning', text = '最终答案'): MindMessage {
     return {
-        id: 'assistant-reasoning',
+        id,
         role: 'assistant',
         createdAt: '2026-06-16T10:00:00.000Z',
         parts: [
@@ -28,7 +44,7 @@ function createAssistantMessage(): MindMessage {
             {
                 id: 'text-1',
                 type: 'text',
-                text: '最终答案',
+                text,
                 format: 'markdown',
             },
         ],
@@ -195,6 +211,51 @@ describe('ChatMessageList', () => {
         )
 
         expect(screen.queryByText('试试这些能力')).toBeNull()
+    })
+
+    it('keeps completed-reply recommendations in the tree while their actions are temporarily unavailable', () => {
+        render(
+            <ChatMessageList
+                actionsDisabled
+                messages={[createAssistantMessage()]}
+                status="ready"
+                enableReasoning={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        const recommendationButtons = within(screen.getByRole('group', { name: '推荐问题' })).getAllByRole('button')
+
+        expect(recommendationButtons).toHaveLength(3)
+        expect(recommendationButtons.every(button => (button as HTMLButtonElement).disabled)).toBe(true)
+    })
+
+    it('only rerenders the latest assistant message when recommendation actions become disabled', () => {
+        const messages = [createAssistantMessage('assistant-history', '历史回复'), createAssistantMessage('assistant-latest', '最新回复')]
+        const props = {
+            enableReasoning: false,
+            messages,
+            status: 'ready' as const,
+            onDeleteUserTurn: vi.fn(() => true),
+            onRegenerateLastTurn: vi.fn(() => true),
+            onSelectFollowUpQuestion: vi.fn(),
+            onSelectSuggestion: vi.fn(),
+        }
+        const page = render(<ChatMessageList {...props} />)
+
+        assistantMessageRenderSpy.mockClear()
+        page.rerender(<ChatMessageList {...props} actionsDisabled />)
+
+        expect(assistantMessageRenderSpy).toHaveBeenCalledTimes(1)
+        expect(assistantMessageRenderSpy).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                followUpSuggestionsDisabled: true,
+                message: expect.objectContaining({ id: 'assistant-latest' }),
+            })
+        )
     })
 
     it('renders image summary and result parts after an image generation task completes', async () => {

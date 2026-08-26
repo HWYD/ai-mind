@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> 当前发布候选为 v0.5.1：Chat Experience & Image Reliability。它在既有 Windows x64 / macOS arm64 Electron 宿主与 Web 应用边界内，扩容近期会话、完善图像生成反馈与当前 profile 的图片恢复，并补充桌面/移动项目入口。提交后仍需由 GitHub Actions 完成 macOS arm64 打包验证；[`v0.5.0-public-beta`](https://github.com/HWYD/ai-mind/releases/tag/v0.5.0-public-beta) 继续作为上一版未签名桌面预览的历史记录。
+> 当前发布候选为 v0.5.2：Conversation Entry Without Scroll Flash。它将历史会话切换和刷新恢复收口为“加载骨架 → 已定位的最新内容”两阶段展示，消息区独立滚动并为后续尾页分页保留稳定视口；远端 GitHub Actions 是正式 tag 与 Release 的最后闸门。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前发布候选：`v0.5.1 Chat Experience & Image Reliability`。
+当前阶段：`Runtime Skeleton / MVP`，当前发布候选：`v0.5.2 Conversation Entry Without Scroll Flash`。
 
 已经验证：
 
@@ -255,18 +255,23 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前发布候选：v0.5.1 Chat Experience & Image Reliability
+## 当前发布候选：v0.5.2 Conversation Entry Without Scroll Flash
 
-v0.5.1 是既有 Web 体验与图像生成可靠性的小版本，已达到提交候选状态：
+v0.5.2 收口已有历史会话的进入与切换体验：
 
-- 近期会话统一保留 50 条；桌面端长标题在溢出时按需单次展示完整内容。
-- 已验证的图片 Blob 仅缓存于当前浏览器或 Electron profile，刷新后可恢复预览与下载；上限为 30 张或 100 MiB。
-- 图像生成与结果读取使用同一流光占位；图像规划和 Provider 仅对确定的瞬时故障有限重试。
-- 桌面侧栏和移动抽屉提供访客项目菜单：浏览器新开 GitHub，Electron 复制链接。
+- 消息区成为独立的全高滚动视口；历史会话首次揭示前，在隐藏布局中完成无动画到底定位。
+- Composer 保持底部悬浮，真实高度加 54px 作为消息末尾安全区；底部渐变遮罩覆盖其后的内容。
+- 原生 scrollbar gutter 稳定预留，Composer 与消息内容列按实测滚动条宽度对齐，不随短/长内容切换横移。
+- 已有会话本地优先切换；本地快照、只读缓存、快速 A→B 与后台选中偏好确认均不会显示旧内容或二次定位。
+- 最新回复的推荐问题与回复同一帧揭示；交互暂不可用时仅禁用推荐按钮，不延后插入推荐区块。
 
-本版本不提供无限历史、跨设备图片同步、服务端图片库、图片编辑或新的 Electron IPC。详细设计见 [v0.5.1 Version](./docs/versions/v0.5.1-chat-experience-reliability.md)、[Release Note](./docs/releases/v0.5.1.md) 和 [Tasklist](./docs/tasklists/v0.5.1-chat-experience-reliability-tasklist.md)。
+本版本不提供尾页 cursor 分页、向上加载、虚拟列表、阅读位置/未读模型、API 或 Electron IPC 变更。详细设计见 [v0.5.2 Version](./docs/versions/v0.5.2-conversation-entry-no-flash.md)、[Release Note](./docs/releases/v0.5.2.md) 和 [Tasklist](./docs/tasklists/v0.5.2-conversation-entry-no-flash-tasklist.md)。
 
-## 上一版本：v0.5.0 Electron Desktop Host
+## 上一版本：v0.5.1 Chat Experience & Image Reliability
+
+v0.5.1 扩容近期会话、补强图片生成反馈和当前 profile 图片恢复，并在桌面侧栏和移动抽屉补充项目入口。详细设计见 [v0.5.1 Version](./docs/versions/v0.5.1-chat-experience-reliability.md)、[Release Note](./docs/releases/v0.5.1.md) 和 [Tasklist](./docs/tasklists/v0.5.1-chat-experience-reliability-tasklist.md)。
+
+## 早期桌面预览：v0.5.0 Electron Desktop Host
 
 v0.5.0 为既有在线 Web 应用增加 Windows x64 与 macOS arm64 Electron 桌面宿主。AI Runtime、会话、
 StreamRun recovery、图像和受控 Agent 仍由服务端与 Web 应用负责；桌面进程只承担固定 Origin 准入、
@@ -790,6 +795,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.4.12 | Image Generation Agent                             | 通过显式 `/image` 增加受控单张文生图：独立 LangGraph 图、固定 Provider、临时同源预览与下载                                                                                      |
 | v0.5.0  | Electron Desktop Host                              | 增加固定 Origin 的 Windows x64 / macOS arm64 Electron 宿主与公开未签名预览；生产与双平台手工验收仍在收口                                                                        |
 | v0.5.1  | Chat Experience & Image Reliability                | 扩容近期会话、改进标题与加载反馈、增加受限本地图片恢复和分层重试，并补充桌面/移动项目菜单                                                                                       |
+| v0.5.2  | Conversation Entry Without Scroll Flash            | 历史会话首次揭示直接到达最新消息；全高消息滚动视口与悬浮 Composer 保持稳定 gutter、列对齐和本地优先切换语义                                                                     |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

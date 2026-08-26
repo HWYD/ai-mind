@@ -1,7 +1,7 @@
 'use client'
 
 import { ArrowDown, CircleAlert } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { ChatComposer } from '@/components/chat/composer/chat-composer'
 import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
@@ -83,6 +83,10 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const [interactionLocked, setInteractionLocked] = useState(false)
     const [projectLinkNotice, setProjectLinkNotice] = useState<{ id: number; type: ProjectLinkNoticeType } | null>(null)
+    const [positionedHistoryEntrySequence, setPositionedHistoryEntrySequence] = useState<number | null>(null)
+    const [chatScrollbarWidth, setChatScrollbarWidth] = useState<number | null>(null)
+    const [measuredHistoryEntrySequence, setMeasuredHistoryEntrySequence] = useState<number | null>(null)
+    const historyEntryStartRafRef = useRef<number | null>(null)
     const {
         hasAvailableModels,
         isLoading: isModelLoading,
@@ -97,7 +101,6 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         deleteConversation,
         error: conversationError,
         handleConversationPromoted,
-        interactionDisabled,
         isDraft,
         isLoading: isConversationLoading,
         isMutating: isConversationMutating,
@@ -115,6 +118,8 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         status,
         imageQuotaError,
         hydrationStatus,
+        historyEntryReady,
+        messageConversationId,
         readOnlyCacheMessage: threadReadOnlyCacheMessage,
         threadMemoryStatusHint,
         pendingInterrupt,
@@ -138,8 +143,20 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const nextInteractionLocked = isStreamingOutput || hasPendingReview
     const conversationSidebarWidth = sidebarCollapsed ? '3.75rem' : '16.75rem'
     const conversationTransitionPending = isConversationLoading || isConversationMutating
-    const conversationHydrationPending = !isDraft && hydrationStatus === 'loading'
-    const conversationHydrationFailed = !isDraft && hydrationStatus === 'failed'
+    const selectedHistoryConversationId = isDraft ? null : selectedConversationId
+    const hasCurrentMessageOwnership = selectedHistoryConversationId === null || messageConversationId === selectedHistoryConversationId
+    const conversationHydrationFailed = selectedHistoryConversationId !== null && hydrationStatus === 'failed'
+    const conversationHydrationPending =
+        selectedHistoryConversationId !== null &&
+        !conversationHydrationFailed &&
+        (hydrationStatus === 'loading' || !hasCurrentMessageOwnership)
+    const historyEntrySequence = historyEntryReady?.conversationId === selectedHistoryConversationId ? historyEntryReady.sequence : null
+    const shouldPositionHistoryEntry =
+        !conversationHydrationPending &&
+        !conversationHydrationFailed &&
+        hasCurrentMessageOwnership &&
+        historyEntrySequence !== null &&
+        historyEntrySequence !== positionedHistoryEntrySequence
     const readOnlyCacheMessage = conversationReadOnlyCacheMessage ?? threadReadOnlyCacheMessage
     const isReadOnlyCache = isConversationReadOnlyCache || Boolean(threadReadOnlyCacheMessage)
     const composerDisabled = hasPendingReview
@@ -148,11 +165,99 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const selectedConversationTitle = selectedConversation?.title ?? '新会话'
     const readOnlyCacheRetryDisabled = conversationTransitionPending || conversationHydrationPending || isStreamingOutput
     const readOnlyCacheDescriptionId = 'instamind-readonly-cache-description'
-    const { inputContainerRef, bottomSpacing, showScrollToBottom, resetAutoScrollForNewTurn, restoreAutoFollowAndScrollToBottom } =
-        useChatAutoScroll({
-            isStreamingOutput,
-            contentSignal: messages,
+    const {
+        composerContainerRef,
+        composerOverlayInset = 0,
+        messageContentRef,
+        scrollViewportRef,
+        showScrollToBottom,
+        resetAutoScrollForNewTurn,
+        restoreAutoFollowAndScrollToBottom,
+        positionConversationEntryAtBottom,
+        cancelConversationEntryPositioning,
+    } = useChatAutoScroll({
+        isStreamingOutput,
+        contentSignal: messages,
+    })
+
+    useLayoutEffect(() => {
+        cancelConversationEntryPositioning()
+    }, [cancelConversationEntryPositioning, selectedHistoryConversationId])
+
+    const syncChatScrollbarWidth = useCallback(() => {
+        const viewport = scrollViewportRef.current
+
+        if (!viewport) {
+            return
+        }
+
+        const nextWidth = Math.max(0, viewport.offsetWidth - viewport.clientWidth)
+
+        setChatScrollbarWidth(current => (current === nextWidth ? current : nextWidth))
+    }, [scrollViewportRef])
+
+    useLayoutEffect(() => {
+        const viewport = scrollViewportRef.current
+
+        if (!viewport) {
+            return
+        }
+
+        syncChatScrollbarWidth()
+
+        if (!window.ResizeObserver) {
+            return
+        }
+
+        const observer = new ResizeObserver(syncChatScrollbarWidth)
+        observer.observe(viewport)
+
+        return () => observer.disconnect()
+    }, [scrollViewportRef, syncChatScrollbarWidth])
+
+    useLayoutEffect(() => {
+        if (!shouldPositionHistoryEntry || historyEntrySequence === null) {
+            return
+        }
+
+        // 每次历史会话进入都重新读取原生滚动条宽度，不能复用骨架或上一会话的缓存值。
+        syncChatScrollbarWidth()
+        setMeasuredHistoryEntrySequence(current => (current === historyEntrySequence ? current : historyEntrySequence))
+    }, [historyEntrySequence, shouldPositionHistoryEntry, syncChatScrollbarWidth])
+
+    useLayoutEffect(() => {
+        if (
+            !shouldPositionHistoryEntry ||
+            historyEntrySequence === null ||
+            chatScrollbarWidth === null ||
+            measuredHistoryEntrySequence !== historyEntrySequence
+        ) {
+            return
+        }
+
+        // 先让 scrollbar 右 inset 参与 Composer 布局，再开始隐藏历史的到底定位，避免首帧按旧列宽和旧高度揭示。
+        historyEntryStartRafRef.current = window.requestAnimationFrame(() => {
+            historyEntryStartRafRef.current = null
+            positionConversationEntryAtBottom(() => {
+                setPositionedHistoryEntrySequence(historyEntrySequence)
+            })
         })
+
+        return () => {
+            if (historyEntryStartRafRef.current === null) {
+                return
+            }
+
+            window.cancelAnimationFrame(historyEntryStartRafRef.current)
+            historyEntryStartRafRef.current = null
+        }
+    }, [
+        chatScrollbarWidth,
+        historyEntrySequence,
+        measuredHistoryEntrySequence,
+        positionConversationEntryAtBottom,
+        shouldPositionHistoryEntry,
+    ])
 
     useEffect(() => {
         setInteractionLocked(nextInteractionLocked)
@@ -211,7 +316,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     }
 
     function handleSelectConversation(conversationId: string) {
-        if (nextInteractionLocked || isReadOnlyCache) {
+        if (nextInteractionLocked) {
             return false
         }
 
@@ -244,21 +349,24 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
         }))
     }
 
-    const conversationControlsDisabled = nextInteractionLocked || interactionDisabled || isReadOnlyCache
+    const conversationSelectionDisabled = nextInteractionLocked || isConversationLoading || isConversationMutating
+    const conversationWriteDisabled = conversationSelectionDisabled || isReadOnlyCache
 
     return (
         <main
-            className="min-h-screen bg-background text-foreground"
+            className="h-dvh overflow-hidden bg-background text-foreground"
             style={{
                 ['--chat-content-column-width' as string]: '53.5rem',
-                ['--chat-bottom-spacing' as string]: `${bottomSpacing}px`,
                 ['--conversation-sidebar-width' as string]: conversationSidebarWidth,
+                ['--chat-scrollbar-width' as string]: `${chatScrollbarWidth ?? 0}px`,
             }}
         >
             <ConversationSidebar
                 collapsed={sidebarCollapsed}
                 conversations={conversations}
-                disabled={conversationControlsDisabled}
+                createDisabled={conversationWriteDisabled}
+                deleteDisabled={conversationWriteDisabled}
+                disabled={conversationSelectionDisabled}
                 onCreateConversation={() => {
                     void handleCreateConversation()
                 }}
@@ -270,102 +378,121 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
             />
 
             <div
-                className="pb-[var(--chat-bottom-spacing)] transition-[padding-left] duration-200 ease-linear lg:pl-[var(--conversation-sidebar-width)]"
-                data-slot="chat-scroll-shell"
+                className="h-full min-w-0 transition-[padding-left] duration-200 ease-linear lg:pl-[var(--conversation-sidebar-width)]"
+                data-slot="chat-layout"
             >
-                <div className="px-4 pb-6 pt-0 sm:px-6 lg:px-8 lg:pt-8">
-                    <ConversationMobileSelector
-                        conversations={conversations}
-                        disabled={conversationControlsDisabled}
-                        onCreateConversation={handleCreateConversation}
-                        onDeleteConversation={handleDeleteConversation}
-                        onProjectLinkCopied={() => showProjectLinkNotice('copied')}
-                        onProjectLinkCopyFailed={() => showProjectLinkNotice('copy-failed')}
-                        onSelectConversation={selectConversation}
-                        selectedConversationTitle={selectedConversationTitle}
-                    />
+                <div
+                    ref={scrollViewportRef}
+                    role="region"
+                    tabIndex={0}
+                    aria-label="聊天记录"
+                    className="h-full overflow-y-auto overscroll-contain"
+                    data-slot="chat-message-viewport"
+                    style={{ scrollbarGutter: 'stable' }}
+                >
                     <div
-                        className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} min-h-[calc(100vh-var(--chat-bottom-spacing)-1.5rem)] lg:min-h-[calc(100vh-var(--chat-bottom-spacing)-3.5rem)]`}
-                        data-slot="chat-main-column"
+                        className="px-4 pt-0 sm:px-6 lg:px-8 lg:pt-8"
+                        data-slot="chat-message-content"
+                        style={{ paddingBottom: `${composerOverlayInset + 54}px` }}
                     >
-                        {projectLinkNotice ? (
-                            <ProjectLinkNotice
-                                key={projectLinkNotice.id}
-                                notice={projectLinkNotice.type}
-                                onDismiss={dismissProjectLinkNotice}
-                            />
-                        ) : null}
-                        {imageQuotaError ? (
-                            <Alert variant="destructive" className="mb-4 rounded-2xl">
-                                <CircleAlert />
-                                <AlertTitle>今日生图次数已达上限</AlertTitle>
-                                <AlertDescription>{imageQuotaError}</AlertDescription>
-                            </Alert>
-                        ) : null}
-                        {conversationError ? (
-                            <Alert variant="destructive" className="mb-4 rounded-2xl border-destructive/20 bg-destructive/5">
-                                <CircleAlert className="size-4" />
-                                <AlertTitle>会话列表暂时不可用</AlertTitle>
-                                <AlertDescription>{conversationError}</AlertDescription>
-                            </Alert>
-                        ) : null}
-                        {readOnlyCacheMessage ? (
-                            <Alert
-                                className="mb-4 rounded-2xl border-amber-200/80 bg-amber-50/80 text-amber-950"
-                                aria-describedby={readOnlyCacheDescriptionId}
-                            >
-                                <CircleAlert className="size-4" />
-                                <AlertTitle>本地只读缓存</AlertTitle>
-                                <AlertDescription id={readOnlyCacheDescriptionId}>
-                                    {readOnlyCacheMessage}
-                                    <p className="mt-3">要恢复发送、新建或切换会话，请重试连接服务端。</p>
-                                </AlertDescription>
-                                <div className="col-start-2 mt-3 flex flex-wrap gap-2">
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={handleRetryReadOnlyCache}
-                                        disabled={readOnlyCacheRetryDisabled}
-                                        aria-describedby={readOnlyCacheDescriptionId}
-                                    >
-                                        重试连接服务端
-                                    </Button>
+                        <ConversationMobileSelector
+                            conversations={conversations}
+                            createDisabled={conversationWriteDisabled}
+                            deleteDisabled={conversationWriteDisabled}
+                            disabled={conversationSelectionDisabled}
+                            onCreateConversation={handleCreateConversation}
+                            onDeleteConversation={handleDeleteConversation}
+                            onProjectLinkCopied={() => showProjectLinkNotice('copied')}
+                            onProjectLinkCopyFailed={() => showProjectLinkNotice('copy-failed')}
+                            onSelectConversation={handleSelectConversation}
+                            selectedConversationTitle={selectedConversationTitle}
+                        />
+                        <div ref={messageContentRef} className={CHAT_CONTENT_COLUMN_CLASS_NAME} data-slot="chat-main-column">
+                            {projectLinkNotice ? (
+                                <ProjectLinkNotice
+                                    key={projectLinkNotice.id}
+                                    notice={projectLinkNotice.type}
+                                    onDismiss={dismissProjectLinkNotice}
+                                />
+                            ) : null}
+                            {imageQuotaError ? (
+                                <Alert variant="destructive" className="mb-4 rounded-2xl">
+                                    <CircleAlert />
+                                    <AlertTitle>今日生图次数已达上限</AlertTitle>
+                                    <AlertDescription>{imageQuotaError}</AlertDescription>
+                                </Alert>
+                            ) : null}
+                            {conversationError ? (
+                                <Alert variant="destructive" className="mb-4 rounded-2xl border-destructive/20 bg-destructive/5">
+                                    <CircleAlert className="size-4" />
+                                    <AlertTitle>会话列表暂时不可用</AlertTitle>
+                                    <AlertDescription>{conversationError}</AlertDescription>
+                                </Alert>
+                            ) : null}
+                            {readOnlyCacheMessage ? (
+                                <Alert
+                                    className="mb-4 rounded-2xl border-amber-200/80 bg-amber-50/80 text-amber-950"
+                                    aria-describedby={readOnlyCacheDescriptionId}
+                                >
+                                    <CircleAlert className="size-4" />
+                                    <AlertTitle>本地只读缓存</AlertTitle>
+                                    <AlertDescription id={readOnlyCacheDescriptionId}>
+                                        {readOnlyCacheMessage}
+                                        <p className="mt-3">要恢复发送、新建或删除会话，请重试连接服务端。</p>
+                                    </AlertDescription>
+                                    <div className="col-start-2 mt-3 flex flex-wrap gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={handleRetryReadOnlyCache}
+                                            disabled={readOnlyCacheRetryDisabled}
+                                            aria-describedby={readOnlyCacheDescriptionId}
+                                        >
+                                            重试连接服务端
+                                        </Button>
+                                    </div>
+                                </Alert>
+                            ) : null}
+                            {conversationHydrationPending ? <ConversationHydrationSkeleton /> : null}
+                            {conversationHydrationFailed ? (
+                                <ConversationHydrationErrorState
+                                    onRetry={() => {
+                                        retryHydration()
+                                    }}
+                                />
+                            ) : null}
+                            {!conversationHydrationPending && !conversationHydrationFailed ? (
+                                <div
+                                    className={shouldPositionHistoryEntry ? 'invisible' : undefined}
+                                    data-entry-positioned={String(!shouldPositionHistoryEntry)}
+                                    data-slot="conversation-history-presentation"
+                                >
+                                    <ChatMessageList
+                                        conversationId={selectedConversationId ?? undefined}
+                                        messages={messages}
+                                        status={status}
+                                        enableReasoning={enableReasoning}
+                                        showEmptyStateSuggestions={isDraft}
+                                        actionsDisabled={hasPendingReview || conversationTransitionPending || isReadOnlyCache}
+                                        onDeleteUserTurn={deleteUserTurn}
+                                        onRegenerateLastTurn={handleRegenerateLastTurn}
+                                        onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
+                                        onSelectSuggestion={handleSelectSuggestion}
+                                    />
                                 </div>
-                            </Alert>
-                        ) : null}
-                        {conversationHydrationPending ? <ConversationHydrationSkeleton /> : null}
-                        {conversationHydrationFailed ? (
-                            <ConversationHydrationErrorState
-                                onRetry={() => {
-                                    retryHydration()
-                                }}
-                            />
-                        ) : null}
-                        {!conversationHydrationPending && !conversationHydrationFailed ? (
-                            <ChatMessageList
-                                conversationId={selectedConversationId ?? undefined}
-                                messages={messages}
-                                status={status}
-                                enableReasoning={enableReasoning}
-                                showEmptyStateSuggestions={isDraft}
-                                actionsDisabled={hasPendingReview || conversationTransitionPending}
-                                onDeleteUserTurn={deleteUserTurn}
-                                onRegenerateLastTurn={handleRegenerateLastTurn}
-                                onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
-                                onSelectSuggestion={handleSelectSuggestion}
-                            />
-                        ) : null}
+                            ) : null}
+                        </div>
                     </div>
                 </div>
             </div>
 
             <div
-                className="fixed inset-x-0 bottom-0 z-20 overflow-visible bg-background/90 pb-4 backdrop-blur-sm transition-[left] duration-200 ease-linear lg:left-[var(--conversation-sidebar-width)]"
+                className="pointer-events-none fixed bottom-0 left-0 right-[var(--chat-scrollbar-width)] z-20 overflow-visible bg-gradient-to-t from-background via-background/95 to-transparent pt-12 pb-4 transition-[left] duration-200 ease-linear lg:left-[var(--conversation-sidebar-width)]"
                 data-slot="chat-composer-shell"
             >
-                <div className="px-4 sm:px-6 lg:px-8">
-                    <div className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} relative`} data-slot="chat-composer-column">
+                <div className="pointer-events-none px-4 sm:px-6 lg:px-8">
+                    <div className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} pointer-events-auto relative`} data-slot="chat-composer-column">
                         <div
                             className={[
                                 'pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 transition-[opacity,transform] duration-200 ease-out',
@@ -386,7 +513,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                             </Button>
                         </div>
 
-                        <div ref={inputContainerRef}>
+                        <div ref={composerContainerRef}>
                             <ThreadMemoryStatusHint hint={threadMemoryStatusHint} />
                             <HumanReviewComposerPanel pendingInterrupt={pendingInterrupt} onResumeDecision={handleResumeDecision} />
                             <ChatComposer

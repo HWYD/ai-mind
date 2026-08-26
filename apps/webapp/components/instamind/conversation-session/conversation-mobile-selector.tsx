@@ -18,6 +18,8 @@ const MOBILE_CONVERSATION_TITLE_MAX_UNITS = 28
 
 interface ConversationMobileSelectorProps {
     conversations: ConversationListItemValue[]
+    createDisabled?: boolean
+    deleteDisabled?: boolean
     disabled?: boolean
     onCreateConversation: () => Promise<boolean> | boolean
     onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
@@ -30,6 +32,8 @@ interface ConversationMobileSelectorProps {
 export function ConversationMobileSelector({
     conversations,
     disabled = false,
+    createDisabled = disabled,
+    deleteDisabled = disabled,
     onCreateConversation,
     onDeleteConversation = () => false,
     onProjectLinkCopied,
@@ -78,7 +82,7 @@ export function ConversationMobileSelector({
                         variant="ghost"
                         size="icon-sm"
                         aria-label="新聊天"
-                        disabled={disabled}
+                        disabled={createDisabled}
                         onClick={() => void handleCreateConversation()}
                         className="shrink-0 rounded-[10px] hover:bg-muted/60"
                     >
@@ -104,7 +108,7 @@ export function ConversationMobileSelector({
                             type="button"
                             variant="ghost"
                             className="h-10 w-full justify-start rounded-[10px] px-3 text-sm font-medium text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                            disabled={disabled}
+                            disabled={createDisabled}
                             onClick={() => void handleCreateConversation()}
                         >
                             <MessageSquarePlus className="size-4" />
@@ -146,7 +150,7 @@ export function ConversationMobileSelector({
                                         />
                                         <ConversationRowActions
                                             conversationId={conversation.id}
-                                            disabled={disabled}
+                                            disabled={deleteDisabled}
                                             mobile
                                             onDelete={onDeleteConversation}
                                             title={conversation.title}

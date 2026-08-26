@@ -104,6 +104,12 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
     const [registryRetryToken, setRegistryRetryToken] = useState(0)
     const isMountedRef = useRef(true)
     const localIndexRevisionRef = useRef(0)
+    const conversationsRef = useRef<ConversationListItem[]>([])
+    const selectedConversationIdRef = useRef<string | null>(null)
+    const pendingSelectionPersistenceIdRef = useRef<string | null>(null)
+    const pendingSelectionServerPersistenceRef = useRef(false)
+    const selectionGenerationRef = useRef(0)
+    const selectionPersistenceRunningRef = useRef(false)
 
     useEffect(() => {
         isMountedRef.current = true
@@ -134,7 +140,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
                     conversations: payload.conversations,
                     isDraft: shouldEnterDraft,
                     previousRevision: localIndexRevisionRef.current,
-                    selectedConversationId: shouldEnterDraft ? null : payload.selectedConversationId,
+                    selectedConversationId: shouldEnterDraft ? null : (selectedConversationIdRef.current ?? payload.selectedConversationId),
                 }),
                 localIndex
             )
@@ -163,14 +169,41 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
                 return
             }
 
-            const shouldEnterDraft = options.preferDraft || (!payload.selectedConversationId && payload.conversations.length === 0)
+            const pendingSelectionPersistenceId = pendingSelectionPersistenceIdRef.current
+            const preservePendingSelection =
+                pendingSelectionPersistenceId !== null && payload.selectedConversationId !== pendingSelectionPersistenceId
+            const shouldEnterDraft =
+                !preservePendingSelection &&
+                (options.preferDraft || (!payload.selectedConversationId && payload.conversations.length === 0))
+            const nextSelectedConversationId = shouldEnterDraft
+                ? null
+                : preservePendingSelection
+                  ? pendingSelectionPersistenceId
+                  : payload.selectedConversationId
+            const pendingConversation = preservePendingSelection
+                ? conversationsRef.current.find(conversation => conversation.id === pendingSelectionPersistenceId)
+                : undefined
+            const nextConversations =
+                pendingConversation && !payload.conversations.some(conversation => conversation.id === pendingConversation.id)
+                    ? [...payload.conversations, pendingConversation]
+                    : payload.conversations
+            const presentationPayload: ConversationRegistryPayload = {
+                ...payload,
+                conversations: nextConversations,
+                selectedConversationId: nextSelectedConversationId,
+            }
 
-            setConversations(payload.conversations)
-            setSelectedConversationId(shouldEnterDraft ? null : payload.selectedConversationId)
+            conversationsRef.current = nextConversations
+            selectedConversationIdRef.current = nextSelectedConversationId
+            if (!preservePendingSelection) {
+                pendingSelectionPersistenceIdRef.current = null
+            }
+            setConversations(nextConversations)
+            setSelectedConversationId(nextSelectedConversationId)
             setIsDraft(shouldEnterDraft)
             setIsReadOnlyCache(false)
             setError(null)
-            void persistRegistryPayload(payload, shouldEnterDraft, options.localIndexBaseline, options.cleanupConversationIds)
+            void persistRegistryPayload(presentationPayload, shouldEnterDraft, options.localIndexBaseline, options.cleanupConversationIds)
 
             if (shouldEnterDraft) {
                 writeStoredConversationId(null)
@@ -179,7 +212,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             }
 
             clearStoredDraftSelection()
-            writeStoredConversationId(payload.selectedConversationId)
+            writeStoredConversationId(nextSelectedConversationId)
         },
         [persistRegistryPayload]
     )
@@ -190,14 +223,25 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         }
 
         localIndexRevisionRef.current = index.revision
-        setConversations(toConversationListItems(index.conversations, index.selectedConversationId))
-        setSelectedConversationId(index.isDraft ? null : index.selectedConversationId)
+        const nextConversations = toConversationListItems(index.conversations, index.selectedConversationId)
+        const nextSelectedConversationId = index.isDraft ? null : index.selectedConversationId
+        conversationsRef.current = nextConversations
+        selectedConversationIdRef.current = nextSelectedConversationId
+        setConversations(nextConversations)
+        setSelectedConversationId(nextSelectedConversationId)
         setIsDraft(index.isDraft)
         setError(null)
     }, [])
 
     const fetchRegistry = useCallback(
-        async (options: { conversationIdHint?: string; localIndexBaseline?: LocalConversationIndex; preferDraft?: boolean } = {}) => {
+        async (
+            options: {
+                conversationIdHint?: string
+                localIndexBaseline?: LocalConversationIndex
+                preferDraft?: boolean
+                selectionGeneration?: number
+            } = {}
+        ) => {
             let localIndexBaseline = options.localIndexBaseline
 
             if (!localIndexBaseline) {
@@ -213,6 +257,10 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
 
             if (!response.ok || !isConversationRegistryPayload(data)) {
                 throw new Error('Conversation registry request failed.')
+            }
+
+            if (options.selectionGeneration !== undefined && options.selectionGeneration !== selectionGenerationRef.current) {
+                return true
             }
 
             applyRegistryPayload(data, {
@@ -233,16 +281,27 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             const draftRestoreHint = readStoredDraftSelection()
             const conversationRestoreHint = draftRestoreHint ? null : readStoredConversationId()
             const localIndex = await readLocalConversationIndex()
-            const hasValidLocalIndex = localIndex.status === 'valid'
+            const localIndexData = localIndex.status === 'valid' ? localIndex.data : undefined
+            const hasValidLocalIndex = localIndexData !== undefined
+            const localIndexForPresentation =
+                localIndexData &&
+                conversationRestoreHint &&
+                !localIndexData.isDraft &&
+                localIndexData.conversations.some(conversation => conversation.id === conversationRestoreHint)
+                    ? {
+                          ...localIndexData,
+                          selectedConversationId: conversationRestoreHint,
+                      }
+                    : localIndexData
 
-            if (!cancelled && hasValidLocalIndex) {
-                applyLocalIndex(localIndex.data)
+            if (!cancelled && localIndexForPresentation) {
+                applyLocalIndex(localIndexForPresentation)
             }
 
             try {
                 await fetchRegistry({
                     conversationIdHint: conversationRestoreHint ?? undefined,
-                    localIndexBaseline: hasValidLocalIndex ? localIndex.data : undefined,
+                    localIndexBaseline: localIndexData,
                     preferDraft: draftRestoreHint,
                 })
             } catch {
@@ -275,7 +334,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
     async function mutateConversationRegistry(
         body: Record<string, unknown>,
         method: 'DELETE' | 'POST' = 'POST',
-        options: { cleanupConversationIds?: string[] } = {}
+        options: { cleanupConversationIds?: string[]; selectionGeneration?: number } = {}
     ) {
         const response = await fetch('/api/chat/conversations', {
             method,
@@ -290,6 +349,10 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             throw new Error('Conversation registry request failed.')
         }
 
+        if (options.selectionGeneration !== undefined && options.selectionGeneration !== selectionGenerationRef.current) {
+            return true
+        }
+
         applyRegistryPayload(data, options)
         return true
     }
@@ -299,6 +362,9 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             return false
         }
 
+        selectionGenerationRef.current += 1
+        pendingSelectionPersistenceIdRef.current = null
+        pendingSelectionServerPersistenceRef.current = false
         setIsMutating(true)
 
         try {
@@ -324,6 +390,10 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         setSelectedConversationId(null)
         setIsReadOnlyCache(false)
         setError(null)
+        selectedConversationIdRef.current = null
+        pendingSelectionPersistenceIdRef.current = null
+        pendingSelectionServerPersistenceRef.current = false
+        selectionGenerationRef.current += 1
         writeStoredConversationId(null)
         writeStoredDraftSelection()
         void writeLocalConversationIndex(
@@ -341,8 +411,68 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         return true
     }
 
+    function persistLatestSelectedConversation() {
+        if (selectionPersistenceRunningRef.current) {
+            return
+        }
+
+        selectionPersistenceRunningRef.current = true
+
+        void (async () => {
+            try {
+                while (true) {
+                    const conversationId = pendingSelectionPersistenceIdRef.current
+
+                    if (!conversationId || !isMountedRef.current) {
+                        return
+                    }
+
+                    const selectionGeneration = selectionGenerationRef.current
+
+                    try {
+                        const localIndexResult = await writeLocalConversationIndex(
+                            createIndexFromRegistry({
+                                conversations: conversationsRef.current,
+                                isDraft: false,
+                                previousRevision: localIndexRevisionRef.current,
+                                selectedConversationId: conversationId,
+                            })
+                        )
+
+                        if (localIndexResult.status === 'written') {
+                            localIndexRevisionRef.current = Math.max(localIndexRevisionRef.current, localIndexResult.revision)
+                        }
+
+                        if (
+                            selectionGeneration !== selectionGenerationRef.current ||
+                            conversationId !== selectedConversationIdRef.current
+                        ) {
+                            continue
+                        }
+
+                        if (!pendingSelectionServerPersistenceRef.current) {
+                            pendingSelectionPersistenceIdRef.current = null
+                            return
+                        }
+
+                        await mutateConversationRegistry({ conversationId }, 'POST', { selectionGeneration })
+                    } catch {
+                        if (
+                            selectionGeneration === selectionGenerationRef.current &&
+                            conversationId === selectedConversationIdRef.current
+                        ) {
+                            return
+                        }
+                    }
+                }
+            } finally {
+                selectionPersistenceRunningRef.current = false
+            }
+        })()
+    }
+
     async function selectConversation(conversationId: string) {
-        if (interactionLocked || isLoading || isMutating || isReadOnlyCache) {
+        if (interactionLocked || isLoading || isMutating) {
             return false
         }
 
@@ -350,40 +480,45 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             return true
         }
 
-        setIsMutating(true)
+        const selectingFromReadOnlyCache = isReadOnlyCache
+        const selectionGeneration = selectionGenerationRef.current + 1
 
-        try {
-            clearStoredDraftSelection()
-            return await mutateConversationRegistry({
-                conversationId,
-            })
-        } catch {
-            if (isMountedRef.current) {
-                setError('Conversation registry is unavailable.')
-            }
-            return false
-        } finally {
-            if (isMountedRef.current) {
-                setIsMutating(false)
-            }
+        clearStoredDraftSelection()
+        setIsDraft(false)
+        setSelectedConversationId(conversationId)
+        if (!selectingFromReadOnlyCache) {
+            setIsReadOnlyCache(false)
+            setError(null)
         }
+        selectedConversationIdRef.current = conversationId
+        pendingSelectionPersistenceIdRef.current = conversationId
+        pendingSelectionServerPersistenceRef.current = !selectingFromReadOnlyCache
+        selectionGenerationRef.current = selectionGeneration
+        writeStoredConversationId(conversationId)
+
+        persistLatestSelectedConversation()
+
+        return true
     }
 
     async function handleConversationPromoted(conversationId: string) {
         clearStoredDraftSelection()
+        const selectionGeneration = selectionGenerationRef.current
 
         try {
             await fetchRegistry({
                 conversationIdHint: conversationId,
+                selectionGeneration,
             })
         } catch {
-            if (!isMountedRef.current) {
+            if (!isMountedRef.current || selectionGeneration !== selectionGenerationRef.current) {
                 return
             }
 
             setIsDraft(false)
             setSelectedConversationId(conversationId)
             setIsReadOnlyCache(false)
+            selectedConversationIdRef.current = conversationId
             writeStoredConversationId(conversationId)
         }
     }
@@ -413,7 +548,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         isLoading,
         isMutating,
         isReadOnlyCache,
-        readOnlyCacheMessage: isReadOnlyCache ? '当前显示的是浏览器本地只读缓存，服务端恢复后才能继续发送或切换会话。' : null,
+        readOnlyCacheMessage: isReadOnlyCache ? '当前显示的是浏览器本地只读缓存，服务端恢复后才能继续发送、新建或删除会话。' : null,
         retryRecovery,
         selectedConversation: !isDraft
             ? (visibleConversations.find(conversation => conversation.id === selectedConversationId) ?? null)

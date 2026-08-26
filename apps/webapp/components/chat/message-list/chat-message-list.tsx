@@ -36,6 +36,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     onFeedbackChange,
     onRegenerateLastTurn,
     onSelectFollowUpQuestion,
+    followUpSuggestionsDisabled,
     showFollowUpSuggestions,
 }: {
     conversationId?: string
@@ -53,6 +54,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     onFeedbackChange: (messageId: string, feedback: 'up' | 'down') => void
     onRegenerateLastTurn: () => Promise<boolean> | boolean
     onSelectFollowUpQuestion: (question: string) => void
+    followUpSuggestionsDisabled: boolean
     showFollowUpSuggestions: boolean
 }) {
     const visibleParts = useMemo(() => message.parts.filter(hasVisibleContent), [message.parts])
@@ -112,6 +114,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
             onRegenerateLastTurn={onRegenerateLastTurn}
             onSelectFollowUpQuestion={onSelectFollowUpQuestion}
             reserveReasoningSpace={reserveReasoningSpace}
+            followUpSuggestionsDisabled={followUpSuggestionsDisabled}
             showFollowUpSuggestions={showFollowUpSuggestions}
         />
     )
@@ -236,8 +239,6 @@ export function ChatMessageList({
                 const hasImageResult = message.parts.some(part => part.type === 'image-result')
                 const showFollowUpSuggestions =
                     isLatestAssistantMessage &&
-                    isAssistantReplyCompleted &&
-                    !actionsDisabled &&
                     status === 'ready' &&
                     message.status !== 'failed' &&
                     (getMessageTextContent(message).trim().length > 0 || hasImageResult)
@@ -260,6 +261,7 @@ export function ChatMessageList({
                         onFeedbackChange={toggleAssistantFeedback}
                         onRegenerateLastTurn={handleRegenerateLastTurn}
                         onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
+                        followUpSuggestionsDisabled={isLatestAssistantMessage && actionsDisabled}
                         showFollowUpSuggestions={showFollowUpSuggestions}
                     />
                 )

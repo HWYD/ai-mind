@@ -227,6 +227,7 @@ export function AssistantMessage({
     onRegenerateLastTurn,
     onSelectFollowUpQuestion,
     reserveReasoningSpace,
+    followUpSuggestionsDisabled = false,
     showFollowUpSuggestions,
 }: {
     combinedReasoning: string
@@ -245,6 +246,7 @@ export function AssistantMessage({
     onRegenerateLastTurn: () => Promise<boolean> | boolean
     onSelectFollowUpQuestion: (question: string) => void
     reserveReasoningSpace?: boolean
+    followUpSuggestionsDisabled?: boolean
     showFollowUpSuggestions: boolean
 }) {
     const agentMessage = contentParts.some(part => part.type === 'agent-step')
@@ -495,7 +497,11 @@ export function AssistantMessage({
 
                 {showBuiltInFollowUpSuggestions ? (
                     <div role="group" aria-label="推荐问题">
-                        <FollowUpSuggestions seed={`${message.id}:${message.createdAt}`} onSelectQuestion={onSelectFollowUpQuestion} />
+                        <FollowUpSuggestions
+                            seed={`${message.id}:${message.createdAt}`}
+                            disabled={followUpSuggestionsDisabled}
+                            onSelectQuestion={onSelectFollowUpQuestion}
+                        />
                     </div>
                 ) : null}
             </div>

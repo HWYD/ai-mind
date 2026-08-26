@@ -29,6 +29,8 @@ import type { ConversationListItem as ConversationListItemValue } from './types'
 interface ConversationSidebarProps {
     collapsed?: boolean
     conversations: ConversationListItemValue[]
+    createDisabled?: boolean
+    deleteDisabled?: boolean
     disabled?: boolean
     onCreateConversation: () => void
     onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
@@ -42,6 +44,8 @@ export function ConversationSidebar({
     collapsed = false,
     conversations,
     disabled = false,
+    createDisabled = disabled,
+    deleteDisabled = disabled,
     onCreateConversation,
     onDeleteConversation = () => false,
     onProjectLinkCopied,
@@ -103,7 +107,7 @@ export function ConversationSidebar({
                                     type="button"
                                     size="lg"
                                     aria-label="新聊天"
-                                    disabled={disabled}
+                                    disabled={createDisabled}
                                     onClick={onCreateConversation}
                                     className={cn('text-sidebar-foreground cursor-pointer', collapsed ? 'justify-center' : 'justify-start')}
                                 >
@@ -186,7 +190,7 @@ export function ConversationSidebar({
                                                             />
                                                             <ConversationRowActions
                                                                 conversationId={conversation.id}
-                                                                disabled={disabled}
+                                                                disabled={deleteDisabled}
                                                                 onDelete={onDeleteConversation}
                                                                 title={conversation.title}
                                                             />

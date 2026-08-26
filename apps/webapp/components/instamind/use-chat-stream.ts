@@ -217,6 +217,11 @@ export interface ThreadMemoryStatusHint {
     summaryLength?: number
 }
 
+export interface HistoryEntryReady {
+    conversationId: string
+    sequence: number
+}
+
 export type ConversationHydrationStatus = 'idle' | 'loading' | 'ready' | 'failed'
 export type StreamRecoveryStatus =
     | 'idle'
@@ -269,6 +274,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [imageQuotaError, setImageQuotaError] = useState<string | null>(null)
     const [hydrationError, setHydrationError] = useState<string | null>(null)
     const [hydrationStatus, setHydrationStatus] = useState<ConversationHydrationStatus>('idle')
+    const [messageConversationId, setMessageConversationId] = useState<string | null>(null)
+    const [historyEntryReady, setHistoryEntryReady] = useState<HistoryEntryReady | null>(null)
     const [readOnlyCacheMessage, setReadOnlyCacheMessage] = useState<string | null>(null)
     const [threadMemoryStatusHint, setThreadMemoryStatusHint] = useState<ThreadMemoryStatusHint | null>(null)
     const [hydrationRetryToken, setHydrationRetryToken] = useState(0)
@@ -280,6 +287,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const activeStreamRecoveryRef = useRef<ActiveStreamRecovery | null>(null)
     const hydratedConversationIdRef = useRef<string | null>(null)
     const localSnapshotRevisionRef = useRef(0)
+    const historyEntrySequenceRef = useRef(0)
 
     const streamMessageStateRef = useRef(createStreamMessageState(messages)) //给 stream reducer 用的同步快照，里面有 messages + activeStream。
 
@@ -295,6 +303,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             ...streamMessageStateRef.current,
             messages: nextMessages,
         }
+    }
+
+    function publishHistoryEntryReady(targetConversationId: string) {
+        historyEntrySequenceRef.current += 1
+        setMessageConversationId(targetConversationId)
+        setHistoryEntryReady({
+            conversationId: targetConversationId,
+            sequence: historyEntrySequenceRef.current,
+        })
     }
 
     /**
@@ -406,6 +423,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             hydratedConversationIdRef.current = null
             setHydrationError(null)
             setHydrationStatus('idle')
+            setMessageConversationId(null)
+            setHistoryEntryReady(null)
             setReadOnlyCacheMessage(null)
             localSnapshotRevisionRef.current = 0
             setThreadMemoryStatusHint(null)
@@ -426,6 +445,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         hydratedConversationIdRef.current = conversationId
         setHydrationError(null)
         setHydrationStatus('loading')
+        setMessageConversationId(null)
+        setHistoryEntryReady(null)
         setReadOnlyCacheMessage(null)
         localSnapshotRevisionRef.current = 0
         setThreadMemoryStatusHint(null)
@@ -449,15 +470,26 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                     syncMessageSnapshots(localSnapshot.data.messages)
                     streamMessageStateRef.current = createStreamMessageState(localSnapshot.data.messages)
                     setMessages(localSnapshot.data.messages)
+                    setHydrationError(null)
+                    setHydrationStatus('ready')
+                    publishHistoryEntryReady(conversationId)
                 }
 
                 const response = await fetch(`/api/chat/thread?conversationId=${encodeURIComponent(conversationId)}`)
                 const contentType = response.headers.get('Content-Type') ?? ''
 
+                if (cancelled) {
+                    return
+                }
+
                 if (!response.ok || !contentType.includes('application/json')) {
                     const errorData = contentType.includes('application/json')
                         ? ((await response.json().catch(() => null)) as ThreadHydrationErrorResponse | null)
                         : null
+
+                    if (cancelled) {
+                        return
+                    }
 
                     if (hasLocalSnapshot && errorData?.code === 'CHAT_THREAD_HYDRATION_UNAVAILABLE') {
                         setHydrationError(null)
@@ -476,8 +508,13 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
 
                 if (!data.restored || !Array.isArray(data.messages)) {
+                    if (hasLocalSnapshot) {
+                        return
+                    }
+
                     setHydrationError(null)
                     setHydrationStatus('ready')
+                    publishHistoryEntryReady(conversationId)
                     return
                 }
 
@@ -500,6 +537,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 setMessages(restoredMessages)
                 setHydrationError(null)
                 setHydrationStatus('ready')
+                publishHistoryEntryReady(conversationId)
             } catch {
                 if (cancelled) {
                     return
@@ -1005,6 +1043,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
 
                 activeConversationIdRef.current = promotedConversationId
                 hydratedConversationIdRef.current = promotedConversationId
+                setMessageConversationId(promotedConversationId)
+                setHistoryEntryReady(null)
                 void Promise.resolve(options.onConversationPromoted?.(promotedConversationId)).catch(() => undefined)
             }
 
@@ -1082,6 +1122,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         }
 
         hydratedConversationIdRef.current = null
+        setMessageConversationId(null)
+        setHistoryEntryReady(null)
         setHydrationRetryToken(current => current + 1)
         return true
     }
@@ -1260,6 +1302,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         imageQuotaError,
         hydrationError,
         hydrationStatus,
+        messageConversationId,
+        historyEntryReady,
         readOnlyCacheMessage,
         streamRecoveryStatus,
         threadMemoryStatusHint,

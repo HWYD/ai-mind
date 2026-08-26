@@ -319,6 +319,52 @@ describe('useConversationSessions', () => {
         expect(result.current.readOnlyCacheMessage).toContain('本地只读缓存')
     })
 
+    it('allows cached conversation navigation without a registry write while keeping write operations unavailable', async () => {
+        const conversationA = createConversation('conv-a', 'Conversation A', true)
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        const fetchMock = vi.fn().mockRejectedValue(new Error('registry down'))
+
+        localPersistenceMocks.readLocalConversationIndex.mockResolvedValue({
+            data: {
+                conversations: [conversationA, conversationB],
+                isDraft: false,
+                revision: 3,
+                schemaVersion: 1,
+                selectedConversationId: conversationA.id,
+                updatedAt: '2026-07-05T10:00:00.000Z',
+            },
+            status: 'valid',
+        })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.isReadOnlyCache).toBe(true)
+        })
+
+        await act(async () => {
+            await expect(result.current.selectConversation(conversationB.id)).resolves.toBe(true)
+        })
+
+        expect(result.current.selectedConversationId).toBe(conversationB.id)
+        expect(result.current.conversations).toEqual([
+            expect.objectContaining({ id: conversationA.id, selected: false }),
+            expect.objectContaining({ id: conversationB.id, selected: true }),
+        ])
+        expect(result.current.isReadOnlyCache).toBe(true)
+        expect(result.current.isMutating).toBe(false)
+        expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBe(conversationB.id)
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+        await waitFor(() => {
+            expect(localPersistenceMocks.writeLocalConversationIndex).toHaveBeenCalledWith(
+                expect.objectContaining({ isDraft: false, selectedConversationId: conversationB.id })
+            )
+        })
+        await expect(result.current.createConversation()).resolves.toBe(false)
+        await expect(result.current.deleteConversation(conversationA.id)).resolves.toBe(false)
+    })
+
     it('retries registry recovery from read-only cache and returns to interactive state after server success', async () => {
         const fetchMock = vi
             .fn()
@@ -392,6 +438,362 @@ describe('useConversationSessions', () => {
         expect(result.current.selectedConversation).toBeNull()
         expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBeNull()
         expect(window.localStorage.getItem(DRAFT_CONVERSATION_STORAGE_KEY)).toBe('1')
+    })
+
+    it('selects the target locally before registry persistence settles and retains it after failure', async () => {
+        let rejectSelectionPersistence: ((error: Error) => void) | undefined
+        const conversationA = createConversation('conv-a', 'Conversation A', true)
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationA.id,
+                        conversations: [conversationA, conversationB],
+                    })
+                )
+            )
+            .mockImplementationOnce(
+                () =>
+                    new Promise<Response>((_resolve, reject) => {
+                        rejectSelectionPersistence = reject
+                    })
+            )
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.selectedConversationId).toBe('conv-a')
+        })
+
+        let selection: Promise<boolean> | undefined
+        act(() => {
+            selection = result.current.selectConversation('conv-b')
+        })
+
+        expect(result.current.selectedConversationId).toBe('conv-b')
+        expect(result.current.conversations).toEqual([
+            expect.objectContaining({ id: 'conv-a', selected: false }),
+            expect.objectContaining({ id: 'conv-b', selected: true }),
+        ])
+        expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBe('conv-b')
+        expect(localPersistenceMocks.createIndexFromRegistry).toHaveBeenLastCalledWith(
+            expect.objectContaining({ isDraft: false, selectedConversationId: 'conv-b' })
+        )
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        })
+
+        await act(async () => {
+            rejectSelectionPersistence?.(new Error('registry down'))
+            await expect(selection).resolves.toBe(true)
+        })
+
+        expect(result.current.selectedConversationId).toBe('conv-b')
+        expect(result.current.error).toBeNull()
+        expect(result.current.isMutating).toBe(false)
+    })
+
+    it('does not let an older registry response replace a locally retained selection after persistence failure', async () => {
+        let resolvePromotionRegistry: ((response: Response) => void) | undefined
+        let rejectSelectionPersistence: ((error: Error) => void) | undefined
+        const conversationA = createConversation('conv-a', 'Conversation A', true)
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationA.id,
+                        conversations: [conversationA, conversationB],
+                    })
+                )
+            )
+            .mockImplementationOnce(
+                () =>
+                    new Promise<Response>(resolve => {
+                        resolvePromotionRegistry = resolve
+                    })
+            )
+            .mockImplementationOnce(
+                () =>
+                    new Promise<Response>((_resolve, reject) => {
+                        rejectSelectionPersistence = reject
+                    })
+            )
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.selectedConversationId).toBe('conv-a')
+        })
+
+        let promotion: Promise<void> | undefined
+        act(() => {
+            promotion = result.current.handleConversationPromoted('conv-a')
+        })
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        })
+
+        let selection: Promise<boolean> | undefined
+        act(() => {
+            selection = result.current.selectConversation('conv-b')
+        })
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(3)
+        })
+
+        await act(async () => {
+            rejectSelectionPersistence?.(new Error('registry down'))
+            await expect(selection).resolves.toBe(true)
+        })
+
+        await act(async () => {
+            resolvePromotionRegistry?.(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationA.id,
+                        conversations: [conversationA, conversationB],
+                    })
+                )
+            )
+            await promotion
+        })
+
+        expect(result.current.selectedConversationId).toBe('conv-b')
+        expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBe('conv-b')
+    })
+
+    it('waits for the local selected-session index write before sending background persistence', async () => {
+        let resolveLocalIndexWrite: ((result: { revision: number; status: 'written' }) => void) | undefined
+        const conversationA = createConversation('conv-a', 'Conversation A', true)
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationA.id,
+                        conversations: [conversationA, conversationB],
+                    })
+                )
+            )
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationB.id,
+                        conversations: [conversationA, conversationB],
+                    })
+                )
+            )
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.selectedConversationId).toBe('conv-a')
+        })
+
+        localPersistenceMocks.writeLocalConversationIndex.mockImplementationOnce(
+            () =>
+                new Promise(resolve => {
+                    resolveLocalIndexWrite = resolve
+                })
+        )
+
+        let selection: Promise<boolean> | undefined
+        act(() => {
+            selection = result.current.selectConversation('conv-b')
+        })
+
+        expect(result.current.selectedConversationId).toBe('conv-b')
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+
+        await act(async () => {
+            resolveLocalIndexWrite?.({ revision: 2, status: 'written' })
+            await expect(selection).resolves.toBe(true)
+        })
+
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('coalesces rapid selections before the first local index write reaches registry persistence', async () => {
+        let resolveFirstLocalIndexWrite: ((result: { revision: number; status: 'written' }) => void) | undefined
+        const conversationA = createConversation('conv-a', 'Conversation A')
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        const conversationC = createConversation('conv-c', 'Conversation C', true)
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationC.id,
+                        conversations: [conversationC, conversationA, conversationB],
+                    })
+                )
+            )
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationB.id,
+                        conversations: [conversationC, conversationA, conversationB],
+                    })
+                )
+            )
+
+        localPersistenceMocks.writeLocalConversationIndex
+            .mockImplementationOnce(
+                () =>
+                    new Promise(resolve => {
+                        resolveFirstLocalIndexWrite = resolve
+                    })
+            )
+            .mockResolvedValueOnce({ revision: 3, status: 'written' })
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.selectedConversationId).toBe(conversationC.id)
+        })
+
+        await act(async () => {
+            await expect(result.current.selectConversation(conversationA.id)).resolves.toBe(true)
+            await expect(result.current.selectConversation(conversationB.id)).resolves.toBe(true)
+        })
+
+        await waitFor(() => {
+            expect(localPersistenceMocks.writeLocalConversationIndex).toHaveBeenCalledTimes(1)
+        })
+
+        await act(async () => {
+            resolveFirstLocalIndexWrite?.({ revision: 2, status: 'written' })
+        })
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        })
+
+        expect(JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit).body as string)).toEqual({
+            conversationId: conversationB.id,
+        })
+        expect(localPersistenceMocks.createIndexFromRegistry).toHaveBeenLastCalledWith(
+            expect.objectContaining({ selectedConversationId: conversationB.id })
+        )
+    })
+
+    it('serializes background preference writes so the final server selection is the latest choice', async () => {
+        let resolveFirstPreference: ((response: Response) => void) | undefined
+        const conversationA = createConversation('conv-a', 'Conversation A')
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        const conversationC = createConversation('conv-c', 'Conversation C', true)
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationC.id,
+                        conversations: [conversationC, conversationA, conversationB],
+                    })
+                )
+            )
+            .mockImplementationOnce(
+                () =>
+                    new Promise<Response>(resolve => {
+                        resolveFirstPreference = resolve
+                    })
+            )
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationB.id,
+                        conversations: [conversationC, conversationA, conversationB],
+                    })
+                )
+            )
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.selectedConversationId).toBe(conversationC.id)
+        })
+
+        await act(async () => {
+            await expect(result.current.selectConversation(conversationA.id)).resolves.toBe(true)
+        })
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        })
+
+        await act(async () => {
+            await expect(result.current.selectConversation(conversationB.id)).resolves.toBe(true)
+        })
+
+        expect(fetchMock).toHaveBeenCalledTimes(2)
+
+        await act(async () => {
+            resolveFirstPreference?.(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: conversationA.id,
+                        conversations: [conversationC, conversationA, conversationB],
+                    })
+                )
+            )
+        })
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(3)
+        })
+
+        expect(JSON.parse((fetchMock.mock.calls[2]?.[1] as RequestInit).body as string)).toEqual({
+            conversationId: conversationB.id,
+        })
+        expect(result.current.selectedConversationId).toBe(conversationB.id)
+    })
+
+    it('uses the stored local selection over an older local index while registry recovery is unavailable', async () => {
+        const conversationA = createConversation('conv-a', 'Conversation A', true)
+        const conversationB = createConversation('conv-b', 'Conversation B')
+        window.localStorage.setItem(SELECTED_CONVERSATION_STORAGE_KEY, conversationB.id)
+        localPersistenceMocks.readLocalConversationIndex.mockResolvedValue({
+            data: {
+                conversations: [conversationA, conversationB],
+                isDraft: false,
+                revision: 6,
+                schemaVersion: 1,
+                selectedConversationId: conversationA.id,
+                updatedAt: '2026-07-05T10:00:00.000Z',
+            },
+            status: 'valid',
+        })
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('registry down')))
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+
+        expect(result.current.selectedConversationId).toBe('conv-b')
+        expect(result.current.conversations).toEqual([
+            expect.objectContaining({ id: 'conv-a', selected: false }),
+            expect.objectContaining({ id: 'conv-b', selected: true }),
+        ])
+        expect(result.current.isReadOnlyCache).toBe(true)
     })
 
     it('restores a local blank draft sentinel even when the server registry still has persisted conversations', async () => {
@@ -1022,6 +1424,55 @@ describe('conversation session UI', () => {
         expect(mobileActionButtons).toHaveLength(1)
         expect((mobileActionButtons[0] as HTMLButtonElement).disabled).toBe(true)
         expect((mobileActionButtons[0] as HTMLButtonElement).className).toContain('disabled:opacity-100')
+    })
+
+    it('keeps cached rows selectable when only server write actions are disabled', async () => {
+        const onDesktopSelect = vi.fn()
+        const onMobileSelect = vi.fn().mockResolvedValue(true)
+
+        render(
+            <>
+                <ConversationSidebar
+                    conversations={[createConversation('conv-desktop', 'Desktop Conversation', true)]}
+                    createDisabled
+                    deleteDisabled
+                    onCreateConversation={vi.fn()}
+                    onSelectConversation={onDesktopSelect}
+                />
+                <ConversationMobileSelector
+                    conversations={[createConversation('conv-mobile', 'Mobile Conversation', true)]}
+                    createDisabled
+                    deleteDisabled
+                    onCreateConversation={vi.fn()}
+                    onSelectConversation={onMobileSelect}
+                    selectedConversationTitle="Mobile Conversation"
+                />
+            </>
+        )
+
+        const createButtons = screen.getAllByRole('button', { name: '新聊天' })
+
+        expect((createButtons[0] as HTMLButtonElement).disabled).toBe(true)
+        expect((createButtons[1] as HTMLButtonElement).disabled).toBe(true)
+        expect((screen.getByRole('button', { name: 'Desktop Conversation' }) as HTMLButtonElement).disabled).toBe(false)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Desktop Conversation' }))
+
+        fireEvent.click(screen.getByRole('button', { name: '打开会话抽屉' }))
+
+        const mobileConversationButton = (await screen.findByRole('button', { name: 'Mobile Conversation' })) as HTMLButtonElement
+        const rowActionButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label^="操作会话："]'))
+
+        expect(mobileConversationButton.disabled).toBe(false)
+        expect(rowActionButtons).toHaveLength(2)
+        expect(rowActionButtons.every(button => button.disabled)).toBe(true)
+
+        fireEvent.click(mobileConversationButton)
+
+        expect(onDesktopSelect).toHaveBeenCalledWith('conv-desktop')
+        await waitFor(() => {
+            expect(onMobileSelect).toHaveBeenCalledWith('conv-mobile')
+        })
     })
 
     it('keeps collapsed desktop sidebar semantics aligned with draft-first behavior', () => {
