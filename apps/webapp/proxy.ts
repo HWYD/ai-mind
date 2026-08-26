@@ -1,15 +1,21 @@
 import { type NextRequest, NextResponse } from 'next/server'
 
-import { createDocumentSecurityHeaders } from '@/lib/security/browser-security-headers'
+import { createDocumentSecurityHeaders, createStaticLandingSecurityHeaders } from '@/lib/security/browser-security-headers'
 
 export function proxy(request: NextRequest) {
     if (!isDocumentRequest(request)) {
         return NextResponse.next()
     }
 
+    if (request.nextUrl.pathname === '/') {
+        return createDocumentResponse(createStaticLandingSecurityHeaders())
+    }
+
     const nonce = crypto.randomUUID().replaceAll('-', '')
+    const securityHeaders = createDocumentSecurityHeaders(nonce)
     const requestHeaders = new Headers(request.headers)
     requestHeaders.set('x-nonce', nonce)
+    requestHeaders.set('Content-Security-Policy', securityHeaders['Content-Security-Policy'])
 
     const response = NextResponse.next({
         request: {
@@ -17,7 +23,17 @@ export function proxy(request: NextRequest) {
         },
     })
 
-    for (const [name, value] of Object.entries(createDocumentSecurityHeaders(nonce))) {
+    for (const [name, value] of Object.entries(securityHeaders)) {
+        response.headers.set(name, value)
+    }
+
+    return response
+}
+
+function createDocumentResponse(securityHeaders: Record<string, string>): NextResponse {
+    const response = NextResponse.next()
+
+    for (const [name, value] of Object.entries(securityHeaders)) {
         response.headers.set(name, value)
     }
 
