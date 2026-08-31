@@ -15,6 +15,7 @@ import type {
     WorkflowProgressPart,
 } from '@/lib/ai/types/message'
 
+import { createMessageDisclosureKey, getDisclosurePartIdentity, useMessageDisclosureState } from '../message-disclosure-state'
 import { AgentTextArtifactPanel } from '../parts/agent-text-artifact-panel'
 import { AgentTracePanel } from '../parts/agent-trace-panel'
 import { canRenderDeliveryChainReport } from '../parts/delivery-chain-report-parser'
@@ -122,12 +123,18 @@ function getDeliveryChainResourceListLabel(part: ResourcePart, entryUris: Set<st
 }
 
 function DeliveryChainContextSummaryPanel({
+    debugDisclosureKey,
     entryResources,
     internalResources,
+    summaryDisclosureKey,
 }: {
+    debugDisclosureKey?: string
     entryResources: ResourcePart[]
     internalResources: ResourcePart[]
+    summaryDisclosureKey?: string
 }) {
+    const [summaryOpen, setSummaryOpen] = useMessageDisclosureState(summaryDisclosureKey, false)
+    const [debugOpen, setDebugOpen] = useMessageDisclosureState(debugDisclosureKey, false)
     const entryUris = useMemo(() => new Set(entryResources.map(resource => normalizeResourceUri(resource.uri))), [entryResources])
     const summaryLabel = buildDeliveryChainSummaryLabel(internalResources)
     const groupedResources = useMemo(() => {
@@ -155,7 +162,15 @@ function DeliveryChainContextSummaryPanel({
     }
 
     return (
-        <details className="mb-3 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 shadow-xs">
+        <details
+            open={summaryOpen}
+            onToggle={event => {
+                if (event.target === event.currentTarget) {
+                    setSummaryOpen(event.currentTarget.open)
+                }
+            }}
+            className="mb-3 rounded-lg border border-border/60 bg-muted/15 px-3 py-2.5 shadow-xs"
+        >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
                     <Files className="size-4 shrink-0 text-muted-foreground" strokeWidth={2.1} />
@@ -179,7 +194,11 @@ function DeliveryChainContextSummaryPanel({
                     </section>
                 ))}
 
-                <details className="rounded-md border border-border/60 bg-background/80 px-3 py-2">
+                <details
+                    open={debugOpen}
+                    onToggle={event => setDebugOpen(event.currentTarget.open)}
+                    className="rounded-md border border-border/60 bg-background/80 px-3 py-2"
+                >
                     <summary className="cursor-pointer text-xs font-medium text-muted-foreground">调试详情</summary>
                     <div className="mt-3 space-y-2">
                         {[...entryResources, ...internalResources].map(resource => (
@@ -213,6 +232,7 @@ function DeliveryChainContextSummaryPanel({
 export function AssistantMessage({
     combinedReasoning,
     conversationId,
+    disclosureScopeKey,
     contentParts,
     feedbackState,
     hasTextContent,
@@ -232,6 +252,7 @@ export function AssistantMessage({
 }: {
     combinedReasoning: string
     conversationId?: string
+    disclosureScopeKey?: string
     contentParts: MindMessagePart[]
     feedbackState: AssistantFeedback
     hasTextContent: boolean
@@ -250,6 +271,20 @@ export function AssistantMessage({
     showFollowUpSuggestions: boolean
 }) {
     const agentMessage = contentParts.some(part => part.type === 'agent-step')
+    const partIndexes = useMemo(() => new Map(message.parts.map((part, index) => [part, index])), [message.parts])
+    const reasoningDisclosureKey = useMemo(() => {
+        if (!disclosureScopeKey) {
+            return undefined
+        }
+
+        const identities = message.parts.flatMap((part, partIndex) =>
+            part.type === 'reasoning' ? [getDisclosurePartIdentity(part, partIndex)] : []
+        )
+
+        return identities.length > 0
+            ? createMessageDisclosureKey(disclosureScopeKey, message.id, `reasoning:${identities.join('|')}`)
+            : undefined
+    }, [disclosureScopeKey, message.id, message.parts])
     const hasStartedFinalAnswer = contentParts.some(part => part.type === 'text')
     const agentDetailParts = agentMessage ? contentParts.filter(isAgentDetailPart) : []
     const artifacts = message.artifacts ?? []
@@ -327,10 +362,18 @@ export function AssistantMessage({
 
     return (
         <article className="flex justify-start">
-            <div className="w-full max-w-[var(--chat-content-column-width,51rem)] text-foreground">
-                <ReasoningPanel combinedReasoning={combinedReasoning} isThinking={isThinking} reserveSpace={reserveReasoningSpace} />
+            <div className="flow-root w-full max-w-[var(--chat-content-column-width,51rem)] text-foreground">
+                <ReasoningPanel
+                    combinedReasoning={combinedReasoning}
+                    disclosureKey={reasoningDisclosureKey}
+                    isThinking={isThinking}
+                    reserveSpace={reserveReasoningSpace}
+                />
 
                 {contentParts.map((part, index) => {
+                    const partIndex = partIndexes.get(part) ?? index
+                    const partIdentity = getDisclosurePartIdentity(part, partIndex)
+
                     if (agentMessage && isAgentDetailPart(part)) {
                         return null
                     }
@@ -350,13 +393,33 @@ export function AssistantMessage({
                     }
 
                     if (part.type === 'tool') {
-                        return <ToolPanel key={`${message.id}:tool:${part.id ?? index}`} part={part} />
+                        return (
+                            <ToolPanel
+                                key={`${message.id}:tool:${part.id ?? index}`}
+                                inputDisclosureKey={
+                                    disclosureScopeKey
+                                        ? createMessageDisclosureKey(disclosureScopeKey, message.id, `${partIdentity}:tool-input-raw`)
+                                        : undefined
+                                }
+                                outputDisclosureKey={
+                                    disclosureScopeKey
+                                        ? createMessageDisclosureKey(disclosureScopeKey, message.id, `${partIdentity}:tool-output-raw`)
+                                        : undefined
+                                }
+                                part={part}
+                            />
+                        )
                     }
 
                     if (part.type === 'workflow-progress') {
                         return isDeliveryChainMessage || part.workflowKind === 'image_generation' ? (
                             <WorkflowProgressPanel
                                 key={`${message.id}:workflow-progress:${part.workflowId}:${part.visibility}`}
+                                disclosureKey={
+                                    disclosureScopeKey
+                                        ? createMessageDisclosureKey(disclosureScopeKey, message.id, `${partIdentity}:workflow`)
+                                        : undefined
+                                }
                                 part={part}
                             />
                         ) : null
@@ -400,8 +463,18 @@ export function AssistantMessage({
                             return (
                                 <DeliveryChainContextSummaryPanel
                                     key={`${message.id}:delivery-chain-context-summary`}
+                                    debugDisclosureKey={
+                                        disclosureScopeKey
+                                            ? createMessageDisclosureKey(disclosureScopeKey, message.id, 'delivery-debug')
+                                            : undefined
+                                    }
                                     entryResources={deliveryChainEntryResources}
                                     internalResources={deliveryChainInternalResources}
+                                    summaryDisclosureKey={
+                                        disclosureScopeKey
+                                            ? createMessageDisclosureKey(disclosureScopeKey, message.id, 'delivery-summary')
+                                            : undefined
+                                    }
                                 />
                             )
                         }
@@ -410,7 +483,17 @@ export function AssistantMessage({
                             return null
                         }
 
-                        return <ResourcePanel key={`${message.id}:resource:${part.id ?? index}`} part={part} />
+                        return (
+                            <ResourcePanel
+                                key={`${message.id}:resource:${part.id ?? index}`}
+                                part={part}
+                                rawDisclosureKey={
+                                    disclosureScopeKey
+                                        ? createMessageDisclosureKey(disclosureScopeKey, message.id, `${partIdentity}:resource-raw`)
+                                        : undefined
+                                }
+                            />
+                        )
                     }
 
                     if (part.type === 'skill') {
@@ -421,8 +504,18 @@ export function AssistantMessage({
                         return (
                             <div key={`${message.id}:agent-step:${part.runId}`}>
                                 <AgentTracePanel
+                                    debugDisclosureKey={
+                                        disclosureScopeKey
+                                            ? createMessageDisclosureKey(disclosureScopeKey, message.id, `${partIdentity}:agent-debug`)
+                                            : undefined
+                                    }
                                     part={part}
                                     detailParts={agentDetailParts}
+                                    mainDisclosureKey={
+                                        disclosureScopeKey
+                                            ? createMessageDisclosureKey(disclosureScopeKey, message.id, `${partIdentity}:agent-main`)
+                                            : undefined
+                                    }
                                     collapseWhenFinalAnswerStarts={part.agentName === TASKLIST_AGENT_NAME && hasStartedFinalAnswer}
                                 />
                                 {artifacts.map(artifact => (

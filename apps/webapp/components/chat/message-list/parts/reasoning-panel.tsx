@@ -1,11 +1,11 @@
 'use client'
 
 import { ChevronRight } from 'lucide-react'
-import { useState } from 'react'
 
 import { Card, CardContent } from '@/components/ui/card'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 
+import { useMessageDisclosureState } from '../message-disclosure-state'
 import { ThinkingText } from '../shared/thinking-text'
 
 function getReasoningPreview(text: string) {
@@ -14,14 +14,16 @@ function getReasoningPreview(text: string) {
 
 export function ReasoningPanel({
     combinedReasoning,
+    disclosureKey,
     isThinking,
     reserveSpace,
 }: {
     combinedReasoning: string
+    disclosureKey?: string
     isThinking: boolean
     reserveSpace?: boolean
 }) {
-    const [open, setOpen] = useState(false)
+    const [open, setOpen] = useMessageDisclosureState(disclosureKey, false)
     const preview = getReasoningPreview(combinedReasoning)
 
     if (!combinedReasoning && !reserveSpace) {

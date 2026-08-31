@@ -1,25 +1,35 @@
 import {
     LOCAL_CHAT_RECENT_LIMIT,
     LOCAL_CHAT_SCHEMA_VERSION,
+    LOCAL_MESSAGE_HEIGHT_HINT_MAX_LAYOUTS_PER_CONVERSATION,
     type LocalConversationIndex,
     localConversationIndexSchema,
     type LocalConversationMetadata,
     type LocalConversationSnapshot,
     localConversationSnapshotSchema,
+    type LocalMessageHeightHintRecord,
+    localMessageHeightHintRecordSchema,
     type LocalReadResult,
     type LocalWriteResult,
     normalizeLocalConversationIndex,
 } from './schema'
 
 const DATABASE_NAME = 'ai-mind-local-chat'
-const DATABASE_VERSION = 2
+const DATABASE_VERSION = 3
 const INDEX_STORE = 'conversation-index'
 const SNAPSHOT_STORE = 'conversation-snapshots'
 const IMAGE_RESULT_STORE = 'image-results'
+const MESSAGE_HEIGHT_HINT_STORE = 'message-height-hints'
 const INDEX_KEY = 'current'
 
 export const LOCAL_IMAGE_RESULT_CACHE_MAX_COUNT = 30
 export const LOCAL_IMAGE_RESULT_CACHE_MAX_BYTES = 100 * 1024 * 1024
+
+const messageHeightHintDeletionGenerations = new Map<string, number>()
+
+function getMessageHeightHintDeletionGeneration(conversationId: string) {
+    return messageHeightHintDeletionGenerations.get(conversationId) ?? 0
+}
 
 export interface LocalImageResultCacheEntry {
     blob: Blob
@@ -44,6 +54,10 @@ export type LocalImageResultWriteResult = {
     status: 'written' | 'quota' | 'unavailable'
 }
 
+export type LocalMessageHeightHintWriteResult = {
+    status: 'written' | 'quota' | 'unavailable'
+}
+
 function getIndexedDBFactory() {
     return typeof window === 'undefined' ? null : window.indexedDB
 }
@@ -61,6 +75,16 @@ function openDatabase(): Promise<IDBDatabase> {
 
     return new Promise((resolve, reject) => {
         const request = factory.open(DATABASE_NAME, DATABASE_VERSION)
+        let settled = false
+
+        const rejectOpen = (error: Error) => {
+            if (settled) {
+                return
+            }
+
+            settled = true
+            reject(error)
+        }
 
         request.onupgradeneeded = () => {
             const database = request.result
@@ -80,9 +104,25 @@ function openDatabase(): Promise<IDBDatabase> {
                     keyPath: 'runId',
                 })
             }
+
+            if (!database.objectStoreNames.contains(MESSAGE_HEIGHT_HINT_STORE)) {
+                const heightHintStore = database.createObjectStore(MESSAGE_HEIGHT_HINT_STORE, {
+                    keyPath: 'key',
+                })
+                heightHintStore.createIndex('conversationId', 'conversationId')
+            }
         }
-        request.onerror = () => reject(request.error ?? new Error('IndexedDB open failed.'))
-        request.onsuccess = () => resolve(request.result)
+        request.onblocked = () => rejectOpen(new Error('IndexedDB upgrade blocked.'))
+        request.onerror = () => rejectOpen(request.error ?? new Error('IndexedDB open failed.'))
+        request.onsuccess = () => {
+            if (settled) {
+                request.result.close()
+                return
+            }
+
+            settled = true
+            resolve(request.result)
+        }
     })
 }
 
@@ -264,6 +304,162 @@ export async function deleteLocalConversationSnapshots(conversationIds: string[]
         )
     } catch {
         // 删除失败不阻断聊天主链；下次服务端 reconcile 仍可再次清理。
+    }
+}
+
+function createLocalMessageHeightHintKey(conversationId: string, layoutKey: string) {
+    return `${conversationId}::${layoutKey}`
+}
+
+function isLocalMessageHeightHintRecord(value: unknown): value is LocalMessageHeightHintRecord {
+    return localMessageHeightHintRecordSchema.safeParse(value).success
+}
+
+function compareLocalMessageHeightHintRecords(left: LocalMessageHeightHintRecord, right: LocalMessageHeightHintRecord) {
+    return left.updatedAt.localeCompare(right.updatedAt) || left.key.localeCompare(right.key)
+}
+
+export async function readLocalMessageHeightHints(
+    conversationId: string,
+    layoutKey: string
+): Promise<LocalReadResult<LocalMessageHeightHintRecord>> {
+    if (!conversationId || !layoutKey) {
+        return { status: 'missing' }
+    }
+
+    try {
+        const expectedKey = createLocalMessageHeightHintKey(conversationId, layoutKey)
+        const value = await runStoreOperation<unknown>(MESSAGE_HEIGHT_HINT_STORE, 'readonly', store => store.get(expectedKey))
+
+        if (!value) {
+            return { status: 'missing' }
+        }
+
+        const parsed = localMessageHeightHintRecordSchema.safeParse(value)
+
+        if (
+            !parsed.success ||
+            parsed.data.conversationId !== conversationId ||
+            parsed.data.layoutKey !== layoutKey ||
+            parsed.data.key !== expectedKey
+        ) {
+            return { status: 'invalid' }
+        }
+
+        return { data: parsed.data, status: 'valid' }
+    } catch {
+        return { status: 'unavailable' }
+    }
+}
+
+export async function writeLocalMessageHeightHints(nextRecord: LocalMessageHeightHintRecord): Promise<LocalMessageHeightHintWriteResult> {
+    const parsed = localMessageHeightHintRecordSchema.safeParse(nextRecord)
+    const expectedKey = createLocalMessageHeightHintKey(nextRecord.conversationId, nextRecord.layoutKey)
+
+    if (!parsed.success || nextRecord.key !== expectedKey) {
+        return { status: 'unavailable' }
+    }
+
+    const deletionGeneration = getMessageHeightHintDeletionGeneration(nextRecord.conversationId)
+
+    try {
+        return await openDatabase().then(
+            database =>
+                new Promise<LocalMessageHeightHintWriteResult>((resolve, reject) => {
+                    const transaction = database.transaction(MESSAGE_HEIGHT_HINT_STORE, 'readwrite')
+                    const store = transaction.objectStore(MESSAGE_HEIGHT_HINT_STORE)
+                    const request = store.index('conversationId').getAll(nextRecord.conversationId)
+                    let wasInvalidated = false
+
+                    request.onsuccess = () => {
+                        if (getMessageHeightHintDeletionGeneration(nextRecord.conversationId) !== deletionGeneration) {
+                            wasInvalidated = true
+                            return
+                        }
+
+                        const retainedRecords = request.result
+                            .filter(isLocalMessageHeightHintRecord)
+                            .filter(record => record.conversationId === nextRecord.conversationId && record.key !== nextRecord.key)
+
+                        retainedRecords.sort(compareLocalMessageHeightHintRecords)
+
+                        while (retainedRecords.length >= LOCAL_MESSAGE_HEIGHT_HINT_MAX_LAYOUTS_PER_CONVERSATION) {
+                            const evictedRecord = retainedRecords.shift()
+
+                            if (!evictedRecord) {
+                                break
+                            }
+
+                            store.delete(evictedRecord.key)
+                        }
+
+                        store.put(parsed.data)
+                    }
+                    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'))
+                    transaction.oncomplete = () => {
+                        database.close()
+                        resolve({ status: wasInvalidated ? 'unavailable' : 'written' })
+                    }
+                    transaction.onerror = () => {
+                        database.close()
+                        reject(transaction.error ?? new Error('IndexedDB transaction failed.'))
+                    }
+                    transaction.onabort = () => {
+                        database.close()
+                        reject(transaction.error ?? new Error('IndexedDB transaction aborted.'))
+                    }
+                })
+        )
+    } catch (error) {
+        return { status: isQuotaError(error) ? 'quota' : 'unavailable' }
+    }
+}
+
+export async function deleteLocalMessageHeightHints(conversationIds: string[]) {
+    if (conversationIds.length === 0) {
+        return
+    }
+
+    const conversationIdSet = new Set(conversationIds)
+
+    for (const conversationId of conversationIdSet) {
+        messageHeightHintDeletionGenerations.set(conversationId, getMessageHeightHintDeletionGeneration(conversationId) + 1)
+    }
+
+    try {
+        await Promise.all(
+            [...conversationIdSet].map(conversationId =>
+                openDatabase().then(
+                    database =>
+                        new Promise<void>((resolve, reject) => {
+                            const transaction = database.transaction(MESSAGE_HEIGHT_HINT_STORE, 'readwrite')
+                            const store = transaction.objectStore(MESSAGE_HEIGHT_HINT_STORE)
+                            const request = store.index('conversationId').getAll(conversationId)
+
+                            request.onsuccess = () => {
+                                for (const record of request.result.filter(isLocalMessageHeightHintRecord)) {
+                                    store.delete(record.key)
+                                }
+                            }
+                            request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed.'))
+                            transaction.oncomplete = () => {
+                                database.close()
+                                resolve()
+                            }
+                            transaction.onerror = () => {
+                                database.close()
+                                reject(transaction.error ?? new Error('IndexedDB transaction failed.'))
+                            }
+                            transaction.onabort = () => {
+                                database.close()
+                                reject(transaction.error ?? new Error('IndexedDB transaction aborted.'))
+                            }
+                        })
+                )
+            )
+        )
+    } catch {
+        // 高度提示只是可再生性能缓存，删除失败不应影响会话删除主链。
     }
 }
 

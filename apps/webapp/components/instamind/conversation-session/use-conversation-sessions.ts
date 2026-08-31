@@ -11,6 +11,7 @@ import {
     createIndexFromRegistry,
     deleteLocalConversationSnapshots,
     deleteLocalImageResultCaches,
+    deleteLocalMessageHeightHints,
     readLocalConversationIndex,
     reconcileLocalConversationIndex,
     writeLocalConversationIndex,
@@ -150,6 +151,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
                 await Promise.all([
                     deleteLocalConversationSnapshots(conversationIdsToDelete),
                     deleteLocalImageResultCaches(conversationIdsToDelete),
+                    deleteLocalMessageHeightHints(conversationIdsToDelete),
                 ])
             }
         },

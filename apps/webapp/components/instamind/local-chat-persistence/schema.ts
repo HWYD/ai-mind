@@ -5,6 +5,8 @@ import type { MindMessage } from '@/lib/ai/types/message'
 export const LOCAL_CHAT_SCHEMA_VERSION = 1
 export const LOCAL_CHAT_RECENT_LIMIT = 50
 export const LOCAL_CHAT_MAX_MESSAGES_PER_SNAPSHOT = 120
+export const LOCAL_MESSAGE_HEIGHT_HINT_MAX_ENTRIES = 2_000
+export const LOCAL_MESSAGE_HEIGHT_HINT_MAX_LAYOUTS_PER_CONVERSATION = 3
 
 export const localConversationMetadataSchema = z
     .object({
@@ -100,9 +102,38 @@ export const localConversationSnapshotSchema = z
     })
     .strict()
 
+export const localMessageHeightHintEntrySchema = z
+    .object({
+        height: z
+            .number()
+            .finite()
+            .positive()
+            .max(8_000)
+            .refine(value => Number.isInteger(value * 4), 'Height hints must be normalized to quarter CSS pixels.'),
+        measuredAt: z.string().datetime(),
+        messageId: z.string().min(1),
+        presentation: z.literal('history-default'),
+        renderFingerprint: z.string().min(1).max(160),
+    })
+    .strict()
+
+export const localMessageHeightHintRecordSchema = z
+    .object({
+        conversationId: z.string().min(1),
+        entries: z.array(localMessageHeightHintEntrySchema).max(LOCAL_MESSAGE_HEIGHT_HINT_MAX_ENTRIES),
+        geometryVersion: z.number().int().positive(),
+        key: z.string().min(1).max(512),
+        layoutKey: z.string().min(1).max(256),
+        messageColumnWidth: z.number().finite().positive().max(4_000),
+        updatedAt: z.string().datetime(),
+    })
+    .strict()
+
 export type LocalConversationMetadata = z.infer<typeof localConversationMetadataSchema>
 export type LocalConversationIndex = z.infer<typeof localConversationIndexSchema>
 export type LocalConversationSnapshot = z.infer<typeof localConversationSnapshotSchema>
+export type LocalMessageHeightHintEntry = z.infer<typeof localMessageHeightHintEntrySchema>
+export type LocalMessageHeightHintRecord = z.infer<typeof localMessageHeightHintRecordSchema>
 
 export type LocalReadResult<T> =
     | {

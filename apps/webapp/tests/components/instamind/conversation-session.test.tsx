@@ -26,6 +26,7 @@ const localPersistenceMocks = vi.hoisted(() => ({
     ),
     deleteLocalImageResultCaches: vi.fn(),
     deleteLocalConversationSnapshots: vi.fn(),
+    deleteLocalMessageHeightHints: vi.fn(),
     reconcileLocalConversationIndex: vi.fn(),
     readLocalConversationIndex: vi.fn(),
     writeLocalConversationIndex: vi.fn(),
@@ -181,6 +182,7 @@ beforeEach(() => {
     localPersistenceMocks.reconcileLocalConversationIndex.mockResolvedValue({ revision: 1, status: 'written' })
     localPersistenceMocks.deleteLocalImageResultCaches.mockResolvedValue(undefined)
     localPersistenceMocks.deleteLocalConversationSnapshots.mockResolvedValue(undefined)
+    localPersistenceMocks.deleteLocalMessageHeightHints.mockResolvedValue(undefined)
 })
 
 describe('useConversationSessions', () => {
@@ -257,6 +259,7 @@ describe('useConversationSessions', () => {
         })
         await waitFor(() => {
             expect(localPersistenceMocks.deleteLocalConversationSnapshots).toHaveBeenCalledWith(['conv-local'])
+            expect(localPersistenceMocks.deleteLocalMessageHeightHints).toHaveBeenCalledWith(['conv-local'])
         })
         expect(localPersistenceMocks.reconcileLocalConversationIndex).toHaveBeenCalledWith(
             expect.objectContaining({ conversations: [serverConversation] }),
@@ -898,6 +901,7 @@ describe('useConversationSessions', () => {
         await waitFor(() => {
             expect(localPersistenceMocks.deleteLocalConversationSnapshots).toHaveBeenCalledWith(['conv-b'])
             expect(localPersistenceMocks.deleteLocalImageResultCaches).toHaveBeenCalledWith(['conv-b'])
+            expect(localPersistenceMocks.deleteLocalMessageHeightHints).toHaveBeenCalledWith(['conv-b'])
         })
         expect(result.current.conversations.map(conversation => conversation.id)).toEqual(['conv-a'])
     })

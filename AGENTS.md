@@ -183,6 +183,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/v0.5.2-conversation-entry-no-flash/plan.md
+at specs/v0.5.3-message-virtualization/plan.md
 
 <!-- SPECKIT END -->

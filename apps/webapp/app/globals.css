@@ -69,6 +69,10 @@ html {
     -webkit-text-size-adjust: 100%;
 }
 
+html:has(main[data-slot='instant-mind-page']) {
+    scrollbar-gutter: auto;
+}
+
 button,
 [role='button'] {
     touch-action: manipulation;

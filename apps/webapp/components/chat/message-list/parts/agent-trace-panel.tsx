@@ -14,7 +14,7 @@ import {
     Wrench,
     XCircle,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import type { AgentGraphNodeEntry, AgentGraphRouteEntry, AgentGraphTrace, AgentStepPart, SkillPart } from '@/lib/ai/types/message'
 import { cn } from '@/lib/utils'
 
+import { useMessageDisclosureState } from '../message-disclosure-state'
 import {
     formatDuration,
     getAgentStatusLabel,
@@ -288,15 +289,19 @@ function renderGraphDebugSummary(summary: GraphDebugSummary) {
 
 export function AgentTracePanel({
     collapseWhenFinalAnswerStarts = false,
+    debugDisclosureKey,
     detailParts = [],
+    mainDisclosureKey,
     part,
 }: {
     collapseWhenFinalAnswerStarts?: boolean
+    debugDisclosureKey?: string
     detailParts?: AgentDetailPart[]
+    mainDisclosureKey?: string
     part: AgentStepPart
 }) {
-    const [isExpanded, setIsExpanded] = useState(true)
-    const [isDebugExpanded, setIsDebugExpanded] = useState(false)
+    const [isExpanded, setIsExpanded] = useMessageDisclosureState(mainDisclosureKey, true)
+    const [isDebugExpanded, setIsDebugExpanded] = useMessageDisclosureState(debugDisclosureKey, false)
     const previousCollapseRequestRef = useRef(collapseWhenFinalAnswerStarts)
     const graphDebugSummary = part.graph.debugSummary
     const hasGraphTimeline = part.graph.nodes.length > 0 || part.graph.routes.length > 0
@@ -317,7 +322,7 @@ export function AgentTracePanel({
         }
 
         previousCollapseRequestRef.current = collapseWhenFinalAnswerStarts
-    }, [collapseWhenFinalAnswerStarts])
+    }, [collapseWhenFinalAnswerStarts, setIsExpanded])
 
     if (!hasGraph) {
         return null

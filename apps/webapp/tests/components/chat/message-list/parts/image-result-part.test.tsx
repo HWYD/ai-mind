@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ImageBriefPart } from '@/components/chat/message-list/parts/image-brief-part'
@@ -110,6 +110,10 @@ describe('image message parts', () => {
         expect(screen.getByText('生成结果')).toBeTruthy()
         expect(screen.getByText('临时结果')).toBeTruthy()
         expect(container.querySelector('[data-slot="image-generation-preview-placeholder"]')).toBeTruthy()
+        const loadingFooter = container.querySelector('[data-slot="card-footer"]')
+        expect(loadingFooter).toBeTruthy()
+        expect(loadingFooter?.querySelector('[data-slot="image-result-action-reserve"]')).toBeTruthy()
+        expect(within(loadingFooter as HTMLElement).queryByRole('link', { name: '下载生成图片' })).toBeNull()
         expect(screen.queryByText('图片读取成功后会保存在当前浏览器。')).toBeNull()
         expect(screen.queryByText(/正在准备临时图片预览|图像生成完成后将准备临时预览/)).toBeNull()
 
@@ -117,6 +121,8 @@ describe('image message parts', () => {
 
         await waitFor(() => expect(screen.getByRole('img')).toBeTruthy())
         expect(container.querySelector('[data-slot="image-generation-preview-placeholder"]')).toBeNull()
+        expect(container.querySelector('[data-slot="card-footer"]')).toBeTruthy()
+        expect(screen.getByRole('link', { name: '下载生成图片' })).toBeTruthy()
     })
 
     it('uses a cached Blob without refetching an expired result', async () => {
@@ -150,10 +156,26 @@ describe('image message parts', () => {
     it('shows an expired placeholder without fetching when neither cache nor temporary result is available', async () => {
         vi.stubGlobal('fetch', vi.fn())
 
-        render(<ImageResultPart brief={createBrief()} enabled part={{ ...createResult(), expiresAt: '2000-01-01T00:00:00.000Z' }} />)
+        const { container } = render(
+            <ImageResultPart brief={createBrief()} enabled part={{ ...createResult(), expiresAt: '2000-01-01T00:00:00.000Z' }} />
+        )
 
         await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('图片已失效'))
         expect(screen.getByText(/重新发起 \/image/)).toBeTruthy()
         expect(fetch).not.toHaveBeenCalled()
+        expect(container.querySelector('[data-slot="aspect-ratio"]')).toBeTruthy()
+        expect(container.querySelector('[data-slot="card-footer"] [data-slot="image-result-action-reserve"]')).toBeTruthy()
+        expect(screen.queryByRole('link', { name: '下载生成图片' })).toBeNull()
+    })
+
+    it('keeps a proportional preview frame and reserved footer when the image request fails', async () => {
+        vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockRejectedValue(new Error('network unavailable')))
+
+        const { container } = render(<ImageResultPart brief={createBrief()} enabled part={createResult()} />)
+
+        await waitFor(() => expect(screen.getByRole('alert').textContent).toContain('图片预览不可用'))
+        expect(container.querySelector('[data-slot="aspect-ratio"]')).toBeTruthy()
+        expect(container.querySelector('[data-slot="card-footer"] [data-slot="image-result-action-reserve"]')).toBeTruthy()
+        expect(screen.queryByRole('link', { name: '下载生成图片' })).toBeNull()
     })
 })

@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> 当前发布候选为 v0.5.2：Conversation Entry Without Scroll Flash。它将历史会话切换和刷新恢复收口为“加载骨架 → 已定位的最新内容”两阶段展示，消息区独立滚动并为后续尾页分页保留稳定视口；远端 GitHub Actions 是正式 tag 与 Release 的最后闸门。
+> 当前发布候选为 v0.5.3：Long Message Virtualization。它以免费 `react-virtuoso` 对非空消息列表执行可视区渲染，并把底层滚动与业务 Scroll Policy 明确分层；长会话、动态高度和流式阅读意图仍遵循同一条聊天体验链路。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前发布候选：`v0.5.2 Conversation Entry Without Scroll Flash`。
+当前阶段：`Runtime Skeleton / MVP`，当前发布候选：`v0.5.3 Long Message Virtualization`。
 
 已经验证：
 
@@ -219,6 +219,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - Minimal multi-thread chat sessions。
 - browser-session scoped long-term UserMemory baseline。
 - browser-local recent conversation restore、rich UI snapshot persistence 与单会话删除。
+- 长消息可视区渲染、动态高度估算与本地高度提示。
 
 当前非目标：
 
@@ -255,19 +256,23 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前发布候选：v0.5.2 Conversation Entry Without Scroll Flash
+## 当前发布候选：v0.5.3 Long Message Virtualization
 
-v0.5.2 收口已有历史会话的进入与切换体验：
+v0.5.3 为长会话建立统一的可视区渲染路径：
 
-- 消息区成为独立的全高滚动视口；历史会话首次揭示前，在隐藏布局中完成无动画到底定位。
-- Composer 保持底部悬浮，真实高度加 54px 作为消息末尾安全区；底部渐变遮罩覆盖其后的内容。
-- 原生 scrollbar gutter 稳定预留，Composer 与消息内容列按实测滚动条宽度对齐，不随短/长内容切换横移。
-- 已有会话本地优先切换；本地快照、只读缓存、快速 A→B 与后台选中偏好确认均不会显示旧内容或二次定位。
-- 最新回复的推荐问题与回复同一帧揭示；交互暂不可用时仅禁用推荐按钮，不延后插入推荐区块。
+- 非空消息列表由免费 `react-virtuoso` 负责底层滚动、可见区挂载和动态尺寸测量，完整会话消息仍保留在当前数据模型中。
+- AI Mind 的 Scroll Policy 只决定历史首次定位、流式跟随、用户阅读锁定和“回到底部”入口，不再与 virtualizer 竞争像素滚动控制权。
+- 图片、Markdown、代码、Tool / Resource / Prompt / Agent / Workflow 等异构消息使用结构化初始高度估算；已完成历史可保留与会话和布局签名隔离的本地高度提示，失效时自动回退。
+- 重要的 Reasoning、Agent、Workflow 和详情展开状态可跨离屏回收保持；静态阅读不会因测量、图片或 Composer 高度变化被自动拉回末尾。
+- 历史会话先显示与消息列对齐的加载骨架，确认尾部可见后一次性揭示，避免内容列横移、滚动条突变或旧会话入口闪现。
 
-本版本不提供尾页 cursor 分页、向上加载、虚拟列表、阅读位置/未读模型、API 或 Electron IPC 变更。详细设计见 [v0.5.2 Version](./docs/versions/v0.5.2-conversation-entry-no-flash.md)、[Release Note](./docs/releases/v0.5.2.md) 和 [Tasklist](./docs/tasklists/v0.5.2-conversation-entry-no-flash-tasklist.md)。
+本版本不增加服务端 cursor 分页、消息 API / Stream DTO、数据库 schema、跨设备阅读位置或 Electron IPC；离屏消息不参与浏览器原生全文查找和可访问树。详细设计见 [v0.5.3 Version](./docs/versions/v0.5.3-message-virtualization.md)、[Release Note](./docs/releases/v0.5.3.md) 和 [Tasklist](./docs/tasklists/v0.5.3-message-virtualization-tasklist.md)。
 
-## 上一版本：v0.5.1 Chat Experience & Image Reliability
+## 上一版本：v0.5.2 Conversation Entry Without Scroll Flash
+
+v0.5.2 收口已有历史会话的进入与切换体验：历史会话首次揭示前完成尾部定位，消息区成为独立全高滚动视口，并保持 Composer 安全区、稳定 gutter 与本地优先切换语义。详细设计见 [v0.5.2 Version](./docs/versions/v0.5.2-conversation-entry-no-flash.md)、[Release Note](./docs/releases/v0.5.2.md) 和 [Tasklist](./docs/tasklists/v0.5.2-conversation-entry-no-flash-tasklist.md)。
+
+## 更早版本：v0.5.1 Chat Experience & Image Reliability
 
 v0.5.1 扩容近期会话、补强图片生成反馈和当前 profile 图片恢复，并在桌面侧栏和移动抽屉补充项目入口。详细设计见 [v0.5.1 Version](./docs/versions/v0.5.1-chat-experience-reliability.md)、[Release Note](./docs/releases/v0.5.1.md) 和 [Tasklist](./docs/tasklists/v0.5.1-chat-experience-reliability-tasklist.md)。
 
@@ -796,6 +801,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.5.0  | Electron Desktop Host                              | 增加固定 Origin 的 Windows x64 / macOS arm64 Electron 宿主与公开未签名预览；生产与双平台手工验收仍在收口                                                                        |
 | v0.5.1  | Chat Experience & Image Reliability                | 扩容近期会话、改进标题与加载反馈、增加受限本地图片恢复和分层重试，并补充桌面/移动项目菜单                                                                                       |
 | v0.5.2  | Conversation Entry Without Scroll Flash            | 历史会话首次揭示直接到达最新消息；全高消息滚动视口与悬浮 Composer 保持稳定 gutter、列对齐和本地优先切换语义                                                                     |
+| v0.5.3  | Long Message Virtualization                        | 以免费 `react-virtuoso` 实现统一消息虚拟化、动态高度估算与单一滚动所有权，并保留流式阅读意图和离屏详情状态                                                                      |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -835,6 +841,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] Browser-session scoped long-term UserMemory baseline
 - [x] UserMemory vector semantic retrieval baseline
 - [x] pnpm / Turborepo Monorepo 工程治理
+- [x] 长消息可视区渲染与动态高度稳定化
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化
