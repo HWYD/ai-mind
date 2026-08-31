@@ -1,13 +1,14 @@
 'use client'
 
 import { CheckCircle2, ChevronRight, CircleSlash2, LoaderCircle, XCircle } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker'
 import type { WorkflowProgressPart, WorkflowProgressStep } from '@/lib/ai/types/message'
 import { cn } from '@/lib/utils'
 
+import { useMessageDisclosureState } from '../message-disclosure-state'
 import styles from './workflow-progress-panel.module.css'
 
 function formatWorkflowDuration(durationMs?: number) {
@@ -93,8 +94,8 @@ function WorkflowProgressStepRow({ step }: { step: WorkflowProgressStep }) {
     )
 }
 
-export function WorkflowProgressPanel({ part }: { part: WorkflowProgressPart }) {
-    const [expanded, setExpanded] = useState(part.visibility === 'expanded')
+export function WorkflowProgressPanel({ disclosureKey, part }: { disclosureKey?: string; part: WorkflowProgressPart }) {
+    const [expanded, setExpanded] = useMessageDisclosureState(disclosureKey, part.visibility === 'expanded')
 
     const summaryLabel = useMemo(() => getWorkflowSummary(part), [part])
     const headerLabel =

@@ -35,6 +35,7 @@ export function ImageGenerationLoadingResultCard({
             <CardContent>
                 <ImageGenerationPreviewPlaceholder aspectRatio={aspectRatio} className="mb-0" height={height} width={width} />
             </CardContent>
+            <ImageResultCardFooter />
         </Card>
     )
 }
@@ -153,19 +154,15 @@ export function ImageResultPart({
                         <img src={state.objectUrl} alt={alt} className="size-full object-cover" />
                     </AspectRatio>
                 ) : null}
-                {state.status === 'expired' ? <ExpiredImagePlaceholder part={part} /> : null}
-                {state.status === 'error' ? <ImageErrorAlert message={state.message} /> : null}
+                {state.status === 'expired' ? <ExpiredImagePlaceholder aspectRatio={brief?.summary.aspectRatio} part={part} /> : null}
+                {state.status === 'error' ? (
+                    <ImageErrorPlaceholder aspectRatio={brief?.summary.aspectRatio} message={state.message} part={part} />
+                ) : null}
             </CardContent>
-            {state.status === 'ready' ? (
-                <CardFooter className="flex justify-end border-t border-border/60">
-                    <Button asChild size="sm">
-                        <a href={state.objectUrl} download={part.suggestedFileName} aria-label="下载生成图片">
-                            <Download aria-hidden="true" />
-                            下载图片
-                        </a>
-                    </Button>
-                </CardFooter>
-            ) : null}
+            <ImageResultCardFooter
+                objectUrl={state.status === 'ready' ? state.objectUrl : undefined}
+                suggestedFileName={part.suggestedFileName}
+            />
         </Card>
     )
 }
@@ -197,6 +194,23 @@ function LocalCacheBadge() {
     )
 }
 
+function ImageResultCardFooter({ objectUrl, suggestedFileName }: { objectUrl?: string; suggestedFileName?: string }) {
+    return (
+        <CardFooter className="flex justify-end border-t border-border/60">
+            {objectUrl ? (
+                <Button asChild size="sm">
+                    <a href={objectUrl} download={suggestedFileName} aria-label="下载生成图片">
+                        <Download aria-hidden="true" />
+                        下载图片
+                    </a>
+                </Button>
+            ) : (
+                <span data-slot="image-result-action-reserve" className="block h-8 w-[5.375rem]" aria-hidden="true" />
+            )}
+        </CardFooter>
+    )
+}
+
 export function createSafeImageAlt(brief?: ImageBriefPart): string {
     if (!brief) {
         return 'AI Mind 生成的图片'
@@ -223,13 +237,43 @@ function resolveImageMimeType(part: ImageResultPartModel, blob: Blob): 'image/jp
     return mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp' ? mimeType : null
 }
 
-function ExpiredImagePlaceholder({ part }: { part: ImageResultPartModel }) {
+function ExpiredImagePlaceholder({
+    aspectRatio,
+    part,
+}: {
+    aspectRatio?: ImageBriefPart['summary']['aspectRatio']
+    part: ImageResultPartModel
+}) {
     return (
-        <AspectRatio ratio={previewRatio(part)} className="overflow-hidden rounded-lg border border-dashed border-border bg-muted/50">
+        <AspectRatio
+            ratio={previewRatio(part, aspectRatio)}
+            className="overflow-hidden rounded-lg border border-dashed border-border bg-muted/50"
+        >
             <div className="flex size-full flex-col items-center justify-center gap-2 px-6 text-center" role="alert">
                 <ImageOff className="size-8 text-muted-foreground" aria-hidden="true" />
                 <p className="font-medium text-foreground">图片已失效</p>
                 <p className="text-sm text-muted-foreground">本地缓存已被清理，且临时图片已过期。请重新发起 /image。</p>
+            </div>
+        </AspectRatio>
+    )
+}
+
+function ImageErrorPlaceholder({
+    aspectRatio,
+    message,
+    part,
+}: {
+    aspectRatio?: ImageBriefPart['summary']['aspectRatio']
+    message: string
+    part: ImageResultPartModel
+}) {
+    return (
+        <AspectRatio
+            ratio={previewRatio(part, aspectRatio)}
+            className="overflow-hidden rounded-lg border border-dashed border-destructive/40 bg-destructive/5"
+        >
+            <div className="flex size-full items-center p-4">
+                <ImageErrorAlert message={message} />
             </div>
         </AspectRatio>
     )

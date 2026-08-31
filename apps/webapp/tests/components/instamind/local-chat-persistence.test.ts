@@ -6,20 +6,24 @@ import {
     LOCAL_CHAT_RECENT_LIMIT,
     type LocalConversationMetadata,
     localConversationSnapshotSchema,
+    localMessageHeightHintRecordSchema,
 } from '@/components/instamind/local-chat-persistence/schema'
 import { createLocalConversationSnapshot, projectRecoverableMessages } from '@/components/instamind/local-chat-persistence/stable-snapshot'
 import {
     createIndexFromRegistry,
     deleteLocalConversationSnapshots,
     deleteLocalImageResultCaches,
+    deleteLocalMessageHeightHints,
     LOCAL_IMAGE_RESULT_CACHE_MAX_COUNT,
     readLocalConversationIndex,
     readLocalConversationSnapshot,
     readLocalImageResultCache,
+    readLocalMessageHeightHints,
     reconcileLocalConversationIndex,
     writeLocalConversationIndex,
     writeLocalConversationSnapshot,
     writeLocalImageResultCache,
+    writeLocalMessageHeightHints,
 } from '@/components/instamind/local-chat-persistence/store'
 import type { MindMessage } from '@/lib/ai/types/message'
 
@@ -45,6 +49,14 @@ function createTextMessage(id: string, role: 'assistant' | 'user', text = id): M
 
 function installFakeIndexedDB() {
     const stores = new Map<string, Map<string, unknown>>()
+    const observations = {
+        heightHintIndexLookups: [] as string[],
+        heightHintStoreGetAllCalls: 0,
+        reset() {
+            this.heightHintIndexLookups.length = 0
+            this.heightHintStoreGetAllCalls = 0
+        },
+    }
 
     class FakeObjectStore {
         constructor(
@@ -67,6 +79,10 @@ function installFakeIndexedDB() {
         getAll() {
             const request = {} as IDBRequest<unknown[]>
 
+            if (this.name === 'message-height-hints') {
+                observations.heightHintStoreGetAllCalls += 1
+            }
+
             queueMicrotask(() => {
                 Object.assign(request, { result: Array.from(stores.get(this.name)?.values() ?? []) })
                 request.onsuccess?.(new Event('success') as Event & { target: IDBRequest<unknown[]> })
@@ -85,7 +101,9 @@ function installFakeIndexedDB() {
                     key ??
                     (this.name === 'image-results'
                         ? (value as { runId?: string }).runId
-                        : (value as { conversationId?: string }).conversationId)
+                        : this.name === 'message-height-hints'
+                          ? (value as { key?: string }).key
+                          : (value as { conversationId?: string }).conversationId)
 
                 if (typeof storeKey === 'string') {
                     store.set(storeKey, value)
@@ -110,6 +128,42 @@ function installFakeIndexedDB() {
             })
 
             return request
+        }
+
+        createIndex() {
+            return {} as IDBIndex
+        }
+
+        index(name: string) {
+            if (this.name !== 'message-height-hints' || name !== 'conversationId') {
+                throw new Error(`Unsupported fake index: ${this.name}.${name}`)
+            }
+
+            return {
+                getAll: (conversationId: IDBValidKey | IDBKeyRange | null | undefined) => {
+                    const request = {} as IDBRequest<unknown[]>
+
+                    if (typeof conversationId === 'string') {
+                        observations.heightHintIndexLookups.push(conversationId)
+                    }
+
+                    queueMicrotask(() => {
+                        const records = Array.from(stores.get(this.name)?.values() ?? []).filter(
+                            record =>
+                                typeof conversationId === 'string' &&
+                                !!record &&
+                                typeof record === 'object' &&
+                                (record as { conversationId?: unknown }).conversationId === conversationId
+                        )
+
+                        Object.assign(request, { result: records })
+                        request.onsuccess?.(new Event('success') as Event & { target: IDBRequest<unknown[]> })
+                        this.transaction.complete()
+                    })
+
+                    return request
+                },
+            } as IDBIndex
         }
     }
 
@@ -171,6 +225,8 @@ function installFakeIndexedDB() {
         configurable: true,
         value: indexedDB,
     })
+
+    return observations
 }
 
 afterEach(() => {
@@ -302,9 +358,256 @@ describe('local chat persistence schema and projection', () => {
             }).success
         ).toBe(false)
     })
+
+    it('accepts only opaque, bounded message height hint entries', () => {
+        const record = {
+            conversationId: 'conv-height-hints',
+            entries: [
+                {
+                    height: 248.25,
+                    measuredAt: '2026-08-30T10:00:00.000Z',
+                    messageId: 'message-1',
+                    presentation: 'history-default',
+                    renderFingerprint: 'fnv1a-abc123',
+                },
+            ],
+            geometryVersion: 1,
+            key: 'conv-height-hints::g1|w856|r1|history-default',
+            layoutKey: 'g1|w856|r1|history-default',
+            messageColumnWidth: 856,
+            updatedAt: '2026-08-30T10:00:00.000Z',
+        }
+
+        expect(localMessageHeightHintRecordSchema.safeParse(record).success).toBe(true)
+        expect(
+            localMessageHeightHintRecordSchema.safeParse({
+                ...record,
+                entries: [{ ...record.entries[0], content: '不得存储消息正文' }],
+            }).success
+        ).toBe(false)
+    })
 })
 
 describe('local chat persistence store', () => {
+    it('reads only an exact conversation and layout height hint record', async () => {
+        installFakeIndexedDB()
+
+        await expect(
+            writeLocalMessageHeightHints({
+                conversationId: 'conv-height-hints',
+                entries: [
+                    {
+                        height: 248.25,
+                        measuredAt: '2026-08-30T10:00:00.000Z',
+                        messageId: 'message-1',
+                        presentation: 'history-default',
+                        renderFingerprint: 'fnv1a-abc123',
+                    },
+                ],
+                geometryVersion: 1,
+                key: 'conv-height-hints::g1|w856|r1|history-default',
+                layoutKey: 'g1|w856|r1|history-default',
+                messageColumnWidth: 856,
+                updatedAt: '2026-08-30T10:00:00.000Z',
+            })
+        ).resolves.toEqual({ status: 'written' })
+
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w856|r1|history-default')).resolves.toMatchObject({
+            data: {
+                entries: [expect.objectContaining({ height: 248.25, messageId: 'message-1' })],
+            },
+            status: 'valid',
+        })
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w720|r1|history-default')).resolves.toEqual({ status: 'missing' })
+        await expect(readLocalMessageHeightHints('other-conversation', 'g1|w856|r1|history-default')).resolves.toEqual({
+            status: 'missing',
+        })
+    })
+
+    it('uses the conversation index when retaining height-hint layouts', async () => {
+        const observations = installFakeIndexedDB()
+
+        await writeLocalMessageHeightHints({
+            conversationId: 'conv-unrelated-hints',
+            entries: [],
+            geometryVersion: 1,
+            key: 'conv-unrelated-hints::g1|w856|r1|history-default',
+            layoutKey: 'g1|w856|r1|history-default',
+            messageColumnWidth: 856,
+            updatedAt: '2026-08-30T10:00:00.000Z',
+        })
+        observations.reset()
+
+        for (let index = 0; index < 4; index += 1) {
+            const layoutKey = `g1|w${720 + index * 80}|r1|history-default`
+
+            await writeLocalMessageHeightHints({
+                conversationId: 'conv-height-hints',
+                entries: [],
+                geometryVersion: 1,
+                key: `conv-height-hints::${layoutKey}`,
+                layoutKey,
+                messageColumnWidth: 720 + index * 80,
+                updatedAt: `2026-08-30T10:00:0${index}.000Z`,
+            })
+        }
+
+        expect(observations.heightHintStoreGetAllCalls).toBe(0)
+        expect(observations.heightHintIndexLookups).toEqual([
+            'conv-height-hints',
+            'conv-height-hints',
+            'conv-height-hints',
+            'conv-height-hints',
+        ])
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w720|r1|history-default')).resolves.toEqual({
+            status: 'missing',
+        })
+        await expect(readLocalMessageHeightHints('conv-unrelated-hints', 'g1|w856|r1|history-default')).resolves.toMatchObject({
+            status: 'valid',
+        })
+    })
+
+    it('uses the conversation index when clearing deleted height-hint layouts', async () => {
+        const observations = installFakeIndexedDB()
+
+        await writeLocalMessageHeightHints({
+            conversationId: 'conv-delete-hints',
+            entries: [],
+            geometryVersion: 1,
+            key: 'conv-delete-hints::g1|w856|r1|history-default',
+            layoutKey: 'g1|w856|r1|history-default',
+            messageColumnWidth: 856,
+            updatedAt: '2026-08-30T10:00:00.000Z',
+        })
+        await writeLocalMessageHeightHints({
+            conversationId: 'conv-retain-hints',
+            entries: [],
+            geometryVersion: 1,
+            key: 'conv-retain-hints::g1|w856|r1|history-default',
+            layoutKey: 'g1|w856|r1|history-default',
+            messageColumnWidth: 856,
+            updatedAt: '2026-08-30T10:00:01.000Z',
+        })
+        observations.reset()
+
+        await deleteLocalMessageHeightHints(['conv-delete-hints'])
+
+        expect(observations.heightHintStoreGetAllCalls).toBe(0)
+        expect(observations.heightHintIndexLookups).toEqual(['conv-delete-hints'])
+        await expect(readLocalMessageHeightHints('conv-delete-hints', 'g1|w856|r1|history-default')).resolves.toEqual({
+            status: 'missing',
+        })
+        await expect(readLocalMessageHeightHints('conv-retain-hints', 'g1|w856|r1|history-default')).resolves.toMatchObject({
+            status: 'valid',
+        })
+    })
+
+    it('retains at most three height-hint layouts per conversation and cleans only deleted conversations', async () => {
+        installFakeIndexedDB()
+
+        for (let index = 0; index < 4; index += 1) {
+            const layoutKey = `g1|w${720 + index * 80}|r1|history-default`
+            await expect(
+                writeLocalMessageHeightHints({
+                    conversationId: 'conv-height-hints',
+                    entries: [],
+                    geometryVersion: 1,
+                    key: `conv-height-hints::${layoutKey}`,
+                    layoutKey,
+                    messageColumnWidth: 720 + index * 80,
+                    updatedAt: `2026-08-30T10:00:0${index}.000Z`,
+                })
+            ).resolves.toEqual({ status: 'written' })
+        }
+        await writeLocalMessageHeightHints({
+            conversationId: 'conv-retain-hints',
+            entries: [],
+            geometryVersion: 1,
+            key: 'conv-retain-hints::g1|w856|r1|history-default',
+            layoutKey: 'g1|w856|r1|history-default',
+            messageColumnWidth: 856,
+            updatedAt: '2026-08-30T10:00:09.000Z',
+        })
+
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w720|r1|history-default')).resolves.toEqual({ status: 'missing' })
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w800|r1|history-default')).resolves.toMatchObject({
+            status: 'valid',
+        })
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w960|r1|history-default')).resolves.toMatchObject({
+            status: 'valid',
+        })
+
+        await deleteLocalMessageHeightHints(['conv-height-hints'])
+
+        await expect(readLocalMessageHeightHints('conv-height-hints', 'g1|w800|r1|history-default')).resolves.toEqual({ status: 'missing' })
+        await expect(readLocalMessageHeightHints('conv-retain-hints', 'g1|w856|r1|history-default')).resolves.toMatchObject({
+            status: 'valid',
+        })
+    })
+
+    it('does not let a pending height-hint write recreate cache after its conversation is deleted', async () => {
+        installFakeIndexedDB()
+
+        const pendingWrite = writeLocalMessageHeightHints({
+            conversationId: 'conv-deleted-during-write',
+            entries: [],
+            geometryVersion: 1,
+            key: 'conv-deleted-during-write::g1|w856|r1|history-default',
+            layoutKey: 'g1|w856|r1|history-default',
+            messageColumnWidth: 856,
+            updatedAt: '2026-08-30T10:00:00.000Z',
+        })
+
+        await deleteLocalMessageHeightHints(['conv-deleted-during-write'])
+        await pendingWrite
+
+        await expect(readLocalMessageHeightHints('conv-deleted-during-write', 'g1|w856|r1|history-default')).resolves.toEqual({
+            status: 'missing',
+        })
+    })
+
+    it('allows a new height-hint generation to write when the same conversation id re-enters', async () => {
+        installFakeIndexedDB()
+
+        await deleteLocalMessageHeightHints(['conv-reentered'])
+
+        await expect(
+            writeLocalMessageHeightHints({
+                conversationId: 'conv-reentered',
+                entries: [],
+                geometryVersion: 1,
+                key: 'conv-reentered::g1|w856|r1|history-default',
+                layoutKey: 'g1|w856|r1|history-default',
+                messageColumnWidth: 856,
+                updatedAt: '2026-08-30T10:00:00.000Z',
+            })
+        ).resolves.toEqual({ status: 'written' })
+
+        await expect(readLocalMessageHeightHints('conv-reentered', 'g1|w856|r1|history-default')).resolves.toMatchObject({
+            status: 'valid',
+        })
+    })
+
+    it('returns unavailable when the browser blocks an IndexedDB upgrade', async () => {
+        const request = {} as IDBOpenDBRequest
+        const indexedDB = {
+            open: vi.fn(() => request),
+        }
+
+        vi.stubGlobal('indexedDB', indexedDB)
+        Object.defineProperty(window, 'indexedDB', {
+            configurable: true,
+            value: indexedDB,
+        })
+
+        const resultPromise = readLocalMessageHeightHints('conv-blocked', 'g1|w856|r1|history-default')
+
+        expect(request.onblocked).toBeTypeOf('function')
+        request.onblocked?.(new Event('blocked') as IDBVersionChangeEvent)
+
+        await expect(resultPromise).resolves.toEqual({ status: 'unavailable' })
+    })
+
     it('writes and reads the local index without losing different conversations', async () => {
         installFakeIndexedDB()
 

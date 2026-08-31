@@ -1,10 +1,10 @@
 'use client'
 
 import { ArrowDown, CircleAlert } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { ChatComposer } from '@/components/chat/composer/chat-composer'
-import { ChatMessageList } from '@/components/chat/message-list/chat-message-list'
+import { ChatMessageList, type ChatMessageListHandle } from '@/components/chat/message-list/chat-message-list'
 import type { EmptyStateSuggestion } from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -18,8 +18,8 @@ import { useConversationSessions } from './conversation-session/use-conversation
 import { HumanReviewComposerPanel } from './human-review/human-review-composer-panel'
 import { ProjectLinkNotice, type ProjectLinkNoticeType } from './project-link-notice'
 import { ThreadMemoryStatusHint } from './thread-memory-status-hint'
-import { useChatAutoScroll } from './use-chat-auto-scroll'
 import { useChatModels } from './use-chat-models'
+import { useChatScrollPolicy } from './use-chat-scroll-policy'
 import { useChatStream } from './use-chat-stream'
 
 const CHAT_CONTENT_COLUMN_CLASS_NAME = 'mx-auto w-full max-w-[var(--chat-content-column-width)]'
@@ -84,9 +84,13 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const [interactionLocked, setInteractionLocked] = useState(false)
     const [projectLinkNotice, setProjectLinkNotice] = useState<{ id: number; type: ProjectLinkNoticeType } | null>(null)
     const [positionedHistoryEntrySequence, setPositionedHistoryEntrySequence] = useState<number | null>(null)
-    const [chatScrollbarWidth, setChatScrollbarWidth] = useState<number | null>(null)
-    const [measuredHistoryEntrySequence, setMeasuredHistoryEntrySequence] = useState<number | null>(null)
+    const [heightHintBootstrapPending, setHeightHintBootstrapPending] = useState(false)
     const historyEntryStartRafRef = useRef<number | null>(null)
+    const messageListRef = useRef<ChatMessageListHandle>(null)
+    const [scrollViewportElement, setScrollViewportElement] = useState<HTMLDivElement | null>(null)
+    const setScrollViewportRef = useCallback((node: HTMLDivElement | null) => {
+        setScrollViewportElement(current => (current === node ? current : node))
+    }, [])
     const {
         hasAvailableModels,
         isLoading: isModelLoading,
@@ -154,93 +158,118 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     const shouldPositionHistoryEntry =
         !conversationHydrationPending &&
         !conversationHydrationFailed &&
+        !heightHintBootstrapPending &&
         hasCurrentMessageOwnership &&
         historyEntrySequence !== null &&
         historyEntrySequence !== positionedHistoryEntrySequence
+    const isHistoryLayoutBootstrapping = conversationHydrationPending || heightHintBootstrapPending || shouldPositionHistoryEntry
+    const isHistoryPresentationRevealed =
+        !conversationHydrationPending && !conversationHydrationFailed && !heightHintBootstrapPending && !shouldPositionHistoryEntry
     const readOnlyCacheMessage = conversationReadOnlyCacheMessage ?? threadReadOnlyCacheMessage
     const isReadOnlyCache = isConversationReadOnlyCache || Boolean(threadReadOnlyCacheMessage)
     const composerDisabled = hasPendingReview
     const composerSubmitDisabled =
-        conversationTransitionPending || conversationHydrationPending || conversationHydrationFailed || isReadOnlyCache
+        conversationTransitionPending ||
+        conversationHydrationPending ||
+        conversationHydrationFailed ||
+        heightHintBootstrapPending ||
+        isReadOnlyCache
     const selectedConversationTitle = selectedConversation?.title ?? '新会话'
     const readOnlyCacheRetryDisabled = conversationTransitionPending || conversationHydrationPending || isStreamingOutput
     const readOnlyCacheDescriptionId = 'instamind-readonly-cache-description'
+
     const {
         composerContainerRef,
         composerOverlayInset = 0,
-        messageContentRef,
-        scrollViewportRef,
+        onAtBottomChange,
+        onItemMounted,
+        onItemUnmounted,
+        onRangeChange,
+        onScrollingChange,
+        onTotalHeightChange,
         showScrollToBottom,
-        resetAutoScrollForNewTurn,
-        restoreAutoFollowAndScrollToBottom,
+        resetScrollPolicyForNewTurn: resetAutoScrollForNewTurn,
+        restoreFollowAndScrollToEnd: restoreAutoFollowAndScrollToBottom,
         positionConversationEntryAtBottom,
         cancelConversationEntryPositioning,
-    } = useChatAutoScroll({
+    } = useChatScrollPolicy({
         isStreamingOutput,
         contentSignal: messages,
+        listRef: messageListRef,
+        messageCount: messages.length,
+        scrollViewportElement,
     })
+    const historyEntryObservationScope = useMemo(
+        () =>
+            selectedHistoryConversationId !== null && historyEntrySequence !== null
+                ? { conversationId: selectedHistoryConversationId, sequence: historyEntrySequence }
+                : undefined,
+        [historyEntrySequence, selectedHistoryConversationId]
+    )
+    const handleAtBottomChange = useCallback(
+        (atBottom: boolean) => onAtBottomChange(atBottom, historyEntryObservationScope),
+        [historyEntryObservationScope, onAtBottomChange]
+    )
+    const handleRangeChange = useCallback(
+        (range: { endIndex: number; startIndex: number }) => onRangeChange(range, historyEntryObservationScope),
+        [historyEntryObservationScope, onRangeChange]
+    )
+    const handleScrollingChange = useCallback(
+        (isScrolling: boolean) => onScrollingChange(isScrolling, historyEntryObservationScope),
+        [historyEntryObservationScope, onScrollingChange]
+    )
+    const handleTotalHeightChange = useCallback(
+        (height: number) => onTotalHeightChange(height, historyEntryObservationScope),
+        [historyEntryObservationScope, onTotalHeightChange]
+    )
+    const handleMessageItemMounted = useCallback(
+        (itemIndex: number) => {
+            if (!historyEntryObservationScope) {
+                return
+            }
+
+            onItemMounted({
+                ...historyEntryObservationScope,
+                itemIndex,
+            })
+        },
+        [historyEntryObservationScope, onItemMounted]
+    )
+    const handleMessageItemUnmounted = useCallback(
+        (itemIndex: number) => {
+            if (!historyEntryObservationScope) {
+                return
+            }
+
+            onItemUnmounted({
+                ...historyEntryObservationScope,
+                itemIndex,
+            })
+        },
+        [historyEntryObservationScope, onItemUnmounted]
+    )
 
     useLayoutEffect(() => {
         cancelConversationEntryPositioning()
     }, [cancelConversationEntryPositioning, selectedHistoryConversationId])
-
-    const syncChatScrollbarWidth = useCallback(() => {
-        const viewport = scrollViewportRef.current
-
-        if (!viewport) {
-            return
-        }
-
-        const nextWidth = Math.max(0, viewport.offsetWidth - viewport.clientWidth)
-
-        setChatScrollbarWidth(current => (current === nextWidth ? current : nextWidth))
-    }, [scrollViewportRef])
-
-    useLayoutEffect(() => {
-        const viewport = scrollViewportRef.current
-
-        if (!viewport) {
-            return
-        }
-
-        syncChatScrollbarWidth()
-
-        if (!window.ResizeObserver) {
-            return
-        }
-
-        const observer = new ResizeObserver(syncChatScrollbarWidth)
-        observer.observe(viewport)
-
-        return () => observer.disconnect()
-    }, [scrollViewportRef, syncChatScrollbarWidth])
 
     useLayoutEffect(() => {
         if (!shouldPositionHistoryEntry || historyEntrySequence === null) {
             return
         }
 
-        // 每次历史会话进入都重新读取原生滚动条宽度，不能复用骨架或上一会话的缓存值。
-        syncChatScrollbarWidth()
-        setMeasuredHistoryEntrySequence(current => (current === historyEntrySequence ? current : historyEntrySequence))
-    }, [historyEntrySequence, shouldPositionHistoryEntry, syncChatScrollbarWidth])
-
-    useLayoutEffect(() => {
-        if (
-            !shouldPositionHistoryEntry ||
-            historyEntrySequence === null ||
-            chatScrollbarWidth === null ||
-            measuredHistoryEntrySequence !== historyEntrySequence
-        ) {
-            return
-        }
-
-        // 先让 scrollbar 右 inset 参与 Composer 布局，再开始隐藏历史的到底定位，避免首帧按旧列宽和旧高度揭示。
         historyEntryStartRafRef.current = window.requestAnimationFrame(() => {
             historyEntryStartRafRef.current = null
-            positionConversationEntryAtBottom(() => {
-                setPositionedHistoryEntrySequence(historyEntrySequence)
-            })
+            positionConversationEntryAtBottom(
+                {
+                    conversationId: selectedHistoryConversationId ?? '',
+                    lastMessageIndex: messages.length - 1,
+                    sequence: historyEntrySequence,
+                },
+                () => {
+                    setPositionedHistoryEntrySequence(historyEntrySequence)
+                }
+            )
         })
 
         return () => {
@@ -252,10 +281,10 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
             historyEntryStartRafRef.current = null
         }
     }, [
-        chatScrollbarWidth,
         historyEntrySequence,
-        measuredHistoryEntrySequence,
+        messages.length,
         positionConversationEntryAtBottom,
+        selectedHistoryConversationId,
         shouldPositionHistoryEntry,
     ])
 
@@ -355,10 +384,10 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     return (
         <main
             className="h-dvh overflow-hidden bg-background text-foreground"
+            data-slot="instant-mind-page"
             style={{
                 ['--chat-content-column-width' as string]: '53.5rem',
                 ['--conversation-sidebar-width' as string]: conversationSidebarWidth,
-                ['--chat-scrollbar-width' as string]: `${chatScrollbarWidth ?? 0}px`,
             }}
         >
             <ConversationSidebar
@@ -378,23 +407,21 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
             />
 
             <div
-                className="h-full min-w-0 transition-[padding-left] duration-200 ease-linear lg:pl-[var(--conversation-sidebar-width)]"
+                className="relative h-full min-w-0 transition-[padding-left] duration-200 ease-linear lg:pl-[var(--conversation-sidebar-width)]"
                 data-slot="chat-layout"
             >
                 <div
-                    ref={scrollViewportRef}
+                    ref={setScrollViewportRef}
                     role="region"
                     tabIndex={0}
                     aria-label="聊天记录"
-                    className="h-full overflow-y-auto overscroll-contain"
+                    className={['h-full overscroll-contain', isHistoryLayoutBootstrapping ? 'overflow-y-hidden' : 'overflow-y-auto'].join(
+                        ' '
+                    )}
                     data-slot="chat-message-viewport"
-                    style={{ scrollbarGutter: 'stable' }}
+                    style={{ scrollbarGutter: 'stable both-edges' }}
                 >
-                    <div
-                        className="px-4 pt-0 sm:px-6 lg:px-8 lg:pt-8"
-                        data-slot="chat-message-content"
-                        style={{ paddingBottom: `${composerOverlayInset + 54}px` }}
-                    >
+                    <div className="px-4 pt-0 sm:px-6 lg:px-8 lg:pt-8" data-slot="chat-message-content">
                         <ConversationMobileSelector
                             conversations={conversations}
                             createDisabled={conversationWriteDisabled}
@@ -407,7 +434,7 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                             onSelectConversation={handleSelectConversation}
                             selectedConversationTitle={selectedConversationTitle}
                         />
-                        <div ref={messageContentRef} className={CHAT_CONTENT_COLUMN_CLASS_NAME} data-slot="chat-main-column">
+                        <div className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} relative`} data-slot="chat-main-column">
                             {projectLinkNotice ? (
                                 <ProjectLinkNotice
                                     key={projectLinkNotice.id}
@@ -454,7 +481,6 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                                     </div>
                                 </Alert>
                             ) : null}
-                            {conversationHydrationPending ? <ConversationHydrationSkeleton /> : null}
                             {conversationHydrationFailed ? (
                                 <ConversationHydrationErrorState
                                     onRetry={() => {
@@ -464,54 +490,84 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                             ) : null}
                             {!conversationHydrationPending && !conversationHydrationFailed ? (
                                 <div
-                                    className={shouldPositionHistoryEntry ? 'invisible' : undefined}
-                                    data-entry-positioned={String(!shouldPositionHistoryEntry)}
+                                    className={!isHistoryPresentationRevealed ? 'invisible' : undefined}
+                                    data-entry-positioned={String(isHistoryPresentationRevealed)}
                                     data-slot="conversation-history-presentation"
                                 >
-                                    <ChatMessageList
-                                        conversationId={selectedConversationId ?? undefined}
-                                        messages={messages}
-                                        status={status}
-                                        enableReasoning={enableReasoning}
-                                        showEmptyStateSuggestions={isDraft}
-                                        actionsDisabled={hasPendingReview || conversationTransitionPending || isReadOnlyCache}
-                                        onDeleteUserTurn={deleteUserTurn}
-                                        onRegenerateLastTurn={handleRegenerateLastTurn}
-                                        onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
-                                        onSelectSuggestion={handleSelectSuggestion}
-                                    />
+                                    {scrollViewportElement ? (
+                                        <ChatMessageList
+                                            key={selectedConversationId ?? 'draft'}
+                                            ref={messageListRef}
+                                            bottomInset={composerOverlayInset + 54}
+                                            conversationId={selectedConversationId ?? undefined}
+                                            messages={messages}
+                                            scrollParent={scrollViewportElement}
+                                            status={status}
+                                            enableReasoning={enableReasoning}
+                                            showEmptyStateSuggestions={isDraft}
+                                            actionsDisabled={hasPendingReview || conversationTransitionPending || isReadOnlyCache}
+                                            onAtBottomChange={handleAtBottomChange}
+                                            onDeleteUserTurn={deleteUserTurn}
+                                            onHeightHintBootstrapChange={setHeightHintBootstrapPending}
+                                            onItemMounted={handleMessageItemMounted}
+                                            onItemUnmounted={handleMessageItemUnmounted}
+                                            onRangeChange={handleRangeChange}
+                                            onRegenerateLastTurn={handleRegenerateLastTurn}
+                                            onScrollingChange={handleScrollingChange}
+                                            onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
+                                            onSelectSuggestion={handleSelectSuggestion}
+                                            onTotalHeightChange={handleTotalHeightChange}
+                                        />
+                                    ) : null}
                                 </div>
                             ) : null}
                         </div>
                     </div>
                 </div>
+                {isHistoryLayoutBootstrapping ? (
+                    <div
+                        className="pointer-events-none absolute top-0 right-0 left-0 z-10 px-4 pt-0 sm:px-6 lg:left-[var(--conversation-sidebar-width)] lg:px-8 lg:pt-8"
+                        data-slot="conversation-entry-layout-skeleton"
+                    >
+                        <div className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} relative`}>
+                            <ConversationHydrationSkeleton />
+                        </div>
+                    </div>
+                ) : null}
             </div>
 
             <div
-                className="pointer-events-none fixed bottom-0 left-0 right-[var(--chat-scrollbar-width)] z-20 overflow-visible bg-gradient-to-t from-background via-background/95 to-transparent pt-12 pb-4 transition-[left] duration-200 ease-linear lg:left-[var(--conversation-sidebar-width)]"
+                className="pointer-events-none fixed right-0 bottom-0 left-0 z-20 overflow-visible pt-12 pb-4 transition-[left] duration-200 ease-linear lg:left-[var(--conversation-sidebar-width)]"
                 data-slot="chat-composer-shell"
             >
-                <div className="pointer-events-none px-4 sm:px-6 lg:px-8">
+                <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 left-1/2 w-full max-w-[calc(var(--chat-content-column-width)+4rem)] -translate-x-1/2 bg-gradient-to-t from-background via-background/95 to-transparent"
+                    data-slot="chat-composer-gradient-mask"
+                />
+                <div className="pointer-events-none relative z-10 px-4 sm:px-6 lg:px-8">
                     <div className={`${CHAT_CONTENT_COLUMN_CLASS_NAME} pointer-events-auto relative`} data-slot="chat-composer-column">
-                        <div
-                            className={[
-                                'pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 transition-[opacity,transform] duration-200 ease-out',
-                                showScrollToBottom ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
-                            ].join(' ')}
-                        >
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="icon-lg"
-                                aria-label="回到底部"
-                                aria-hidden={!showScrollToBottom}
-                                disabled={!showScrollToBottom}
-                                onClick={restoreAutoFollowAndScrollToBottom}
-                                className="pointer-events-auto rounded-full border-border/70 bg-background/95 shadow-md shadow-black/5 hover:bg-muted/60"
+                        {isHistoryPresentationRevealed ? (
+                            <div
+                                className={[
+                                    'pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 transition-[opacity,transform] duration-200 ease-out',
+                                    showScrollToBottom ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0',
+                                ].join(' ')}
                             >
-                                <ArrowDown className="size-4" strokeWidth={2.4} />
-                            </Button>
-                        </div>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="icon-lg"
+                                    aria-label="回到底部"
+                                    aria-hidden={!showScrollToBottom}
+                                    disabled={!showScrollToBottom}
+                                    onClick={restoreAutoFollowAndScrollToBottom}
+                                    className="pointer-events-auto rounded-full border-border/70 bg-background/95 shadow-md shadow-black/5 hover:bg-muted/60"
+                                >
+                                    <ArrowDown className="size-4" strokeWidth={2.4} />
+                                </Button>
+                            </div>
+                        ) : null}
 
                         <div ref={composerContainerRef}>
                             <ThreadMemoryStatusHint hint={threadMemoryStatusHint} />

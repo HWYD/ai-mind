@@ -11,8 +11,8 @@
 1. 先看根 [README](../README.md)，了解项目定位、当前状态和 Roadmap。
 2. 如果要让 Codex 或其他 AI coding agent 改代码，先看 [Constitution](../.specify/memory/constitution.md) 和 [AI Coding Workflow](./architecture/ai-coding-workflow.md)。
 3. 再看 [Architecture](./architecture)，理解长期架构边界和核心分层。
-4. 如果想了解某个版本为什么这样设计，看 [Versions](./versions)，其中 [v0.5.2](./versions/v0.5.2-conversation-entry-no-flash.md) 说明历史会话无闪动进入与独立消息视口设计。
-5. 如果只想快速了解每个版本交付了什么，看 [Releases](./releases)，其中 [v0.5.2 release](./releases/v0.5.2.md) 记录能力边界与验证状态。
+4. 如果想了解某个版本为什么这样设计，看 [Versions](./versions)，其中 [v0.5.3](./versions/v0.5.3-message-virtualization.md) 说明长消息虚拟化、动态高度与单一滚动所有权设计。
+5. 如果只想快速了解每个版本交付了什么，看 [Releases](./releases)，其中 [v0.5.3 release](./releases/v0.5.3.md) 记录能力边界与验证状态。
 6. 如果想看公开版任务拆分和验收范围，看 [Tasklists](./tasklists)。
 7. 如果要检查长期架构决策，看 [ADR](./adr)。
 

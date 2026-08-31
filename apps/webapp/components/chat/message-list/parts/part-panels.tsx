@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
 import type { PromptPart, ResourcePart, SkillPart, ThreadMemoryStatusPart, ToolPart } from '@/lib/ai/types/message'
 
+import { useMessageDisclosureState } from '../message-disclosure-state'
 import {
     getActionLabel,
     getLocationLabel,
@@ -75,9 +76,15 @@ function getStructuredRows(value: unknown) {
         }))
 }
 
-function RawContentDetails({ label = '原始内容', value }: { label?: string; value: string }) {
+function RawContentDetails({ disclosureKey, label = '原始内容', value }: { disclosureKey?: string; label?: string; value: string }) {
+    const [open, setOpen] = useMessageDisclosureState(disclosureKey, false)
+
     return (
-        <details className="rounded-md border border-border/60 bg-background/70 px-3 py-2">
+        <details
+            open={open}
+            onToggle={event => setOpen(event.currentTarget.open)}
+            className="rounded-md border border-border/60 bg-background/70 px-3 py-2"
+        >
             <summary className="cursor-pointer text-xs font-medium text-muted-foreground">{label}</summary>
             <pre className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap pr-2 font-sans text-sm leading-6 text-foreground">
                 {value}
@@ -99,7 +106,17 @@ function KeyValueRows({ rows }: { rows: Array<{ key: string; label?: string; val
     )
 }
 
-function StructuredContentBlock({ label, value, rawLabel }: { label: string; rawLabel?: string; value: string }) {
+function StructuredContentBlock({
+    disclosureKey,
+    label,
+    value,
+    rawLabel,
+}: {
+    disclosureKey?: string
+    label: string
+    rawLabel?: string
+    value: string
+}) {
     const parsedJson = tryParseJson(value)
     const rows = getStructuredRows(parsedJson)
 
@@ -110,7 +127,7 @@ function StructuredContentBlock({ label, value, rawLabel }: { label: string; raw
             {rows.length > 0 ? (
                 <div className="space-y-2">
                     <KeyValueRows rows={rows} />
-                    <RawContentDetails label={rawLabel ?? '查看原始 JSON'} value={value} />
+                    <RawContentDetails disclosureKey={disclosureKey} label={rawLabel ?? '查看原始 JSON'} value={value} />
                 </div>
             ) : (
                 <pre className="whitespace-pre-wrap font-sans text-sm leading-6 text-foreground">{value}</pre>
@@ -245,7 +262,15 @@ export function PromptPanel({ part }: { part: PromptPart }) {
     )
 }
 
-export function ToolPanel({ part }: { part: ToolPart }) {
+export function ToolPanel({
+    inputDisclosureKey,
+    outputDisclosureKey,
+    part,
+}: {
+    inputDisclosureKey?: string
+    outputDisclosureKey?: string
+    part: ToolPart
+}) {
     const actionLabel = getActionLabel(part.action)
 
     return (
@@ -271,9 +296,11 @@ export function ToolPanel({ part }: { part: ToolPart }) {
             </CardHeader>
 
             <CardContent className="space-y-2.5 pt-4">
-                <StructuredContentBlock label="输入" rawLabel="查看原始输入" value={part.input} />
+                <StructuredContentBlock disclosureKey={inputDisclosureKey} label="输入" rawLabel="查看原始输入" value={part.input} />
 
-                {part.output ? <StructuredContentBlock label="结果" rawLabel="查看原始结果" value={part.output} /> : null}
+                {part.output ? (
+                    <StructuredContentBlock disclosureKey={outputDisclosureKey} label="结果" rawLabel="查看原始结果" value={part.output} />
+                ) : null}
 
                 <ErrorBlock error={part.error} />
             </CardContent>
@@ -281,7 +308,7 @@ export function ToolPanel({ part }: { part: ToolPart }) {
     )
 }
 
-export function ResourcePanel({ part }: { part: ResourcePart }) {
+export function ResourcePanel({ part, rawDisclosureKey }: { part: ResourcePart; rawDisclosureKey?: string }) {
     return (
         <Card size="sm" className="mb-3 border-border/60 shadow-xs">
             <CardHeader className="gap-2 border-b border-border/60 pb-2.5">
@@ -321,7 +348,11 @@ export function ResourcePanel({ part }: { part: ResourcePart }) {
                         <div className="text-[0.7rem] font-medium text-muted-foreground">内容摘要</div>
                         <Separator className="my-2" />
                         <p className="line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-foreground">{part.contentPreview}</p>
-                        <RawContentDetails label={`查看原始预览（最多 ${part.previewChars ?? 3000} 字）`} value={part.contentPreview} />
+                        <RawContentDetails
+                            disclosureKey={rawDisclosureKey}
+                            label={`查看原始预览（最多 ${part.previewChars ?? 3000} 字）`}
+                            value={part.contentPreview}
+                        />
                         {part.isTruncated ? (
                             <p className="mt-2 text-xs text-muted-foreground">已截断，仅展示前 {part.previewChars ?? 3000} 字。</p>
                         ) : null}
