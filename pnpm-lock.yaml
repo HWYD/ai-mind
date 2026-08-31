@@ -323,6 +323,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      vite:
+        specifier: 8.0.8
+        version: 8.0.8(@types/node@22.20.1)(esbuild@0.27.7)(jiti@2.6.1)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.3)
       vitest:
         specifier: 'catalog:'
         version: 4.1.4(@types/node@22.20.1)(jsdom@29.0.2(@noble/hashes@1.8.0))(msw@2.12.14(@types/node@22.20.1)(typescript@5.9.3))(vite@8.0.8(@types/node@22.20.1)(esbuild@0.27.7)(jiti@2.6.1)(terser@5.49.0)(tsx@4.21.0)(yaml@2.8.3))
