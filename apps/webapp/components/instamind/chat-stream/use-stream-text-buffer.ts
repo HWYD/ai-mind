@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 
 import type { PendingTextDelta } from './stream-message-reducer'
 
-const earlyFlushCodePointThreshold = 48
+const earlyFlushCodePointThreshold = 18
 
 /**
  * 文本增量 buffer 的配置。
