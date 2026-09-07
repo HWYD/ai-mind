@@ -55,6 +55,7 @@ const resolvedModelSelection: ResolvedModelSelection = {
             tasklist: true,
             toolCalling: true,
         },
+        contextWindowTokens: 40000,
         enabled: true,
         family: 'ollama',
         id: 'ollama/qwen3-8b',

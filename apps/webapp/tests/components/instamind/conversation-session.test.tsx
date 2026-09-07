@@ -576,6 +576,72 @@ describe('useConversationSessions', () => {
         expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBe('conv-b')
     })
 
+    it('promotes a draft session before its registry reconciliation resolves', async () => {
+        let resolvePromotionRegistry: ((response: Response) => void) | undefined
+        const promotedConversation = createConversation('conv-promoted', 'Promoted conversation', true)
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValueOnce(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: null,
+                        conversations: [],
+                    })
+                )
+            )
+            .mockImplementationOnce(
+                () =>
+                    new Promise<Response>(resolve => {
+                        resolvePromotionRegistry = resolve
+                    })
+            )
+
+        vi.stubGlobal('fetch', fetchMock)
+
+        const { result } = renderHook(() => useConversationSessions())
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(false)
+        })
+        expect(result.current.isDraft).toBe(true)
+
+        const presentationKey = result.current.presentationKey
+        expect(presentationKey).toBeTruthy()
+        let promotion: Promise<void> | undefined
+        act(() => {
+            promotion = result.current.handleConversationPromoted(promotedConversation.id)
+        })
+
+        expect(result.current.presentationKey).toBe(presentationKey)
+        expect(result.current.isDraft).toBe(false)
+        expect(result.current.selectedConversationId).toBe(promotedConversation.id)
+        expect(window.localStorage.getItem(SELECTED_CONVERSATION_STORAGE_KEY)).toBe(promotedConversation.id)
+
+        await waitFor(() => {
+            expect(fetchMock).toHaveBeenCalledTimes(2)
+        })
+
+        await act(async () => {
+            resolvePromotionRegistry?.(
+                Response.json(
+                    createRegistryPayload({
+                        selectedConversationId: promotedConversation.id,
+                        conversations: [promotedConversation],
+                    })
+                )
+            )
+            await promotion
+        })
+
+        expect(result.current.selectedConversationId).toBe(promotedConversation.id)
+        expect(result.current.presentationKey).toBe(presentationKey)
+        expect(result.current.isDraft).toBe(false)
+        await act(async () => {
+            await result.current.createConversation()
+        })
+        expect(result.current.presentationKey).not.toBe(presentationKey)
+    })
+
     it('waits for the local selected-session index write before sending background persistence', async () => {
         let resolveLocalIndexWrite: ((result: { revision: number; status: 'written' }) => void) | undefined
         const conversationA = createConversation('conv-a', 'Conversation A', true)
@@ -999,6 +1065,33 @@ describe('useConversationSessions', () => {
 })
 
 describe('conversation session UI', () => {
+    it('keeps persistent conversation failures beside each conversation list', async () => {
+        const notice = <div role="alert">会话服务暂时不可用</div>
+        const desktop = render(
+            <ConversationSidebar conversations={[]} notice={notice} onCreateConversation={vi.fn()} onSelectConversation={vi.fn()} />
+        )
+
+        const desktopAlert = screen.getByRole('alert')
+        expect(document.querySelector('[data-slot="sidebar"]')?.contains(desktopAlert)).toBe(true)
+        expect(document.querySelector('[data-slot="scroll-area"]')?.contains(desktopAlert)).toBe(false)
+        desktop.unmount()
+
+        render(
+            <ConversationMobileSelector
+                conversations={[]}
+                notice={notice}
+                onCreateConversation={vi.fn()}
+                onSelectConversation={vi.fn()}
+                selectedConversationTitle="新聊天"
+            />
+        )
+        fireEvent.click(screen.getByRole('button', { name: '打开会话抽屉' }))
+
+        const mobileAlert = await screen.findByRole('alert')
+        expect(document.querySelector('[data-slot="sheet-content"]')?.contains(mobileAlert)).toBe(true)
+        expect(document.querySelector('[data-slot="scroll-area"]')?.contains(mobileAlert)).toBe(false)
+    })
+
     it('uses the full desktop title and only enables marquee behavior for measured overflow', () => {
         const title = 'AI Mind 侧栏会话标题在悬浮时需要完整展示的中英文混排内容'
 

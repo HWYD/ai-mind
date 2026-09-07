@@ -1,14 +1,20 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { ZodError } from 'zod'
 
-import { createChatModel, getModelProviderConfig, logProviderError, resolveModelSelection } from '@/lib/ai/model-provider'
+import { isAbortError, throwIfAborted } from '@/lib/ai/error-utils'
+import {
+    type ContextBudget,
+    createChatModel,
+    estimateModelInputTokens,
+    getModelProviderConfig,
+    resolveModelSelection,
+} from '@/lib/ai/model-provider'
 
+import { buildChatMemoryContextMessages } from './context-builder'
 import {
     type AiMindThreadState,
     CHAT_MEMORY_PINNED_DECISION_LIMIT,
     CHAT_MEMORY_PINNED_DECISION_TEXT_LIMIT,
-    CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT,
-    CHAT_MEMORY_RECENT_MESSAGE_LIMIT,
     CHAT_MEMORY_SUMMARY_TARGET_LIMIT,
     type ChatThreadMessage,
     type CompactionOutput,
@@ -16,34 +22,48 @@ import {
 } from './state-schema'
 
 export const CHAT_MEMORY_COMPACTION_MODEL_ID = 'deepseek/deepseek-v4-pro'
+export const CHAT_MEMORY_COMPACTION_MAX_OUTPUT_TOKENS = 3000
 
 export const CHAT_MEMORY_COMPACTION_PROMPT = [
     'Return strict JSON that matches this schema: {"summary": string, "pinnedDecisions": string[]}.',
     '你是 AI Mind 的对话记忆压缩器。',
-    '只根据输入的旧摘要、旧 pinned decisions、待压缩的用户可见文本消息和将被保留的 recent messages 生成结构化结果。',
+    '只根据输入的旧摘要、旧 pinned decisions 和全部用户可见文本消息生成结构化结果。',
     '你的输出只允许包含两个字段：summary、pinnedDecisions。',
     '不要保留 raw prompt、tool transcript、GraphState、RuntimeArtifact、workflow progress、subagent raw result、provider response 或 stack trace。',
     `summary 控制在 ${CHAT_MEMORY_SUMMARY_TARGET_LIMIT} 字以内。`,
     `pinnedDecisions 最多 ${CHAT_MEMORY_PINNED_DECISION_LIMIT} 条，每条不超过 ${CHAT_MEMORY_PINNED_DECISION_TEXT_LIMIT} 字。`,
-    '不要重复 recent messages 中已经保留的局部上下文，优先压缩更早内容。',
 ].join('\n')
 
 export interface ChatMemoryCompactionInput {
-    messagesToCompact: ChatThreadMessage[]
+    messages: ChatThreadMessage[]
     previousPinnedDecisions: string[]
     previousSummary: string
-    recentMessages: ChatThreadMessage[]
 }
 
-export type ChatMemoryCompactionGenerator = (input: ChatMemoryCompactionInput) => Promise<unknown>
+export interface ChatMemoryCompactionExecutionOptions {
+    signal?: AbortSignal
+}
+
+export type ChatMemoryCompactionGenerator = (
+    input: ChatMemoryCompactionInput,
+    options?: ChatMemoryCompactionExecutionOptions
+) => Promise<unknown>
 
 export interface ChatMemoryCompactionResult {
+    estimatedTokens: number
     nextPinnedDecisions: string[]
+    originalTokens: number
     previousPinnedDecisions: string[]
     state: AiMindThreadState
+    wasCompacted: boolean
 }
 
-function logCompactionEvent(event: string, meta: Record<string, unknown>): void {
+export interface ChatMemoryCompactionOptions {
+    force?: boolean
+    signal?: AbortSignal
+}
+
+function logCompactionEvent(event: string, meta: Record<string, number | string | boolean | null>): void {
     // eslint-disable-next-line no-console
     console.info('[chat-memory-compaction]', JSON.stringify({ event, ...meta }))
 }
@@ -69,32 +89,59 @@ function buildCompactionMessages(input: ChatMemoryCompactionInput) {
                     ? input.previousPinnedDecisions.map((decision, index) => `${index + 1}. ${decision}`).join('\n')
                     : '无',
                 '',
-                '待压缩旧消息：',
-                formatMessagesForPrompt(input.messagesToCompact),
-                '',
-                '将保留的 recent messages：',
-                formatMessagesForPrompt(input.recentMessages),
+                '全部用户可见消息：',
+                formatMessagesForPrompt(input.messages),
             ].join('\n')
         ),
     ]
 }
 
-export async function generateStructuredCompaction(input: ChatMemoryCompactionInput): Promise<CompactionOutput> {
+export function estimateChatMemoryTokens(state: Pick<AiMindThreadState, 'messages' | 'pinnedDecisions' | 'summary'>): number {
+    return estimateModelInputTokens(buildChatMemoryContextMessages(state)).estimatedTokens
+}
+
+function selectRetainedTurns(state: AiMindThreadState, targetTokens: number): ChatThreadMessage[] {
+    const retained: ChatThreadMessage[] = []
+
+    for (let end = state.messages.length; end >= 2; end -= 2) {
+        const turn = state.messages.slice(end - 2, end)
+
+        if (turn[0]?.role !== 'user' || turn[1]?.role !== 'assistant') {
+            break
+        }
+
+        const nextMessages = [...turn, ...retained]
+        const nextTokens = estimateChatMemoryTokens({
+            messages: nextMessages,
+            pinnedDecisions: state.pinnedDecisions,
+            summary: state.summary,
+        })
+
+        if (nextTokens > targetTokens) {
+            break
+        }
+
+        retained.unshift(...turn)
+    }
+
+    return retained
+}
+
+export async function generateStructuredCompaction(
+    input: ChatMemoryCompactionInput,
+    options: ChatMemoryCompactionExecutionOptions = {}
+): Promise<CompactionOutput> {
+    throwIfAborted(options.signal)
     const config = getModelProviderConfig()
     const resolvedModelSelection = resolveModelSelection({
         modelId: CHAT_MEMORY_COMPACTION_MODEL_ID,
         routeType: 'chat',
     })
 
-    logCompactionEvent('model-selected', {
-        modelId: resolvedModelSelection.modelId,
-        provider: resolvedModelSelection.provider,
-        providerModel: resolvedModelSelection.providerModel,
-    })
-
     const modelHandle = createChatModel({
         config,
         enableReasoning: false,
+        maxOutputTokens: CHAT_MEMORY_COMPACTION_MAX_OUTPUT_TOKENS,
         resolvedModelSelection,
         streaming: false,
         temperature: 0,
@@ -104,70 +151,103 @@ export async function generateStructuredCompaction(input: ChatMemoryCompactionIn
         name: 'ai_mind_chat_memory_compaction',
     })
 
-    return runnable.invoke(buildCompactionMessages(input))
+    const output = await runnable.invoke(buildCompactionMessages(input), { signal: options.signal })
+
+    throwIfAborted(options.signal)
+    return output
 }
 
 export async function compactThreadStateWithResult(
     state: AiMindThreadState,
-    generator: ChatMemoryCompactionGenerator = generateStructuredCompaction
+    budget: ContextBudget,
+    generator: ChatMemoryCompactionGenerator = generateStructuredCompaction,
+    options: ChatMemoryCompactionOptions = {}
 ): Promise<ChatMemoryCompactionResult | null> {
-    if (state.messages.length <= CHAT_MEMORY_RECENT_MESSAGE_LIMIT) {
+    throwIfAborted(options.signal)
+    const originalTokens = estimateChatMemoryTokens(state)
+
+    if (!options.force && originalTokens < budget.compactionTriggerTokens) {
         return {
+            estimatedTokens: originalTokens,
             nextPinnedDecisions: state.pinnedDecisions,
+            originalTokens,
             previousPinnedDecisions: state.pinnedDecisions,
             state,
+            wasCompacted: false,
         }
     }
 
-    const recentMessages = state.messages.slice(-CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT)
-    const messagesToCompact = state.messages.slice(0, -CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT)
-
     logCompactionEvent('triggered', {
-        messageCount: state.messages.length,
-        messagesToCompactCount: messagesToCompact.length,
+        originalTokens,
         pinnedDecisionCount: state.pinnedDecisions.length,
-        recentMessageCount: recentMessages.length,
-        summaryLength: state.summary.length,
+        targetTokens: budget.postCompactionTargetTokens,
     })
 
     try {
-        const rawResult = await generator({
-            messagesToCompact,
-            previousPinnedDecisions: state.pinnedDecisions,
-            previousSummary: state.summary,
-            recentMessages,
-        })
-        const result = compactionOutputSchema.parse(rawResult)
+        const rawResult = await generator(
+            {
+                messages: state.messages,
+                previousPinnedDecisions: state.pinnedDecisions,
+                previousSummary: state.summary,
+            },
+            { signal: options.signal }
+        )
+        throwIfAborted(options.signal)
+        const output = compactionOutputSchema.parse(rawResult)
+        const candidateBase: AiMindThreadState = {
+            messages: [],
+            pinnedDecisions: output.pinnedDecisions,
+            summary: output.summary,
+        }
+        const messages = selectRetainedTurns({ ...candidateBase, messages: state.messages }, budget.postCompactionTargetTokens)
+        const estimatedTokens = estimateChatMemoryTokens({ ...candidateBase, messages })
+
+        if (estimatedTokens > budget.postCompactionTargetTokens || estimatedTokens >= originalTokens) {
+            logCompactionEvent('candidate-rejected', {
+                candidateTokens: estimatedTokens,
+                originalTokens,
+                reason: estimatedTokens > budget.postCompactionTargetTokens ? 'over-target' : 'not-smaller',
+                targetTokens: budget.postCompactionTargetTokens,
+            })
+            return null
+        }
+
+        const compactedState: AiMindThreadState = {
+            ...candidateBase,
+            lastCompactedAt: new Date().toISOString(),
+            messages,
+        }
 
         logCompactionEvent('succeeded', {
-            pinnedDecisionCount: result.pinnedDecisions.length,
-            recentMessageCount: recentMessages.length,
-            summaryLength: result.summary.length,
+            candidateTokens: estimatedTokens,
+            originalTokens,
+            pinnedDecisionCount: output.pinnedDecisions.length,
+            retainedMessageCount: messages.length,
         })
 
         return {
-            nextPinnedDecisions: result.pinnedDecisions,
+            estimatedTokens,
+            nextPinnedDecisions: output.pinnedDecisions,
+            originalTokens,
             previousPinnedDecisions: state.pinnedDecisions,
-            state: {
-                lastCompactedAt: new Date().toISOString(),
-                messages: recentMessages,
-                pinnedDecisions: result.pinnedDecisions,
-                summary: result.summary,
-            },
+            state: compactedState,
+            wasCompacted: true,
         }
     } catch (error) {
+        if (options.signal?.aborted) {
+            throwIfAborted(options.signal)
+        }
+
+        if (isAbortError(error)) {
+            throw error
+        }
+
         if (error instanceof ZodError) {
             logCompactionEvent('schema-parse-failed', {
                 issueCount: error.issues.length,
-                issues: error.issues.map(issue => ({
-                    code: issue.code,
-                    path: issue.path.join('.'),
-                })),
             })
         } else {
-            logProviderError(error)
             logCompactionEvent('generator-failed', {
-                errorMessage: error instanceof Error ? error.message : String(error),
                 errorName: error instanceof Error ? error.name : 'UnknownError',
             })
         }
@@ -178,9 +258,11 @@ export async function compactThreadStateWithResult(
 
 export async function compactThreadState(
     state: AiMindThreadState,
-    generator: ChatMemoryCompactionGenerator = generateStructuredCompaction
+    budget: ContextBudget,
+    generator: ChatMemoryCompactionGenerator = generateStructuredCompaction,
+    options: ChatMemoryCompactionOptions = {}
 ): Promise<AiMindThreadState | null> {
-    const result = await compactThreadStateWithResult(state, generator)
+    const result = await compactThreadStateWithResult(state, budget, generator, options)
 
     return result?.state ?? null
 }

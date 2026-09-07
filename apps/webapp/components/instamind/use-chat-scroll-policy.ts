@@ -4,9 +4,6 @@ import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useSta
 
 import type { ChatMessageListHandle } from '@/components/chat/message-list/chat-message-list'
 
-const STREAM_FOLLOW_INTERVAL_MS = 64
-const NEAR_END_ITEM_THRESHOLD = 5
-
 interface VisibleRange {
     endIndex: number
     startIndex: number
@@ -34,14 +31,6 @@ interface ConversationEntryObservations extends ConversationEntryObservationScop
     visibleRange: VisibleRange | null
 }
 
-interface UseChatScrollPolicyOptions {
-    contentSignal: unknown
-    isStreamingOutput: boolean
-    listRef: RefObject<ChatMessageListHandle | null>
-    messageCount: number
-    scrollViewportElement: HTMLElement | null
-}
-
 interface PendingConversationEntry extends ConversationEntryTarget {
     atBottom: boolean
     isScrolling: boolean
@@ -49,6 +38,16 @@ interface PendingConversationEntry extends ConversationEntryTarget {
     lastItemInRange: boolean
     onPositioned: (() => void) | null
     readinessRevision: number
+}
+
+interface UseChatScrollPolicyOptions {
+    contentSignal: unknown
+    isStreamingOutput: boolean
+    listRef: RefObject<ChatMessageListHandle | null>
+    messageCount: number
+    scrollViewportElement: HTMLElement | null
+    presentationKey?: string
+    acceptedTurnRevision?: number
 }
 
 function getConversationEntryGenerationKey(scope: ConversationEntryObservationScope) {
@@ -96,105 +95,104 @@ function isEditableTarget(target: EventTarget | null) {
     return target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT'
 }
 
+function nestedScrollerConsumes(target: EventTarget | null, viewport: HTMLElement, direction: number) {
+    let element = target instanceof HTMLElement ? target : null
+    while (element && element !== viewport) {
+        const style = window.getComputedStyle(element)
+        if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight) {
+            const canMove = direction < 0 ? element.scrollTop > 0 : element.scrollTop + element.clientHeight < element.scrollHeight - 1
+            if (canMove || style.overscrollBehaviorY === 'contain' || style.overscrollBehaviorY === 'none') return true
+        }
+        element = element.parentElement
+    }
+    return false
+}
+
 function isUpwardNavigationKey(event: KeyboardEvent) {
     if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || isEditableTarget(event.target)) {
         return false
     }
 
-    return event.key === 'PageUp' || event.key === 'Home' || ((event.key === ' ' || event.key === 'Spacebar') && event.shiftKey)
+    return (
+        event.key === 'ArrowUp' ||
+        event.key === 'PageUp' ||
+        event.key === 'Home' ||
+        ((event.key === ' ' || event.key === 'Spacebar') && event.shiftKey)
+    )
 }
 
 export function useChatScrollPolicy({
     contentSignal,
-    isStreamingOutput,
     listRef,
     messageCount,
     scrollViewportElement,
+    presentationKey = 'current',
+    acceptedTurnRevision = 0,
 }: UseChatScrollPolicyOptions) {
     const composerContainerRef = useRef<HTMLDivElement>(null)
     const [composerOverlayInset, setComposerOverlayInset] = useState(0)
     const [showScrollToBottom, setShowScrollToBottom] = useState(false)
-    const isStreamingOutputRef = useRef(isStreamingOutput)
-    const wasStreamingOutputRef = useRef(isStreamingOutput)
     const messageCountRef = useRef(messageCount)
     const atBottomRef = useRef(true)
+    const lastObservedTotalListHeightRef = useRef<number | null>(null)
     const visibleRangeRef = useRef<VisibleRange | null>(null)
     const isListScrollingRef = useRef(false)
-    const followLockedForTurnRef = useRef(false)
-    const programmaticCommandPendingRef = useRef(false)
-    const programmaticResetRafRef = useRef<number | null>(null)
-    const followTimeoutRef = useRef<number | null>(null)
-    const touchStartYRef = useRef<number | null>(null)
+    const intentRef = useRef<'following' | 'reading'>('following')
+    const followRafRef = useRef<number | null>(null)
+    const forceFollowRef = useRef(false)
     const entryRevealRafRef = useRef<number | null>(null)
     const entryRetryRafRef = useRef<number | null>(null)
     const entryRetryForceRef = useRef(false)
     const entryObservationsRef = useRef(new Map<string, ConversationEntryObservations>())
     const activeEntryGenerationRef = useRef<ConversationEntryObservationScope | null>(null)
     const pendingEntryRef = useRef<PendingConversationEntry | null>(null)
-    const previousComposerInsetRef = useRef<number | null>(null)
+    const presentationRef = useRef(presentationKey)
+    useLayoutEffect(() => {
+        presentationRef.current = presentationKey
+        lastObservedTotalListHeightRef.current = null
+    }, [presentationKey])
 
     useLayoutEffect(() => {
-        isStreamingOutputRef.current = isStreamingOutput
         messageCountRef.current = messageCount
-    }, [isStreamingOutput, messageCount])
+    }, [messageCount])
 
-    const clearFollowTimeout = useCallback(() => {
-        if (followTimeoutRef.current === null) {
-            return
-        }
-
-        window.clearTimeout(followTimeoutRef.current)
-        followTimeoutRef.current = null
-    }, [])
-
-    const clearProgrammaticReset = useCallback(() => {
-        if (programmaticResetRafRef.current === null) {
-            return
-        }
-
-        window.cancelAnimationFrame(programmaticResetRafRef.current)
-        programmaticResetRafRef.current = null
+    const clearFollowWork = useCallback(() => {
+        if (followRafRef.current !== null) window.cancelAnimationFrame(followRafRef.current)
+        followRafRef.current = null
+        forceFollowRef.current = false
     }, [])
 
     const issueScrollToEnd = useCallback(
         (behavior: 'auto' | 'smooth') => {
-            const list = listRef.current
-
-            if (!list || messageCountRef.current === 0) {
-                programmaticCommandPendingRef.current = false
-                return
-            }
-
-            programmaticCommandPendingRef.current = true
-            clearProgrammaticReset()
-            list.scrollToEnd(behavior)
-
-            // 这里只清理命令来源标记，不计算或改写像素位置。
-            programmaticResetRafRef.current = window.requestAnimationFrame(() => {
-                programmaticResetRafRef.current = window.requestAnimationFrame(() => {
-                    programmaticCommandPendingRef.current = false
-                    programmaticResetRafRef.current = null
-                })
-            })
+            if (messageCountRef.current > 0) listRef.current?.scrollToEnd(behavior)
         },
-        [clearProgrammaticReset, listRef]
+        [listRef]
     )
 
-    const scheduleFollowToEnd = useCallback(() => {
-        if (followTimeoutRef.current !== null) {
-            return
-        }
+    const scheduleFollowToEnd = useCallback(
+        (force = false) => {
+            if (intentRef.current !== 'following' || pendingEntryRef.current) return
+            forceFollowRef.current ||= force
+            if (followRafRef.current !== null) return
+            const generation = presentationRef.current
+            followRafRef.current = window.requestAnimationFrame(() => {
+                if (presentationRef.current !== generation) return
+                followRafRef.current = null
+                const shouldForce = forceFollowRef.current
+                forceFollowRef.current = false
+                if (intentRef.current === 'following' && !pendingEntryRef.current && (shouldForce || !atBottomRef.current)) {
+                    issueScrollToEnd('auto')
+                }
+            })
+        },
+        [issueScrollToEnd]
+    )
 
-        followTimeoutRef.current = window.setTimeout(() => {
-            followTimeoutRef.current = null
-
-            if (followLockedForTurnRef.current || !isStreamingOutputRef.current) {
-                return
-            }
-
-            issueScrollToEnd('auto')
-        }, STREAM_FOLLOW_INTERVAL_MS)
-    }, [issueScrollToEnd])
+    const lockFollowForReader = useCallback(() => {
+        intentRef.current = 'reading'
+        clearFollowWork()
+        setShowScrollToBottom(!atBottomRef.current && !pendingEntryRef.current && messageCountRef.current > 0)
+    }, [clearFollowWork])
 
     const clearConversationEntryWork = useCallback(() => {
         if (entryRevealRafRef.current !== null) {
@@ -263,6 +261,7 @@ export function useChatScrollPolicy({
                 }
 
                 pendingEntryRef.current = null
+                setShowScrollToBottom(false)
                 confirmedEntry.onPositioned?.()
             })
         })
@@ -311,59 +310,47 @@ export function useChatScrollPolicy({
     )
 
     const cancelConversationEntryPositioning = useCallback(() => {
-        clearFollowTimeout()
-        clearProgrammaticReset()
+        clearFollowWork()
         clearConversationEntryWork()
         activeEntryGenerationRef.current = null
-        programmaticCommandPendingRef.current = false
         visibleRangeRef.current = null
         isListScrollingRef.current = false
-        followLockedForTurnRef.current = false
-        touchStartYRef.current = null
-        atBottomRef.current = false
+        intentRef.current = 'following'
+        atBottomRef.current = true
         setShowScrollToBottom(false)
-    }, [clearConversationEntryWork, clearFollowTimeout, clearProgrammaticReset])
+    }, [clearConversationEntryWork, clearFollowWork])
+
+    useLayoutEffect(() => {
+        cancelConversationEntryPositioning()
+        return clearFollowWork
+    }, [cancelConversationEntryPositioning, clearFollowWork, presentationKey])
 
     const onAtBottomChange = useCallback(
         (atBottom: boolean, scope?: ConversationEntryObservationScope) => {
             const entry = pendingEntryRef.current
-            const activeGeneration = activeEntryGenerationRef.current
-
+            const active = activeEntryGenerationRef.current
             if (scope) {
                 getConversationEntryObservations(entryObservationsRef.current, scope).atBottom = atBottom
-
+                if (presentationRef.current !== 'current' && scope.conversationId !== presentationRef.current) return
                 if (
                     (entry && !isSameConversationEntryGeneration(entry, scope)) ||
-                    (!entry && activeGeneration && !isSameConversationEntryGeneration(activeGeneration, scope))
-                ) {
+                    (!entry && active && !isSameConversationEntryGeneration(active, scope))
+                )
                     return
-                }
-            } else if (entry) {
-                return
-            }
-
+            } else if (entry) return
             atBottomRef.current = atBottom
-            setShowScrollToBottom(current => (current === !atBottom ? current : !atBottom))
-
-            if (atBottom) {
-                programmaticCommandPendingRef.current = false
-            } else if (isStreamingOutputRef.current && isListScrollingRef.current && !programmaticCommandPendingRef.current) {
-                followLockedForTurnRef.current = true
-                clearFollowTimeout()
-            }
-
+            const canShowButton = !atBottom && !entry && messageCountRef.current > 0
+            const isReading = intentRef.current === 'reading'
+            // 跟随中的瞬时离底不显示；显式回底保留已有按钮，直到首次确认到底。
+            setShowScrollToBottom(visible => canShowButton && (isReading || visible))
             if (entry) {
                 invalidateConversationEntryReveal()
                 entry.atBottom = atBottom
-
-                if (!atBottom) {
-                    scheduleConversationEntryRetry()
-                }
-
+                if (!atBottom) scheduleConversationEntryRetry()
                 tryRevealConversationEntry()
-            }
+            } else if (!atBottom) scheduleFollowToEnd()
         },
-        [clearFollowTimeout, invalidateConversationEntryReveal, scheduleConversationEntryRetry, tryRevealConversationEntry]
+        [invalidateConversationEntryReveal, scheduleConversationEntryRetry, scheduleFollowToEnd, tryRevealConversationEntry]
     )
 
     const onRangeChange = useCallback(
@@ -373,6 +360,7 @@ export function useChatScrollPolicy({
 
             if (scope) {
                 getConversationEntryObservations(entryObservationsRef.current, scope).visibleRange = range
+                if (presentationRef.current !== 'current' && scope.conversationId !== presentationRef.current) return
 
                 if (
                     (entry && !isSameConversationEntryGeneration(entry, scope)) ||
@@ -456,92 +444,58 @@ export function useChatScrollPolicy({
     const onScrollingChange = useCallback(
         (isScrolling: boolean, scope?: ConversationEntryObservationScope) => {
             const entry = pendingEntryRef.current
-            const activeGeneration = activeEntryGenerationRef.current
-
+            const active = activeEntryGenerationRef.current
             if (scope) {
                 getConversationEntryObservations(entryObservationsRef.current, scope).isScrolling = isScrolling
-
+                if (presentationRef.current !== 'current' && scope.conversationId !== presentationRef.current) return
                 if (
                     (entry && !isSameConversationEntryGeneration(entry, scope)) ||
-                    (!entry && activeGeneration && !isSameConversationEntryGeneration(activeGeneration, scope))
-                ) {
+                    (!entry && active && !isSameConversationEntryGeneration(active, scope))
+                )
                     return
-                }
-            } else if (entry) {
-                return
-            }
-
-            const wasScrolling = isListScrollingRef.current
+            } else if (entry) return
+            const changed = isListScrollingRef.current !== isScrolling
             isListScrollingRef.current = isScrolling
-
-            if (entry && wasScrolling !== isScrolling) {
+            if (entry && changed) {
                 invalidateConversationEntryReveal()
                 entry.isScrolling = isScrolling
-
                 if (!isScrolling) {
-                    if (isConversationEntryReady(entry)) {
-                        tryRevealConversationEntry()
-                    } else {
-                        scheduleConversationEntryRetry()
-                    }
+                    if (isConversationEntryReady(entry)) tryRevealConversationEntry()
+                    else scheduleConversationEntryRetry()
                 }
             }
-
-            if (!isScrolling) {
-                programmaticCommandPendingRef.current = false
-                return
-            }
-
-            if (isStreamingOutputRef.current && !atBottomRef.current && !programmaticCommandPendingRef.current) {
-                followLockedForTurnRef.current = true
-                clearFollowTimeout()
-            }
         },
-        [clearFollowTimeout, invalidateConversationEntryReveal, scheduleConversationEntryRetry, tryRevealConversationEntry]
+        [invalidateConversationEntryReveal, scheduleConversationEntryRetry, tryRevealConversationEntry]
     )
 
     const onTotalHeightChange = useCallback(
-        (_height: number, scope?: ConversationEntryObservationScope) => {
+        (height: number, scope?: ConversationEntryObservationScope) => {
+            if (scope && presentationRef.current !== 'current' && scope.conversationId !== presentationRef.current) return
             const entry = pendingEntryRef.current
-            const activeGeneration = activeEntryGenerationRef.current
-
+            const active = activeEntryGenerationRef.current
             if (
                 (scope && entry && !isSameConversationEntryGeneration(entry, scope)) ||
-                (scope && !entry && activeGeneration && !isSameConversationEntryGeneration(activeGeneration, scope)) ||
-                (scope && !entry && !activeGeneration) ||
+                (scope && !entry && active && !isSameConversationEntryGeneration(active, scope)) ||
                 (!scope && entry)
-            ) {
+            )
                 return
-            }
-
+            const previousHeight = lastObservedTotalListHeightRef.current
+            lastObservedTotalListHeightRef.current = height
             if (entry) {
                 invalidateConversationEntryReveal()
                 scheduleConversationEntryRetry(true)
-                return
-            }
-
-            if (!followLockedForTurnRef.current && isStreamingOutputRef.current) {
-                scheduleFollowToEnd()
+            } else {
+                // 总高已是 Virtuoso 完成测量后的事实；atBottom 回调可能仍保留增长前的状态。
+                scheduleFollowToEnd(previousHeight !== null && height > previousHeight)
             }
         },
         [invalidateConversationEntryReveal, scheduleConversationEntryRetry, scheduleFollowToEnd]
     )
 
-    const resetScrollPolicyForNewTurn = useCallback(() => {
-        followLockedForTurnRef.current = false
-        clearFollowTimeout()
-        issueScrollToEnd('auto')
-    }, [clearFollowTimeout, issueScrollToEnd])
-
     const restoreFollowAndScrollToEnd = useCallback(() => {
-        followLockedForTurnRef.current = false
-        clearFollowTimeout()
-        const lastMessageIndex = messageCountRef.current - 1
-        const endIndex = visibleRangeRef.current?.endIndex ?? -1
-        const isNearEnd = lastMessageIndex >= 0 && lastMessageIndex - endIndex <= NEAR_END_ITEM_THRESHOLD
-
-        issueScrollToEnd(isNearEnd ? 'smooth' : 'auto')
-    }, [clearFollowTimeout, issueScrollToEnd])
+        intentRef.current = 'following'
+        scheduleFollowToEnd(true)
+    }, [scheduleFollowToEnd])
 
     const positionConversationEntryAtBottom = useCallback(
         (target: ConversationEntryTarget, onPositioned?: () => void) => {
@@ -600,95 +554,120 @@ export function useChatScrollPolicy({
     }, [])
 
     useLayoutEffect(() => {
-        const previousInset = previousComposerInsetRef.current
-        previousComposerInsetRef.current = composerOverlayInset
-
-        if (
-            previousInset === null ||
-            previousInset === composerOverlayInset ||
-            !isStreamingOutputRef.current ||
-            followLockedForTurnRef.current ||
-            !atBottomRef.current
-        ) {
-            return
-        }
-
-        issueScrollToEnd('auto')
-    }, [composerOverlayInset, issueScrollToEnd])
-
-    useEffect(() => {
-        if (isStreamingOutput && !followLockedForTurnRef.current) {
-            scheduleFollowToEnd()
-        }
-    }, [contentSignal, isStreamingOutput, scheduleFollowToEnd])
-
-    useEffect(() => {
-        const wasStreamingOutput = wasStreamingOutputRef.current
-        wasStreamingOutputRef.current = isStreamingOutput
-
-        if (wasStreamingOutput && !isStreamingOutput) {
-            clearFollowTimeout()
-        }
-    }, [clearFollowTimeout, isStreamingOutput])
+        if (acceptedTurnRevision > 0) restoreFollowAndScrollToEnd()
+    }, [acceptedTurnRevision, restoreFollowAndScrollToEnd])
 
     useEffect(() => {
         const viewport = scrollViewportElement
-
-        if (!viewport) {
-            return
-        }
-
-        const lockForUserIntent = () => {
-            programmaticCommandPendingRef.current = false
-            followLockedForTurnRef.current = true
-            clearFollowTimeout()
-        }
-
+        if (!viewport) return
+        let lastTop = viewport.scrollTop
+        let downInputUntil = 0
+        let touchY: number | null = null
+        let scrollbarDragging = false
         const handleWheel = (event: WheelEvent) => {
-            if (event.deltaY < 0 && !isEditableTarget(event.target)) {
-                lockForUserIntent()
-            }
+            if (event.ctrlKey || isEditableTarget(event.target) || nestedScrollerConsumes(event.target, viewport, event.deltaY)) return
+            if (event.deltaY < 0) {
+                lockFollowForReader()
+                downInputUntil = 0
+            } else if (event.deltaY > 0) downInputUntil = performance.now() + 250
         }
-
         const handleTouchStart = (event: TouchEvent) => {
-            touchStartYRef.current = event.touches[0]?.clientY ?? null
+            touchY = event.touches[0]?.clientY ?? null
         }
-
         const handleTouchMove = (event: TouchEvent) => {
-            const startY = touchStartYRef.current
-            const currentY = event.touches[0]?.clientY
-
-            if (startY !== null && currentY !== undefined && currentY > startY && !isEditableTarget(event.target)) {
-                lockForUserIntent()
+            const y = event.touches[0]?.clientY
+            if (
+                y !== undefined &&
+                touchY !== null &&
+                !isEditableTarget(event.target) &&
+                !nestedScrollerConsumes(event.target, viewport, touchY - y)
+            ) {
+                if (y > touchY) {
+                    lockFollowForReader()
+                    downInputUntil = 0
+                } else if (y < touchY) downInputUntil = performance.now() + 250
             }
+            touchY = y ?? null
         }
-
         const handleKeyDown = (event: KeyboardEvent) => {
+            if (nestedScrollerConsumes(event.target, viewport, isUpwardNavigationKey(event) ? -1 : 1)) return
             if (isUpwardNavigationKey(event)) {
-                lockForUserIntent()
+                lockFollowForReader()
+                downInputUntil = 0
+            } else if (
+                !event.defaultPrevented &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !isEditableTarget(event.target) &&
+                ['ArrowDown', 'PageDown', 'End', ' '].includes(event.key)
+            ) {
+                downInputUntil = performance.now() + 250
             }
         }
-
+        const handlePointerDown = (event: PointerEvent) => {
+            const rect = viewport.getBoundingClientRect()
+            scrollbarDragging =
+                event.target === viewport && event.clientX >= rect.right - Math.max(viewport.offsetWidth - viewport.clientWidth, 12)
+            if (scrollbarDragging) lockFollowForReader()
+        }
+        const handlePointerUp = () => {
+            scrollbarDragging = false
+        }
+        const handleScroll = () => {
+            const top = viewport.scrollTop
+            if (top > lastTop && (scrollbarDragging || performance.now() < downInputUntil)) {
+                // 仅在真实用户滚动事件里读底部距离；内容缩短/浏览器锚定不能恢复阅读锁。
+                if (viewport.scrollHeight - viewport.clientHeight - top <= 4) {
+                    intentRef.current = 'following'
+                    setShowScrollToBottom(false)
+                    scheduleFollowToEnd()
+                    downInputUntil = 0
+                } else {
+                    // End/PageDown 和触屏惯性会跨多个 scroll 帧，保留整段用户输入的连续性。
+                    downInputUntil = performance.now() + 250
+                }
+            } else if (top < lastTop) {
+                if (scrollbarDragging) lockFollowForReader()
+                downInputUntil = 0
+            }
+            lastTop = top
+        }
+        const handleScrollEnd = () => {
+            downInputUntil = 0
+        }
+        const observer = new ResizeObserver(() => scheduleFollowToEnd())
+        observer.observe(viewport)
         viewport.addEventListener('wheel', handleWheel, { passive: true })
         viewport.addEventListener('touchstart', handleTouchStart, { passive: true })
         viewport.addEventListener('touchmove', handleTouchMove, { passive: true })
         viewport.addEventListener('keydown', handleKeyDown)
-
+        viewport.addEventListener('pointerdown', handlePointerDown)
+        window.addEventListener('pointerup', handlePointerUp)
+        window.addEventListener('pointercancel', handlePointerUp)
+        viewport.addEventListener('scroll', handleScroll, { passive: true })
+        viewport.addEventListener('scrollend', handleScrollEnd)
         return () => {
+            observer.disconnect()
             viewport.removeEventListener('wheel', handleWheel)
             viewport.removeEventListener('touchstart', handleTouchStart)
             viewport.removeEventListener('touchmove', handleTouchMove)
             viewport.removeEventListener('keydown', handleKeyDown)
+            viewport.removeEventListener('pointerdown', handlePointerDown)
+            window.removeEventListener('pointerup', handlePointerUp)
+            window.removeEventListener('pointercancel', handlePointerUp)
+            viewport.removeEventListener('scroll', handleScroll)
+            viewport.removeEventListener('scrollend', handleScrollEnd)
         }
-    }, [clearFollowTimeout, scrollViewportElement])
+    }, [lockFollowForReader, scheduleFollowToEnd, scrollViewportElement])
 
-    useEffect(() => {
-        return () => {
-            clearFollowTimeout()
-            clearProgrammaticReset()
+    useEffect(
+        () => () => {
+            clearFollowWork()
             clearConversationEntryWork()
-        }
-    }, [clearConversationEntryWork, clearFollowTimeout, clearProgrammaticReset])
+        },
+        [clearConversationEntryWork, clearFollowWork]
+    )
 
     return {
         cancelConversationEntryPositioning,
@@ -701,8 +680,9 @@ export function useChatScrollPolicy({
         onScrollingChange,
         onTotalHeightChange,
         positionConversationEntryAtBottom,
-        resetScrollPolicyForNewTurn,
+        resetScrollPolicyForNewTurn: restoreFollowAndScrollToEnd,
         restoreFollowAndScrollToEnd,
         showScrollToBottom,
+        lockFollowForReader,
     }
 }

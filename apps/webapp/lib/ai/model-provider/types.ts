@@ -22,6 +22,7 @@ export interface AiMindModelCatalogItem {
         tasklist: boolean
         toolCalling: boolean
     }
+    contextWindowTokens: number
     enabled: boolean
     family: AiMindModelFamily
     id: string
@@ -82,6 +83,7 @@ export interface ModelProviderConfig {
     }
     defaultModelId: string
     maxInputChars: number
+    ollamaContextTokens: number
     ollama: {
         baseURL: string
     }
@@ -93,6 +95,7 @@ export interface ModelProviderConfig {
         apiKey?: string
         baseURL: string
     }
+    operationalContextCapTokens: number
     tasklistMaxOutputTokens: number
     temperature: number
     timeoutMs: number

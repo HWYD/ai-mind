@@ -25,15 +25,24 @@ export {
 } from './final-turn-adapter'
 export {
     CHAT_MEMORY_COMPACTION_PROMPT,
+    CHAT_MEMORY_COMPACTION_MAX_OUTPUT_TOKENS,
     CHAT_MEMORY_COMPACTION_MODEL_ID,
     compactThreadState,
     compactThreadStateWithResult,
+    estimateChatMemoryTokens,
     generateStructuredCompaction,
     type ChatMemoryCompactionGenerator,
+    type ChatMemoryCompactionExecutionOptions,
     type ChatMemoryCompactionInput,
+    type ChatMemoryCompactionOptions,
     type ChatMemoryCompactionResult,
 } from './compaction'
-export { buildChatMemoryContextMessages } from './context-builder'
+export {
+    buildChatMemoryContextMessages,
+    fitChatMemoryContextMessages,
+    type EphemeralChatMemoryProjection,
+    type FitChatMemoryContextOptions,
+} from './context-builder'
 export { isChatMemoryContextEligibleRequest, isChatMemoryEligibleRequest, isChatMemoryWriteEligibleRequest } from './eligibility'
 export { assertNoForbiddenHydrationFields, buildThreadHydrationDTO, HYDRATION_FORBIDDEN_FIELDS } from './hydration-dto'
 export { createChatThreadMessage, toChatThreadMessage, toMindMessage, toMindMessages } from './message-adapter'
@@ -45,6 +54,7 @@ export {
     type AppendCompletedTurnInput,
     type AppendCompletedTurnOptions,
     type ChatMemoryService,
+    type CompactThreadStateOptions,
     type ThreadMemoryStatus,
     type ThreadMemoryStatusEvent,
 } from './chat-memory-service'
@@ -53,10 +63,6 @@ export {
     aiMindCheckpointThreadStateSchema,
     chatConversationSchema,
     CHAT_MEMORY_PINNED_DECISION_LIMIT,
-    CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT,
-    CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT,
-    CHAT_MEMORY_RECENT_MESSAGE_LIMIT,
-    CHAT_MEMORY_RECENT_TURN_LIMIT,
     CHAT_MEMORY_SUMMARY_PREVIEW_LIMIT,
     CHAT_MEMORY_SUMMARY_TARGET_LIMIT,
     CHAT_CONVERSATION_REGISTRY_LIMIT,

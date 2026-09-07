@@ -1,7 +1,7 @@
 'use client'
 
 import { Menu, MessageSquarePlus } from 'lucide-react'
-import { useState } from 'react'
+import { type ReactNode, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -21,6 +21,7 @@ interface ConversationMobileSelectorProps {
     createDisabled?: boolean
     deleteDisabled?: boolean
     disabled?: boolean
+    notice?: ReactNode
     onCreateConversation: () => Promise<boolean> | boolean
     onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
     onProjectLinkCopied?: () => void
@@ -34,6 +35,7 @@ export function ConversationMobileSelector({
     disabled = false,
     createDisabled = disabled,
     deleteDisabled = disabled,
+    notice,
     onCreateConversation,
     onDeleteConversation = () => false,
     onProjectLinkCopied,
@@ -61,7 +63,11 @@ export function ConversationMobileSelector({
     }
 
     return (
-        <div className="sticky top-0 z-20 -mx-4 mb-4 border-b border-border/70 bg-background/95 px-4 py-2 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:hidden">
+        <nav
+            aria-label="会话导航"
+            className="shrink-0 border-b border-border/70 bg-background/95 px-4 py-2 backdrop-blur-sm sm:px-6 lg:hidden"
+            data-slot="conversation-mobile-navigation"
+        >
             <Sheet open={open} onOpenChange={setOpen}>
                 <div className="flex h-10 items-center justify-between gap-2">
                     <SheetTrigger asChild>
@@ -118,6 +124,7 @@ export function ConversationMobileSelector({
                         <Separator className="my-3 bg-sidebar-border" />
 
                         <div className="px-3 pb-2 text-xs font-medium text-sidebar-foreground/60">最近</div>
+                        {notice ? <div className="px-3 pb-2">{notice}</div> : null}
                         <ScrollArea className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden pr-1 [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
                             <div className="flex w-full min-w-0 max-w-full flex-col gap-1 overflow-hidden">
                                 {recentConversations.map(conversation => (
@@ -184,6 +191,6 @@ export function ConversationMobileSelector({
                     </div>
                 </SheetContent>
             </Sheet>
-        </div>
+        </nav>
     )
 }

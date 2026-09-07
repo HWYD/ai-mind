@@ -4,20 +4,23 @@ import type { ModelProviderConfig, ResolvedModelSelection } from '@/lib/ai/model
 import { createChatModel } from '@/lib/ai/model-provider'
 
 function createTestConfig(overrides: Partial<ModelProviderConfig> = {}): ModelProviderConfig {
-    return {
+    const config: ModelProviderConfig = {
         allowedProviders: ['ollama', 'deepseek', 'qwen', 'doubao'],
         chatMaxOutputTokens: 4096,
         deepseek: { apiKey: undefined, baseURL: 'https://api.deepseek.com' },
         defaultModelId: 'ollama/qwen3-8b',
         doubao: { apiKey: undefined, baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
         maxInputChars: 12000,
+        ollamaContextTokens: 32768,
         ollama: { baseURL: 'http://127.0.0.1:11434' },
+        operationalContextCapTokens: 128000,
         qwen: { apiKey: undefined, baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
         tasklistMaxOutputTokens: 8192,
         temperature: 0.7,
         timeoutMs: 60000,
-        ...overrides,
     }
+
+    return Object.assign(config, overrides)
 }
 
 function createTestSelection(overrides: Partial<ResolvedModelSelection> = {}): ResolvedModelSelection {
@@ -32,6 +35,7 @@ function createTestSelection(overrides: Partial<ResolvedModelSelection> = {}): R
                 tasklist: true,
                 toolCalling: true,
             },
+            contextWindowTokens: 40000,
             enabled: true,
             family: 'ollama',
             id: 'ollama/qwen3-8b',
@@ -94,6 +98,41 @@ describe('Ollama Provider via createChatModel', () => {
         expect(model.temperature).toBe(0.25)
         expect(model.numPredict).toBe(2048)
         expect(model.think).toBe(true)
+    })
+
+    it('明确传入 32K effective context window，并在 artifact 物理窗口更小时自动 clamp', () => {
+        const defaultHandle = createChatModel({
+            config: createTestConfig(),
+            resolvedModelSelection: createTestSelection(),
+        })
+        const artifactLimitedHandle = createChatModel({
+            config: createTestConfig({ ollamaContextTokens: 32_768 }),
+            resolvedModelSelection: createTestSelection({
+                catalogItem: {
+                    ...createTestSelection().catalogItem,
+                    contextWindowTokens: 20_000,
+                },
+            }),
+        })
+        const cloudHandle = createChatModel({
+            config: createTestConfig({ deepseek: { apiKey: 'deepseek-test-key', baseURL: 'https://api.deepseek.com' } }),
+            resolvedModelSelection: createTestSelection({
+                catalogItem: {
+                    ...createTestSelection().catalogItem,
+                    family: 'deepseek',
+                    id: 'deepseek/deepseek-v4-pro',
+                    provider: 'deepseek',
+                    providerModel: 'deepseek-v4-pro',
+                },
+                modelId: 'deepseek/deepseek-v4-pro',
+                provider: 'deepseek',
+                providerModel: 'deepseek-v4-pro',
+            }),
+        })
+
+        expect(defaultHandle.model).toMatchObject({ numCtx: 32_768 })
+        expect(artifactLimitedHandle.model).toMatchObject({ numCtx: 20_000 })
+        expect(cloudHandle.model).not.toHaveProperty('numCtx')
     })
 
     it('maps tasklist stage retry count', () => {

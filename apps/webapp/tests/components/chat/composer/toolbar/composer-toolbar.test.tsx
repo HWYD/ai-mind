@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { ComposerToolbar } from '@/components/chat/composer/toolbar/composer-toolbar'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import { modelCatalog } from '@/lib/ai/model-provider/catalog/model-catalog'
 import type { ChatModelGroup } from '@/lib/ai/models'
 
@@ -243,5 +244,34 @@ describe('ComposerToolbar model selector', () => {
         expect(modelButton.className).toContain('text-xs')
         expect(modelButton.className).toContain('sm:h-10')
         expect(modelButton.className).toContain('sm:text-sm')
+    })
+
+    it('在工具技能右侧放置无数字的聊天记忆占用圆环', () => {
+        const { container } = render(
+            <TooltipProvider>
+                <ComposerToolbar
+                    contextUsage={{ effectiveWindowTokens: 128000, usedPercent: 13 }}
+                    enableReasoning
+                    isModelLoading={false}
+                    model="qwen/qwen3.6-flash"
+                    modelGroups={modelGroups}
+                    onEnableReasoningChange={vi.fn()}
+                    onInsertTrigger={vi.fn()}
+                    onModelChange={vi.fn()}
+                    onSkillModeChange={vi.fn()}
+                    onStop={vi.fn()}
+                    onSubmit={vi.fn()}
+                    sendDisabled={false}
+                    skillMode="auto"
+                    status="ready"
+                />
+            </TooltipProvider>
+        )
+
+        const skillModeControl = container.querySelector('[data-slot="toggle-group"]')
+        const indicator = screen.getByLabelText('聊天上下文已使用 13%（128K）')
+
+        expect(skillModeControl?.compareDocumentPosition(indicator) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(indicator.textContent).toBe('')
     })
 })

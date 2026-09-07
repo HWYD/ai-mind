@@ -1,6 +1,18 @@
 'use client'
 
-import { memo, type Ref, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+    type CSSProperties,
+    memo,
+    type ReactNode,
+    type Ref,
+    useCallback,
+    useEffect,
+    useImperativeHandle,
+    useLayoutEffect,
+    useMemo,
+    useRef,
+    useState,
+} from 'react'
 import { type Components, type ItemProps, type ListItem, type ListRange, Virtuoso, type VirtuosoHandle } from 'react-virtuoso'
 
 import {
@@ -37,10 +49,23 @@ import type { EmptyStateSuggestion } from './suggestions/empty-state-suggestion-
 import { EmptyStateSuggestions } from './suggestions/empty-state-suggestions'
 
 interface MessageEntry {
+    kind: 'message'
+    itemKey?: string
     message: MindMessage
     renderFingerprint: string
     requestComposer?: ChatComposerPayload
 }
+
+interface TurnEntry {
+    assistantMessage?: MindMessage
+    kind: 'turn'
+    itemKey: string
+    renderFingerprint: string
+    requestComposer?: ChatComposerPayload
+    userMessage: MindMessage
+}
+
+type MessageListEntry = MessageEntry | TurnEntry
 
 const DEFAULT_MESSAGE_COLUMN_WIDTH = 856
 const HEIGHT_HINT_READ_TIMEOUT_MS = 500
@@ -51,7 +76,12 @@ const TEXT_LINE_HEIGHT = 28
 const WIDE_TEXT_CHARACTER_PATTERN = /[\u1100-\u115f\u2e80-\ua4cf\uf900-\ufaff\uff01-\uff60\uffe0-\uffe6]/
 
 interface MessageListContext {
+    acceptedTurnReplyRunway?: string
+    acceptedTurnRunwayItemKey?: string
+    acceptedTurnRunwayMode?: 'assistant-slot'
     bottomInset: number
+    header?: ReactNode
+    onUserReading?: () => void
     onItemMounted?: (itemIndex: number) => void
     onItemUnmounted?: (itemIndex: number) => void
 }
@@ -72,7 +102,7 @@ interface MessageHeightHintRuntime {
     entriesByMessageId: ReadonlyMap<string, MessageEntry>
     isBusy: boolean
     layoutKey: string
-    latestAssistantMessageId?: string
+    streamingAssistantMessageId?: string
     messageColumnWidth: number
     ready: boolean
     requestKey: string | null
@@ -86,12 +116,18 @@ function MessageListItem({
     children,
     context,
     'data-item-index': itemIndex,
-    item: _item,
+    item,
     style,
     ...props
-}: ItemProps<MessageEntry> & { context?: MessageListContext }) {
+}: ItemProps<MessageListEntry> & { context?: MessageListContext }) {
     const onItemMounted = context?.onItemMounted
     const onItemUnmounted = context?.onItemUnmounted
+    const acceptedTurnRunwayMode = context?.acceptedTurnRunwayItemKey === item.itemKey ? context.acceptedTurnRunwayMode : undefined
+    const itemStyle: CSSProperties & { '--accepted-turn-reply-runway'?: string } = {
+        ...style,
+        '--accepted-turn-reply-runway': acceptedTurnRunwayMode ? context?.acceptedTurnReplyRunway : undefined,
+        paddingBlock: item.kind === 'turn' ? 0 : '0.625rem',
+    }
 
     useLayoutEffect(() => {
         onItemMounted?.(itemIndex)
@@ -100,7 +136,23 @@ function MessageListItem({
     }, [itemIndex, onItemMounted, onItemUnmounted])
 
     return (
-        <div {...props} data-item-index={itemIndex} style={{ ...style, paddingBlock: '0.625rem' }}>
+        <div
+            {...props}
+            data-accepted-turn-runway={acceptedTurnRunwayMode}
+            data-item-index={itemIndex}
+            style={itemStyle}
+            onClickCapture={event => {
+                if (event.defaultPrevented || !(event.target instanceof Element)) return
+                const trigger = event.target.closest('summary, button[aria-expanded="false"]')
+                if (
+                    trigger &&
+                    event.currentTarget.contains(trigger) &&
+                    (trigger.tagName !== 'SUMMARY' || !trigger.closest('details')?.open)
+                ) {
+                    context?.onUserReading?.()
+                }
+            }}
+        >
             {children}
         </div>
     )
@@ -110,13 +162,22 @@ function MessageListFooter({ context }: { context?: MessageListContext }) {
     return <div aria-hidden="true" style={{ height: `${context?.bottomInset ?? 0}px` }} />
 }
 
-const messageListComponents: Components<MessageEntry, MessageListContext> = {
+function MessageListHeader({ context }: { context?: MessageListContext }) {
+    return <div className="flow-root">{context?.header}</div>
+}
+
+const messageListComponents: Components<MessageListEntry, MessageListContext> = {
     Footer: MessageListFooter,
+    Header: MessageListHeader,
     Item: MessageListItem,
 }
 
-function computeMessageItemKey(_index: number, entry: MessageEntry) {
-    return entry.message.id
+function getAcceptedTurnRunwayItemKey(userMessageId: string) {
+    return `accepted-turn-runway:${userMessageId}`
+}
+
+function computeMessageItemKey(_index: number, entry: MessageListEntry) {
+    return entry.itemKey ?? (entry.kind === 'turn' ? entry.userMessage.id : entry.message.id)
 }
 
 function resolveMessageColumnWidth(viewportWidth: number): number {
@@ -367,6 +428,10 @@ export function ChatMessageList({
     onHeightHintBootstrapChange,
     onSelectFollowUpQuestion,
     onSelectSuggestion,
+    onUserReading,
+    header,
+    presentationKey,
+    positionAcceptedTurn = false,
     onTotalHeightChange,
     scrollParent,
 }: {
@@ -388,6 +453,10 @@ export function ChatMessageList({
     onScrollingChange?: (isScrolling: boolean) => void
     onSelectFollowUpQuestion: (question: string) => void
     onSelectSuggestion: (suggestion: EmptyStateSuggestion) => void
+    onUserReading?: () => void
+    header?: ReactNode
+    presentationKey?: string
+    positionAcceptedTurn?: boolean
     onTotalHeightChange?: (height: number) => void
     scrollParent?: HTMLElement | null
 }) {
@@ -408,6 +477,7 @@ export function ChatMessageList({
     const heightHintCandidatesRef = useRef<Map<string, MessageHeightHintCandidate>>(new Map())
     const heightHintEntriesRef = useRef<Map<string, LocalMessageHeightHintEntry>>(new Map())
     const heightHintPersistedSignaturesRef = useRef<Map<string, string>>(new Map())
+    const streamingHeightEstimatesRef = useRef<Map<string, { estimate: number; layoutKey: string }>>(new Map())
     const heightHintRuntimeRef = useRef<MessageHeightHintRuntime>({
         entriesByMessageId: new Map(),
         isBusy: false,
@@ -420,6 +490,8 @@ export function ChatMessageList({
     const heightHintWritePendingRef = useRef(false)
     const isMessageListMountedRef = useRef(true)
     const virtuosoScrollingRef = useRef(false)
+    const totalHeightRef = useRef(0)
+    const hasPresentedListRef = useRef(false)
 
     useLayoutEffect(() => {
         if (!scrollParent) {
@@ -516,6 +588,8 @@ export function ChatMessageList({
     }, [])
 
     const isBusy = actionsDisabled || status === 'submitted' || status === 'streaming'
+    const isStreamingOutput = status === 'submitted' || status === 'streaming'
+    const streamingAssistantMessageId = isStreamingOutput && messages.at(-1)?.role === 'assistant' ? messages.at(-1)?.id : undefined
     const heightHintLayoutKey = useMemo(
         () => createMessageHeightHintLayoutKey({ enableReasoning, messageColumnWidth }),
         [enableReasoning, messageColumnWidth]
@@ -523,10 +597,11 @@ export function ChatMessageList({
     const heightHintRequestKey = conversationId && scrollParent && messages.length > 0 ? `${conversationId}::${heightHintLayoutKey}` : null
     const areHeightHintsReady =
         !heightHintRequestKey || (heightHintReadState.requestKey === heightHintRequestKey && heightHintReadState.status === 'ready')
-
+    const isHeightHintBootstrapPending = !hasPresentedListRef.current && !areHeightHintsReady
     useLayoutEffect(() => {
-        onHeightHintBootstrapChange?.(!areHeightHintsReady && messages.length > 0)
-    }, [areHeightHintsReady, messages.length, onHeightHintBootstrapChange])
+        if (!isHeightHintBootstrapPending && scrollParent) hasPresentedListRef.current = true
+        onHeightHintBootstrapChange?.(isHeightHintBootstrapPending && messages.length > 0)
+    }, [isHeightHintBootstrapPending, messages.length, onHeightHintBootstrapChange, scrollParent])
 
     useEffect(() => {
         if (!heightHintRequestKey || !conversationId) {
@@ -580,48 +655,145 @@ export function ChatMessageList({
     }, [conversationId, heightHintLayoutKey, heightHintRequestKey, messageColumnWidth])
 
     const { heightEstimates, messageEntries } = useMemo(() => {
-        const entries: MessageEntry[] = []
+        const entries: MessageListEntry[] = []
         const structuralEstimates: number[] = []
         let latestUserComposer: ChatComposerPayload | undefined
+        const latestMessage = messages.at(-1)
+        const previousMessage = messages.at(-2)
+        const acceptedTurnUserMessage =
+            positionAcceptedTurn && isStreamingOutput
+                ? latestMessage?.role === 'user'
+                    ? latestMessage
+                    : latestMessage?.role === 'assistant' && previousMessage?.role === 'user'
+                      ? previousMessage
+                      : undefined
+                : undefined
+        const acceptedTurnAssistantMessage =
+            acceptedTurnUserMessage && latestMessage?.role === 'assistant' && previousMessage?.id === acceptedTurnUserMessage.id
+                ? latestMessage
+                : undefined
+        const activeStreamingAssistantId = streamingAssistantMessageId
+        const activeMessageIds = new Set(messages.map(message => message.id))
 
-        for (const message of messages) {
+        for (const messageId of streamingHeightEstimatesRef.current.keys()) {
+            if (!activeMessageIds.has(messageId)) {
+                streamingHeightEstimatesRef.current.delete(messageId)
+            }
+        }
+
+        for (let messageIndex = 0; messageIndex < messages.length; messageIndex += 1) {
+            const message = messages[messageIndex]
+
+            if (acceptedTurnUserMessage?.id === message.id) {
+                const assistantMessage = acceptedTurnAssistantMessage
+                const userMessage = message
+                const turnEntry: TurnEntry = {
+                    assistantMessage,
+                    itemKey: getAcceptedTurnRunwayItemKey(userMessage.id),
+                    kind: 'turn',
+                    renderFingerprint: createMessageRenderFingerprint(
+                        assistantMessage ?? userMessage,
+                        assistantMessage ? userMessage.composer : undefined
+                    ),
+                    requestComposer: userMessage.composer,
+                    userMessage,
+                }
+
+                entries.push(turnEntry)
+                const assistantEstimate = assistantMessage
+                    ? estimateMessageHeight(assistantMessage, messageColumnWidth, {
+                          enableReasoning,
+                          requestComposer: userMessage.composer,
+                      })
+                    : 0
+                const frozenAssistantEstimate =
+                    assistantMessage !== undefined && assistantMessage.id === activeStreamingAssistantId
+                        ? (() => {
+                              const current = streamingHeightEstimatesRef.current.get(assistantMessage.id)
+                              if (current?.layoutKey === heightHintLayoutKey) return current.estimate
+                              streamingHeightEstimatesRef.current.set(assistantMessage.id, {
+                                  estimate: assistantEstimate,
+                                  layoutKey: heightHintLayoutKey,
+                              })
+                              return assistantEstimate
+                          })()
+                        : assistantEstimate
+                structuralEstimates.push(
+                    estimateMessageHeight(userMessage, messageColumnWidth, { enableReasoning }) + frozenAssistantEstimate
+                )
+                if (assistantMessage) messageIndex += 1
+                continue
+            }
+
             if (message.role === 'user') {
                 latestUserComposer = message.composer
             }
 
-            const entry = {
+            const entry: MessageEntry = {
+                kind: 'message',
                 message,
                 renderFingerprint: createMessageRenderFingerprint(message, message.role === 'assistant' ? latestUserComposer : undefined),
                 requestComposer: message.role === 'assistant' ? latestUserComposer : undefined,
             }
 
             entries.push(entry)
-            structuralEstimates.push(
-                estimateMessageHeight(message, messageColumnWidth, { enableReasoning, requestComposer: entry.requestComposer })
-            )
+            const estimate = estimateMessageHeight(message, messageColumnWidth, { enableReasoning, requestComposer: entry.requestComposer })
+            const frozenEstimate =
+                message.id === activeStreamingAssistantId && message.role === 'assistant'
+                    ? (() => {
+                          const current = streamingHeightEstimatesRef.current.get(message.id)
+                          if (current?.layoutKey === heightHintLayoutKey) return current.estimate
+                          streamingHeightEstimatesRef.current.set(message.id, { estimate, layoutKey: heightHintLayoutKey })
+                          return estimate
+                      })()
+                    : (() => {
+                          streamingHeightEstimatesRef.current.delete(message.id)
+                          return estimate
+                      })()
+
+            structuralEstimates.push(frozenEstimate)
         }
 
         return {
             heightEstimates: mergeMessageHeightHints(
                 entries.map((entry, index) => ({
                     estimatedHeight: structuralEstimates[index] ?? 0,
-                    messageId: entry.message.id,
+                    messageId: entry.kind === 'turn' ? entry.userMessage.id : entry.message.id,
                     renderFingerprint: entry.renderFingerprint,
                 })),
                 areHeightHintsReady ? heightHintReadState.entries : []
             ),
             messageEntries: entries,
         }
-    }, [areHeightHintsReady, enableReasoning, heightHintReadState.entries, messageColumnWidth, messages])
+    }, [
+        areHeightHintsReady,
+        enableReasoning,
+        heightHintLayoutKey,
+        heightHintReadState.entries,
+        isStreamingOutput,
+        messageColumnWidth,
+        messages,
+        positionAcceptedTurn,
+        streamingAssistantMessageId,
+    ])
 
-    const messageEntriesByMessageId = useMemo(() => new Map(messageEntries.map(entry => [entry.message.id, entry])), [messageEntries])
+    const messageEntriesByMessageId = useMemo(
+        () =>
+            new Map(
+                messageEntries.filter((entry): entry is MessageEntry => entry.kind === 'message').map(entry => [entry.message.id, entry])
+            ),
+        [messageEntries]
+    )
+    const acceptedTurnRunwayEntry = positionAcceptedTurn && isStreamingOutput ? messageEntries.at(-1) : undefined
+    const acceptedTurnRunwayMode: MessageListContext['acceptedTurnRunwayMode'] =
+        acceptedTurnRunwayEntry?.kind === 'turn' ? 'assistant-slot' : undefined
 
     heightHintRuntimeRef.current = {
         conversationId,
         entriesByMessageId: messageEntriesByMessageId,
         isBusy,
         layoutKey: heightHintLayoutKey,
-        latestAssistantMessageId: messageEntries.at(-1)?.message.role === 'assistant' ? messageEntries.at(-1)?.message.id : undefined,
+        streamingAssistantMessageId,
         messageColumnWidth,
         ready: areHeightHintsReady,
         requestKey: heightHintRequestKey,
@@ -643,8 +815,20 @@ export function ChatMessageList({
         )
     }, [areHeightHintsReady, heightHintReadState.entries, heightHintRequestKey])
 
-    const listContext = useMemo(() => ({ bottomInset, onItemMounted, onItemUnmounted }), [bottomInset, onItemMounted, onItemUnmounted])
-    const disclosureScopeKey = conversationId ?? 'draft'
+    const listContext = useMemo(
+        () => ({
+            acceptedTurnReplyRunway: acceptedTurnRunwayMode ? `clamp(10rem, calc(72dvh - ${bottomInset}px - 4rem), 48rem)` : undefined,
+            acceptedTurnRunwayItemKey: acceptedTurnRunwayEntry?.itemKey,
+            acceptedTurnRunwayMode,
+            bottomInset,
+            header,
+            onItemMounted,
+            onItemUnmounted,
+            onUserReading,
+        }),
+        [acceptedTurnRunwayEntry?.itemKey, acceptedTurnRunwayMode, bottomInset, header, onItemMounted, onItemUnmounted, onUserReading]
+    )
+    const disclosureScopeKey = presentationKey ?? conversationId ?? 'draft'
     const { disclosureMessageIdByKey, validDisclosureKeys } = useMemo(() => {
         const keys = new Set<string>()
         const messageIdByKey = new Map<string, string>()
@@ -766,7 +950,7 @@ export function ChatMessageList({
                         candidate.observationCount < 2 ||
                         candidate.renderFingerprint !== entry.renderFingerprint ||
                         disclosureMessageIdsRef.current.has(messageId) ||
-                        entry.message.id === runtime.latestAssistantMessageId
+                        entry.message.id === runtime.streamingAssistantMessageId
                     ) {
                         continue
                     }
@@ -820,7 +1004,7 @@ export function ChatMessageList({
     }, [])
 
     const handleItemsRendered = useCallback(
-        (items: ListItem<MessageEntry>[]) => {
+        (items: ListItem<MessageListEntry>[]) => {
             const runtime = heightHintRuntimeRef.current
 
             if (!runtime.ready || runtime.isBusy || !runtime.requestKey || !runtime.conversationId) {
@@ -830,7 +1014,7 @@ export function ChatMessageList({
             for (const item of items) {
                 const entry = item.data
 
-                if (!entry || entry.message.id === runtime.latestAssistantMessageId) {
+                if (!entry || entry.kind === 'turn' || entry.message.id === runtime.streamingAssistantMessageId) {
                     continue
                 }
 
@@ -868,6 +1052,14 @@ export function ChatMessageList({
         [onScrollingChange, scheduleHeightHintPersistence]
     )
 
+    const handleTotalHeightChange = useCallback(
+        (totalHeight: number) => {
+            totalHeightRef.current = totalHeight
+            onTotalHeightChange?.(totalHeight)
+        },
+        [onTotalHeightChange]
+    )
+
     useImperativeHandle(
         ref,
         () => ({
@@ -876,53 +1068,81 @@ export function ChatMessageList({
                     return
                 }
 
-                virtuosoRef.current?.scrollToIndex({
-                    align: 'end',
-                    behavior,
-                    index: 'LAST',
-                    offset: bottomInset,
-                })
+                // 总高已含 Header / Footer，交互命令不使用带 listRefresh 重试的索引定位。
+                virtuosoRef.current?.scrollTo({ top: totalHeightRef.current, behavior })
             },
         }),
-        [bottomInset, messageEntries.length]
+        [messageEntries.length]
     )
 
     const renderMessage = useCallback(
-        (messageIndex: number, { message, requestComposer }: MessageEntry) => {
-            const isCopied = copiedMessageId === message.id
-            const feedbackState = assistantFeedback[message.id] ?? null
-            const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messageEntries.length - 1
-            const isAssistantReplyCompleted = !isLatestAssistantMessage || !isBusy
-            const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted
-            const hasImageResult = message.parts.some(part => part.type === 'image-result')
-            const showFollowUpSuggestions =
-                isLatestAssistantMessage &&
-                status === 'ready' &&
-                message.status !== 'failed' &&
-                (getMessageTextContent(message).trim().length > 0 || hasImageResult)
+        (messageIndex: number, entry: MessageListEntry) => {
+            const renderChatMessage = (message: MindMessage, isLatestAssistantMessage: boolean, requestComposer?: ChatComposerPayload) => {
+                const isCopied = copiedMessageId === message.id
+                const feedbackState = assistantFeedback[message.id] ?? null
+                const isAssistantReplyCompleted = !isLatestAssistantMessage || !isBusy
+                const isThinking = isLatestAssistantMessage && !isAssistantReplyCompleted
+                const hasImageResult = message.parts.some(part => part.type === 'image-result')
+                const showFollowUpSuggestions =
+                    isLatestAssistantMessage &&
+                    status === 'ready' &&
+                    message.status !== 'failed' &&
+                    (getMessageTextContent(message).trim().length > 0 || hasImageResult)
 
-            return (
-                <ChatMessageItem
-                    conversationId={conversationId}
-                    disclosureScopeKey={disclosureScopeKey}
-                    enableReasoning={enableReasoning}
-                    message={message}
-                    requestComposer={requestComposer}
-                    isCopied={isCopied}
-                    isDeleteDisabled={message.role === 'user' && isBusy}
-                    isLatestAssistantMessage={isLatestAssistantMessage}
-                    isAssistantReplyCompleted={isAssistantReplyCompleted}
-                    isThinking={isThinking}
-                    feedbackState={feedbackState}
-                    onCopy={handleCopyMessage}
-                    onDeleteUserTurn={handleDeleteUserTurn}
-                    onFeedbackChange={toggleAssistantFeedback}
-                    onRegenerateLastTurn={handleRegenerateLastTurn}
-                    onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
-                    followUpSuggestionsDisabled={isLatestAssistantMessage && actionsDisabled}
-                    showFollowUpSuggestions={showFollowUpSuggestions}
-                />
-            )
+                return (
+                    <ChatMessageItem
+                        conversationId={conversationId}
+                        disclosureScopeKey={disclosureScopeKey}
+                        enableReasoning={enableReasoning}
+                        message={message}
+                        requestComposer={requestComposer}
+                        isCopied={isCopied}
+                        isDeleteDisabled={message.role === 'user' && isBusy}
+                        isLatestAssistantMessage={isLatestAssistantMessage}
+                        isAssistantReplyCompleted={isAssistantReplyCompleted}
+                        isThinking={isThinking}
+                        feedbackState={feedbackState}
+                        onCopy={handleCopyMessage}
+                        onDeleteUserTurn={handleDeleteUserTurn}
+                        onFeedbackChange={toggleAssistantFeedback}
+                        onRegenerateLastTurn={handleRegenerateLastTurn}
+                        onSelectFollowUpQuestion={handleSelectFollowUpQuestion}
+                        followUpSuggestionsDisabled={isLatestAssistantMessage && actionsDisabled}
+                        showFollowUpSuggestions={showFollowUpSuggestions}
+                    />
+                )
+            }
+
+            if (entry.kind === 'turn') {
+                const hasAcceptedTurnRunway =
+                    entry.itemKey === acceptedTurnRunwayEntry?.itemKey && acceptedTurnRunwayMode === 'assistant-slot'
+
+                return (
+                    <>
+                        <div className="py-2.5">{renderChatMessage(entry.userMessage, false)}</div>
+                        <div
+                            data-slot="assistant-loading-slot"
+                            className="py-2.5"
+                            style={hasAcceptedTurnRunway ? { minHeight: 'var(--accepted-turn-reply-runway)' } : undefined}
+                        >
+                            {entry.assistantMessage ? (
+                                renderChatMessage(entry.assistantMessage, true, entry.requestComposer)
+                            ) : (
+                                <article className="flex justify-start">
+                                    <div className="inline-flex items-center py-1 text-sm font-medium text-muted-foreground">
+                                        <ThinkingText />
+                                    </div>
+                                </article>
+                            )}
+                        </div>
+                    </>
+                )
+            }
+
+            const { message, requestComposer } = entry
+            const isLatestAssistantMessage = message.role === 'assistant' && messageIndex === messageEntries.length - 1
+
+            return renderChatMessage(message, isLatestAssistantMessage, requestComposer)
         },
         [
             actionsDisabled,
@@ -938,6 +1158,8 @@ export function ChatMessageList({
             isBusy,
             messageEntries.length,
             status,
+            acceptedTurnRunwayEntry?.itemKey,
+            acceptedTurnRunwayMode,
             toggleAssistantFeedback,
         ]
     )
@@ -945,6 +1167,7 @@ export function ChatMessageList({
     if (messageEntries.length === 0) {
         return (
             <div className="flex min-h-0 flex-col py-2" style={{ paddingBottom: `${bottomInset}px` }}>
+                {header}
                 {showEmptyStateSuggestions ? (
                     <EmptyStateSuggestions
                         disabled={isBusy}
@@ -956,7 +1179,7 @@ export function ChatMessageList({
         )
     }
 
-    if (!areHeightHintsReady) {
+    if (isHeightHintBootstrapPending) {
         return null
     }
 
@@ -971,7 +1194,7 @@ export function ChatMessageList({
                 ref={virtuosoRef}
                 alignToBottom
                 atBottomStateChange={onAtBottomChange}
-                atBottomThreshold={120}
+                atBottomThreshold={4}
                 components={messageListComponents}
                 computeItemKey={computeMessageItemKey}
                 context={listContext}
@@ -986,7 +1209,7 @@ export function ChatMessageList({
                 itemsRendered={handleItemsRendered}
                 minOverscanItemCount={{ top: 2, bottom: 2 }}
                 rangeChanged={onRangeChange}
-                totalListHeightChanged={onTotalHeightChange}
+                totalListHeightChanged={handleTotalHeightChange}
             />
         </MessageDisclosureProvider>
     )

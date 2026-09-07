@@ -21,9 +21,14 @@ const virtuosoHarness = vi.hoisted(() => ({
         const callback = virtuosoHarness.props?.itemsRendered as ((nextItems: unknown[]) => void) | undefined
         callback?.(items)
     },
+    emitTotalListHeightChanged: (height: number) => {
+        const callback = virtuosoHarness.props?.totalListHeightChanged as ((nextHeight: number) => void) | undefined
+        callback?.(height)
+    },
     props: null as Record<string, unknown> | null,
     renderRange: null as { endIndex: number; startIndex: number } | null,
     scrollToIndex: vi.fn(),
+    scrollTo: vi.fn(),
 }))
 
 vi.mock('@/components/instamind/local-chat-persistence/store', async importOriginal => ({
@@ -41,6 +46,7 @@ vi.mock('react-virtuoso', async () => {
                 ref,
                 () => ({
                     scrollToIndex: virtuosoHarness.scrollToIndex,
+                    scrollTo: virtuosoHarness.scrollTo,
                 }),
                 []
             )
@@ -72,6 +78,8 @@ vi.mock('react-virtuoso', async () => {
                             key: computeItemKey?.(index, item, context) ?? index,
                             'data-item-index': index,
                             context,
+                            item,
+                            style: {},
                         },
                         itemContent?.(index, item, context)
                     )
@@ -101,6 +109,7 @@ afterEach(() => {
     virtuosoHarness.props = null
     virtuosoHarness.renderRange = null
     virtuosoHarness.scrollToIndex.mockClear()
+    virtuosoHarness.scrollTo.mockClear()
     heightHintStoreMocks.readLocalMessageHeightHints.mockReset()
     heightHintStoreMocks.readLocalMessageHeightHints.mockResolvedValue({ status: 'missing' })
     heightHintStoreMocks.writeLocalMessageHeightHints.mockReset()
@@ -122,6 +131,22 @@ function createAssistantMessage(id = 'assistant-reasoning', text = '最终答案
             },
             {
                 id: 'text-1',
+                type: 'text',
+                text,
+                format: 'markdown',
+            },
+        ],
+    }
+}
+
+function createUserMessage(id = 'user-message', text = '用户问题'): MindMessage {
+    return {
+        id,
+        role: 'user',
+        createdAt: '2026-06-16T10:00:00.000Z',
+        parts: [
+            {
+                id: `${id}-text`,
                 type: 'text',
                 text,
                 format: 'markdown',
@@ -484,6 +509,33 @@ describe('ChatMessageList', () => {
         )
     })
 
+    it('freezes the streaming assistant estimate while tokens grow', async () => {
+        const initialMessage = createAssistantMessage('streaming-estimate', '短文本')
+        const props = {
+            conversationId: 'conv-streaming-estimate',
+            enableReasoning: false,
+            messages: [initialMessage],
+            onDeleteUserTurn: vi.fn(() => true),
+            onRegenerateLastTurn: vi.fn(() => true),
+            onSelectFollowUpQuestion: vi.fn(),
+            onSelectSuggestion: vi.fn(),
+            scrollParent: document.createElement('div'),
+            status: 'streaming' as const,
+        }
+
+        const page = render(<ChatMessageList {...props} />)
+        await waitFor(() => expect(screen.getByTestId('virtuoso')).toBeTruthy())
+        const firstEstimate = (virtuosoHarness.props?.heightEstimates as number[])[0]
+
+        const grownMessage = createAssistantMessage(
+            'streaming-estimate',
+            '这是一段持续增长的 Markdown 文本。'.repeat(30) + '\n\n## 新标题\n\n- 列表项'
+        )
+        page.rerender(<ChatMessageList {...props} messages={[grownMessage]} />)
+
+        expect((virtuosoHarness.props?.heightEstimates as number[])[0]).toBe(firstEstimate)
+    })
+
     it('does not persist a history-default height while the user has an expanded disclosure for that message', async () => {
         const messages = createDisclosureMessages()
         const scrollParent = document.createElement('div')
@@ -598,7 +650,7 @@ describe('ChatMessageList', () => {
         }
     })
 
-    it('does not persist the latest assistant message before it becomes completed history', async () => {
+    it('persists the latest assistant message after it becomes completed history', async () => {
         const latestAssistantMessage = createAssistantMessage('latest-assistant-height')
         const precedingUserMessage: MindMessage = {
             createdAt: '2026-08-30T10:00:00.000Z',
@@ -628,10 +680,38 @@ describe('ChatMessageList', () => {
             { data: latestEntry, index: 1, offset: 0, size: 256 },
             { data: latestEntry, index: 1, offset: 0, size: 256 },
         ])
+        const onScrollingChange = virtuosoHarness.props?.isScrolling as ((isScrolling: boolean) => void) | undefined
+        onScrollingChange?.(false)
 
         await new Promise(resolve => window.requestAnimationFrame(resolve))
         await Promise.resolve()
-        expect(heightHintStoreMocks.writeLocalMessageHeightHints).not.toHaveBeenCalled()
+        await waitFor(() =>
+            expect(heightHintStoreMocks.writeLocalMessageHeightHints).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    conversationId: 'conv-latest-assistant',
+                    entries: [expect.objectContaining({ height: 256, messageId: latestAssistantMessage.id })],
+                })
+            )
+        )
+    })
+
+    it('keeps the active list and disclosure mounted while promotion hints are pending', async () => {
+        heightHintStoreMocks.readLocalMessageHeightHints.mockReturnValue(new Promise(() => {}))
+        const props = {
+            enableReasoning: true,
+            messages: [createAssistantMessage()],
+            presentationKey: 'draft-presentation',
+            onDeleteUserTurn: vi.fn(() => true),
+            onRegenerateLastTurn: vi.fn(() => true),
+            onSelectFollowUpQuestion: vi.fn(),
+            onSelectSuggestion: vi.fn(),
+            scrollParent: document.createElement('div'),
+            status: 'streaming' as const,
+        }
+        const page = render(<ChatMessageList {...props} />)
+        const list = screen.getByTestId('virtuoso')
+        page.rerender(<ChatMessageList {...props} conversationId="promoted" />)
+        expect(screen.queryByTestId('virtuoso')).toBe(list)
     })
 
     it('delegates every non-empty message list and end command to free React Virtuoso', () => {
@@ -657,20 +737,120 @@ describe('ChatMessageList', () => {
         expect(virtuosoHarness.props).toEqual(
             expect.objectContaining({
                 alignToBottom: true,
-                atBottomThreshold: 120,
+                atBottomThreshold: 4,
                 customScrollParent: scrollParent,
                 followOutput: false,
             })
         )
 
+        act(() => virtuosoHarness.emitTotalListHeightChanged(1400))
         listRef.current?.scrollToEnd('auto')
 
-        expect(virtuosoHarness.scrollToIndex).toHaveBeenCalledWith({
-            align: 'end',
-            behavior: 'auto',
-            index: 'LAST',
-            offset: 198,
-        })
+        expect(virtuosoHarness.scrollTo).toHaveBeenCalledWith({ top: 1400, behavior: 'auto' })
+        expect(virtuosoHarness.scrollToIndex).not.toHaveBeenCalled()
+    })
+
+    it('keeps an accepted follow-up as one turn while the assistant slot changes from loading to content', () => {
+        const scrollParent = document.createElement('div')
+        const historyMessages = [createUserMessage('history-question'), createAssistantMessage('history-answer')]
+        const followUpMessage = createUserMessage('follow-up-question', '新的 follow-up 问题')
+        const page = render(
+            <ChatMessageList
+                bottomInset={198}
+                positionAcceptedTurn
+                scrollParent={scrollParent}
+                messages={[...historyMessages, followUpMessage]}
+                status="submitted"
+                enableReasoning={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        const submittedUserItem = screen.getByText('新的 follow-up 问题').closest('[data-item-index]') as HTMLElement
+        expect(submittedUserItem.dataset.acceptedTurnRunway).toBe('assistant-slot')
+        expect(submittedUserItem.style.paddingBlock).toBe('0px')
+        const submittedRunway = submittedUserItem.style.getPropertyValue('--accepted-turn-reply-runway')
+        expect(submittedRunway).toBe('clamp(10rem, calc(72dvh - 198px - 4rem), 48rem)')
+        const submittedAssistantSlot = submittedUserItem.querySelector('[data-slot="assistant-loading-slot"]') as HTMLElement
+        expect(submittedAssistantSlot.style.minHeight).toBe('var(--accepted-turn-reply-runway)')
+        expect(screen.getByText('正在思考')).toBeTruthy()
+        const submittedData = virtuosoHarness.props?.data as Array<{ itemKey?: string; message?: MindMessage }>
+        const submittedKey = (
+            virtuosoHarness.props?.computeItemKey as (index: number, item: { itemKey?: string; message?: MindMessage }) => string
+        )(submittedData.length - 1, submittedData.at(-1)!)
+        expect(submittedData).toHaveLength(historyMessages.length + 1)
+
+        const streamingAssistant = createAssistantMessage('follow-up-answer', '正在回答')
+        page.rerender(
+            <ChatMessageList
+                bottomInset={198}
+                positionAcceptedTurn
+                scrollParent={scrollParent}
+                messages={[...historyMessages, followUpMessage, streamingAssistant]}
+                status="streaming"
+                enableReasoning={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        const streamingTurnItem = screen.getByText('正在回答').closest('[data-item-index]') as HTMLElement
+        expect(screen.getByText('新的 follow-up 问题').closest('[data-item-index]')).toBe(streamingTurnItem)
+        expect(streamingTurnItem.dataset.acceptedTurnRunway).toBe('assistant-slot')
+        expect(streamingTurnItem.style.minHeight).toBe('')
+        expect((streamingTurnItem.querySelector('[data-slot="assistant-loading-slot"]') as HTMLElement).style.minHeight).toBe(
+            'var(--accepted-turn-reply-runway)'
+        )
+        expect(streamingTurnItem.style.getPropertyValue('--accepted-turn-reply-runway')).toBe(submittedRunway)
+        const streamingData = virtuosoHarness.props?.data as Array<{ itemKey?: string; message?: MindMessage }>
+        const streamingKey = (
+            virtuosoHarness.props?.computeItemKey as (index: number, item: { itemKey?: string; message?: MindMessage }) => string
+        )(streamingData.length - 1, streamingData.at(-1)!)
+        expect(streamingData).toHaveLength(submittedData.length)
+        expect(streamingKey).toBe(submittedKey)
+
+        page.rerender(
+            <ChatMessageList
+                bottomInset={198}
+                positionAcceptedTurn
+                scrollParent={scrollParent}
+                messages={[...historyMessages, followUpMessage, streamingAssistant]}
+                status="ready"
+                enableReasoning={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        const completedAssistantItem = screen.getByText('正在回答').closest('[data-item-index]') as HTMLElement
+        expect(completedAssistantItem.dataset.acceptedTurnRunway).toBeUndefined()
+        expect(completedAssistantItem.style.minHeight).toBe('')
+
+        page.rerender(
+            <ChatMessageList
+                bottomInset={198}
+                positionAcceptedTurn
+                scrollParent={scrollParent}
+                messages={[...historyMessages, followUpMessage, streamingAssistant]}
+                status="error"
+                enableReasoning={false}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        const failedAssistantItem = screen.getByText('正在回答').closest('[data-item-index]') as HTMLElement
+        expect(failedAssistantItem.dataset.acceptedTurnRunway).toBeUndefined()
+        expect(failedAssistantItem.style.minHeight).toBe('')
     })
 
     it('reports committed item DOM indices through the Virtuoso Item component', () => {

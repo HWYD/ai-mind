@@ -98,6 +98,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
     const [conversations, setConversations] = useState<ConversationListItem[]>([])
     const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null)
     const [isDraft, setIsDraft] = useState(false)
+    const [presentationGeneration, setPresentationGeneration] = useState(0)
     const [isLoading, setIsLoading] = useState(true)
     const [isMutating, setIsMutating] = useState(false)
     const [isReadOnlyCache, setIsReadOnlyCache] = useState(false)
@@ -196,6 +197,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             }
 
             conversationsRef.current = nextConversations
+            if (selectedConversationIdRef.current !== nextSelectedConversationId) setPresentationGeneration(current => current + 1)
             selectedConversationIdRef.current = nextSelectedConversationId
             if (!preservePendingSelection) {
                 pendingSelectionPersistenceIdRef.current = null
@@ -228,6 +230,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         const nextConversations = toConversationListItems(index.conversations, index.selectedConversationId)
         const nextSelectedConversationId = index.isDraft ? null : index.selectedConversationId
         conversationsRef.current = nextConversations
+        if (selectedConversationIdRef.current !== nextSelectedConversationId) setPresentationGeneration(current => current + 1)
         selectedConversationIdRef.current = nextSelectedConversationId
         setConversations(nextConversations)
         setSelectedConversationId(nextSelectedConversationId)
@@ -388,6 +391,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
             return false
         }
 
+        setPresentationGeneration(current => current + 1)
         setIsDraft(true)
         setSelectedConversationId(null)
         setIsReadOnlyCache(false)
@@ -486,6 +490,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         const selectionGeneration = selectionGenerationRef.current + 1
 
         clearStoredDraftSelection()
+        setPresentationGeneration(current => current + 1)
         setIsDraft(false)
         setSelectedConversationId(conversationId)
         if (!selectingFromReadOnlyCache) {
@@ -503,26 +508,26 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
         return true
     }
 
-    async function handleConversationPromoted(conversationId: string) {
+    function handleConversationPromoted(conversationId: string) {
         clearStoredDraftSelection()
-        const selectionGeneration = selectionGenerationRef.current
+        const selectionGeneration = selectionGenerationRef.current + 1
 
-        try {
-            await fetchRegistry({
-                conversationIdHint: conversationId,
-                selectionGeneration,
-            })
-        } catch {
-            if (!isMountedRef.current || selectionGeneration !== selectionGenerationRef.current) {
-                return
-            }
+        // 响应头已确认真实会话身份；registry 只负责补齐侧栏和本地索引，不能阻断当前流式 run。
+        selectionGenerationRef.current = selectionGeneration
+        setIsDraft(false)
+        setSelectedConversationId(conversationId)
+        setIsReadOnlyCache(false)
+        setError(null)
+        selectedConversationIdRef.current = conversationId
+        writeStoredConversationId(conversationId)
 
-            setIsDraft(false)
-            setSelectedConversationId(conversationId)
-            setIsReadOnlyCache(false)
-            selectedConversationIdRef.current = conversationId
-            writeStoredConversationId(conversationId)
-        }
+        return fetchRegistry({
+            conversationIdHint: conversationId,
+            selectionGeneration,
+        }).then(
+            () => undefined,
+            () => undefined
+        )
     }
 
     function retryRecovery() {
@@ -541,6 +546,7 @@ export function useConversationSessions(options: UseConversationSessionsOptions 
 
     return {
         conversations: visibleConversations,
+        presentationKey: 'conversation-presentation-' + presentationGeneration,
         createConversation,
         deleteConversation,
         error,

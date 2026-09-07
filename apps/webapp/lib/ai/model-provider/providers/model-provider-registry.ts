@@ -1,3 +1,4 @@
+import { deriveContextBudget } from '../context-budget'
 import type { AiMindChatModelHandle, AiMindLlmProvider, ModelProviderConfig, ResolvedModelSelection } from '../types'
 import { createDeepSeekProvider } from './deepseek-provider'
 import { createDoubaoProvider } from './doubao-provider'
@@ -35,9 +36,19 @@ export interface CreateChatModelOptions {
 export function createChatModel(options: CreateChatModelOptions): AiMindChatModelHandle {
     const { config, resolvedModelSelection } = options
     const provider = getProvider(resolvedModelSelection.provider)
+    const effectiveContextWindowTokens =
+        resolvedModelSelection.provider === 'ollama'
+            ? deriveContextBudget({
+                  environment: 'ollama',
+                  maxOutputTokens: config.chatMaxOutputTokens,
+                  operationalCapTokens: config.ollamaContextTokens,
+                  physicalWindowTokens: resolvedModelSelection.catalogItem.contextWindowTokens,
+              }).effectiveWindowTokens
+            : undefined
 
     const createOptions: ModelProviderCreateOptions = {
         config,
+        effectiveContextWindowTokens,
         enableReasoning: options.enableReasoning,
         maxOutputTokens: options.maxOutputTokens,
         maxRetries: options.maxRetries,

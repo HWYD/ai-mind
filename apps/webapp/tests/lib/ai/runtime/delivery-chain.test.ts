@@ -80,6 +80,7 @@ const testResolvedModelSelection: ResolvedModelSelection = {
             tasklist: false,
             toolCalling: true,
         },
+        contextWindowTokens: 40000,
         enabled: true,
         family: 'ollama',
         id: 'test-model',

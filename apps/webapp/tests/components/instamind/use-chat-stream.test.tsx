@@ -180,7 +180,6 @@ describe('useChatStream', () => {
         })
 
         expect(result.current.error).toBeNull()
-        expect(result.current.imageQuotaError).toBeNull()
         expect(result.current.messages).toHaveLength(2)
         expect(result.current.messages[0]?.role).toBe('user')
         expect(result.current.messages[1]?.role).toBe('assistant')
@@ -191,7 +190,7 @@ describe('useChatStream', () => {
         expect(textPart?.text).toBe('聊天请求已达到当前 IP 的当日上限（2 次）。')
     })
 
-    it('/image 生图配额耗尽时会公开顶部提醒状态，同时保留 assistant 错误消息', async () => {
+    it('/image 生图配额耗尽时只保留对应的 assistant 错误消息', async () => {
         vi.stubGlobal(
             'fetch',
             withThreadHydration(
@@ -222,7 +221,6 @@ describe('useChatStream', () => {
             expect(result.current.status).toBe('ready')
         })
 
-        expect(result.current.imageQuotaError).toBe('今日生图次数已用完（3 次）。')
         expect(result.current.messages).toHaveLength(2)
         expect(result.current.messages[0]?.role).toBe('user')
         expect(result.current.messages[1]?.role).toBe('assistant')
@@ -254,6 +252,23 @@ describe('useChatStream', () => {
             'Content-Type': 'application/json',
             'Idempotency-Key': expect.any(String),
         })
+    })
+
+    it('只在收到正常 finish chunk 后递增流完成 revision', async () => {
+        const fetchMock = vi
+            .fn()
+            .mockResolvedValue(createNdjsonResponse([{ type: 'start', messageId: 'assistant-finish' }, { type: 'finish' }]))
+
+        vi.stubGlobal('fetch', withThreadHydration(fetchMock))
+        const { result } = renderChatStreamHook()
+
+        expect(result.current.streamCompletionRevision).toBe(0)
+
+        await act(async () => {
+            await result.current.sendMessage('完成这一轮')
+        })
+
+        expect(result.current.streamCompletionRevision).toBe(1)
     })
 
     it('duplicate POST replay descriptor 会改走 recovery GET，而不是把 JSON 当作 NDJSON 消费', async () => {
@@ -890,6 +905,7 @@ describe('useChatStream', () => {
         expect(chatFetchCalls).toHaveLength(1)
         expect(chatFetchCalls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal)
         expect(result.current.error).toBeNull()
+        expect(result.current.streamCompletionRevision).toBe(0)
         expect(assistantMessage).toBeDefined()
         expect(textPart?.type).toBe('text')
         expect(textPart?.text).toContain('Vue 的 diff 核心是同层比较。')
@@ -1012,6 +1028,7 @@ describe('useChatStream', () => {
         expect(assistantMessage?.status).toBe('failed')
         expect(textPart?.type).toBe('text')
         expect(textPart?.text).toContain('Model streaming failed.')
+        expect(result.current.streamCompletionRevision).toBe(0)
     })
 
     it('artifact chunks 会聚合到 message.artifacts 且不混入普通 text part', async () => {
@@ -1630,5 +1647,143 @@ describe('useChatStream', () => {
         expect(assistantMessage?.status).toBe('failed')
         expect(textPart?.type).toBe('text')
         expect(textPart?.text).toBe('API Key 无效或已过期，请检查配置后重试。')
+    })
+})
+
+it('signals an accepted turn immediately, but not an empty or duplicate submission', async () => {
+    let release: (value: Response) => void = () => {}
+    vi.stubGlobal(
+        'fetch',
+        vi.fn(
+            () =>
+                new Promise<Response>(resolve => {
+                    release = resolve
+                })
+        )
+    )
+    const { result } = renderHook(() =>
+        useChatStreamBase({ draftMode: true, model: 'deepseek-chat', skillMode: 'auto', enableReasoning: false })
+    )
+    await act(async () => {
+        expect(await result.current.sendMessage('')).toBe(false)
+    })
+    expect(result.current.acceptedTurnRevision).toBe(0)
+    let pending: Promise<boolean> | undefined
+    act(() => {
+        pending = result.current.sendMessage('hello')
+    })
+    expect(result.current.acceptedTurnRevision).toBe(1)
+    await act(async () => {
+        expect(await result.current.sendMessage('duplicate')).toBe(false)
+    })
+    expect(result.current.acceptedTurnRevision).toBe(1)
+    await act(async () => {
+        release(createNdjsonResponse([{ type: 'finish' }]))
+        await pending
+    })
+    expect(result.current.acceptedTurnRevision).toBe(1)
+})
+
+it('positions only a new accepted question that starts with existing history', async () => {
+    const pendingResponses: Array<(response: Response) => void> = []
+    vi.stubGlobal(
+        'fetch',
+        withThreadHydration(
+            () =>
+                new Promise<Response>(resolve => {
+                    pendingResponses.push(resolve)
+                })
+        )
+    )
+    const { result } = renderChatStreamHook({ model: 'deepseek-chat', skillMode: 'auto' })
+
+    await waitFor(() => expect(result.current.hydrationStatus).toBe('ready'))
+
+    let firstTurn: Promise<boolean> | undefined
+    act(() => {
+        firstTurn = result.current.sendMessage('first question')
+    })
+    expect(result.current.shouldPositionAcceptedTurn).toBe(false)
+    await act(async () => {
+        pendingResponses.shift()?.(
+            createNdjsonResponse([
+                { type: 'start', messageId: 'assistant-first' },
+                { type: 'text-start', partId: 'text-first' },
+                { type: 'text-delta', partId: 'text-first', delta: 'first answer' },
+                { type: 'finish' },
+            ])
+        )
+        await firstTurn
+    })
+
+    let followUpTurn: Promise<boolean> | undefined
+    act(() => {
+        followUpTurn = result.current.sendMessage('follow-up question')
+    })
+    expect(result.current.shouldPositionAcceptedTurn).toBe(true)
+    await act(async () => {
+        pendingResponses.shift()?.(
+            createNdjsonResponse([
+                { type: 'start', messageId: 'assistant-follow-up' },
+                { type: 'text-start', partId: 'text-follow-up' },
+                { type: 'text-delta', partId: 'text-follow-up', delta: 'follow-up answer' },
+                { type: 'finish' },
+            ])
+        )
+        await followUpTurn
+    })
+
+    let regeneratedTurn: Promise<boolean> | undefined
+    act(() => {
+        regeneratedTurn = result.current.regenerateLastTurn()
+    })
+    expect(result.current.shouldPositionAcceptedTurn).toBe(false)
+    await act(async () => {
+        pendingResponses.shift()?.(
+            createNdjsonResponse([
+                { type: 'start', messageId: 'assistant-regenerated' },
+                { type: 'text-start', partId: 'text-regenerated' },
+                { type: 'text-delta', partId: 'text-regenerated', delta: 'regenerated answer' },
+                { type: 'finish' },
+            ])
+        )
+        await regeneratedTurn
+    })
+
+    let interruptedTurn: Promise<boolean> | undefined
+    act(() => {
+        interruptedTurn = result.current.sendMessage('follow-up with review')
+    })
+    expect(result.current.shouldPositionAcceptedTurn).toBe(true)
+    await act(async () => {
+        pendingResponses.shift()?.(createStrategyInterruptResponse('run-positioned-follow-up', 'interrupt-positioned-follow-up'))
+        await interruptedTurn
+    })
+
+    let resumedTurn: Promise<boolean> | undefined
+    act(() => {
+        resumedTurn = result.current.resumeAgentRun({ type: 'approve' })
+    })
+    expect(result.current.shouldPositionAcceptedTurn).toBe(false)
+    await act(async () => {
+        pendingResponses.shift()?.(
+            createNdjsonResponse(
+                [
+                    {
+                        agentName: 'version-plan-to-tasklist-agent',
+                        assistantMessageId: 'assistant-resume-error',
+                        interruptId: 'interrupt-positioned-follow-up',
+                        runId: 'run-positioned-follow-up',
+                        threadId: 'tasklist-agent:c1:run-positioned-follow-up',
+                        type: 'agent-resume',
+                    },
+                    { type: 'finish' },
+                ],
+                200,
+                'run-positioned-follow-up',
+                3
+            )
+        )
+        await resumedTurn
     })
 })

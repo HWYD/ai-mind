@@ -367,6 +367,7 @@ export function AgentTracePanel({
                         variant="ghost"
                         size="sm"
                         className="h-8 gap-1.5 text-sky-700 hover:bg-sky-50 hover:text-sky-800"
+                        aria-expanded={isExpanded}
                         onClick={() => setIsExpanded(current => !current)}
                     >
                         <span>{isExpanded ? '收起详情' : '展开详情'}</span>

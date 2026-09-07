@@ -6,6 +6,7 @@ import { useCallback, useState } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { hasComposerSemanticInput, normalizeImageComposerSubmission, resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { type ChatModel, type ChatModelGroup } from '@/lib/ai/models'
+import type { ChatMemoryUsageSummary } from '@/lib/ai/runtime/chat-memory/context-usage-contract'
 import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +22,7 @@ const footerTextBySkillMode: Record<ChatSkillMode, string> = {
 }
 
 export function ChatComposer({
+    contextUsage = null,
     disabled = false,
     enableReasoning,
     hasAvailableModels,
@@ -38,6 +40,7 @@ export function ChatComposer({
     status,
     submitDisabled = false,
 }: {
+    contextUsage?: ChatMemoryUsageSummary | null
     disabled?: boolean
     enableReasoning: boolean
     hasAvailableModels: boolean
@@ -160,6 +163,7 @@ export function ChatComposer({
                         onStop={onStop}
                     />
                     <ComposerToolbar
+                        contextUsage={contextUsage}
                         status={status}
                         skillMode={skillMode}
                         modelGroups={modelGroups}
