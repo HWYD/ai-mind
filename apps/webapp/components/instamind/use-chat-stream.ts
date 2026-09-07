@@ -1,4 +1,4 @@
-﻿'use client'
+'use client'
 
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { useEffect, useRef, useState } from 'react'
@@ -39,7 +39,18 @@ import { readLocalConversationSnapshot, writeLocalConversationSnapshot } from '.
 
 // 文本/推理 delta 的批量刷新窗口。流式 token 先进入 buffer，再按约 40ms + rAF 合并写入 React state。
 // 调大：Markdown 解析和 DOM 更新更少但打字感更钝；调小：更实时但更容易触发渲染/滚动抖动。
-const STREAM_TEXT_FLUSH_INTERVAL_MS = 40
+const DEFAULT_STREAM_TEXT_FLUSH_INTERVAL_MS = 40
+// 按模型 id 定制的刷新窗口。未列出的模型走默认值，后续新增只需在这里加一条。
+const STREAM_TEXT_FLUSH_INTERVAL_BY_MODEL: Partial<Record<ChatModel, number>> = {
+    // deepseek-v4-pro 单 token 更大，缩短合并窗口，避免一个窗口内堆积过多内容导致单帧渲染过重。
+    'deepseek/deepseek-v4-pro': 0,
+    'deepseek/deepseek-v4-flash': 40,
+}
+
+// 按模型解析文本刷新窗口。未命中的模型走默认值，不 fail closed：flush 时间只是 UI 调优，不涉及能力边界。
+function resolveStreamTextFlushIntervalMs(modelId: ChatModel): number {
+    return STREAM_TEXT_FLUSH_INTERVAL_BY_MODEL[modelId] ?? DEFAULT_STREAM_TEXT_FLUSH_INTERVAL_MS
+}
 // 兼容旧实现残留的本地 key。v0.3.0 明确不支持刷新后恢复 pending HITL；
 // 如果后续重新启用，必须同时恢复 assistant message、interrupt payload 和同消息续写上下文，而不是只拉起一张审核卡。
 const PENDING_AGENT_RUN_STORAGE_KEY = 'ai-mind:pending-agent-run-id'
@@ -389,7 +400,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     }
 
     const textBuffer = useStreamTextBuffer({
-        flushIntervalMs: STREAM_TEXT_FLUSH_INTERVAL_MS,
+        flushIntervalMs: resolveStreamTextFlushIntervalMs(model),
         flushTextDeltas: pendingTextDeltas => {
             // buffer 只负责合并高频 token；真正改消息树仍交回 reducer，避免文本更新逻辑散在两个文件。
             commitStreamReduction(current => reduceStreamTextDeltas(current, pendingTextDeltas))

@@ -36,7 +36,7 @@
 
 对已完成、稳定且默认展示的历史消息，可保存浏览器本地高度提示。流式期间不写入 hint；finish 后需经过稳定 render fingerprint、连续两次 item size、字体 ready、非 busy 和无 disclosure 偏差才可保存。提示必须同时匹配会话、消息 identity、渲染指纹、精确列宽、geometry version 和展示状态；不匹配、不可用或读取超时必须回退结构化估算，不能阻塞会话显示。
 
-流式 text/reasoning 仍以 40ms timer 合并；同一 pending Map 累计达到 48 个 Unicode code point，或出现代码围栏结构变化时，提前请求既有 rAF flush。该路径只提交已合并的内容，不读写 following/reading、`scrollTop` 或 Virtuoso 接口，因此不形成第二个滚动来源。
+流式 text/reasoning 按模型配置合并窗口（默认 40ms，大粒度 delta 模型可配置更短窗口）；出现代码围栏结构变化时，提前请求既有 rAF flush。该路径只提交已合并的内容，不读写 following/reading、`scrollTop` 或 Virtuoso 接口，因此不形成第二个滚动来源。
 
 高度提示不保存消息正文、图片 Blob、滚动位置或完整 virtualizer state，也不进入服务端、API 或跨设备同步。
 

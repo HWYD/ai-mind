@@ -2,8 +2,6 @@ import { useEffect, useRef } from 'react'
 
 import type { PendingTextDelta } from './stream-message-reducer'
 
-const earlyFlushCodePointThreshold = 18
-
 /**
  * 文本增量 buffer 的配置。
  *
@@ -116,13 +114,8 @@ export function useStreamTextBuffer({ flushIntervalMs, flushTextDeltas }: UseStr
 
         scheduleFlushByTimer()
 
-        const pendingCodePointCount = Array.from(pendingTextDeltasRef.current.values()).reduce(
-            (total, pending) => total + Array.from(pending.delta).length,
-            0
-        )
-
-        if (pendingCodePointCount >= earlyFlushCodePointThreshold || delta.includes('```')) {
-            // 大 chunk 和代码围栏都提前到最近一帧；rAF 仍只完整提交一次已合并的 pending 内容。
+        // 代码围栏出现时提前到最近一帧，避免 Markdown 代码块边界明显滞后。
+        if (delta.includes('```')) {
             scheduleFlushByAnimationFrame()
         }
     }

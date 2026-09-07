@@ -88,7 +88,7 @@ it('waits for Virtuoso measurement after a content-only render instead of issuin
     expect(scrollToEnd).toHaveBeenCalledOnce()
 })
 
-it('follows a measured height increase before the at-bottom callback catches up', () => {
+it('follows a measured height increase before the at-bottom callback catches up', async () => {
     const { result, scrollToEnd } = setup()
 
     act(() => result.current.onTotalHeightChange(1600))
@@ -97,6 +97,8 @@ it('follows a measured height increase before the at-bottom callback catches up'
         result.current.onTotalHeightChange(1768)
         vi.advanceTimersByTime(100)
     })
+    // 增长改由微任务同帧合并到底，需刷新一次微任务队列后再断言。
+    await act(async () => {})
 
     expect(scrollToEnd).toHaveBeenCalledOnce()
     expect(scrollToEnd).toHaveBeenCalledWith('auto')

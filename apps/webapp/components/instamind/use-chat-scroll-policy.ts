@@ -140,6 +140,7 @@ export function useChatScrollPolicy({
     const intentRef = useRef<'following' | 'reading'>('following')
     const followRafRef = useRef<number | null>(null)
     const forceFollowRef = useRef(false)
+    const followGrowthMicrotaskRef = useRef(false)
     const entryRevealRafRef = useRef<number | null>(null)
     const entryRetryRafRef = useRef<number | null>(null)
     const entryRetryForceRef = useRef(false)
@@ -187,6 +188,19 @@ export function useChatScrollPolicy({
         },
         [issueScrollToEnd]
     )
+
+    const scheduleFollowGrowth = useCallback(() => {
+        if (followGrowthMicrotaskRef.current) return
+        followGrowthMicrotaskRef.current = true
+        // 用微任务在同一帧内合并连续的高度增长事件并滚动到底：既不跨帧产生残影，
+        // 又能把同一批测量增长合并成单次到底命令（保留 maxCommandsPerFrame <= 1 的契约）。
+        queueMicrotask(() => {
+            followGrowthMicrotaskRef.current = false
+            if (intentRef.current === 'following' && !pendingEntryRef.current) {
+                issueScrollToEnd('auto')
+            }
+        })
+    }, [issueScrollToEnd])
 
     const lockFollowForReader = useCallback(() => {
         intentRef.current = 'reading'
@@ -484,12 +498,16 @@ export function useChatScrollPolicy({
             if (entry) {
                 invalidateConversationEntryReveal()
                 scheduleConversationEntryRetry(true)
+            } else if (previousHeight !== null && height > previousHeight) {
+                // Virtuoso 已在 paint 前的 layout 阶段测出新总高；用微任务同帧合并滚动到底，
+                // 避免 rAF 跨帧使内容先以旧 scrollTop 绘制出一帧残影。atBottom 回调可能仍保留
+                // 增长前的状态，这里只依赖高度增长的确定性结果直接跟随。
+                scheduleFollowGrowth()
             } else {
-                // 总高已是 Virtuoso 完成测量后的事实；atBottom 回调可能仍保留增长前的状态。
-                scheduleFollowToEnd(previousHeight !== null && height > previousHeight)
+                scheduleFollowToEnd(false)
             }
         },
-        [invalidateConversationEntryReveal, scheduleConversationEntryRetry, scheduleFollowToEnd]
+        [invalidateConversationEntryReveal, scheduleConversationEntryRetry, scheduleFollowToEnd, scheduleFollowGrowth]
     )
 
     const restoreFollowAndScrollToEnd = useCallback(() => {
