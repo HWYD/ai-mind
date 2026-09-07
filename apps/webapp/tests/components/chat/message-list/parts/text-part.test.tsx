@@ -42,15 +42,32 @@ const part = {
 }
 
 describe('TextPartView', () => {
-    it('静态消息不启用流式 Markdown 与动画', () => {
-        render(<TextPartView part={part} />)
+    it('完成后仍保持 streaming Markdown 与稳定动画配置，只停止动画', () => {
+        const page = render(<TextPartView part={part} />)
 
         const output = screen.getByText('流式回答')
 
-        expect(output.getAttribute('data-mode')).toBe('static')
+        expect(output.getAttribute('data-mode')).toBe('streaming')
         expect(output.getAttribute('data-is-animating')).toBe('false')
-        expect(output.getAttribute('data-animated')).toBe('false')
+        expect(JSON.parse(output.getAttribute('data-animated') ?? '{}')).toEqual({
+            animation: 'fadeIn',
+            duration: 24,
+            easing: 'ease-out',
+            sep: 'word',
+            stagger: 0,
+        })
         expect(output.getAttribute('data-caret')).toBe('undefined')
+
+        page.rerender(<TextPartView part={part} isStreaming />)
+        expect(output.getAttribute('data-mode')).toBe('streaming')
+        expect(output.getAttribute('data-is-animating')).toBe('true')
+        expect(output.getAttribute('data-animated')).toBe(
+            JSON.stringify({ animation: 'fadeIn', duration: 24, easing: 'ease-out', sep: 'word', stagger: 0 })
+        )
+
+        page.rerender(<TextPartView part={part} />)
+        expect(output.getAttribute('data-mode')).toBe('streaming')
+        expect(output.getAttribute('data-is-animating')).toBe('false')
     })
 
     it('流式消息使用轻量淡入动画，不显示尾部光标', () => {
@@ -62,7 +79,7 @@ describe('TextPartView', () => {
         expect(output.getAttribute('data-is-animating')).toBe('true')
         expect(JSON.parse(output.getAttribute('data-animated') ?? '{}')).toEqual({
             animation: 'fadeIn',
-            duration: 90,
+            duration: 24,
             easing: 'ease-out',
             sep: 'word',
             stagger: 0,

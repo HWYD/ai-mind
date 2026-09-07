@@ -8,10 +8,6 @@ function isHydrationThreadId(threadId: string): boolean {
     return LEGACY_CHAT_MEMORY_THREAD_ID_REGEX.test(threadId) || CHAT_CONVERSATION_THREAD_ID_REGEX.test(threadId)
 }
 
-export const CHAT_MEMORY_RECENT_TURN_LIMIT = 2 // 最近完整对话轮次上限，一轮固定为 user + assistant
-export const CHAT_MEMORY_RECENT_MESSAGE_LIMIT = CHAT_MEMORY_RECENT_TURN_LIMIT * 2 // 最近消息上限
-export const CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT = CHAT_MEMORY_RECENT_TURN_LIMIT // 压缩后仍保留的最近完整对话轮次上限
-export const CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT = CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT * 2 // 压缩后最近消息上限
 export const CHAT_MEMORY_SUMMARY_PREVIEW_LIMIT = 240 // 摘要预览上限
 export const CHAT_MEMORY_SUMMARY_TARGET_LIMIT = 2500 // 摘要目标上限
 export const CHAT_MEMORY_PINNED_DECISION_LIMIT = 20 // 关键决策上限
@@ -31,9 +27,30 @@ export const chatThreadMessageSchema = z
     })
     .strict()
 
+const completeTurnMessagesSchema = z.array(chatThreadMessageSchema).superRefine((messages, context) => {
+    if (messages.length % 2 !== 0) {
+        context.addIssue({
+            code: 'custom',
+            message: 'Chat memory messages must contain complete user/assistant turns.',
+        })
+        return
+    }
+
+    for (let index = 0; index < messages.length; index += 2) {
+        if (messages[index]?.role !== 'user' || messages[index + 1]?.role !== 'assistant') {
+            context.addIssue({
+                code: 'custom',
+                message: 'Chat memory messages must contain complete user/assistant turns.',
+                path: [index],
+            })
+            return
+        }
+    }
+})
+
 export const aiMindThreadStateSchema = z
     .object({
-        messages: z.array(chatThreadMessageSchema).max(CHAT_MEMORY_RECENT_MESSAGE_LIMIT).default([]),
+        messages: completeTurnMessagesSchema.default([]),
         summary: z.string().max(CHAT_MEMORY_SUMMARY_TARGET_LIMIT).default(''),
         pinnedDecisions: z
             .array(z.string().trim().min(1).max(CHAT_MEMORY_PINNED_DECISION_TEXT_LIMIT))
@@ -45,7 +62,7 @@ export const aiMindThreadStateSchema = z
 
 export const aiMindCheckpointThreadStateSchema = z
     .object({
-        messages: z.array(chatThreadMessageSchema).default([]),
+        messages: completeTurnMessagesSchema.default([]),
         summary: z.string().max(CHAT_MEMORY_SUMMARY_TARGET_LIMIT).default(''),
         pinnedDecisions: z
             .array(z.string().trim().min(1).max(CHAT_MEMORY_PINNED_DECISION_TEXT_LIMIT))

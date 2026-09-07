@@ -1,4 +1,5 @@
-﻿import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
+﻿import type { BaseMessage } from '@langchain/core/messages'
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -8,6 +9,7 @@ const runtimeMocks = vi.hoisted(() => ({
     buildChatMemoryContextMessages: vi.fn(),
     buildSystemMessages: vi.fn(),
     buildUserMemoryContextMessages: vi.fn(),
+    createChatContextPreflight: vi.fn(),
     createChatSession: vi.fn(),
     decideAuthoritativeToolAnswer: vi.fn(),
     executeCapabilityContextInvocations: vi.fn(),
@@ -17,6 +19,7 @@ const runtimeMocks = vi.hoisted(() => ({
     hasVisibleAssistantText: vi.fn(),
     normalizeAndValidateToolCalls: vi.fn(),
     processCompletedTurnForMemory: vi.fn(),
+    prepareChatContext: vi.fn(),
     readThreadState: vi.fn(),
     resolveCapabilityContextInvocations: vi.fn(),
     resolveComposerContextInvocation: vi.fn(),
@@ -52,10 +55,7 @@ vi.mock('@/lib/ai/runtime/capability-context', () => ({
 vi.mock('@/lib/ai/runtime/chat-session', () => ({
     buildSystemMessages: runtimeMocks.buildSystemMessages,
     createChatSession: runtimeMocks.createChatSession,
-    withChatMemoryContextMessages: (
-        messages: Array<SystemMessage | HumanMessage>,
-        memoryContextMessages: Array<SystemMessage | HumanMessage>
-    ) => {
+    withChatMemoryContextMessages: (messages: BaseMessage[], memoryContextMessages: BaseMessage[]) => {
         if (memoryContextMessages.length === 0) {
             return messages
         }
@@ -96,6 +96,10 @@ vi.mock('@/lib/ai/runtime/chat-memory', () => ({
 
         return request.composer?.command?.name !== 'tasklist' && request.composer?.command?.name !== 'delivery-chain'
     },
+}))
+
+vi.mock('@/lib/ai/runtime/chat-context-preflight', () => ({
+    createChatContextPreflight: runtimeMocks.createChatContextPreflight,
 }))
 
 vi.mock('@/lib/ai/runtime/composer-context', () => ({
@@ -155,6 +159,7 @@ function createExecutionContext(): ResolvedChatExecutionContext {
                     tasklist: true,
                     toolCalling: true,
                 },
+                contextWindowTokens: 40000,
                 enabled: true,
                 family: 'ollama',
                 id: 'ollama/qwen3-8b',
@@ -395,6 +400,12 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         runtimeMocks.stripMessageText.mockImplementation((message: AIMessage) => message)
         runtimeMocks.touchConversation.mockResolvedValue(undefined)
         runtimeMocks.writeToolValidationErrors.mockReturnValue([])
+        runtimeMocks.prepareChatContext.mockImplementation(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
+            messages: assemble(runtimeMocks.buildChatMemoryContextMessages()),
+        }))
+        runtimeMocks.createChatContextPreflight.mockReturnValue({
+            prepare: runtimeMocks.prepareChatContext,
+        })
         vi.mocked(tasklistAgentRuntime.createTasklistAgentModelSet).mockReturnValue({ drafting: {}, planning: {} } as never)
         vi.mocked(tasklistAgentRuntime.createVersionPlanTasklistAgentSkeleton).mockReturnValue({
             runId: 'run-tasklist-test',
@@ -739,6 +750,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
                 signal: undefined,
             })
         )
+        expect(runtimeMocks.prepareChatContext).toHaveBeenCalledTimes(1)
     })
 
     it('UserMemory extraction failure 不影响已完成回答和 final-turn memory 收口', async () => {

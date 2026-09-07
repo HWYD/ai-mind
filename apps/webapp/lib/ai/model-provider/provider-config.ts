@@ -23,7 +23,9 @@ const defaultModelProviderConfig = {
     defaultModelId: 'ollama/qwen3-8b',
     doubaoBaseURL: 'https://ark.cn-beijing.volces.com/api/v3',
     maxInputChars: 12000,
+    ollamaContextTokens: 32768,
     ollamaBaseURL: 'http://127.0.0.1:11434',
+    operationalContextCapTokens: 128000,
     qwenBaseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     tasklistMaxOutputTokens: 8192,
     temperature: 0.7,
@@ -60,9 +62,14 @@ export function getModelProviderConfig(env: ModelProviderEnv = process.env): Mod
         },
         defaultModelId,
         maxInputChars: readPositiveInteger(env.AI_MIND_MAX_INPUT_CHARS, defaultModelProviderConfig.maxInputChars),
+        ollamaContextTokens: readPositiveInteger(env.AI_MIND_OLLAMA_CONTEXT_TOKENS, defaultModelProviderConfig.ollamaContextTokens),
         ollama: {
             baseURL: env.AI_MIND_OLLAMA_BASE_URL?.trim() || env.OLLAMA_BASE_URL?.trim() || defaultModelProviderConfig.ollamaBaseURL,
         },
+        operationalContextCapTokens: readPositiveInteger(
+            env.AI_MIND_OPERATIONAL_CONTEXT_CAP_TOKENS,
+            defaultModelProviderConfig.operationalContextCapTokens
+        ),
         qwen: {
             apiKey: env.AI_MIND_QWEN_API_KEY?.trim() || undefined,
             baseURL: env.AI_MIND_QWEN_BASE_URL?.trim() || defaultModelProviderConfig.qwenBaseURL,

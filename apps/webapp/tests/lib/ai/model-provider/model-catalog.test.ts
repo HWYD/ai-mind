@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { aiMindLlmProviders } from '@/lib/ai/model-provider'
 import { modelCatalog } from '@/lib/ai/model-provider/catalog/model-catalog'
+import { resolvePublicModelList } from '@/lib/ai/model-provider/catalog/resolve-public-model-list'
 
 describe('model catalog', () => {
     // 注意：family 与 provider 故意解耦。像 deepseek 这类家族允许在 catalog 中改走 qwen / doubao / deepseek，
@@ -34,5 +35,20 @@ describe('model catalog', () => {
                 id: 'deepseek/deepseek-v4-pro',
             })
         )
+    })
+
+    it('为每个模型保留仅服务端可见的物理上下文窗口', () => {
+        expect(modelCatalog.every(item => Number.isSafeInteger(item.contextWindowTokens) && item.contextWindowTokens > 0)).toBe(true)
+        expect(modelCatalog).toContainEqual(expect.objectContaining({ contextWindowTokens: 1_000_000, id: 'qwen/qwen3.7-max' }))
+        expect(modelCatalog).toContainEqual(expect.objectContaining({ contextWindowTokens: 40_000, id: 'ollama/qwen3-8b' }))
+    })
+
+    it('不向公开模型列表暴露物理上下文窗口', () => {
+        const publicModel = resolvePublicModelList({ AI_MIND_QWEN_API_KEY: 'qwen-key' }).models.find(
+            model => model.id === 'qwen/qwen3.6-flash'
+        )
+
+        expect(publicModel).toBeDefined()
+        expect(publicModel).not.toHaveProperty('contextWindowTokens')
     })
 })

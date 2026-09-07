@@ -11,6 +11,7 @@ import type {
 
 export interface ModelProviderCreateOptions {
     config: ModelProviderConfig
+    effectiveContextWindowTokens?: number
     enableReasoning?: boolean
     maxOutputTokens?: number
     maxRetries?: number

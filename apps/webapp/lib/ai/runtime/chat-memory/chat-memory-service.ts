@@ -1,14 +1,21 @@
 import { Annotation, type BaseCheckpointSaver, END, START, StateGraph } from '@langchain/langgraph'
 
+import { isAbortError, throwIfAborted } from '@/lib/ai/error-utils'
+import type { ContextBudget } from '@/lib/ai/model-provider'
+
 import { type UserMemoryService, userMemoryService } from '../user-memory'
 import { getChatMemoryCheckpointer } from './checkpointer-provider'
-import { type ChatMemoryCompactionGenerator, compactThreadStateWithResult } from './compaction'
+import {
+    type ChatMemoryCompactionGenerator,
+    type ChatMemoryCompactionResult,
+    compactThreadStateWithResult,
+    estimateChatMemoryTokens,
+} from './compaction'
 import { adaptFinalTurnCandidate, type FinalTurnCompletionStatus, type FinalTurnSource, hasDuplicateFinalTurn } from './final-turn-adapter'
 import { createChatThreadMessage } from './message-adapter'
 import { type ChatMemoryRuntimeConfig, getChatMemoryRuntimeConfig } from './runtime-config'
 import {
     type AiMindThreadState,
-    CHAT_MEMORY_RECENT_MESSAGE_LIMIT,
     type ChatThreadMessage,
     createEmptyThreadState,
     normalizeCheckpointThreadState,
@@ -57,17 +64,6 @@ function isEmptyState(state: AiMindThreadState): boolean {
     return state.messages.length === 0 && state.pinnedDecisions.length === 0 && state.summary.trim().length === 0
 }
 
-function toBoundedThreadState(state: AiMindThreadState): AiMindThreadState {
-    if (state.messages.length <= CHAT_MEMORY_RECENT_MESSAGE_LIMIT) {
-        return normalizeThreadState(state)
-    }
-
-    return normalizeThreadState({
-        ...state,
-        messages: state.messages.slice(-CHAT_MEMORY_RECENT_MESSAGE_LIMIT),
-    })
-}
-
 export interface ChatMemoryReadResult {
     restored: boolean
     state: AiMindThreadState
@@ -99,8 +95,23 @@ export interface AppendCompletedTurnOptions {
     }
 }
 
+export interface CompactThreadStateOptions {
+    force?: boolean
+    onStatus?: (event: ThreadMemoryStatusEvent) => void
+    promotionContext?: {
+        sessionId: string
+        sourceConversationId: string
+    }
+    signal?: AbortSignal
+}
+
 export interface ChatMemoryService {
     appendCompletedTurn(threadId: string, input: AppendCompletedTurnInput, options?: AppendCompletedTurnOptions): Promise<void>
+    compactThreadState(
+        threadId: string,
+        budget: ContextBudget,
+        options?: CompactThreadStateOptions
+    ): Promise<ChatMemoryCompactionResult | null>
     deleteThreadState(threadId: string): Promise<void>
     readThreadState(threadId: string): Promise<ChatMemoryReadResult>
     writeThreadState(threadId: string, state: AiMindThreadState): Promise<void>
@@ -136,9 +147,7 @@ export function createChatMemoryService(
 
     const readCheckpointState = async (threadId: string) => {
         if (!graph) {
-            logChatMemoryServiceEvent('read-skipped-disabled', {
-                threadId,
-            })
+            logChatMemoryServiceEvent('read-skipped-disabled', {})
             return createEmptyThreadState()
         }
 
@@ -171,7 +180,7 @@ export function createChatMemoryService(
             }
 
             const checkpointState = await readCheckpointState(threadId)
-            const state = toBoundedThreadState(checkpointState)
+            const state = normalizeThreadState(checkpointState)
             const restored = !isEmptyState(checkpointState)
 
             logChatMemoryServiceEvent('read-succeeded', {
@@ -180,7 +189,6 @@ export function createChatMemoryService(
                 rawMessageCount: checkpointState.messages.length,
                 restored,
                 summaryLength: state.summary.length,
-                threadId,
             })
 
             return {
@@ -197,6 +205,98 @@ export function createChatMemoryService(
             await graph.invoke(normalizeThreadState(state), getConfig(threadId))
         },
 
+        async compactThreadState(threadId, budget, compactOptions = {}) {
+            if (!graph) {
+                return null
+            }
+
+            throwIfAborted(compactOptions.signal)
+            const state = await readCheckpointState(threadId)
+            throwIfAborted(compactOptions.signal)
+
+            if (!compactOptions.force && estimateChatMemoryTokens(state) < budget.compactionTriggerTokens) {
+                return null
+            }
+
+            compactOptions.onStatus?.({
+                status: 'started',
+                message: '自动压缩上下文中',
+            })
+
+            let compactionResult: ChatMemoryCompactionResult | null
+
+            try {
+                compactionResult = await compactThreadStateWithResult(state, budget, options.compactionGenerator, {
+                    force: compactOptions.force,
+                    signal: compactOptions.signal,
+                })
+                throwIfAborted(compactOptions.signal)
+            } catch (error) {
+                compactOptions.onStatus?.({
+                    status: 'failed',
+                    message: isAbortError(error) || compactOptions.signal?.aborted ? '上下文自动压缩已取消' : '上下文自动压缩失败',
+                })
+                if (compactOptions.signal?.aborted) {
+                    throwIfAborted(compactOptions.signal)
+                }
+                throw error
+            }
+
+            if (!compactionResult?.wasCompacted) {
+                compactOptions.onStatus?.({
+                    status: 'failed',
+                    message: '上下文自动压缩失败',
+                })
+                logChatMemoryServiceEvent('compaction-write-skipped', {})
+                return null
+            }
+
+            try {
+                throwIfAborted(compactOptions.signal)
+                await this.writeThreadState(threadId, compactionResult.state)
+            } catch (error) {
+                compactOptions.onStatus?.({
+                    status: 'failed',
+                    message: isAbortError(error) || compactOptions.signal?.aborted ? '上下文自动压缩已取消' : '上下文自动压缩失败',
+                })
+                if (compactOptions.signal?.aborted) {
+                    throwIfAborted(compactOptions.signal)
+                }
+                throw error
+            }
+
+            compactOptions.onStatus?.({
+                status: 'succeeded',
+                message: '上下文已自动压缩',
+                pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
+                summaryLength: compactionResult.state.summary.length,
+            })
+            logChatMemoryServiceEvent('compaction-write-succeeded', {
+                messageCount: compactionResult.state.messages.length,
+                pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
+                summaryLength: compactionResult.state.summary.length,
+            })
+
+            const promotionContext = compactOptions.promotionContext
+
+            if (promotionContext?.sessionId && promotionContext.sourceConversationId) {
+                try {
+                    await pinnedDecisionPromotionService.promotePinnedDecisionDiff({
+                        nextPinnedDecisions: compactionResult.nextPinnedDecisions,
+                        previousPinnedDecisions: compactionResult.previousPinnedDecisions,
+                        sessionId: promotionContext.sessionId,
+                        sourceConversationId: promotionContext.sourceConversationId,
+                    })
+                } catch (error) {
+                    logChatMemoryServiceEvent('pinned-decision-promotion-failed', {
+                        errorName: error instanceof Error ? error.name : 'UnknownError',
+                    })
+                }
+            }
+
+            return compactionResult
+        },
+
         async appendCompletedTurn(threadId, input, appendOptions = {}) {
             const candidate = adaptFinalTurnCandidate(input)
 
@@ -205,7 +305,6 @@ export function createChatMemoryService(
                     assistantTextLength: typeof input.assistantText === 'string' ? input.assistantText.trim().length : 0,
                     hasGraph: Boolean(graph),
                     source: input.source ?? 'chat',
-                    threadId,
                     userTextLength: typeof input.userText === 'string' ? input.userText.trim().length : 0,
                 })
                 return
@@ -215,10 +314,7 @@ export function createChatMemoryService(
 
             if (hasDuplicateFinalTurn(state.messages, candidate)) {
                 logChatMemoryServiceEvent('append-skipped-duplicate', {
-                    assistantMessageId: candidate.assistantMessageId ?? null,
                     source: candidate.source,
-                    threadId,
-                    userMessageId: candidate.userMessageId ?? null,
                 })
                 return
             }
@@ -231,7 +327,6 @@ export function createChatMemoryService(
                     assistantTextLength: candidate.assistantText.length,
                     hasGraph: Boolean(graph),
                     source: candidate.source,
-                    threadId,
                     userTextLength: candidate.userText.length,
                 })
                 return
@@ -243,74 +338,17 @@ export function createChatMemoryService(
                 messages,
             }
 
-            if (messages.length > CHAT_MEMORY_RECENT_MESSAGE_LIMIT) {
-                appendOptions.onStatus?.({
-                    status: 'started',
-                    message: '自动压缩上下文中',
+            try {
+                await this.writeThreadState(threadId, nextState)
+            } catch (error) {
+                logChatMemoryServiceEvent('raw-append-failed', {
+                    errorName: error instanceof Error ? error.name : 'UnknownError',
                 })
-
-                try {
-                    const compactionResult = await compactThreadStateWithResult(nextState, options.compactionGenerator)
-
-                    if (!compactionResult) {
-                        appendOptions.onStatus?.({
-                            status: 'failed',
-                            message: '上下文自动压缩失败',
-                        })
-                        logChatMemoryServiceEvent('compaction-write-skipped', {
-                            messageCount: messages.length,
-                            threadId,
-                        })
-                        return
-                    }
-
-                    await this.writeThreadState(threadId, compactionResult.state)
-                    appendOptions.onStatus?.({
-                        status: 'succeeded',
-                        message: '上下文已自动压缩',
-                        pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
-                        summaryLength: compactionResult.state.summary.length,
-                    })
-                    logChatMemoryServiceEvent('compaction-write-succeeded', {
-                        messageCount: compactionResult.state.messages.length,
-                        pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
-                        summaryLength: compactionResult.state.summary.length,
-                        threadId,
-                    })
-
-                    const promotionContext = appendOptions.promotionContext
-
-                    if (promotionContext?.sessionId && promotionContext.sourceConversationId) {
-                        try {
-                            await pinnedDecisionPromotionService.promotePinnedDecisionDiff({
-                                nextPinnedDecisions: compactionResult.nextPinnedDecisions,
-                                previousPinnedDecisions: compactionResult.previousPinnedDecisions,
-                                sessionId: promotionContext.sessionId,
-                                sourceConversationId: promotionContext.sourceConversationId,
-                            })
-                        } catch (error) {
-                            logChatMemoryServiceEvent('pinned-decision-promotion-failed', {
-                                errorName: error instanceof Error ? error.name : 'UnknownError',
-                                threadId,
-                            })
-                        }
-                    }
-
-                    return
-                } catch (error) {
-                    appendOptions.onStatus?.({
-                        status: 'failed',
-                        message: '上下文自动压缩失败',
-                    })
-                    throw error
-                }
+                return
             }
-
-            await this.writeThreadState(threadId, nextState)
             logChatMemoryServiceEvent('append-write-succeeded', {
                 messageCount: nextState.messages.length,
                 source: candidate.source,
-                threadId,
             })
         },
     }
@@ -334,6 +372,9 @@ export function getChatMemoryService(
 export const chatMemoryService: ChatMemoryService = {
     appendCompletedTurn(threadId, input, options) {
         return getChatMemoryService().appendCompletedTurn(threadId, input, options)
+    },
+    compactThreadState(threadId, budget, options) {
+        return getChatMemoryService().compactThreadState(threadId, budget, options)
     },
     deleteThreadState(threadId) {
         return getChatMemoryService().deleteThreadState(threadId)

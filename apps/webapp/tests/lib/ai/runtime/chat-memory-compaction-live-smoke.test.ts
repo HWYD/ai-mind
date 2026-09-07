@@ -19,6 +19,11 @@ const candidateModelIds = (
     .split(',')
     .map(modelId => modelId.trim())
     .filter(Boolean)
+const configuredSmokeTimeoutMs = Number(process.env.AI_MIND_CHAT_MEMORY_COMPACTION_SMOKE_TIMEOUT_MS ?? 30_000)
+const smokeTimeoutMs =
+    Number.isFinite(configuredSmokeTimeoutMs) && configuredSmokeTimeoutMs >= 1_000
+        ? Math.min(Math.floor(configuredSmokeTimeoutMs), 120_000)
+        : 30_000
 
 function message(index: number, role: ChatThreadMessage['role'], text: string): ChatThreadMessage {
     return {
@@ -30,34 +35,36 @@ function message(index: number, role: ChatThreadMessage['role'], text: string): 
 }
 
 describeLiveSmoke('runtime/chat-memory live compaction smoke', () => {
-    it('当前 compaction model 可以生成 summary 和 pinned decisions', async () => {
-        const result = await generateStructuredCompaction({
-            messagesToCompact: [
-                message(1, 'user', '决定：v0.4.2 的 chat memory 不保存 Tasklist GraphState。'),
-                message(2, 'assistant', '已确认，这个边界需要作为长期约束保留。'),
-                message(3, 'user', '架构边界：Delivery Chain RuntimeArtifact 只能 run-local，不能进入 chat memory。'),
-                message(4, 'assistant', '收到，会把 Delivery Chain artifact 排除在普通 chat memory 外。'),
-            ],
-            previousPinnedDecisions: [],
-            previousSummary: '',
-            recentMessages: [
-                message(5, 'user', '继续基于这些边界排查压缩问题。'),
-                message(6, 'assistant', '我会只检查 ordinary chat memory 的压缩链路。'),
-            ],
-        })
-
-        // eslint-disable-next-line no-console
-        console.info(
-            '[chat-memory-compaction-live-smoke]',
-            JSON.stringify({
-                pinnedDecisionCount: result.pinnedDecisions.length,
-                summaryLength: result.summary.length,
+    it(
+        '当前 compaction model 可以生成 summary 和 pinned decisions',
+        async () => {
+            const result = await generateStructuredCompaction({
+                messages: [
+                    message(1, 'user', '决定：v0.4.2 的 chat memory 不保存 Tasklist GraphState。'),
+                    message(2, 'assistant', '已确认，这个边界需要作为长期约束保留。'),
+                    message(3, 'user', '架构边界：Delivery Chain RuntimeArtifact 只能 run-local，不能进入 chat memory。'),
+                    message(4, 'assistant', '收到，会把 Delivery Chain artifact 排除在普通 chat memory 外。'),
+                    message(5, 'user', '继续基于这些边界排查压缩问题。'),
+                    message(6, 'assistant', '我会只检查 ordinary chat memory 的压缩链路。'),
+                ],
+                previousPinnedDecisions: [],
+                previousSummary: '',
             })
-        )
 
-        expect(result.summary.trim().length).toBeGreaterThan(0)
-        expect(result.pinnedDecisions.length).toBeGreaterThan(0)
-    }, 30_000)
+            // eslint-disable-next-line no-console
+            console.info(
+                '[chat-memory-compaction-live-smoke]',
+                JSON.stringify({
+                    pinnedDecisionCount: result.pinnedDecisions.length,
+                    summaryLength: result.summary.length,
+                })
+            )
+
+            expect(result.summary.trim().length).toBeGreaterThan(0)
+            expect(result.pinnedDecisions.length).toBeGreaterThan(0)
+        },
+        smokeTimeoutMs
+    )
 
     it.each(candidateModelIds)(
         '候选模型 %s 支持 compaction structured output',
@@ -99,11 +106,9 @@ describeLiveSmoke('runtime/chat-memory live compaction smoke', () => {
                 JSON.stringify({
                     elapsedMs: Date.now() - startedAt,
                     modelId,
-                    pinnedDecisions: result.pinnedDecisions,
                     pinnedDecisionCount: result.pinnedDecisions.length,
                     provider: resolvedModelSelection.provider,
                     providerModel: resolvedModelSelection.providerModel,
-                    summary: result.summary,
                     summaryLength: result.summary.length,
                 })
             )
@@ -111,6 +116,6 @@ describeLiveSmoke('runtime/chat-memory live compaction smoke', () => {
             expect(result.summary.trim().length).toBeGreaterThan(0)
             expect(result.pinnedDecisions.length).toBeGreaterThan(0)
         },
-        30_000
+        smokeTimeoutMs
     )
 })

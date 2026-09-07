@@ -10,11 +10,12 @@ import { getRateLimitNoticeViewModel } from '../shared/message-list-utils'
 
 const streamAnimation = {
     animation: 'fadeIn',
-    duration: 90,
+    duration: 24,
     easing: 'ease-out',
     sep: 'word',
     stagger: 0,
 } as const
+const streamdownMode = 'streaming' as const
 
 export const TextPartView = memo(function TextPartView({ part, isStreaming = false }: { part: TextPart; isStreaming?: boolean }) {
     const rateLimitNotice = getRateLimitNoticeViewModel(part.text)
@@ -41,11 +42,7 @@ export const TextPartView = memo(function TextPartView({ part, isStreaming = fal
 
     return (
         <div className="ai-message-markdown text-[15px] leading-7 text-inherit">
-            <Streamdown
-                mode={isStreaming ? 'streaming' : 'static'}
-                isAnimating={isStreaming}
-                animated={isStreaming ? streamAnimation : false}
-            >
+            <Streamdown mode={streamdownMode} isAnimating={isStreaming} animated={streamAnimation}>
                 {part.text}
             </Streamdown>
         </div>

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { modelCatalog } from '@/lib/ai/model-provider/catalog/model-catalog'
-import { CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT } from '@/lib/ai/runtime/chat-memory'
 import { CHAT_MEMORY_COMPACTION_MODEL_ID, generateStructuredCompaction } from '@/lib/ai/runtime/chat-memory/compaction'
 
 const modelProviderMocks = vi.hoisted(() => {
@@ -56,25 +55,35 @@ describe('runtime/chat-memory structured compaction', () => {
             summary: '更早对话摘要。',
         })
 
-        const recentMessages = Array.from({ length: CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT }, (_, index) => ({
-            createdAt: new Date(index).toISOString(),
-            id: `recent-${index}`,
-            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
-            text: `recent ${index}`,
-        }))
-
         const result = await generateStructuredCompaction({
-            messagesToCompact: [
+            messages: [
                 {
                     createdAt: new Date(100).toISOString(),
                     id: 'old-1',
                     role: 'user',
                     text: '更早问题',
                 },
+                {
+                    createdAt: new Date(101).toISOString(),
+                    id: 'old-2',
+                    role: 'assistant',
+                    text: '更早回答',
+                },
+                {
+                    createdAt: new Date(102).toISOString(),
+                    id: 'recent-1',
+                    role: 'user',
+                    text: '最近问题',
+                },
+                {
+                    createdAt: new Date(103).toISOString(),
+                    id: 'recent-2',
+                    role: 'assistant',
+                    text: '最近回答',
+                },
             ],
             previousPinnedDecisions: ['旧边界'],
             previousSummary: '旧摘要',
-            recentMessages,
         })
 
         expect(result).toEqual({
@@ -89,6 +98,7 @@ describe('runtime/chat-memory structured compaction', () => {
             expect.objectContaining({
                 config: { marker: 'config' },
                 enableReasoning: false,
+                maxOutputTokens: 3000,
                 resolvedModelSelection: expect.objectContaining({
                     modelId: CHAT_MEMORY_COMPACTION_MODEL_ID,
                 }),

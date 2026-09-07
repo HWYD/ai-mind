@@ -121,6 +121,7 @@ describe('InstantMindPage integration', () => {
                 React.createElement('div', {
                     'data-testid': 'chat-message-list',
                     'data-actions-disabled': String(props.actionsDisabled),
+                    'data-has-header': String(props.header !== undefined),
                 }),
         }))
         vi.doMock('@/components/instamind/conversation-session/conversation-sidebar', () => ({
@@ -134,6 +135,7 @@ describe('InstantMindPage integration', () => {
                         'data-disabled': String(props.disabled),
                         'data-has-delete': String(typeof props.onDeleteConversation === 'function'),
                     }),
+                    props.notice as React.ReactNode,
                     React.createElement(
                         'button',
                         {
@@ -147,11 +149,16 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/conversation-session/conversation-mobile-selector', () => ({
             ConversationMobileSelector: (props: Record<string, unknown>) =>
-                React.createElement('div', {
-                    'data-testid': 'conversation-mobile-selector',
-                    'data-disabled': String(props.disabled),
-                    'data-title': String(props.selectedConversationTitle),
-                }),
+                React.createElement(
+                    React.Fragment,
+                    null,
+                    React.createElement('div', {
+                        'data-testid': 'conversation-mobile-selector',
+                        'data-disabled': String(props.disabled),
+                        'data-title': String(props.selectedConversationTitle),
+                    }),
+                    props.notice as React.ReactNode
+                ),
         }))
         vi.doMock('@/components/instamind/human-review/human-review-composer-panel', () => ({
             HumanReviewComposerPanel: () => React.createElement('div', { 'data-testid': 'human-review-panel' }),
@@ -183,7 +190,6 @@ describe('InstantMindPage integration', () => {
         }))
         vi.doMock('@/components/instamind/use-chat-stream', () => ({
             useChatStream: () => ({
-                imageQuotaError: '今日生图次数已用完（3 次）。',
                 messages: [],
                 status: 'streaming',
                 hydrationStatus: 'ready',
@@ -214,11 +220,9 @@ describe('InstantMindPage integration', () => {
             expect(lastCall?.[0]?.interactionLocked).toBe(true)
         })
 
-        expect(document.querySelector('[data-slot="alert"]')).toBeTruthy()
-        expect(screen.getByText('今日生图次数已达上限').textContent).toBe('今日生图次数已达上限')
-        expect(screen.getByText('今日生图次数已用完（3 次）。').textContent).toBe('今日生图次数已用完（3 次）。')
-        expect(screen.getByText('会话列表暂时不可用').textContent).toBe('会话列表暂时不可用')
-        expect(screen.getByText('Conversation registry is unavailable.').textContent).toBe('Conversation registry is unavailable.')
+        expect(screen.getAllByText('会话服务暂时不可用')).toHaveLength(2)
+        expect(screen.getAllByText('Conversation registry is unavailable.')).toHaveLength(2)
+        expect(screen.getAllByRole('button', { name: '重试加载会话' })).toHaveLength(2)
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-disabled')).toBe('true')
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-has-delete')).toBe('true')
         expect(screen.getByTestId('conversation-mobile-selector').getAttribute('data-disabled')).toBe('true')
@@ -227,6 +231,7 @@ describe('InstantMindPage integration', () => {
         expect(screen.getByTestId('chat-composer').getAttribute('data-submit-disabled')).toBe('false')
         expect(screen.getByTestId('chat-composer').getAttribute('data-status')).toBe('streaming')
         expect(screen.getByTestId('chat-message-list').getAttribute('data-actions-disabled')).toBe('false')
+        expect(screen.getByTestId('chat-message-list').getAttribute('data-has-header')).toBe('false')
         expect(createConversation).not.toHaveBeenCalled()
         expect(selectConversation).not.toHaveBeenCalled()
         expect(cancel).not.toHaveBeenCalled()
@@ -382,7 +387,8 @@ describe('InstantMindPage integration', () => {
         expect(instantMindPage?.className).toContain('overflow-hidden')
         expect(instantMindPage?.getAttribute('data-slot')).toBe('instant-mind-page')
         expect(instantMindPage?.style.getPropertyValue('--chat-scrollbar-width')).toBe('')
-        expect(messageViewport?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(true)
+        expect(messageViewport?.contains(screen.getByTestId('conversation-mobile-selector'))).toBe(false)
+        expect(messageViewport?.parentElement?.previousElementSibling).toBe(screen.getByTestId('conversation-mobile-selector'))
         expect(messageContent?.style.paddingBottom).toBe('')
         expect(chatMessageListPropsSpy).toHaveBeenLastCalledWith(
             expect.objectContaining({
@@ -749,6 +755,9 @@ describe('InstantMindPage integration', () => {
         expect(screen.getByText('当前显示的是浏览器本地只读缓存，服务端会话上下文暂时不可用。').textContent).toContain(
             '服务端会话上下文暂时不可用'
         )
+        const readOnlyAlert = screen.getByText('本地只读缓存').closest('[data-slot="alert"]')
+        expect(document.querySelector('[data-slot="chat-composer-column"]')?.contains(readOnlyAlert)).toBe(true)
+        expect(document.querySelector('[data-slot="chat-message-viewport"]')?.contains(readOnlyAlert)).toBe(false)
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-selection-disabled')).toBe('false')
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-create-disabled')).toBe('true')
         expect(screen.getByTestId('conversation-sidebar').getAttribute('data-delete-disabled')).toBe('true')
@@ -768,7 +777,6 @@ describe('InstantMindPage integration', () => {
     })
 
     it('positions a newly hydrated current conversation before revealing its history', async () => {
-        const cancelConversationEntryPositioning = vi.fn()
         let finishEntryPositioningA: (() => void) | undefined
         let finishEntryPositioningB: (() => void) | undefined
         let startEntryPositioning: FrameRequestCallback | undefined
@@ -811,7 +819,6 @@ describe('InstantMindPage integration', () => {
             useChatScrollPolicy: () => ({
                 composerContainerRef: { current: null },
                 scrollViewportRef,
-                cancelConversationEntryPositioning,
                 positionConversationEntryAtBottom,
                 resetScrollPolicyForNewTurn: vi.fn(),
                 restoreFollowAndScrollToEnd: vi.fn(),
@@ -837,7 +844,6 @@ describe('InstantMindPage integration', () => {
                     sequence: selectedConversationId === 'conv-entry-a' ? 1 : 2,
                 },
                 hydrationStatus: 'ready',
-                imageQuotaError: null,
                 messageConversationId: selectedConversationId,
                 messages: [],
                 pendingInterrupt: null,
@@ -864,6 +870,7 @@ describe('InstantMindPage integration', () => {
                 isReadOnlyCache: false,
                 readOnlyCacheMessage: null,
                 retryRecovery: vi.fn(),
+                presentationKey: selectedConversationId,
                 selectedConversation: {
                     id: selectedConversationId,
                     title: 'Entry',
@@ -892,8 +899,9 @@ describe('InstantMindPage integration', () => {
         const layoutSkeleton = document.querySelector('[data-slot="conversation-entry-layout-skeleton"]')
         expect(messageViewport.className).toContain('overflow-y-hidden')
         expect(layoutSkeleton).toBeTruthy()
-        expect(layoutSkeleton?.className).toContain('lg:left-[var(--conversation-sidebar-width)]')
+        expect(layoutSkeleton?.className).not.toContain('lg:left-[var(--conversation-sidebar-width)]')
         expect(messageViewport.contains(layoutSkeleton)).toBe(false)
+        expect(messageViewport.parentElement?.contains(layoutSkeleton)).toBe(true)
 
         act(() => {
             startEntryPositioning?.(0)
@@ -909,7 +917,6 @@ describe('InstantMindPage integration', () => {
             expect.any(Function)
         )
         expect(document.querySelector('[data-slot="conversation-history-end-anchor"]')).toBeNull()
-        expect(cancelConversationEntryPositioning).toHaveBeenCalledTimes(1)
         expect(document.querySelector('[data-slot="conversation-history-presentation"]')?.getAttribute('data-entry-positioned')).toBe(
             'false'
         )
@@ -933,7 +940,6 @@ describe('InstantMindPage integration', () => {
         selectedConversationId = 'conv-entry-b'
         page.rerender(React.createElement(InstantMindPage, { initialChatModelsState }))
 
-        expect(cancelConversationEntryPositioning).toHaveBeenCalledTimes(2)
         expect((document.querySelector('main') as HTMLElement).style.getPropertyValue('--chat-scrollbar-width')).toBe('')
         expect(positionConversationEntryAtBottom).toHaveBeenCalledTimes(1)
         expect(messageViewport.className).toContain('overflow-y-hidden')
@@ -944,9 +950,6 @@ describe('InstantMindPage integration', () => {
         })
 
         expect(positionConversationEntryAtBottom).toHaveBeenCalledTimes(2)
-        expect(cancelConversationEntryPositioning.mock.invocationCallOrder[1]).toBeLessThan(
-            positionConversationEntryAtBottom.mock.invocationCallOrder[1] ?? Number.POSITIVE_INFINITY
-        )
 
         expect(document.querySelector('[data-slot="conversation-history-presentation"]')?.getAttribute('data-entry-positioned')).toBe(
             'false'

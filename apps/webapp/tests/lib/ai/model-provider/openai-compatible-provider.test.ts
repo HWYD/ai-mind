@@ -4,20 +4,23 @@ import type { ModelProviderConfig, ResolvedModelSelection } from '@/lib/ai/model
 import { OpenAICompatibleProvider, OpenAICompatibleProviderError } from '@/lib/ai/model-provider/providers/openai-compatible-provider'
 
 function createTestConfig(overrides: Partial<ModelProviderConfig> = {}): ModelProviderConfig {
-    return {
+    const config: ModelProviderConfig = {
         allowedProviders: ['deepseek', 'qwen', 'doubao'],
         chatMaxOutputTokens: 4096,
         deepseek: { apiKey: undefined, baseURL: 'https://api.deepseek.com' },
         defaultModelId: 'deepseek/deepseek-v4-flash',
         doubao: { apiKey: undefined, baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
         maxInputChars: 12000,
+        ollamaContextTokens: 32768,
         ollama: { baseURL: 'http://127.0.0.1:11434' },
+        operationalContextCapTokens: 128000,
         qwen: { apiKey: undefined, baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
         tasklistMaxOutputTokens: 8192,
         temperature: 0.7,
         timeoutMs: 60000,
-        ...overrides,
     }
+
+    return Object.assign(config, overrides)
 }
 
 function createDeepSeekSelection(overrides: Partial<ResolvedModelSelection> = {}): ResolvedModelSelection {
@@ -32,6 +35,7 @@ function createDeepSeekSelection(overrides: Partial<ResolvedModelSelection> = {}
                 tasklist: true,
                 toolCalling: true,
             },
+            contextWindowTokens: 1_000_000,
             enabled: true,
             family: 'deepseek',
             id: 'deepseek/deepseek-v4-flash',
@@ -60,6 +64,7 @@ function createQwenSelection(): ResolvedModelSelection {
                 tasklist: true,
                 toolCalling: true,
             },
+            contextWindowTokens: 1_000_000,
             enabled: true,
             family: 'qwen',
             id: 'qwen/qwen3.6-flash',

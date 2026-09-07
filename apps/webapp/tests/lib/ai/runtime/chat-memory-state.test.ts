@@ -3,10 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
     aiMindThreadStateSchema,
     CHAT_MEMORY_PINNED_DECISION_LIMIT,
-    CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT,
-    CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT,
-    CHAT_MEMORY_RECENT_MESSAGE_LIMIT,
-    CHAT_MEMORY_RECENT_TURN_LIMIT,
     createEmptyThreadState,
     normalizeCheckpointThreadState,
     threadHydrationDtoSchema,
@@ -30,18 +26,18 @@ describe('runtime/chat-memory state schema', () => {
         })
     })
 
-    it('只允许 bounded text-only messages', () => {
+    it('只允许完整的 text-only user/assistant turns', () => {
         expect(
             aiMindThreadStateSchema.parse({
-                messages: Array.from({ length: CHAT_MEMORY_RECENT_MESSAGE_LIMIT }, (_, index) => createMessage(index)),
+                messages: Array.from({ length: 6 }, (_, index) => createMessage(index)),
                 pinnedDecisions: [],
                 summary: '',
             }).messages
-        ).toHaveLength(CHAT_MEMORY_RECENT_MESSAGE_LIMIT)
+        ).toHaveLength(6)
 
         expect(() =>
             aiMindThreadStateSchema.parse({
-                messages: Array.from({ length: CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 1 }, (_, index) => createMessage(index)),
+                messages: Array.from({ length: 5 }, (_, index) => createMessage(index)),
                 pinnedDecisions: [],
                 summary: '',
             })
@@ -50,21 +46,12 @@ describe('runtime/chat-memory state schema', () => {
 
     it('checkpoint parser 允许读取旧的 over-limit messages，交由 service 后续压缩', () => {
         const state = normalizeCheckpointThreadState({
-            messages: Array.from({ length: CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 2 }, (_, index) => createMessage(index)),
+            messages: Array.from({ length: 6 }, (_, index) => createMessage(index)),
             pinnedDecisions: [],
             summary: '',
         })
 
-        expect(state.messages).toHaveLength(CHAT_MEMORY_RECENT_MESSAGE_LIMIT + 2)
-    })
-
-    it('recent turn limit 以完整轮次定义，并派生消息窗口', () => {
-        expect(CHAT_MEMORY_RECENT_TURN_LIMIT).toBeGreaterThanOrEqual(2)
-        expect(CHAT_MEMORY_RECENT_MESSAGE_LIMIT).toBe(CHAT_MEMORY_RECENT_TURN_LIMIT * 2)
-        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT).toBeGreaterThanOrEqual(1)
-        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT).toBeLessThanOrEqual(CHAT_MEMORY_RECENT_TURN_LIMIT)
-        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT).toBe(CHAT_MEMORY_POST_COMPACTION_RECENT_TURN_LIMIT * 2)
-        expect(CHAT_MEMORY_POST_COMPACTION_RECENT_MESSAGE_LIMIT).toBeLessThanOrEqual(CHAT_MEMORY_RECENT_MESSAGE_LIMIT)
+        expect(state.messages).toHaveLength(6)
     })
 
     it('限制 summary 和 pinned decisions', () => {

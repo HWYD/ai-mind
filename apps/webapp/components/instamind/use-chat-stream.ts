@@ -271,7 +271,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [messages, setMessages] = useState<MindMessage[]>([])
     const [status, setStatus] = useState<ChatStatus>('ready')
     const [error, setError] = useState<string | null>(null)
-    const [imageQuotaError, setImageQuotaError] = useState<string | null>(null)
     const [hydrationError, setHydrationError] = useState<string | null>(null)
     const [hydrationStatus, setHydrationStatus] = useState<ConversationHydrationStatus>('idle')
     const [messageConversationId, setMessageConversationId] = useState<string | null>(null)
@@ -280,6 +279,9 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const [threadMemoryStatusHint, setThreadMemoryStatusHint] = useState<ThreadMemoryStatusHint | null>(null)
     const [hydrationRetryToken, setHydrationRetryToken] = useState(0)
     const [streamRecoveryStatus, setStreamRecoveryStatus] = useState<StreamRecoveryStatus>('idle')
+    const [streamCompletionRevision, setStreamCompletionRevision] = useState(0)
+    const [acceptedTurnRevision, setAcceptedTurnRevision] = useState(0)
+    const [shouldPositionAcceptedTurn, setShouldPositionAcceptedTurn] = useState(false)
 
     const messagesRef = useRef(messages)
     const activeConversationIdRef = useRef<string | null>(null)
@@ -685,6 +687,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 })
                 commitStreamReduction(current => reduceStreamChunk(current, chunk))
                 return
+            case 'finish':
+                commitStreamReduction(current => reduceStreamChunk(current, chunk))
+                setStreamCompletionRevision(current => current + 1)
+                return
             default:
                 // 结构性 chunk 统一交给 reducer：start/tool/resource/prompt/artifact/error/finish 等消息树变化都在一个入口收口。
                 commitStreamReduction(current => reduceStreamChunk(current, chunk))
@@ -914,7 +920,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         baseMessages: MindMessage[],
         input: string,
         composer?: ChatComposerPayload,
-        displaySegments?: ChatComposerDisplaySegment[]
+        displaySegments?: ChatComposerDisplaySegment[],
+        positionAcceptedTurn = false
     ) {
         const text = resolveComposerSubmissionText(input, composer)
         const requestConversationId = conversationId
@@ -943,7 +950,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         streamMessageStateRef.current = createStreamMessageState(nextMessages)
         setMessages(nextMessages)
         setError(null)
-        setImageQuotaError(null)
+        setShouldPositionAcceptedTurn(positionAcceptedTurn && stableBaseMessages.length > 0)
+        setAcceptedTurnRevision(current => current + 1)
         setStatus('submitted')
         setStreamRecoveryStatus('idle')
         abortControllerRef.current = controller
@@ -1084,13 +1092,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
 
             const errorMessage = (requestError as ChatRequestError).userMessage ?? getErrorMessage(requestError)
 
-            if (
-                (composer?.command?.name === 'image' || /^\s*\/image(?=\s|$)/u.test(input)) &&
-                (requestError as ChatRequestError).code === 'MODEL_PROVIDER_RATE_LIMITED'
-            ) {
-                setImageQuotaError(errorMessage)
-            }
-
             surfaceAssistantErrorReply(errorMessage)
             setStatus('ready')
         } finally {
@@ -1113,7 +1114,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     }
 
     async function sendMessage(input: string, composer?: ChatComposerPayload, displaySegments?: ChatComposerDisplaySegment[]) {
-        return submitTurn(messagesRef.current, input, composer, displaySegments)
+        return submitTurn(messagesRef.current, input, composer, displaySegments, true)
     }
 
     function retryHydration() {
@@ -1143,6 +1144,8 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         textBuffer.clear()
         setThreadMemoryStatusHint(null)
         setError(null)
+        setShouldPositionAcceptedTurn(false)
+        setAcceptedTurnRevision(current => current + 1)
         setStatus('submitted')
         setStreamRecoveryStatus('reconnecting')
         abortControllerRef.current = controller
@@ -1299,13 +1302,15 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
         messages,
         status,
         error,
-        imageQuotaError,
         hydrationError,
         hydrationStatus,
         messageConversationId,
         historyEntryReady,
         readOnlyCacheMessage,
         streamRecoveryStatus,
+        streamCompletionRevision,
+        acceptedTurnRevision,
+        shouldPositionAcceptedTurn,
         threadMemoryStatusHint,
         pendingInterrupt: findPendingAgentInterrupt(messages),
         sendMessage,

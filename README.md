@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> 当前发布候选为 v0.5.3：Long Message Virtualization。它以免费 `react-virtuoso` 对非空消息列表执行可视区渲染，并把底层滚动与业务 Scroll Policy 明确分层；长会话、动态高度和流式阅读意图仍遵循同一条聊天体验链路。
+> 当前本地版本为 v0.5.4：Token-aware Memory Compaction。它以模型感知的 token budget 管理普通聊天记忆，统一完整输入 preflight 与失败回退，并在 Composer 中提供无操作的聊天记忆用量提示；尚未创建 tag 或 GitHub Release。
 
 ## 项目解决的问题
 
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前发布候选：`v0.5.3 Long Message Virtualization`。
+当前阶段：`Runtime Skeleton / MVP`，当前本地版本：`v0.5.4 Token-aware Memory Compaction`。
 
 已经验证：
 
@@ -220,6 +220,8 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - browser-session scoped long-term UserMemory baseline。
 - browser-local recent conversation restore、rich UI snapshot persistence 与单会话删除。
 - 长消息可视区渲染、动态高度估算与本地高度提示。
+- token-aware chat memory compaction、完整输入 preflight 与失败后的 ephemeral fit。
+- Composer chat-memory usage hint（无操作圆环与 Tooltip）。
 
 当前非目标：
 
@@ -256,19 +258,24 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前发布候选：v0.5.3 Long Message Virtualization
+## 当前版本：v0.5.4 Token-aware Memory Compaction
 
-v0.5.3 为长会话建立统一的可视区渲染路径：
+v0.5.4 让普通聊天的可见记忆按 token budget，而不是按固定消息数进行压缩：
 
-- 非空消息列表由免费 `react-virtuoso` 负责底层滚动、可见区挂载和动态尺寸测量，完整会话消息仍保留在当前数据模型中。
-- AI Mind 的 Scroll Policy 只决定历史首次定位、流式跟随、用户阅读锁定和“回到底部”入口，不再与 virtualizer 竞争像素滚动控制权。
-- 图片、Markdown、代码、Tool / Resource / Prompt / Agent / Workflow 等异构消息使用结构化初始高度估算；已完成历史可保留与会话和布局签名隔离的本地高度提示，失效时自动回退。
-- 重要的 Reasoning、Agent、Workflow 和详情展开状态可跨离屏回收保持；静态阅读不会因测量、图片或 Composer 高度变化被自动拉回末尾。
-- 历史会话先显示与消息列对齐的加载骨架，确认尾部可见后一次性揭示，避免内容列横移、滚动条突变或旧会话入口闪现。
+- Model Catalog 的物理窗口与产品运行窗口分离；云端普通聊天最多使用 128K，Ollama 最多使用 32K，并在本地 Provider 显式传入 `numCtx`。
+- Chat Orchestrator 在 direct、tool、Composer 与 Capability 路径调用模型前，对 system、Tool、UserMemory、chat memory 和最新问题组成的完整输入统一预检。
+- 持久化 compaction 只接受完整、缩小且位于目标预算内的候选；生成、校验或保存失败时不覆盖 checkpoint，当前请求仍以只读 ephemeral fit 继续。
+- Composer 在桌面 skill-mode 工具栏展示无数字的圆环。hover 或 keyboard focus 显示聊天记忆的已使用百分比和当前运行窗口；它不提供手工压缩操作。
+- 虚拟聊天采用持久跟随意图：首问升格保持列表，完成后的建议和图片仍跟随；上翻或手动展开进入阅读，到底按钮或向下回底恢复。
+- 短暂操作反馈统一使用顶部居中的 Base UI Messages；会话、只读缓存和回复故障显示在对应功能区域，移动会话导航不进入虚拟消息列表。
 
-本版本不增加服务端 cursor 分页、消息 API / Stream DTO、数据库 schema、跨设备阅读位置或 Electron IPC；离屏消息不参与浏览器原生全文查找和可访问树。详细设计见 [v0.5.3 Version](./docs/versions/v0.5.3-message-virtualization.md)、[Release Note](./docs/releases/v0.5.3.md) 和 [Tasklist](./docs/tasklists/v0.5.3-message-virtualization-tasklist.md)。
+本版本不扩大已有 hydration DTO、Stream DTO、公开模型列表或数据库 schema，不把 Tool/Agent 内部 transcript 写入 chat memory，也不以模型物理窗口直接作为产品运行上限。详细设计见 [v0.5.4 Version](./docs/versions/v0.5.4-token-aware-memory-compaction.md)、[Release Note](./docs/releases/v0.5.4.md) 和 [Tasklist](./docs/tasklists/v0.5.4-token-aware-memory-compaction-tasklist.md)。
 
-## 上一版本：v0.5.2 Conversation Entry Without Scroll Flash
+## 上一版本：v0.5.3 Long Message Virtualization
+
+v0.5.3 为长会话建立统一的可视区渲染路径：非空消息列表使用 `react-virtuoso` 管理可见区和动态高度，Scroll Policy 保持业务滚动意图，离屏详情状态与静态阅读行为仍被保留。详细设计见 [v0.5.3 Version](./docs/versions/v0.5.3-message-virtualization.md)、[Release Note](./docs/releases/v0.5.3.md) 和 [Tasklist](./docs/tasklists/v0.5.3-message-virtualization-tasklist.md)。
+
+## 更早版本：v0.5.2 Conversation Entry Without Scroll Flash
 
 v0.5.2 收口已有历史会话的进入与切换体验：历史会话首次揭示前完成尾部定位，消息区成为独立全高滚动视口，并保持 Composer 安全区、稳定 gutter 与本地优先切换语义。详细设计见 [v0.5.2 Version](./docs/versions/v0.5.2-conversation-entry-no-flash.md)、[Release Note](./docs/releases/v0.5.2.md) 和 [Tasklist](./docs/tasklists/v0.5.2-conversation-entry-no-flash-tasklist.md)。
 
@@ -368,7 +375,7 @@ v0.4.9 的边界非常明确：
 - Skill 命中与 Prompt 执行事实展示。
 - 统一 `error` chunk 语义。
 - `authoritative answer`：在单工具确定性结果场景下支持工具结果直出，减少模型二次改写带来的偏差。
-- 普通 chat 采用 server-authoritative memory：前端 payload 可继续携带本地历史用于 UI 兼容，后端模型上下文只取当前 user turn，并从 ThreadState 注入 recent messages + summary + pinned decisions。
+- 普通 chat 采用 server-authoritative memory：前端 payload 可继续携带本地历史用于 UI 兼容，后端模型上下文只取当前 user turn，并从 ThreadState 注入 recent messages + summary + pinned decisions；token-aware compaction 和完整输入 preflight 保证 memory 不会单独挤出当前回答。
 - browser-session scoped `UserMemory`：普通 text chat 和 tool-assisted ordinary chat 可按相关性注入长期用户偏好、稳定用户背景、稳定指令和工作流偏好。
 - safe final-turn memory：tool / MCP / Tasklist / Delivery 的最终用户可见问答可在刷新后恢复，但中间执行态仍不进入 memory。
 - post-final-turn background memory extraction：每个 eligible ordinary completed turn 在 final turn 后 best-effort 抽取 `0..N` 长期记忆候选，并经过 deterministic validation / dedupe / suppression 后入库。
@@ -385,7 +392,7 @@ v0.4.9 的边界非常明确：
 - `GET /api/ai/models` 公开白名单模型列表。
 - 前端“线上模型 / 本地模型”分组选择器。
 - Provider 错误标准化与脱敏日志。
-- 输入字符、输出 token、timeout 和默认限流边界。
+- 输入字符、输出 token、timeout、128K 云端 / 32K Ollama 运行窗口和默认限流边界。
 - usage / token best-effort 观测。
 
 ### Skills
@@ -632,9 +639,12 @@ pnpm exec turbo run build:watch:transpile build:watch:types --filter=@ai-mind/st
 AI_MIND_DEFAULT_MODEL_ID=ollama/qwen3-8b
 AI_MIND_ALLOWED_PROVIDERS=ollama
 AI_MIND_OLLAMA_BASE_URL=http://127.0.0.1:11434
+AI_MIND_OLLAMA_CONTEXT_TOKENS=32768
 ```
 
 Ollama 的底层模型名由服务端 Catalog 管理，不提供 `AI_MIND_OLLAMA_MODEL`。首次运行前请先拉取对应模型，例如 `ollama pull qwen3:8b`。
+
+云端普通聊天默认以 `AI_MIND_OPERATIONAL_CONTEXT_CAP_TOKENS=128000` 作为运行窗口；Ollama 默认以 `AI_MIND_OLLAMA_CONTEXT_TOKENS=32768` 作为运行窗口和 `numCtx`。这两个值是运行策略，不会扩大模型 artifact 或云模型的物理窗口。
 
 本地开发也可以使用 DeepSeek 或 Qwen。推荐把真实 Key 放在操作系统用户环境变量、部署平台 Secret 或其他工作区外的密钥存储中，修改后重启终端和开发服务：
 
@@ -802,6 +812,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.5.1  | Chat Experience & Image Reliability                | 扩容近期会话、改进标题与加载反馈、增加受限本地图片恢复和分层重试，并补充桌面/移动项目菜单                                                                                       |
 | v0.5.2  | Conversation Entry Without Scroll Flash            | 历史会话首次揭示直接到达最新消息；全高消息滚动视口与悬浮 Composer 保持稳定 gutter、列对齐和本地优先切换语义                                                                     |
 | v0.5.3  | Long Message Virtualization                        | 以免费 `react-virtuoso` 实现统一消息虚拟化、动态高度估算与单一滚动所有权，并保留流式阅读意图和离屏详情状态                                                                      |
+| v0.5.4  | Token-aware Memory Compaction                      | 用模型感知 token budget 替代固定消息数压缩，统一完整输入 preflight、失败回退与 128K/32K 运行窗口，并收口虚拟滚动、Composer 用量和全局反馈体验                                   |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
@@ -842,6 +853,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 - [x] UserMemory vector semantic retrieval baseline
 - [x] pnpm / Turborepo Monorepo 工程治理
 - [x] 长消息可视区渲染与动态高度稳定化
+- [x] Token-aware chat memory compaction 与 Composer 记忆用量提示
 - [ ] Redis / KV 分布式限流
 - [ ] 持久化 UsageLog 与成本观测
 - [ ] Agent Trace 持久化

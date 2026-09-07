@@ -13,7 +13,9 @@ function createTestConfig(apiKey?: string): ModelProviderConfig {
         defaultModelId: 'qwen/qwen3.6-flash',
         doubao: { apiKey: undefined, baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
         maxInputChars: 12000,
+        ollamaContextTokens: 32768,
         ollama: { baseURL: 'http://127.0.0.1:11434' },
+        operationalContextCapTokens: 128000,
         qwen: {
             apiKey,
             baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -36,6 +38,7 @@ function createTestSelection(): ResolvedModelSelection {
                 tasklist: true,
                 toolCalling: true,
             },
+            contextWindowTokens: 1_000_000,
             enabled: true,
             family: 'qwen',
             id: 'qwen/qwen3.6-flash',

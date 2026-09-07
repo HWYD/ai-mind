@@ -74,4 +74,27 @@ describe('useStreamTextBuffer', () => {
 
         expect(flushTextDeltas).toHaveBeenCalledTimes(1)
     })
+
+    it('累计达到 48 个 Unicode 码点时在时间窗口前提前刷新合并后的内容', () => {
+        const flushTextDeltas = vi.fn()
+        const ref = createRef<StreamTextBufferHandle>()
+
+        render(<StreamTextBufferHarness ref={ref} flushTextDeltas={flushTextDeltas} />)
+
+        act(() => {
+            ref.current?.enqueue('message-1', 'part-1', 'text', 'a'.repeat(16))
+            ref.current?.enqueue('message-1', 'part-1', 'text', 'b'.repeat(16))
+            ref.current?.enqueue('message-1', 'part-1', 'text', 'c'.repeat(16))
+            vi.advanceTimersByTime(0)
+        })
+
+        expect(flushTextDeltas).toHaveBeenCalledWith([
+            {
+                delta: 'a'.repeat(16) + 'b'.repeat(16) + 'c'.repeat(16),
+                messageId: 'message-1',
+                partId: 'part-1',
+                partType: 'text',
+            },
+        ])
+    })
 })

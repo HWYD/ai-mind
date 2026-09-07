@@ -31,6 +31,7 @@ export class OllamaProvider implements ModelProvider {
             maxRetries: options.maxRetries,
             onFailedAttempt: options.onFailedAttempt,
             model: resolvedModelSelection.providerModel,
+            numCtx: options.effectiveContextWindowTokens,
             numPredict: maxOutputTokens,
             streaming: options.streaming ?? true,
             temperature,

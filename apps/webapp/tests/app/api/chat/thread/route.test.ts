@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GET } from '@/app/api/chat/thread/route'
 import { buildChatConversationThreadId, chatMemoryService, conversationRegistryService } from '@/lib/ai/runtime/chat-memory'
-import * as chatMemoryCompaction from '@/lib/ai/runtime/chat-memory/compaction'
 
 const env = {
     AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
@@ -155,17 +154,6 @@ describe('GET /api/chat/thread', () => {
         const sessionId = `structured-session-${Date.now()}`
         const threadId = buildChatConversationThreadId(sessionId, 'conv-structured', env)
         const longDeliveryReport = `# Delivery Chain Report\n\n${'A'.repeat(8_400)}`
-        const compactThreadStateSpy = vi.spyOn(chatMemoryCompaction, 'compactThreadStateWithResult').mockImplementation(async state => ({
-            nextPinnedDecisions: ['保留结构化 final turn 的文本记忆'],
-            previousPinnedDecisions: state.pinnedDecisions,
-            state: {
-                lastCompactedAt: '2026-07-04T00:00:00.000Z',
-                messages: state.messages.slice(-2),
-                pinnedDecisions: ['保留结构化 final turn 的文本记忆'],
-                summary: '之前的 tool 与 tasklist final turn 已压缩进摘要。',
-            },
-        }))
-
         await conversationRegistryService.createConversation(sessionId, {
             conversationId: 'conv-structured',
             hasMessages: true,
@@ -208,12 +196,10 @@ describe('GET /api/chat/thread', () => {
         expect(response.status).toBe(200)
         expect(body.conversationId).toBe('conv-structured')
         expect(body.threadId).toBe(threadId)
-        expect(compactThreadStateSpy).toHaveBeenCalledTimes(1)
-        expect(body.messages).toHaveLength(2)
-        expect(body.messages.map((message: { role: string }) => message.role)).toEqual(['user', 'assistant'])
-        expect(body.messages[0]?.parts?.[0]?.text).toBe('生成交付计划')
-        expect(body.messages[1]?.parts?.[0]?.text.length).toBeLessThanOrEqual(8_000)
-        expect(body.pinnedDecisions).toEqual(['保留结构化 final turn 的文本记忆'])
+        expect(body.messages).toHaveLength(6)
+        expect(body.messages.at(-2)?.parts?.[0]?.text).toBe('生成交付计划')
+        expect(body.messages.at(-1)?.parts?.[0]?.text.length).toBeLessThanOrEqual(8_000)
+        expect(body.pinnedDecisions).toEqual([])
         expect(serializedBody).not.toContain('source')
         expect(serializedBody).not.toContain('turnId')
         expect(serializedBody).not.toContain('displayKind')

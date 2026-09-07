@@ -17,8 +17,11 @@ import {
 import { Toggle } from '@/components/ui/toggle'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { type ChatModel, type ChatModelGroup, type PublicChatModel } from '@/lib/ai/models'
+import type { ChatMemoryUsageSummary } from '@/lib/ai/runtime/chat-memory/context-usage-contract'
 import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
+
+import { ContextUsageIndicator } from './context-usage-indicator'
 
 const skillModeLabels: Record<ChatSkillMode, string> = {
     auto: '自动',
@@ -63,6 +66,7 @@ function ModelOptionIcon({ model }: { model: PublicChatModel }) {
 }
 
 export function ComposerToolbar({
+    contextUsage = null,
     disabled = false,
     enableReasoning,
     isModelLoading,
@@ -78,6 +82,7 @@ export function ComposerToolbar({
     skillMode,
     status,
 }: {
+    contextUsage?: ChatMemoryUsageSummary | null
     disabled?: boolean
     enableReasoning: boolean
     isModelLoading: boolean
@@ -222,6 +227,8 @@ export function ComposerToolbar({
                         </ToggleGroupItem>
                     ))}
                 </ToggleGroup>
+
+                <ContextUsageIndicator usage={contextUsage} />
             </div>
 
             <Button

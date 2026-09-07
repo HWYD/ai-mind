@@ -17,6 +17,8 @@ describe('model-provider config', () => {
                 baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
             },
             maxInputChars: 12000,
+            ollamaContextTokens: 32768,
+            operationalContextCapTokens: 128000,
             ollama: {
                 baseURL: 'http://127.0.0.1:11434',
             },
@@ -41,6 +43,8 @@ describe('model-provider config', () => {
                 AI_MIND_LLM_TEMPERATURE: '0.2',
                 AI_MIND_LLM_TIMEOUT_MS: '45000',
                 AI_MIND_MAX_INPUT_CHARS: '6000',
+                AI_MIND_OLLAMA_CONTEXT_TOKENS: '16384',
+                AI_MIND_OPERATIONAL_CONTEXT_CAP_TOKENS: '64000',
                 AI_MIND_QWEN_API_KEY: 'qwen-key',
                 AI_MIND_QWEN_BASE_URL: 'https://qwen.example/v1',
                 AI_MIND_TASKLIST_MAX_OUTPUT_TOKENS: '4096',
@@ -58,6 +62,8 @@ describe('model-provider config', () => {
                 baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
             },
             maxInputChars: 6000,
+            ollamaContextTokens: 16384,
+            operationalContextCapTokens: 64000,
             ollama: {
                 baseURL: 'http://127.0.0.1:11434',
             },
@@ -105,6 +111,18 @@ describe('model-provider config', () => {
         ).toEqual({
             baseURL: 'http://127.0.0.1:11434',
         })
+    })
+
+    it('运行窗口和 chat output reserve 只接受正整数', () => {
+        const config = getModelProviderConfig({
+            AI_MIND_CHAT_MAX_OUTPUT_TOKENS: '0',
+            AI_MIND_OLLAMA_CONTEXT_TOKENS: '-1',
+            AI_MIND_OPERATIONAL_CONTEXT_CAP_TOKENS: 'invalid',
+        })
+
+        expect(config.chatMaxOutputTokens).toBe(4096)
+        expect(config.ollamaContextTokens).toBe(32768)
+        expect(config.operationalContextCapTokens).toBe(128000)
     })
 })
 

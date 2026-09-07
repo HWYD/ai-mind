@@ -92,6 +92,22 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 
 长期规则是：chat memory checkpoint 只是普通聊天 runtime 的 bounded memory state，不是产品历史表，也不是 Agent checkpoint 的复用层。
 
+### Token-aware context budget and compaction
+
+v0.5.4 已把上面的“超阈值”从固定 recent turn/message count 改为模型感知的 token budget。模型物理窗口、产品运行上限与单请求完整输入预算由 Runtime 分开处理。
+
+当前边界如下：
+
+- Model Catalog 保存 server-only 物理 context window；普通云端聊天使用不超过 128K 的运行窗口，Ollama 使用不超过 32K 的运行窗口并显式配置 `numCtx`。
+- 统一 budget policy 预留 4096 输出 tokens 与 `max(8192, 10% effective window)` runtime headroom，再从 hard input budget 派生 70% compaction trigger 和 35% post-compaction target。
+- Chat Orchestrator 在所有注入 chat memory 的 direct、tool planning/final、Composer Context 与 Capability Context 模型调用前执行完整输入 preflight。
+- Chat Memory 按估算 token 触发持久化 compaction；候选只保留完整 user/assistant turns，并且只有在合法、位于目标内且严格缩小时才保存。
+- 持久化 compaction 失败不覆盖原 summary、pinned decisions 或 `lastCompactedAt`；当前请求使用不持久化的 ephemeral fit 继续。Candidate save 与回答完成后的 raw final-turn append 是两个独立写入阶段，第二次写入也失败时保留 last durable checkpoint 且不撤销回答。
+- 只有排除 chat memory 后，system/tool/capability/UserMemory/latest input 自身仍超出 hard input budget 时，才返回现有输入过长错误。
+- ThreadState 字段、hydration DTO、公开 API、`thread-memory-status`、frontend reducer、数据库 schema，以及 ADR-0013 的安全 final-turn 边界保持不变。
+
+精确公式与 fallback 契约以 [ADR-0018](../adr/0018-token-aware-chat-context-budget-and-compaction.md) 为准；实现验收记录见 [v0.5.4 spec](../../specs/v0.5.4-token-aware-memory-compaction/spec.md)。
+
 ## Long-term UserMemory Semantic Retrieval
 
 `v0.4.5` 的 `UserMemory Store` 与 conversation-scoped `ThreadState` 分离；`v0.4.6` 只在该 Store 边界内增加 semantic retrieval。它是 runtime-controlled supplemental context，不是聊天历史搜索、RAG、主 assistant tool 或新的业务数据层。

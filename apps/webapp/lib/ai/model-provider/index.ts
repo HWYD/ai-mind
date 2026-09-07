@@ -3,6 +3,8 @@ export { ModelSelectionError, resolveModelSelection } from './catalog/resolve-mo
 export { PublicModelListError, resolvePublicModelList } from './catalog/resolve-public-model-list'
 export { resolveChatModelsInitialState } from './resolve-chat-models-initial-state'
 export { getModelProviderConfig, ModelProviderConfigError } from './provider-config'
+export { ContextBudgetError, deriveContextBudget } from './context-budget'
+export { estimateModelInputTokens } from './token-estimator'
 export { createChatModel } from './providers/model-provider-registry'
 export { logProviderError } from './providers/log-provider-error'
 export { resolveRouteType } from './resolve-route-type'
@@ -22,3 +24,5 @@ export type {
     PublicChatModel,
     ResolvedModelSelection,
 } from './types'
+export type { ContextBudget, ContextBudgetEnvironment, ContextBudgetInput } from './context-budget'
+export type { TokenEstimate, TokenEstimationOptions } from './token-estimator'

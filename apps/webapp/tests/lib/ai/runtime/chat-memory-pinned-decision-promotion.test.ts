@@ -1,12 +1,37 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { CHAT_MEMORY_RECENT_TURN_LIMIT, createChatMemoryService } from '@/lib/ai/runtime/chat-memory'
+import type { ContextBudget } from '@/lib/ai/model-provider'
+import { createChatMemoryService } from '@/lib/ai/runtime/chat-memory'
 import { createUserMemoryService } from '@/lib/ai/runtime/user-memory'
 
 import { createFakeBaseStore } from './fake-base-store'
 
 const env = {
     AI_MIND_AGENT_RUN_SESSION_SECRET: 'test-secret-with-at-least-thirty-two-characters',
+}
+
+const budget: ContextBudget = {
+    compactionTriggerTokens: 320,
+    effectiveWindowTokens: 1000,
+    hardInputTokens: 900,
+    maxOutputTokens: 100,
+    operationalCapTokens: 1000,
+    physicalWindowTokens: 1000,
+    postCompactionTargetTokens: 180,
+    runtimeReserveTokens: 100,
+}
+
+function createOversizedState() {
+    return {
+        messages: Array.from({ length: 6 }, (_, index) => ({
+            createdAt: new Date(index).toISOString(),
+            id: `message-${index}`,
+            role: index % 2 === 0 ? ('user' as const) : ('assistant' as const),
+            text: `message ${index} ${'token '.repeat(80)}`,
+        })),
+        pinnedDecisions: [],
+        summary: '',
+    }
 }
 
 describe('runtime/chat-memory pinned decision promotion', () => {
@@ -70,7 +95,7 @@ describe('runtime/chat-memory pinned decision promotion', () => {
         })
     })
 
-    it('compaction 成功后只把 pinnedDecision diff 交给 promotion，不传 summary', async () => {
+    it('有效持久化 candidate 成功保存后才把 pinnedDecision diff 交给 promotion，不传 summary', async () => {
         const promotePinnedDecisionDiff = vi.fn().mockResolvedValue({
             candidates: 1,
             rejected: 0,
@@ -90,21 +115,13 @@ describe('runtime/chat-memory pinned decision promotion', () => {
         })
         const threadId = `chat:${'a'.repeat(64)}`
 
-        for (let index = 0; index < CHAT_MEMORY_RECENT_TURN_LIMIT + 1; index += 1) {
-            await service.appendCompletedTurn(
-                threadId,
-                {
-                    assistantText: `assistant ${index}`,
-                    userText: `user ${index}`,
-                },
-                {
-                    promotionContext: {
-                        sessionId: 'promotion-session',
-                        sourceConversationId: 'conv-1',
-                    },
-                }
-            )
-        }
+        await service.writeThreadState(threadId, createOversizedState())
+        await service.compactThreadState(threadId, budget, {
+            promotionContext: {
+                sessionId: 'promotion-session',
+                sourceConversationId: 'conv-1',
+            },
+        })
 
         expect(promotePinnedDecisionDiff).toHaveBeenCalledWith({
             nextPinnedDecisions: ['解释技术问题先大白话'],
@@ -119,7 +136,7 @@ describe('runtime/chat-memory pinned decision promotion', () => {
         )
     })
 
-    it('compaction 失败时跳过 promotion', async () => {
+    it('invalid candidate 未保存时跳过 promotion', async () => {
         const promotePinnedDecisionDiff = vi.fn()
         const service = createChatMemoryService({ checkpointMode: 'memory' }, env, {
             compactionGenerator: async () => ({ invalid: true }),
@@ -129,26 +146,13 @@ describe('runtime/chat-memory pinned decision promotion', () => {
         })
         const threadId = `chat:${'b'.repeat(64)}`
 
-        for (let index = 0; index < CHAT_MEMORY_RECENT_TURN_LIMIT; index += 1) {
-            await service.appendCompletedTurn(threadId, {
-                assistantText: `assistant ${index}`,
-                userText: `user ${index}`,
-            })
-        }
-
-        await service.appendCompletedTurn(
-            threadId,
-            {
-                assistantText: 'assistant final',
-                userText: 'user final',
+        await service.writeThreadState(threadId, createOversizedState())
+        await service.compactThreadState(threadId, budget, {
+            promotionContext: {
+                sessionId: 'promotion-session',
+                sourceConversationId: 'conv-1',
             },
-            {
-                promotionContext: {
-                    sessionId: 'promotion-session',
-                    sourceConversationId: 'conv-1',
-                },
-            }
-        )
+        })
 
         expect(promotePinnedDecisionDiff).not.toHaveBeenCalled()
     })

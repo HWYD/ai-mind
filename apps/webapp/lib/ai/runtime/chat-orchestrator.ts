@@ -1,19 +1,20 @@
 import { StreamLifecycle, writeStaticTextPart } from '@ai-mind/stream-core'
 import type { StreamErrorCode } from '@ai-mind/stream-core/protocol'
 import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '@langchain/core/messages'
+import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
 
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import type { AiMindChatModelHandle } from '@/lib/ai/model-provider'
-import { logProviderError, validateInputLength } from '@/lib/ai/model-provider'
+import { logProviderError } from '@/lib/ai/model-provider'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, stripMessageText } from './assistant-stream'
 import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from './authoritative-answer'
 import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
+import { type ChatContextPreflight, createChatContextPreflight } from './chat-context-preflight'
 import {
     buildChatConversationThreadId,
-    buildChatMemoryContextMessages,
     chatMemoryService,
     conversationRegistryService,
     type FinalTurnSource,
@@ -91,7 +92,6 @@ async function streamDirectAnswer(
     isClosed: () => boolean,
     emitReasoning: boolean
 ) {
-    validateInputLength(langChainMessages)
     const stream = await model.stream(langChainMessages, {
         signal: context.signal,
     })
@@ -136,7 +136,8 @@ export class ChatOrchestrator {
     private readonly request: ChatRequest
     private readonly writeChunk: WriteChunk
     private readonly assistantMessageId = createId()
-    private chatMemoryContextMessages: BaseMessage[] = []
+    private chatContextPreflight: ChatContextPreflight | null = null
+    private threadMemoryStatusActive = false
     private userMemoryContextMessages: BaseMessage[] = []
     private modelHandle: AiMindChatModelHandle | null = null
 
@@ -152,12 +153,29 @@ export class ChatOrchestrator {
     }
 
     private writeThreadMemoryStatus(event: ThreadMemoryStatusEvent) {
+        if (event.status === 'started') {
+            this.threadMemoryStatusActive = true
+        } else {
+            this.threadMemoryStatusActive = false
+        }
+
         this.writeChunk({
             type: 'thread-memory-status',
             status: event.status,
             message: event.message,
             ...(typeof event.summaryLength === 'number' ? { summaryLength: event.summaryLength } : {}),
             ...(typeof event.pinnedDecisionCount === 'number' ? { pinnedDecisionCount: event.pinnedDecisionCount } : {}),
+        })
+    }
+
+    private finishActiveThreadMemoryStatus() {
+        if (!this.threadMemoryStatusActive) {
+            return
+        }
+
+        this.writeThreadMemoryStatus({
+            status: 'failed',
+            message: '上下文自动压缩已结束',
         })
     }
 
@@ -366,48 +384,37 @@ export class ChatOrchestrator {
         }
     }
 
-    private async resolveChatMemoryContextMessages() {
-        if (!this.context.sessionId || !isChatMemoryContextEligibleRequest(this.request)) {
-            return []
+    private async prepareChatContextMessages(
+        messages: BaseMessage[],
+        includeUserMemory: boolean,
+        nonMessagePayloads: unknown[] = []
+    ): Promise<BaseMessage[]> {
+        const preflight = this.chatContextPreflight
+        const userMemoryMessages = includeUserMemory ? this.userMemoryContextMessages : []
+
+        if (!preflight) {
+            return withChatMemoryContextMessages(messages, userMemoryMessages)
         }
 
-        const threadId = this.resolveConversationThreadId()
+        const prepared = await preflight.prepare(
+            memoryMessages => withChatMemoryContextMessages(messages, [...userMemoryMessages, ...memoryMessages]),
+            nonMessagePayloads
+        )
 
-        if (!threadId) {
-            return []
-        }
-
-        try {
-            const result = await chatMemoryService.readThreadState(threadId)
-
-            return buildChatMemoryContextMessages(result.state)
-        } catch {
-            return []
-        }
-    }
-
-    private buildRuntimeContextMessages(includeUserMemory: boolean) {
-        if (!includeUserMemory || this.userMemoryContextMessages.length === 0) {
-            return this.chatMemoryContextMessages
-        }
-
-        return [...this.userMemoryContextMessages, ...this.chatMemoryContextMessages]
+        return prepared.messages
     }
 
     private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
         // 普通 Tool Calling 的 planning 阶段仍沿用 Skill + Tool prompt 组合。
-        return withChatMemoryContextMessages(
-            [
-                ...buildSystemMessages(
-                    session.skillSystemPrompt,
-                    session.skillOutputPolicyPrompt,
-                    session.toolUseSystemPrompt,
-                    withRetryPrompt ? session.toolRetrySystemPrompt : undefined
-                ),
-                ...session.langChainMessages,
-            ],
-            this.chatMemoryContextMessages
-        )
+        return [
+            ...buildSystemMessages(
+                session.skillSystemPrompt,
+                session.skillOutputPolicyPrompt,
+                session.toolUseSystemPrompt,
+                withRetryPrompt ? session.toolRetrySystemPrompt : undefined
+            ),
+            ...session.langChainMessages,
+        ]
     }
 
     private async runPlanningAttempt(session: ChatSession, withRetryPrompt: boolean): Promise<PlanningAttemptResult> {
@@ -415,8 +422,11 @@ export class ChatOrchestrator {
             throw new Error('toolBoundModel is required for planning stage')
         }
 
-        const planningMessages = this.buildPlanningMessages(session, withRetryPrompt)
-        validateInputLength(planningMessages)
+        const planningMessages = await this.prepareChatContextMessages(
+            this.buildPlanningMessages(session, withRetryPrompt),
+            true,
+            session.activeTools.map(toolDefinition => convertToOpenAITool(toolDefinition.tool))
+        )
 
         // Planning stage consumes one bound-model stream and folds it into:
         // - executable tool calls
@@ -581,7 +591,7 @@ export class ChatOrchestrator {
 
         // 普通 Tool Calling 的最终回答阶段：把 planning 消息、ToolMessage 和可选 Prompt 上下文合并，
         // 再交给基础模型生成自然语言收束。Agent 的最终回答由 Agent runner 自己生成，不复用这里。
-        const finalMessages: BaseMessage[] = withChatMemoryContextMessages(
+        const finalMessages = await this.prepareChatContextMessages(
             [
                 ...buildSystemMessages(
                     session.skillSystemPrompt,
@@ -594,9 +604,8 @@ export class ChatOrchestrator {
                 ...toolMessages,
                 ...promptContextMessages,
             ],
-            this.buildRuntimeContextMessages(true)
+            true
         )
-        validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
@@ -618,7 +627,7 @@ export class ChatOrchestrator {
             context: this.context,
             writeChunk: this.writeChunk,
         })
-        const finalMessages: BaseMessage[] = withChatMemoryContextMessages(
+        const finalMessages = await this.prepareChatContextMessages(
             [
                 ...buildSystemMessages(
                     session.skillSystemPrompt,
@@ -629,9 +638,8 @@ export class ChatOrchestrator {
                 ...session.langChainMessages,
                 ...capabilityContextMessages,
             ],
-            this.chatMemoryContextMessages
+            false
         )
-        validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
@@ -652,7 +660,7 @@ export class ChatOrchestrator {
             context: this.context,
             writeChunk: this.writeChunk,
         })
-        const finalMessages: BaseMessage[] = withChatMemoryContextMessages(
+        const finalMessages = await this.prepareChatContextMessages(
             [
                 ...buildSystemMessages(
                     session.skillSystemPrompt,
@@ -662,9 +670,8 @@ export class ChatOrchestrator {
                 ...session.langChainMessages,
                 ...composerContextMessages,
             ],
-            this.chatMemoryContextMessages
+            false
         )
-        validateInputLength(finalMessages)
         const finalStream = await session.baseModel.stream(finalMessages, {
             signal: this.context.signal,
         })
@@ -783,7 +790,21 @@ export class ChatOrchestrator {
             const session = await createChatSession(this.request, this.context.resolvedModelSelection)
 
             this.modelHandle = session.modelHandle
-            this.chatMemoryContextMessages = await this.resolveChatMemoryContextMessages()
+            const chatMemoryThreadId = isChatMemoryContextEligibleRequest(this.request) ? this.resolveConversationThreadId() : null
+            const sourceConversationId = chatMemoryThreadId && this.context.sessionId ? this.resolveValidatedConversationId() : null
+            this.chatContextPreflight = createChatContextPreflight({
+                onStatus: event => this.writeThreadMemoryStatus(event),
+                promotionContext:
+                    sourceConversationId && this.context.sessionId
+                        ? {
+                              sessionId: this.context.sessionId,
+                              sourceConversationId,
+                          }
+                        : undefined,
+                resolvedModelSelection: this.context.resolvedModelSelection,
+                signal: this.context.signal,
+                threadId: chatMemoryThreadId,
+            })
             this.userMemoryContextMessages = isUserMemoryContextEligibleRequest(this.request)
                 ? await this.resolveUserMemoryContextMessages(session.toolBoundModel ? 'tool_assisted_ordinary_chat' : 'ordinary_chat')
                 : []
@@ -845,7 +866,7 @@ export class ChatOrchestrator {
             if (!session.toolBoundModel) {
                 const assistantText = await streamDirectAnswer(
                     session.baseModel,
-                    withChatMemoryContextMessages(session.directAnswerMessages, this.buildRuntimeContextMessages(true)),
+                    await this.prepareChatContextMessages(session.directAnswerMessages, true),
                     this.context,
                     this.writeChunk,
                     this.isClosed,
@@ -861,7 +882,7 @@ export class ChatOrchestrator {
             if (planningStage.kind === 'direct-fallback') {
                 const assistantText = await streamDirectAnswer(
                     session.baseModel,
-                    withChatMemoryContextMessages(session.directAnswerMessages, this.buildRuntimeContextMessages(true)),
+                    await this.prepareChatContextMessages(session.directAnswerMessages, true),
                     this.context,
                     this.writeChunk,
                     this.isClosed,
@@ -949,6 +970,8 @@ export class ChatOrchestrator {
                 message: normalized.message,
                 stage: 'runtime',
             })
+        } finally {
+            this.finishActiveThreadMemoryStatus()
         }
     }
 }

@@ -1,7 +1,7 @@
 'use client'
 
-import { MessageSquarePlus, MessageSquareText, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
-import { useState } from 'react'
+import { CircleAlert, MessageSquarePlus, MessageSquareText, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { type ReactNode, useState } from 'react'
 
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -32,6 +32,7 @@ interface ConversationSidebarProps {
     createDisabled?: boolean
     deleteDisabled?: boolean
     disabled?: boolean
+    notice?: ReactNode
     onCreateConversation: () => void
     onDeleteConversation?: (conversationId: string) => Promise<boolean> | boolean
     onProjectLinkCopied?: () => void
@@ -46,6 +47,7 @@ export function ConversationSidebar({
     disabled = false,
     createDisabled = disabled,
     deleteDisabled = disabled,
+    notice,
     onCreateConversation,
     onDeleteConversation = () => false,
     onProjectLinkCopied,
@@ -122,11 +124,15 @@ export function ConversationSidebar({
                                 <SidebarMenuButton
                                     type="button"
                                     size="lg"
-                                    aria-label="展开最近会话"
+                                    aria-label={notice ? '查看会话提示' : '展开最近会话'}
                                     onClick={onToggleCollapsed}
                                     className="justify-center text-sidebar-foreground"
                                 >
-                                    <MessageSquareText className="size-4" />
+                                    {notice ? (
+                                        <CircleAlert className="size-4 text-destructive" />
+                                    ) : (
+                                        <MessageSquareText className="size-4" />
+                                    )}
                                 </SidebarMenuButton>
                             </SidebarMenuItem>
                         </SidebarMenu>
@@ -135,7 +141,8 @@ export function ConversationSidebar({
                             <SidebarSeparator className="my-3" />
                             <SidebarGroup className="min-h-0 flex-1 px-0">
                                 <SidebarGroupLabel className="px-3 pb-2">最近</SidebarGroupLabel>
-                                <SidebarGroupContent className="min-h-0 min-w-0 max-w-full flex-1 overflow-hidden px-0">
+                                <SidebarGroupContent className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden px-0">
+                                    {notice ? <div className="px-2 pb-2">{notice}</div> : null}
                                     <ScrollArea className="h-full min-w-0 max-w-full overflow-hidden [&_[data-slot=scroll-area-viewport]>div]:!block [&_[data-slot=scroll-area-viewport]>div]:max-w-full [&_[data-slot=scroll-area-viewport]>div]:min-w-0 [&_[data-slot=scroll-area-viewport]>div]:w-full">
                                         <SidebarMenu className="box-border w-full min-w-0 max-w-full gap-1 overflow-hidden px-2 pr-3">
                                             {recentConversations.map(conversation => (

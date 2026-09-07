@@ -7,6 +7,8 @@ import { createRoot } from 'react-dom/client'
 import { ChatMessageList, type ChatMessageListHandle } from '@/components/chat/message-list/chat-message-list'
 import { useChatScrollPolicy } from '@/components/instamind/use-chat-scroll-policy'
 import { Button } from '@/components/ui/button'
+import { message } from '@/components/ui/message'
+import { Messages } from '@/components/ui/messages'
 import type { MindMessage } from '@/lib/ai/types/message'
 import { createMessageVirtualizationFixture } from '@/lib/dev/message-virtualization/mixed-message-fixture'
 
@@ -61,6 +63,9 @@ export function MessageVirtualizationHarness() {
         composerContainerRef,
         composerOverlayInset,
         onAtBottomChange,
+        onItemMounted,
+        onItemUnmounted,
+        lockFollowForReader,
         onRangeChange,
         onScrollingChange,
         onTotalHeightChange,
@@ -145,7 +150,7 @@ export function MessageVirtualizationHarness() {
                 aria-label="虚拟消息验收记录"
                 className="h-full overflow-y-auto overscroll-contain"
                 data-slot="chat-message-viewport"
-                style={{ scrollbarGutter: 'stable' }}
+                style={{ scrollbarGutter: 'stable', overflowAnchor: 'none' }}
             >
                 <div className="px-4 pt-8 sm:px-6 lg:px-8" data-slot="chat-message-content">
                     <div className="mx-auto w-full max-w-[var(--chat-content-column-width)]" data-slot="chat-message-column">
@@ -160,14 +165,21 @@ export function MessageVirtualizationHarness() {
                                 conversationId="acceptance-1000"
                                 enableReasoning
                                 messages={messages}
-                                onAtBottomChange={onAtBottomChange}
+                                onAtBottomChange={value => onAtBottomChange(value, { conversationId: 'acceptance-1000', sequence: 1 })}
                                 onDeleteUserTurn={() => true}
-                                onRangeChange={onRangeChange}
+                                onRangeChange={value => onRangeChange(value, { conversationId: 'acceptance-1000', sequence: 1 })}
+                                onItemMounted={itemIndex => onItemMounted({ conversationId: 'acceptance-1000', sequence: 1, itemIndex })}
+                                onItemUnmounted={itemIndex =>
+                                    onItemUnmounted({ conversationId: 'acceptance-1000', sequence: 1, itemIndex })
+                                }
+                                onUserReading={lockFollowForReader}
                                 onRegenerateLastTurn={() => true}
-                                onScrollingChange={onScrollingChange}
+                                onScrollingChange={value => onScrollingChange(value, { conversationId: 'acceptance-1000', sequence: 1 })}
                                 onSelectFollowUpQuestion={() => undefined}
                                 onSelectSuggestion={() => undefined}
-                                onTotalHeightChange={onTotalHeightChange}
+                                onTotalHeightChange={value =>
+                                    onTotalHeightChange(value, { conversationId: 'acceptance-1000', sequence: 1 })
+                                }
                                 scrollParent={scrollViewportElement}
                                 status={streaming ? 'streaming' : 'ready'}
                             />
@@ -226,4 +238,13 @@ export function MessageVirtualizationHarness() {
     )
 }
 
-createRoot(document.getElementById('root')!).render(<MessageVirtualizationHarness />)
+Object.assign(window, {
+    addFixtureMessage: message.add,
+})
+
+createRoot(document.getElementById('root')!).render(
+    <>
+        <MessageVirtualizationHarness />
+        <Messages />
+    </>
+)
