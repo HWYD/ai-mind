@@ -1,16 +1,23 @@
-import { getRemoteMcpToolDefinition } from '@/lib/ai/mcp/adapters'
-import type { MCPServerId } from '@/lib/ai/mcp/protocol/types'
-import type { SkillCapabilitySelector, SkillDefinition } from '@/lib/ai/skills'
-import { type ChatToolDefinition, chatToolRegistry } from '@/lib/ai/tools'
+import { type ChatToolDefinition, getChatToolDefinitionsForScope, toolSupportsRuntimeScope } from '@/lib/ai/tools'
+import { createReadUrlToolDefinition } from '@/lib/ai/tools/web/read-url-tool'
+import { createConfiguredWebProvider } from '@/lib/ai/tools/web/web-provider-factory'
+import { createWebSearchToolDefinition } from '@/lib/ai/tools/web/web-search-tool'
 
-import { getActiveChatCapabilityDefinitions, toCapabilityDefinition } from './catalog'
-import type { CapabilityDefinition } from './types'
+import { toCapabilityDefinition } from './catalog'
 
-const REMOTE_TOOL_DISCOVERY_TIMEOUT_MS = 1200
-const REMOTE_TOOL_DISCOVERY_COOLDOWN_MS = 30_000
-const REMOTE_TOOL_DISCOVERY_TIMEOUT = Symbol('REMOTE_TOOL_DISCOVERY_TIMEOUT')
-
-const remoteToolDiscoveryUnavailableUntilMap = new Map<MCPServerId, number>()
+/**
+ * General ReAct 的工具面由 Runtime 的独立策略管理，不能从 Skill 声明派生。
+ * 后续新增工具需要同时评审安全性、可观测性与 General ReAct 适配性，再显式加入此策略。
+ */
+const GENERAL_REACT_TOOL_NAMES = new Set([
+    'calculator',
+    'datetime',
+    'text-transform',
+    'unit-convert',
+    'read-url',
+    'web-search',
+    'city-weather',
+])
 
 export interface ResolvedActiveToolDefinition {
     capabilityId: string
@@ -25,170 +32,51 @@ export interface ResolvedToolBinding {
     activeTools: ChatToolDefinition[]
 }
 
-function matchesSelector(capabilityDefinition: CapabilityDefinition, selector: SkillCapabilitySelector) {
-    if (selector.capabilityIds && !selector.capabilityIds.includes(capabilityDefinition.capabilityId)) {
-        return false
-    }
-
-    if (selector.providerKind && selector.providerKind !== capabilityDefinition.providerKind) {
-        return false
-    }
-
-    if (selector.location && selector.location !== capabilityDefinition.location) {
-        return false
-    }
-
-    if (selector.serverId && selector.serverId !== capabilityDefinition.serverId) {
-        return false
-    }
-
-    if (selector.capabilityType && selector.capabilityType !== capabilityDefinition.capabilityType) {
-        return false
-    }
-
-    if (selector.names && !selector.names.includes(capabilityDefinition.name)) {
-        return false
-    }
-
-    return true
-}
-
-function isRemoteToolDiscoveryInCooldown(serverId: MCPServerId) {
-    const unavailableUntil = remoteToolDiscoveryUnavailableUntilMap.get(serverId)
-
-    if (!unavailableUntil) {
-        return false
-    }
-
-    if (Date.now() < unavailableUntil) {
-        return true
-    }
-
-    remoteToolDiscoveryUnavailableUntilMap.delete(serverId)
-    return false
-}
-
-function markRemoteToolDiscoveryUnavailable(serverId: MCPServerId) {
-    remoteToolDiscoveryUnavailableUntilMap.set(serverId, Date.now() + REMOTE_TOOL_DISCOVERY_COOLDOWN_MS)
-}
-
-async function getRemoteMcpToolDefinitionFast(serverId: MCPServerId, toolName: string) {
-    if (isRemoteToolDiscoveryInCooldown(serverId)) {
-        return undefined
-    }
-
-    let timeoutId: ReturnType<typeof setTimeout> | undefined
-
-    try {
-        const result = await Promise.race([
-            getRemoteMcpToolDefinition(serverId, toolName),
-            new Promise<typeof REMOTE_TOOL_DISCOVERY_TIMEOUT>(resolve => {
-                timeoutId = setTimeout(() => resolve(REMOTE_TOOL_DISCOVERY_TIMEOUT), REMOTE_TOOL_DISCOVERY_TIMEOUT_MS)
-            }),
-        ])
-
-        if (result === REMOTE_TOOL_DISCOVERY_TIMEOUT) {
-            markRemoteToolDiscoveryUnavailable(serverId)
-            return undefined
-        }
-
-        return result
-    } finally {
-        if (timeoutId) {
-            clearTimeout(timeoutId)
-        }
-    }
-}
-
-async function resolveToolDefinition(capabilityDefinition: CapabilityDefinition) {
-    if (capabilityDefinition.capabilityType !== 'tool') {
-        return undefined
-    }
-
-    const shouldResolveRemoteMcpTool =
-        capabilityDefinition.providerKind === 'mcp' && capabilityDefinition.location === 'remote' && capabilityDefinition.serverId
-
-    let toolDefinition: ChatToolDefinition | undefined
-
-    if (shouldResolveRemoteMcpTool) {
-        const serverId = capabilityDefinition.serverId as MCPServerId
-
-        try {
-            toolDefinition = await getRemoteMcpToolDefinitionFast(serverId, capabilityDefinition.name)
-        } catch {
-            markRemoteToolDiscoveryUnavailable(serverId)
-            // Remote tool discovery happens before any visible tool part exists; fail closed so resource/prompt and普通问答链路不被拖垮。
-            return undefined
-        }
-
-        if (!toolDefinition) {
-            return undefined
-        }
-    } else {
-        toolDefinition = chatToolRegistry.get(capabilityDefinition.name)
-    }
-
-    if (!toolDefinition) {
-        return undefined
-    }
-
-    const resolvedCapabilityId = toCapabilityDefinition(toolDefinition).capabilityId
-
-    if (resolvedCapabilityId !== capabilityDefinition.capabilityId) {
-        throw new Error(
-            `Tool binding conflict: capability "${capabilityDefinition.capabilityId}" resolved to tool "${toolDefinition.name}" with mismatched capabilityId "${resolvedCapabilityId}".`
-        )
-    }
-
-    return toolDefinition
-}
-
-function createEmptyToolBinding(): ResolvedToolBinding {
-    return {
-        activeToolCapabilityIds: {},
-        activeToolDefinitionMap: new Map(),
-        activeToolNames: [],
-        activeTools: [],
-    }
-}
-
 /**
- * 根据 Skill 声明的 capabilitySelectors 解析本轮可绑定工具。
- * 这里故意只返回已经能映射到 ChatToolDefinition 的 tool capability：
- * Resource / Prompt 不进入模型 tool binding，Step 3 前 remote MCP Tool 也不会被提前暴露给模型。
+ * 解析本轮 General ReAct 的固定工具策略。
+ *
+ * Skill 只补充 prompt 和输出风格，不能改变工具可见性，更不会触发远程 MCP Tool 发现。
  */
-export async function resolveToolBindingForSkill(skillDefinition?: SkillDefinition): Promise<ResolvedToolBinding> {
-    if (!skillDefinition?.capabilitySelectors?.length) {
-        return createEmptyToolBinding()
-    }
-
+export async function resolveGeneralToolBinding(): Promise<ResolvedToolBinding> {
     const resolvedToolMap = new Map<string, ResolvedActiveToolDefinition>()
+    const webProvider = createConfiguredWebProvider()
 
-    for (const capabilityDefinition of getActiveChatCapabilityDefinitions()) {
-        if (!skillDefinition.capabilitySelectors.some(selector => matchesSelector(capabilityDefinition, selector))) {
+    for (const toolDefinition of getChatToolDefinitionsForScope('general-react-agent')) {
+        if (!GENERAL_REACT_TOOL_NAMES.has(toolDefinition.name)) {
             continue
         }
 
-        const toolDefinition = await resolveToolDefinition(capabilityDefinition)
-
-        if (!toolDefinition) {
+        if (toolDefinition.executionPolicy.kind !== 'standard-tool' || !toolSupportsRuntimeScope(toolDefinition, 'general-react-agent')) {
             continue
         }
 
-        const modelToolName = toolDefinition.name
-        const existingResolvedTool = resolvedToolMap.get(modelToolName)
-
-        if (existingResolvedTool && existingResolvedTool.capabilityId !== capabilityDefinition.capabilityId) {
-            throw new Error(`Tool binding conflict: model tool name "${modelToolName}" maps to multiple capabilityIds.`)
+        const resolvedToolDefinition = resolveGeneralToolDefinition(toolDefinition, webProvider)
+        if (!resolvedToolDefinition) {
+            continue
         }
 
-        resolvedToolMap.set(modelToolName, {
+        const capabilityDefinition = toCapabilityDefinition(resolvedToolDefinition)
+        resolvedToolMap.set(toolDefinition.name, {
             capabilityId: capabilityDefinition.capabilityId,
-            modelToolName,
-            toolDefinition,
+            modelToolName: toolDefinition.name,
+            toolDefinition: resolvedToolDefinition,
         })
     }
 
+    return createResolvedToolBinding(resolvedToolMap)
+}
+
+function resolveGeneralToolDefinition(toolDefinition: ChatToolDefinition, webProvider: ReturnType<typeof createConfiguredWebProvider>) {
+    if (toolDefinition.name === 'web-search') {
+        return webProvider ? createWebSearchToolDefinition(webProvider) : null
+    }
+    if (toolDefinition.name === 'read-url') {
+        return webProvider ? createReadUrlToolDefinition(webProvider) : null
+    }
+    return toolDefinition.isAvailable?.() === false ? null : toolDefinition
+}
+
+function createResolvedToolBinding(resolvedToolMap: Map<string, ResolvedActiveToolDefinition>): ResolvedToolBinding {
     const resolvedTools = [...resolvedToolMap.values()]
 
     return {

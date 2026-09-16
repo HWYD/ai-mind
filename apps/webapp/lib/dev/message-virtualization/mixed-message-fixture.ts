@@ -97,7 +97,7 @@ function createAssistantParts(index: number): MindMessagePart[] {
             return [
                 {
                     id: `agent-${index}`,
-                    type: 'agent-step',
+                    type: 'agent-graph',
                     agentName: 'fixture-agent',
                     runId: `fixture-agent-run-${index}`,
                     status: 'completed',

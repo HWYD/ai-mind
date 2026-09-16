@@ -4,17 +4,9 @@ import { createAgentRunOwnerSessionHash } from '@/lib/ai/agent-runs'
 import { resolveSessionId } from '@/lib/ai/rate-limit'
 import { ImageGenerationRunRepository } from '@/lib/ai/runtime/image-generation-agent/image-generation-run-repository'
 import { createSafeStreamDiagnostics } from '@/lib/ai/stream-recovery/contracts'
-import { StreamExecutionCoordinator, StreamExecutionCoordinatorError } from '@/lib/ai/stream-recovery/stream-execution-coordinator'
+import { getSharedStreamExecutionCoordinator, StreamExecutionCoordinatorError } from '@/lib/ai/stream-recovery/stream-execution-coordinator'
 
 export const runtime = 'nodejs'
-
-let streamExecutionCoordinator: StreamExecutionCoordinator | undefined
-
-function getStreamExecutionCoordinator() {
-    streamExecutionCoordinator ??= new StreamExecutionCoordinator()
-
-    return streamExecutionCoordinator
-}
 
 function mapCancelError(error: StreamExecutionCoordinatorError) {
     if (error.code === 'STREAM_RUN_FORBIDDEN') {
@@ -63,7 +55,7 @@ export async function POST(request: NextRequest, context: { params: { runId: str
         const runId = params.runId
         const { sessionId, setCookie } = resolveSessionId(request.cookies)
         const ownerSessionHash = createAgentRunOwnerSessionHash(sessionId)
-        const run = await getStreamExecutionCoordinator().requestCancel({
+        const run = await getSharedStreamExecutionCoordinator().requestCancel({
             ownerSessionHash,
             runId,
         })

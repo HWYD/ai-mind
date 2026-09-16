@@ -39,3 +39,5 @@ export type StreamEventEnvelope<TPayload extends StreamEventPayload = StreamEven
     runId: string
     sequence: number
 } & (StreamTerminalMetadata | StreamNonTerminalMetadata)
+
+export type ToolEndStreamEventEnvelope = StreamEventEnvelope<Extract<ChatStreamChunk, { type: 'tool-end' }>>

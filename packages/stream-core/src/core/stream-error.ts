@@ -26,5 +26,5 @@ export function createStreamErrorChunk(payload: StreamErrorPayload): ErrorChunk 
 }
 
 export function writeStreamErrorChunk(writeChunk: WriteChunk, payload: StreamErrorPayload) {
-    writeChunk(createStreamErrorChunk(payload))
+    return writeChunk(createStreamErrorChunk(payload))
 }

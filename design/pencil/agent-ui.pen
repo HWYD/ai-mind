@@ -1,0 +1,3061 @@
+{
+  "version": "2.17",
+  "children": [
+    {
+      "type": "frame",
+      "id": "wtRvx",
+      "x": 849,
+      "y": -108,
+      "name": "AI Mind v0.6.0 / Design Overview",
+      "clip": true,
+      "width": 1040,
+      "height": 290,
+      "fill": "$bg",
+      "cornerRadius": 12,
+      "stroke": "$border-subtle",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "gap": 14,
+      "padding": [
+        34,
+        40
+      ],
+      "children": [
+        {
+          "type": "text",
+          "id": "v05sb",
+          "name": "Version Label",
+          "fill": "$accent",
+          "content": "AI MIND · v0.6.0",
+          "fontFamily": "$font-ui",
+          "fontSize": 13,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "WyB75",
+          "name": "Design Title",
+          "fill": "$text-primary",
+          "content": "General ReAct Agent · 扁平内联执行轨迹",
+          "fontFamily": "$font-ui",
+          "fontSize": 32,
+          "fontWeight": "650"
+        },
+        {
+          "type": "text",
+          "id": "JUh1W",
+          "name": "Design Description",
+          "fill": "$text-secondary",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "本稿只设计通用 ReAct Agent 的 AI 回复执行过程；用户消息气泡与最终回答均沿用项目现有 UI，不在本版改造范围。",
+          "lineHeight": 1.55,
+          "fontFamily": "$font-ui",
+          "fontSize": 15,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "PH1kl",
+          "name": "Design Constraints",
+          "width": "fill_container",
+          "gap": 8,
+          "children": [
+            {
+              "type": "frame",
+              "id": "tsU6Q",
+              "name": "Constraint / 浅色主题",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "A2cf84",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "浅色主题",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "UMqTz",
+              "name": "Constraint / 标题无耗时",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "eP7pS",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "Running 标题 Shimmer",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "tGQhV",
+              "name": "Constraint / 整行展开/收起",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "fOjWq",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "Trace 唯一承载",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "aXrnN",
+              "name": "Constraint / 最终回答开始后自动收起",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "T5Dk6",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "final text-start 自动收起",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "uu2e1",
+              "name": "Constraint / Lucide 工具图标",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Yj6TH",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "并行顺序稳定",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "xZqrH",
+              "name": "Constraint / 状态仅用文字",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "nnPQT",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "状态仅用文字",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "V2lae",
+              "name": "Constraint / 完成 Trace 本地恢复",
+              "fill": "$surface",
+              "cornerRadius": 9999,
+              "padding": [
+                7,
+                11
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "i2Lvg",
+                  "name": "Constraint Label",
+                  "fill": "$text-secondary",
+                  "content": "完成 Trace 本地恢复",
+                  "fontFamily": "$font-ui",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "uON7l",
+          "name": "Implementation Mapping",
+          "fill": "$text-muted",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "实现映射：shadcn/ui Collapsible + CollapsibleTrigger + CollapsibleContent + Button(ghost) + Separator + shimmer utility；完成的 public-safe Trace 与答案进入现有 IndexedDB conversation snapshot；Step / Tool / Skill / Resource / Prompt 只在本 Trace 内展示，图标使用 lucide-react。",
+          "lineHeight": 1.45,
+          "fontFamily": "$font-ui",
+          "fontSize": 12.5,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "AkNwb",
+      "x": 1989,
+      "y": 0,
+      "name": "General ReAct UI Primitives",
+      "clip": true,
+      "width": 760,
+      "height": 640,
+      "fill": "$bg",
+      "cornerRadius": 12,
+      "stroke": "$border-subtle",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "igiTE",
+          "name": "Primitives Title",
+          "fill": "$text-muted",
+          "content": "GENERAL REACT UI PRIMITIVES",
+          "fontFamily": "$font-ui",
+          "fontSize": 13,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "e83Qmc",
+          "name": "Section Label / Header Loading",
+          "fill": "#A3A3A3",
+          "content": "HEADER · LOADING",
+          "fontFamily": "Geist",
+          "fontSize": 11,
+          "fontWeight": "600",
+          "letterSpacing": 0.6
+        },
+        {
+          "type": "frame",
+          "id": "qRgeN",
+          "name": "Component / Trace Header",
+          "reusable": true,
+          "width": "fill_container",
+          "height": 30,
+          "gap": 6,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "PaAet",
+              "name": "Trace Title",
+              "fill": {
+                "type": "gradient",
+                "gradientType": "linear",
+                "enabled": true,
+                "rotation": 90,
+                "size": {
+                  "height": 1
+                },
+                "colors": [
+                  {
+                    "color": "#737373",
+                    "position": 0
+                  },
+                  {
+                    "color": "#D4D4D4",
+                    "position": 0.46
+                  },
+                  {
+                    "color": "#737373",
+                    "position": 1
+                  }
+                ]
+              },
+              "content": "正在思考",
+              "fontFamily": "$font-ui",
+              "fontSize": 15,
+              "fontWeight": "500"
+            },
+            {
+              "type": "icon",
+              "id": "j7dO1Z",
+              "name": "Disclosure Chevron",
+              "width": 16,
+              "height": 16,
+              "icon": "chevron-down",
+              "library": "lucide",
+              "fill": "$text-muted"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "id": "UusW1",
+          "name": "Shimmer Behavior Note",
+          "fill": "#999999",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "“正在思考”使用 shadcn/ui shimmer utility：仅标题文字由左向右高光循环；chevron 不闪动；prefers-reduced-motion 时保持静态。",
+          "lineHeight": 1.45,
+          "fontFamily": "Geist",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "rectangle",
+          "id": "ptMZW",
+          "name": "Primitive Divider / Header",
+          "fill": "#E5E5E5",
+          "width": "fill_container",
+          "height": 1
+        },
+        {
+          "type": "text",
+          "id": "BUMlt",
+          "name": "Section Label / Trace Rows",
+          "fill": "#A3A3A3",
+          "content": "TRACE ROWS · 唯一展示区",
+          "fontFamily": "Geist",
+          "fontSize": 11,
+          "fontWeight": "600",
+          "letterSpacing": 0.6
+        },
+        {
+          "type": "frame",
+          "id": "GI415",
+          "name": "Component / Tool Status Row",
+          "reusable": true,
+          "width": "fill_container",
+          "height": 30,
+          "gap": 11,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "DS5Ue",
+              "name": "Tool Icon",
+              "width": 17,
+              "height": 17,
+              "icon": "globe",
+              "library": "lucide",
+              "fill": "$text-muted"
+            },
+            {
+              "type": "text",
+              "id": "e102XK",
+              "name": "Tool Status Text",
+              "fill": "$text-secondary",
+              "content": "正在搜索网页",
+              "fontFamily": "$font-ui",
+              "fontSize": 14,
+              "fontWeight": "450"
+            }
+          ]
+        },
+        {
+          "id": "Y7C4bC",
+          "type": "ref",
+          "ref": "GI415",
+          "name": "Trace Row / Skill Loaded",
+          "width": "fill_container",
+          "descendants": {
+            "DS5Ue": {
+              "icon": "sparkles"
+            },
+            "e102XK": {
+              "content": "已加载 Web Research 技能"
+            }
+          }
+        },
+        {
+          "id": "qyLEf",
+          "type": "ref",
+          "ref": "GI415",
+          "name": "Trace Row / Resource Read",
+          "width": "fill_container",
+          "descendants": {
+            "DS5Ue": {
+              "icon": "file-text"
+            },
+            "e102XK": {
+              "content": "已读取页面"
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "IWoSp",
+          "name": "Trace Row / Source Link",
+          "width": "fill_container",
+          "height": 30,
+          "gap": 11,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "icon",
+              "id": "FZ9wl",
+              "name": "Source Link Icon",
+              "width": 16,
+              "height": 16,
+              "icon": "external-link",
+              "library": "lucide",
+              "fill": "#A3A3A3"
+            },
+            {
+              "type": "text",
+              "id": "ke9x4",
+              "name": "Source Link Text",
+              "fill": "#666666",
+              "content": "LangChain Agents · docs.langchain.com",
+              "fontFamily": "Geist",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "rectangle",
+          "id": "rbOZC",
+          "name": "Primitive Divider / Contract",
+          "fill": "#E5E5E5",
+          "width": "fill_container",
+          "height": 1
+        },
+        {
+          "type": "text",
+          "id": "douT7",
+          "name": "Section Label / Implementation Contract",
+          "fill": "#A3A3A3",
+          "content": "IMPLEMENTATION CONTRACT",
+          "fontFamily": "Geist",
+          "fontSize": 11,
+          "fontWeight": "600",
+          "letterSpacing": 0.6
+        },
+        {
+          "type": "text",
+          "id": "ZBnBC",
+          "name": "Ownership Note",
+          "fill": "#777777",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "General ReAct：Agent Step / Tool / Skill / Resource / Prompt 只在本 Trace 展示；Trace 外旧面板不再渲染。",
+          "lineHeight": 1.4,
+          "fontFamily": "Geist",
+          "fontSize": 11.5,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "OFTV3",
+          "name": "Parallel Retry Note",
+          "fill": "#777777",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "并行调用按 assistant ordinal 固定顺序；retry 只更新同一行，不新增行、不重复计数。",
+          "lineHeight": 1.4,
+          "fontFamily": "Geist",
+          "fontSize": 11.5,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "ZNibp",
+          "name": "Final Boundary Note",
+          "fill": "#777777",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "工具已收口但尚未收到 final text-start 时，标题仍为“正在思考”并保持 Shimmer。",
+          "lineHeight": 1.4,
+          "fontFamily": "Geist",
+          "fontSize": 11.5,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "cDo5k",
+          "name": "Terminal Note",
+          "fill": "#777777",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "首个 final text-start → “已完成思考”并自动收起；取消 → “已停止思考”；无最终回答失败 → “处理未完成”。",
+          "lineHeight": 1.4,
+          "fontFamily": "Geist",
+          "fontSize": 11.5,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "TTBry",
+          "name": "Zero Tool Note",
+          "fill": "#777777",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "零 Tool 直答不创建空 Tool 行；最终回答继续使用项目现有 text-* 流式渲染。",
+          "lineHeight": 1.4,
+          "fontFamily": "Geist",
+          "fontSize": 11.5,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "text",
+          "id": "MNkU2",
+          "name": "Scope Note",
+          "fill": "#777777",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "STATE 标签、右上说明、外层示意卡片与用户气泡仅为设计标注，不属于新增 UI。",
+          "lineHeight": 1.4,
+          "fontFamily": "Geist",
+          "fontSize": 11.5,
+          "fontWeight": "normal"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "PQwFA",
+      "x": 880,
+      "y": 720,
+      "name": "State 01 / Running Expanded",
+      "clip": true,
+      "width": 880,
+      "fill": "$surface",
+      "cornerRadius": 14,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "q9HV3E",
+          "name": "State Label",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "OB5T1",
+              "name": "State Name",
+              "fill": "$text-secondary",
+              "content": "STATE 01 · 执行中 / 展开",
+              "fontFamily": "$font-ui",
+              "fontSize": 13,
+              "fontWeight": "650"
+            },
+            {
+              "type": "text",
+              "id": "RLf30",
+              "name": "State Trigger",
+              "fill": "$text-muted",
+              "content": "Agent 已开始；同批 Tool 可并行，标题保持 Shimmer",
+              "fontFamily": "$font-ui",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "g8njl",
+          "name": "Chat Surface / Running",
+          "width": "fill_container",
+          "fill": "$bg",
+          "cornerRadius": 12,
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 26,
+          "padding": [
+            34,
+            44
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "TyVI9",
+              "name": "User Message Row",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "bliMp",
+                  "name": "User Message Bubble / Existing UI Context Only",
+                  "width": 560,
+                  "fill": "#F4FBFF",
+                  "cornerRadius": 16,
+                  "stroke": "#E9F6FE",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000D",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 2
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    13,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "J93nmg",
+                      "name": "User Message Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "比较当前主流 Agent 框架，并给出适合本项目的落地建议。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "PVDxC",
+              "name": "Assistant Message / Running",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 13,
+              "children": [
+                {
+                  "id": "zDLYj",
+                  "type": "ref",
+                  "ref": "qRgeN",
+                  "name": "Trace Header / Running",
+                  "width": "fill_container",
+                  "descendants": {
+                    "PaAet": {
+                      "content": "正在思考",
+                      "fill": {
+                        "type": "gradient",
+                        "gradientType": "linear",
+                        "enabled": true,
+                        "rotation": 90,
+                        "size": {
+                          "height": 1
+                        },
+                        "colors": [
+                          {
+                            "color": "#737373",
+                            "position": 0
+                          },
+                          {
+                            "color": "#D4D4D4",
+                            "position": 0.46
+                          },
+                          {
+                            "color": "#737373",
+                            "position": 1
+                          }
+                        ]
+                      }
+                    },
+                    "j7dO1Z": {
+                      "icon": "chevron-down"
+                    }
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "id": "clvzG",
+                  "name": "Header Divider",
+                  "fill": "$border-subtle",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "lEYt4",
+                  "name": "Execution Rows",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "id": "u8XVzq",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Step / Analyze Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "brain"
+                        },
+                        "e102XK": {
+                          "content": "已分析问题范围",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "F3yUBK",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Web Search Running",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "globe"
+                        },
+                        "e102XK": {
+                          "content": "正在搜索网页",
+                          "fill": "$text-secondary",
+                          "fontWeight": "450"
+                        }
+                      }
+                    },
+                    {
+                      "id": "NeRVu",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "已读取页面",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "wJJ8p",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Datetime Running",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calendar-clock"
+                        },
+                        "e102XK": {
+                          "content": "正在核对当前日期",
+                          "fill": "$text-secondary",
+                          "fontWeight": "450"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "FGxge",
+      "x": 2800,
+      "y": 720,
+      "name": "State 02 / Actions Settled Final Pending",
+      "clip": true,
+      "width": 880,
+      "fill": "$surface",
+      "cornerRadius": 14,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "wdHHU",
+          "name": "State Label",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "h5AxGi",
+              "name": "State Name",
+              "fill": "$text-secondary",
+              "content": "STATE 02 · 行动结束 / 等待最终回答",
+              "fontFamily": "$font-ui",
+              "fontSize": 13,
+              "fontWeight": "650"
+            },
+            {
+              "type": "text",
+              "id": "muDpG",
+              "name": "State Trigger",
+              "fill": "$text-muted",
+              "content": "工具已收口，尚未收到 final text-start；标题继续 Shimmer",
+              "fontFamily": "$font-ui",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "MiPSC",
+          "name": "Chat Surface / Completed",
+          "width": "fill_container",
+          "fill": "$bg",
+          "cornerRadius": 12,
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 26,
+          "padding": [
+            34,
+            44
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "vd27V",
+              "name": "User Message Row",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "oQMTd",
+                  "name": "User Message Bubble / Existing UI Context Only",
+                  "width": 560,
+                  "fill": "#F4FBFF",
+                  "cornerRadius": 16,
+                  "stroke": "#E9F6FE",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000D",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 2
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    13,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xTyCr",
+                      "name": "User Message Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "比较当前主流 Agent 框架，并给出适合本项目的落地建议。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "o94Ds",
+              "name": "Assistant Message / Completed",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 13,
+              "children": [
+                {
+                  "id": "qaiUa",
+                  "type": "ref",
+                  "ref": "qRgeN",
+                  "name": "Trace Header / Completed",
+                  "width": "fill_container",
+                  "descendants": {
+                    "PaAet": {
+                      "content": "正在思考",
+                      "fill": {
+                        "type": "gradient",
+                        "gradientType": "linear",
+                        "enabled": true,
+                        "rotation": 90,
+                        "size": {
+                          "height": 1
+                        },
+                        "colors": [
+                          {
+                            "color": "#737373",
+                            "position": 0
+                          },
+                          {
+                            "color": "#D4D4D4",
+                            "position": 0.46
+                          },
+                          {
+                            "color": "#737373",
+                            "position": 1
+                          }
+                        ]
+                      }
+                    },
+                    "j7dO1Z": {
+                      "icon": "chevron-down"
+                    }
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "id": "j0432w",
+                  "name": "Header Divider",
+                  "fill": "$border-subtle",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "PzeNF",
+                  "name": "Execution Rows",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "id": "Z8ynB",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Web Search Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "globe"
+                        },
+                        "e102XK": {
+                          "content": "已搜索到 4 个来源",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "bRR8h",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "已读取 2 个页面",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "HE3F5",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Failed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "读取 1 个页面失败",
+                          "fill": "$danger",
+                          "fontWeight": "500"
+                        }
+                      }
+                    },
+                    {
+                      "id": "bHJBL",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Calculator Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calculator"
+                        },
+                        "e102XK": {
+                          "content": "已完成费用计算",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "YTSiG",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Datetime Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calendar-clock"
+                        },
+                        "e102XK": {
+                          "content": "已获取当前日期",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "b1O6x",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Step / Synthesis Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "brain"
+                        },
+                        "e102XK": {
+                          "content": "已整理可用信息",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "B0Ayq",
+                  "name": "Available Sources",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 7,
+                  "padding": [
+                    8,
+                    0,
+                    0,
+                    28
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "ZM0pp",
+                      "name": "Source Label",
+                      "fill": "$text-muted",
+                      "content": "已读取来源",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "550"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "SJDIi",
+                      "name": "Source / LangChain",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "Et7nz",
+                          "name": "Source Icon",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "external-link",
+                          "library": "lucide",
+                          "fill": "$text-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "iFV8H",
+                          "name": "Source Text",
+                          "fill": "$text-secondary",
+                          "content": "LangChain Agents · docs.langchain.com",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "D0jVs",
+                      "name": "Source / OpenAI Agents",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "w11mUl",
+                          "name": "Source Icon",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "external-link",
+                          "library": "lucide",
+                          "fill": "$text-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "t2E4b",
+                          "name": "Source Text",
+                          "fill": "$text-secondary",
+                          "content": "OpenAI Agents guide · platform.openai.com",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "hPpQn",
+      "x": 3760,
+      "y": 720,
+      "name": "State 03 / Final Answer Auto Collapsed",
+      "clip": true,
+      "width": 880,
+      "fill": "$surface",
+      "cornerRadius": 14,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "az7wf",
+          "name": "State Label",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "Q0ZLIY",
+              "name": "State Name",
+              "fill": "$text-secondary",
+              "content": "STATE 03 · 最终回答开始 / 过程自动收起",
+              "fontFamily": "$font-ui",
+              "fontSize": 13,
+              "fontWeight": "650"
+            },
+            {
+              "type": "text",
+              "id": "JscJK",
+              "name": "State Trigger",
+              "fill": "$text-muted",
+              "content": "收到首个 text-start；最终回答沿用项目现有流式增量渲染",
+              "fontFamily": "$font-ui",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "p5fv8M",
+          "name": "Chat Surface / Final Answer",
+          "width": "fill_container",
+          "fill": "$bg",
+          "cornerRadius": 12,
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 26,
+          "padding": [
+            34,
+            44
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "Jm2wz",
+              "name": "User Message Row",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "biBX6",
+                  "name": "User Message Bubble / Existing UI Context Only",
+                  "width": 560,
+                  "fill": "#F4FBFF",
+                  "cornerRadius": 16,
+                  "stroke": "#E9F6FE",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000D",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 2
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    13,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "Ts1kk",
+                      "name": "User Message Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "比较当前主流 Agent 框架，并给出适合本项目的落地建议。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "YTcXU",
+              "name": "Assistant Message / Final Answer",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 18,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "nT9rb",
+                  "name": "Collapsed Trace Trigger",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "id": "T9K3O",
+                      "type": "ref",
+                      "ref": "qRgeN",
+                      "name": "Trace Header / Collapsed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "PaAet": {
+                          "content": "已完成思考",
+                          "fill": "#666666"
+                        },
+                        "j7dO1Z": {
+                          "icon": "chevron-right"
+                        }
+                      }
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "HWuFD",
+                      "name": "Collapsed Trace Divider",
+                      "fill": "$border-subtle",
+                      "width": "fill_container",
+                      "height": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "zLnf9",
+      "x": 1840,
+      "y": 720,
+      "name": "State 01B / Parallel Mixed Expanded",
+      "clip": true,
+      "width": 880,
+      "fill": "$surface",
+      "cornerRadius": 14,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "HK7cU",
+          "name": "State Label",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "r6qT1",
+              "name": "State Name",
+              "fill": "$text-secondary",
+              "content": "STATE 01B · 并行执行 / 部分完成",
+              "fontFamily": "$font-ui",
+              "fontSize": 13,
+              "fontWeight": "650"
+            },
+            {
+              "type": "text",
+              "id": "WIKCA",
+              "name": "State Trigger",
+              "fill": "$text-muted",
+              "content": "同批最多 3 个 Tool；槽位按 assistant ordinal 固定",
+              "fontFamily": "$font-ui",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Z6KqF1",
+          "name": "Chat Surface / Running",
+          "width": "fill_container",
+          "fill": "$bg",
+          "cornerRadius": 12,
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 26,
+          "padding": [
+            34,
+            44
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "G4JqXV",
+              "name": "User Message Row",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "aHD98",
+                  "name": "User Message Bubble / Existing UI Context Only",
+                  "width": 560,
+                  "fill": "#F4FBFF",
+                  "cornerRadius": 16,
+                  "stroke": "#E9F6FE",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000D",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 2
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    13,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xcL6j",
+                      "name": "User Message Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "比较当前主流 Agent 框架，并给出适合本项目的落地建议。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "bygil",
+              "name": "Assistant Message / Running",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 13,
+              "children": [
+                {
+                  "id": "h7P2Ql",
+                  "type": "ref",
+                  "ref": "qRgeN",
+                  "name": "Trace Header / Running",
+                  "width": "fill_container",
+                  "descendants": {
+                    "PaAet": {
+                      "content": "正在思考",
+                      "fill": {
+                        "type": "gradient",
+                        "gradientType": "linear",
+                        "enabled": true,
+                        "rotation": 90,
+                        "size": {
+                          "height": 1
+                        },
+                        "colors": [
+                          {
+                            "color": "#737373",
+                            "position": 0
+                          },
+                          {
+                            "color": "#D4D4D4",
+                            "position": 0.46
+                          },
+                          {
+                            "color": "#737373",
+                            "position": 1
+                          }
+                        ]
+                      }
+                    },
+                    "j7dO1Z": {
+                      "icon": "chevron-down"
+                    }
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "id": "sroFX",
+                  "name": "Header Divider",
+                  "fill": "$border-subtle",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "i69XN",
+                  "name": "Execution Rows",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "id": "tVF0p",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Step / Analyze Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "brain"
+                        },
+                        "e102XK": {
+                          "content": "已分析问题范围",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "snr9G",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Web Search Running",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "globe"
+                        },
+                        "e102XK": {
+                          "content": "正在搜索网页",
+                          "fill": "$text-secondary",
+                          "fontWeight": "450"
+                        }
+                      }
+                    },
+                    {
+                      "id": "T4aXO",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "已读取页面",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "xEdRq",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Datetime Running",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calendar-clock"
+                        },
+                        "e102XK": {
+                          "content": "正在核对当前日期",
+                          "fill": "$text-secondary",
+                          "fontWeight": "450"
+                        }
+                      }
+                    },
+                    {
+                      "id": "p6yMPy",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Calculator Running",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calculator"
+                        },
+                        "e102XK": {
+                          "content": "正在计算费用"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "U1aNLT",
+      "x": 4720,
+      "y": 720,
+      "name": "State 04 / Completed Restored And Manually Reopened",
+      "clip": true,
+      "width": 880,
+      "fill": "$surface",
+      "cornerRadius": 14,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "u4fsDz",
+          "name": "State Label",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "yuBAX",
+              "name": "State Name",
+              "fill": "$text-secondary",
+              "content": "STATE 04 · 已完成 / 恢复后手动展开",
+              "fontFamily": "$font-ui",
+              "fontSize": 13,
+              "fontWeight": "650"
+            },
+            {
+              "type": "text",
+              "id": "apzTe",
+              "name": "State Trigger",
+              "fill": "$text-muted",
+              "content": "完成 Trace 写入 IndexedDB；刷新后默认收起，可手动查看",
+              "fontFamily": "$font-ui",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "r3rpLe",
+          "name": "Chat Surface / Completed",
+          "width": "fill_container",
+          "fill": "$bg",
+          "cornerRadius": 12,
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 26,
+          "padding": [
+            34,
+            44
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "PzdiV",
+              "name": "User Message Row",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "T6jdWe",
+                  "name": "User Message Bubble / Existing UI Context Only",
+                  "width": 560,
+                  "fill": "#F4FBFF",
+                  "cornerRadius": 16,
+                  "stroke": "#E9F6FE",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000D",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 2
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    13,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "MYAMq",
+                      "name": "User Message Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "比较当前主流 Agent 框架，并给出适合本项目的落地建议。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "lkpy1",
+              "name": "Assistant Message / Completed",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 13,
+              "children": [
+                {
+                  "id": "idPUS",
+                  "type": "ref",
+                  "ref": "qRgeN",
+                  "name": "Trace Header / Completed",
+                  "width": "fill_container",
+                  "descendants": {
+                    "PaAet": {
+                      "content": "已完成思考",
+                      "fill": "#666666"
+                    },
+                    "j7dO1Z": {
+                      "icon": "chevron-down"
+                    }
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "id": "BKRKC",
+                  "name": "Header Divider",
+                  "fill": "$border-subtle",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "N2NQxn",
+                  "name": "Execution Rows",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "id": "s4rCy",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Web Search Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "globe"
+                        },
+                        "e102XK": {
+                          "content": "已搜索到 4 个来源",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "w62fv4",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "已读取 2 个页面",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "xiZjP",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Failed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "读取 1 个页面失败",
+                          "fill": "$danger",
+                          "fontWeight": "500"
+                        }
+                      }
+                    },
+                    {
+                      "id": "aGs4V",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Calculator Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calculator"
+                        },
+                        "e102XK": {
+                          "content": "已完成费用计算",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "Xcyf0",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Datetime Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "calendar-clock"
+                        },
+                        "e102XK": {
+                          "content": "已获取当前日期",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "smY4l",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Step / Synthesis Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "brain"
+                        },
+                        "e102XK": {
+                          "content": "已整理可用信息",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "e53bp",
+                  "name": "Available Sources",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 7,
+                  "padding": [
+                    8,
+                    0,
+                    0,
+                    28
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "BT4T5",
+                      "name": "Source Label",
+                      "fill": "$text-muted",
+                      "content": "已读取来源",
+                      "fontFamily": "$font-ui",
+                      "fontSize": 12,
+                      "fontWeight": "550"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "meW9d",
+                      "name": "Source / LangChain",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "d8MMh8",
+                          "name": "Source Icon",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "external-link",
+                          "library": "lucide",
+                          "fill": "$text-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "B2lwYU",
+                          "name": "Source Text",
+                          "fill": "$text-secondary",
+                          "content": "LangChain Agents · docs.langchain.com",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Ddyns",
+                      "name": "Source / OpenAI Agents",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "hepgq",
+                          "name": "Source Icon",
+                          "width": 13,
+                          "height": 13,
+                          "icon": "external-link",
+                          "library": "lucide",
+                          "fill": "$text-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "VdZ4g",
+                          "name": "Source Text",
+                          "fill": "$text-secondary",
+                          "content": "OpenAI Agents guide · platform.openai.com",
+                          "fontFamily": "$font-ui",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "zSXLs",
+      "x": 5680,
+      "y": 720,
+      "name": "State 05 / Exceptional Terminal",
+      "clip": true,
+      "width": 880,
+      "fill": "$surface",
+      "cornerRadius": 14,
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 28,
+      "children": [
+        {
+          "type": "frame",
+          "id": "owjDU",
+          "name": "State Label",
+          "width": "fill_container",
+          "justifyContent": "space_between",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "BUNGP",
+              "name": "State Name",
+              "fill": "$text-secondary",
+              "content": "STATE 05 · 异常终态 / 展开",
+              "fontFamily": "$font-ui",
+              "fontSize": 13,
+              "fontWeight": "650"
+            },
+            {
+              "type": "text",
+              "id": "untHL",
+              "name": "State Trigger",
+              "fill": "$text-muted",
+              "content": "异常终态不闪动；显式取消时标题使用“已停止思考”",
+              "fontFamily": "$font-ui",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "fhwBx",
+          "name": "Chat Surface / Running",
+          "width": "fill_container",
+          "fill": "$bg",
+          "cornerRadius": 12,
+          "stroke": "$border-subtle",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 26,
+          "padding": [
+            34,
+            44
+          ],
+          "children": [
+            {
+              "type": "frame",
+              "id": "qQXsR",
+              "name": "User Message Row",
+              "width": "fill_container",
+              "justifyContent": "end",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "xSOih",
+                  "name": "User Message Bubble / Existing UI Context Only",
+                  "width": 560,
+                  "fill": "#F4FBFF",
+                  "cornerRadius": 16,
+                  "stroke": "#E9F6FE",
+                  "strokeWidth": 1,
+                  "effect": {
+                    "type": "shadow",
+                    "shadowType": "outer",
+                    "color": "#0000000D",
+                    "offset": {
+                      "x": 0,
+                      "y": 1
+                    },
+                    "blur": 2
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    13,
+                    16
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xPcjm",
+                      "name": "User Message Text",
+                      "fill": "$text-primary",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "比较当前主流 Agent 框架，并给出适合本项目的落地建议。",
+                      "lineHeight": 1.5,
+                      "fontFamily": "$font-ui",
+                      "fontSize": 15,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "BzxBs",
+              "name": "Assistant Message / Running",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 13,
+              "children": [
+                {
+                  "id": "Xc6R0",
+                  "type": "ref",
+                  "ref": "qRgeN",
+                  "name": "Trace Header / Running",
+                  "width": "fill_container",
+                  "descendants": {
+                    "PaAet": {
+                      "content": "处理未完成",
+                      "fill": "#666666"
+                    },
+                    "j7dO1Z": {
+                      "icon": "chevron-down"
+                    }
+                  }
+                },
+                {
+                  "type": "rectangle",
+                  "id": "Wv7SK",
+                  "name": "Header Divider",
+                  "fill": "$border-subtle",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "KlRSt",
+                  "name": "Execution Rows",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 8,
+                  "children": [
+                    {
+                      "id": "dgOjr",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Step / Analyze Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "brain"
+                        },
+                        "e102XK": {
+                          "content": "已分析问题范围",
+                          "fill": "$text-secondary"
+                        }
+                      }
+                    },
+                    {
+                      "id": "vVBK6",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Web Search Running",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "globe"
+                        },
+                        "e102XK": {
+                          "content": "已搜索到 2 个来源",
+                          "fill": "$text-secondary",
+                          "fontWeight": "450"
+                        }
+                      }
+                    },
+                    {
+                      "id": "PaomG",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Read URL Completed",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "file-text"
+                        },
+                        "e102XK": {
+                          "content": "读取页面失败",
+                          "fill": "#C62828"
+                        }
+                      }
+                    },
+                    {
+                      "id": "EatDE",
+                      "type": "ref",
+                      "ref": "GI415",
+                      "name": "Tool / Datetime Running",
+                      "width": "fill_container",
+                      "descendants": {
+                        "DS5Ue": {
+                          "icon": "timer-off"
+                        },
+                        "e102XK": {
+                          "content": "运行时间已到，未继续调用工具",
+                          "fill": "$text-secondary",
+                          "fontWeight": "450"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "yAQ3N",
+      "x": 6656,
+      "y": 0,
+      "name": "Nested Trace Row Disclosure",
+      "clip": true,
+      "width": 1120,
+      "height": 760,
+      "fill": "#F7F8FA",
+      "cornerRadius": 12,
+      "stroke": "#DDE2E8",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "gap": 20,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "S9uJlJ",
+          "name": "Design Title",
+          "fill": "#20242A",
+          "content": "General ReAct / Nested Trace Row Disclosure",
+          "fontFamily": "Inter",
+          "fontSize": 18,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "H35jk5",
+          "name": "Design Subtitle",
+          "fill": "#737A84",
+          "content": "Tool / Skill 行可独立展开，查看一行安全的执行摘要",
+          "fontFamily": "Inter",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "N8Vdc1",
+          "name": "Disclosure Content",
+          "width": "fill_container",
+          "height": 610,
+          "gap": 28,
+          "children": [
+            {
+              "type": "frame",
+              "id": "BUAEq",
+              "name": "Interaction State Reference",
+              "width": 320,
+              "fill": "#FFFFFF",
+              "cornerRadius": 8,
+              "stroke": "#E2E6EB",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "AmAlo",
+                  "name": "Reference Heading",
+                  "fill": "#20242A",
+                  "content": "Interaction states",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "o5K0S",
+                  "name": "Reference Note",
+                  "fill": "#737A84",
+                  "content": "折叠行保留箭头位置，避免 hover 时标题跳动",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "M19aM",
+                  "name": "State Default Collapsed Final",
+                  "height": 44,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "xTT9G",
+                      "name": "Default Tool Icon Final",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "globe",
+                      "library": "lucide",
+                      "fill": "#8A929C"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "b7y0HY",
+                      "name": "Default Label And Placeholder Final",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "rpyJv",
+                          "name": "Default Row Label Final Clean",
+                          "fill": "#606872",
+                          "content": "正在搜索网页",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "YLuoP",
+                          "name": "Default Chevron Placeholder Final Clean",
+                          "opacity": 0,
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "#8A929C"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "h7tjc",
+                      "name": "Default Annotation Final Clean",
+                      "fill": "#9AA1AA",
+                      "content": "Default / collapsed",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "f53jV",
+                  "name": "State Hover Collapsed Final",
+                  "height": 44,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "KxjTO",
+                      "name": "Hover Tool Icon Final",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "globe",
+                      "library": "lucide",
+                      "fill": "#737A84"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "wDnNV",
+                      "name": "Hover Label And Chevron Final",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "bwqhi",
+                          "name": "Hover Row Label Final Clean",
+                          "fill": "#4D555F",
+                          "content": "正在搜索网页",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "N9IIo",
+                          "name": "Hover Chevron Final Clean",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "VM40r",
+                      "name": "Hover Annotation Final Clean",
+                      "fill": "#8A929C",
+                      "content": "Hover or focus / collapsed",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vM59D",
+                  "name": "State Expanded",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "layout": "vertical",
+                  "gap": 7,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "y40lv",
+                      "name": "Expanded Row Header",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "n4D0Jf",
+                          "name": "Expanded Tool Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "globe",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        },
+                        {
+                          "type": "text",
+                          "id": "iumnC",
+                          "x": 24,
+                          "y": 4.5,
+                          "name": "Expanded Row Label",
+                          "enabled": false,
+                          "fill": "#4D555F",
+                          "content": "正在搜索网页",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "guKBn",
+                          "x": 111,
+                          "y": 8,
+                          "name": "Expanded Chevron",
+                          "enabled": false,
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "i5c6u",
+                          "name": "Expanded Label And Chevron",
+                          "gap": 3,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "Q9r0zd",
+                              "name": "Expanded Row Label Tight",
+                              "fill": "#4D555F",
+                              "content": "正在搜索网页",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "jVBQY",
+                              "name": "Expanded Chevron Tight",
+                              "width": 12,
+                              "height": 12,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "#737A84"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "ufJ5D",
+                      "name": "Expanded Detail",
+                      "fill": "#737A84",
+                      "content": "正在检索与问题相关的公开来源…",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "cjMIr",
+                      "name": "Expanded State Label",
+                      "fill": "#8A929C",
+                      "content": "Expanded / detail visible",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "u9eF7",
+                  "name": "State No Detail",
+                  "width": "fill_container",
+                  "height": 44,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "V21Y7",
+                      "name": "No Detail Tool Icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "calculator",
+                      "library": "lucide",
+                      "fill": "#8A929C"
+                    },
+                    {
+                      "type": "text",
+                      "id": "y18CM",
+                      "name": "No Detail Row Label",
+                      "fill": "#606872",
+                      "content": "正在计算费用",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "p79zRE",
+                      "name": "No Detail State Label",
+                      "fill": "#9AA1AA",
+                      "content": "No detail / no arrow",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "vrsUa",
+              "name": "Trace Example",
+              "width": "fill_container",
+              "fill": "#FFFFFF",
+              "cornerRadius": 8,
+              "stroke": "#E2E6EB",
+              "strokeWidth": 1,
+              "layout": "vertical",
+              "gap": 12,
+              "padding": 20,
+              "children": [
+                {
+                  "type": "text",
+                  "id": "M27oxh",
+                  "name": "Trace Heading",
+                  "fill": "#20242A",
+                  "content": "Trace row example",
+                  "fontFamily": "Inter",
+                  "fontSize": 13,
+                  "fontWeight": "600"
+                },
+                {
+                  "type": "text",
+                  "id": "s71CV",
+                  "name": "Trace Note",
+                  "fill": "#737A84",
+                  "content": "Tool / Skill 详情均为一行 public-safe 摘要",
+                  "fontFamily": "Inter",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "MKhFX",
+                  "name": "Trace Header Row",
+                  "width": "fill_container",
+                  "height": 32,
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "hR21I",
+                      "x": 0,
+                      "y": 8,
+                      "name": "Trace Header Icon",
+                      "enabled": false,
+                      "width": 16,
+                      "height": 16,
+                      "icon": "brain",
+                      "library": "lucide",
+                      "fill": "#8A929C"
+                    },
+                    {
+                      "type": "text",
+                      "id": "WQkn0",
+                      "x": 0,
+                      "y": 6.5,
+                      "name": "Trace Header Label",
+                      "enabled": false,
+                      "fill": "#606872",
+                      "content": "正在思考",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "600"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "Nn4On",
+                      "x": 61,
+                      "y": 10,
+                      "name": "Trace Header Chevron",
+                      "enabled": false,
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-down",
+                      "library": "lucide",
+                      "fill": "#8A929C"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "yD0ue",
+                      "name": "Trace Header Label And Chevron",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "H0b7CI",
+                          "name": "Trace Header Label Tight",
+                          "fill": "#606872",
+                          "content": "正在思考",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "600"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "TJQeb",
+                          "name": "Trace Header Chevron Tight",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#8A929C"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "aT7Se",
+                  "name": "Trace Divider",
+                  "fill": "#E6E9ED",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "R9W573",
+                  "name": "Tool Row Collapsed",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "#FFFFFF00",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "egMKQ",
+                      "name": "Tool Search Icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "globe",
+                      "library": "lucide",
+                      "fill": "#8A929C"
+                    },
+                    {
+                      "type": "text",
+                      "id": "uNhyp",
+                      "x": 24,
+                      "y": 8.5,
+                      "name": "Tool Search Label",
+                      "enabled": false,
+                      "fill": "#606872",
+                      "content": "正在搜索网页",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "OxUaP",
+                      "x": 111,
+                      "y": 12,
+                      "name": "Tool Search Chevron Placeholder",
+                      "enabled": false,
+                      "opacity": 0,
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-right",
+                      "library": "lucide",
+                      "fill": "#8A929C"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Vyedc",
+                      "name": "Tool Label And Placeholder",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "mhnIz",
+                          "name": "Tool Search Label Tight",
+                          "fill": "#606872",
+                          "content": "正在搜索网页",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "tkoIp",
+                          "name": "Tool Search Placeholder Tight",
+                          "opacity": 0,
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "#8A929C"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "gj5EA",
+                  "name": "Skill Row Hover Collapsed",
+                  "width": "fill_container",
+                  "height": 36,
+                  "fill": "#FFFFFF00",
+                  "gap": 8,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "icon",
+                      "id": "k2TPA",
+                      "name": "Skill Icon",
+                      "width": 16,
+                      "height": 16,
+                      "icon": "sparkles",
+                      "library": "lucide",
+                      "fill": "#737A84"
+                    },
+                    {
+                      "type": "text",
+                      "id": "T87kzz",
+                      "x": 24,
+                      "y": 8.5,
+                      "name": "Skill Label",
+                      "enabled": false,
+                      "fill": "#606872",
+                      "content": "已加载 Web Research 技能",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "icon",
+                      "id": "Yyjug",
+                      "x": 194,
+                      "y": 12,
+                      "name": "Skill Chevron",
+                      "enabled": false,
+                      "width": 12,
+                      "height": 12,
+                      "icon": "chevron-right",
+                      "library": "lucide",
+                      "fill": "#737A84"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "WJZCA",
+                      "name": "Skill Label And Chevron",
+                      "gap": 3,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "ABQQa",
+                          "name": "Skill Label Tight",
+                          "fill": "#606872",
+                          "content": "已加载 Web Research 技能",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "KRofK",
+                          "name": "Skill Chevron Tight",
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-right",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "J5Ddu",
+                  "name": "Tool Row Expanded",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Khmzh",
+                      "name": "Tool Expanded Header",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "SkHAX",
+                          "name": "Tool Expanded Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "globe",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        },
+                        {
+                          "type": "text",
+                          "id": "iZJBH",
+                          "x": 24,
+                          "y": 4.5,
+                          "name": "Tool Expanded Label",
+                          "enabled": false,
+                          "fill": "#606872",
+                          "content": "已读取页面",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "rTEeB",
+                          "x": 98,
+                          "y": 8,
+                          "name": "Tool Expanded Chevron",
+                          "enabled": false,
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "CHSfa",
+                          "name": "Tool Expanded Label And Chevron",
+                          "gap": 3,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "PUOg2",
+                              "name": "Tool Expanded Label Tight",
+                              "fill": "#606872",
+                              "content": "已读取页面",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "k1ji3",
+                              "name": "Tool Expanded Chevron Tight",
+                              "width": 12,
+                              "height": 12,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "#737A84"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "BiNxg",
+                      "x": 0,
+                      "y": 34,
+                      "name": "Tool Detail Summary",
+                      "enabled": false,
+                      "fill": "#737A84",
+                      "content": "已读取 docs.langchain.com 的标题和关键段落",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "iRNpo",
+                      "name": "Tool Detail Indented",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        24
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "lBieo",
+                          "name": "Tool Detail Text",
+                          "fill": "#737A84",
+                          "content": "已读取 docs.langchain.com 的标题和关键段落",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "bZiNR",
+                  "name": "Skill Row Expanded",
+                  "width": "fill_container",
+                  "fill": "#FFFFFF00",
+                  "layout": "vertical",
+                  "gap": 6,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "QyLF3",
+                      "name": "Skill Expanded Header",
+                      "width": "fill_container",
+                      "height": 28,
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon",
+                          "id": "q6dLN",
+                          "name": "Skill Expanded Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "sparkles",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        },
+                        {
+                          "type": "text",
+                          "id": "dTwfZ",
+                          "x": 24,
+                          "y": 4.5,
+                          "name": "Skill Expanded Label",
+                          "enabled": false,
+                          "fill": "#606872",
+                          "content": "已加载 Web Research 技能",
+                          "fontFamily": "Inter",
+                          "fontSize": 13,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "icon",
+                          "id": "peLik",
+                          "x": 194,
+                          "y": 8,
+                          "name": "Skill Expanded Chevron",
+                          "enabled": false,
+                          "width": 12,
+                          "height": 12,
+                          "icon": "chevron-down",
+                          "library": "lucide",
+                          "fill": "#737A84"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "x2DmAn",
+                          "name": "Skill Expanded Label And Chevron",
+                          "gap": 3,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "uNiN0",
+                              "name": "Skill Expanded Label Tight",
+                              "fill": "#606872",
+                              "content": "已加载 Web Research 技能",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "icon",
+                              "id": "zJsXl",
+                              "name": "Skill Expanded Chevron Tight",
+                              "width": 12,
+                              "height": 12,
+                              "icon": "chevron-down",
+                              "library": "lucide",
+                              "fill": "#737A84"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "GwtHa",
+                      "x": 0,
+                      "y": 34,
+                      "name": "Skill Detail Summary",
+                      "enabled": false,
+                      "fill": "#737A84",
+                      "content": "用于检索、筛选和整理公开网页来源",
+                      "fontFamily": "Inter",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Vxxxp",
+                      "name": "Skill Detail Indented",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        0,
+                        0,
+                        24
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "A4oBw",
+                          "name": "Skill Detail Text",
+                          "fill": "#737A84",
+                          "content": "用于检索、筛选和整理公开网页来源",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "bg": {
+      "type": "color",
+      "value": "#FFFFFF"
+    },
+    "surface": {
+      "type": "color",
+      "value": "#F7F7F7"
+    },
+    "surface-hover": {
+      "type": "color",
+      "value": "#F2F2F2"
+    },
+    "text-primary": {
+      "type": "color",
+      "value": "#1A1A1A"
+    },
+    "text-secondary": {
+      "type": "color",
+      "value": "#666666"
+    },
+    "text-muted": {
+      "type": "color",
+      "value": "#999999"
+    },
+    "border-subtle": {
+      "type": "color",
+      "value": "#E5E5E5"
+    },
+    "accent": {
+      "type": "color",
+      "value": "#4F46E5"
+    },
+    "danger": {
+      "type": "color",
+      "value": "#B42318"
+    },
+    "font-ui": {
+      "type": "string",
+      "value": "Geist"
+    }
+  },
+  "fileToken": "b0ed4e0f-6e7c-4dee-9cc5-8a3ce9b1cf94"
+}

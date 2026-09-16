@@ -101,6 +101,11 @@ function getValidateTasklistStructureDisplayConfig(args: unknown): ToolDisplayCo
 }
 
 export const validateTasklistStructureToolDefinition: ChatToolDefinition<z.infer<typeof validateTasklistStructureInputSchema>> = {
+    executionPolicy: {
+        kind: 'standard-tool',
+        profile: 'local-deterministic',
+        retrySafe: true,
+    },
     name: 'validate_tasklist_structure',
     tool: validateTasklistStructureTool,
     schema: validateTasklistStructureInputSchema,

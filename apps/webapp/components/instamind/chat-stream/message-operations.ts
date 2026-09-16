@@ -2,10 +2,11 @@ import type { AgentGraphDebugSummary, ChatStreamChunk } from '@ai-mind/stream-co
 
 import type {
     AgentGraphNodeEntry,
+    AgentGraphPart,
     AgentGraphRouteEntry,
     AgentGraphTrace,
     AgentInterruptPart,
-    AgentStepPart,
+    AgentRunPart,
     AgentTextArtifactViewModel,
     ImageBriefPart,
     ImageResultPart,
@@ -20,7 +21,13 @@ import type {
     WorkflowProgressStep,
 } from '@/lib/ai/types/message'
 
-import { createAgentGraphStepPart, createReasoningPart, createTextPart, createWorkflowProgressStep } from './message-factory'
+import {
+    createAgentGraphStepPart,
+    createAgentRunPart,
+    createReasoningPart,
+    createTextPart,
+    createWorkflowProgressStep,
+} from './message-factory'
 
 export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
     return messages.filter(message => {
@@ -34,7 +41,8 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
 
         return message.parts.some(part => {
             if (
-                part.type === 'agent-step' ||
+                part.type === 'agent-graph' ||
+                part.type === 'agent-run' ||
                 part.type === 'tool' ||
                 part.type === 'resource' ||
                 part.type === 'skill' ||
@@ -48,7 +56,7 @@ export function pruneTransientMessages(messages: MindMessage[]): MindMessage[] {
                 return true
             }
 
-            return part.text.trim().length > 0
+            return part.type === 'text' && part.text.trim().length > 0
         })
     })
 }
@@ -72,6 +80,28 @@ export function ensureAssistantMessage(messages: MindMessage[], messageId: strin
 
 export function updateMessageStatus(messages: MindMessage[], messageId: string, status: MindMessage['status']): MindMessage[] {
     return messages.map(message => (message.id === messageId ? { ...message, status } : message))
+}
+
+export function upsertAgentRunPart(
+    messages: MindMessage[],
+    messageId: string,
+    runId: string,
+    status: AgentRunPart['status'],
+    partId = `agent-run:${runId}`
+): MindMessage[] {
+    return messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existing = message.parts.find((part): part is AgentRunPart => part.type === 'agent-run' && part.runId === runId)
+        const nextPart = existing ? { ...existing, id: partId, status } : createAgentRunPart(runId, status, partId)
+
+        return {
+            ...message,
+            parts: existing ? message.parts.map(part => (part === existing ? nextPart : part)) : [...message.parts, nextPart],
+        }
+    })
 }
 
 export function appendAgentTextArtifact(messages: MindMessage[], messageId: string, artifact: AgentTextArtifactViewModel): MindMessage[] {
@@ -470,7 +500,7 @@ export function applyWorkflowProgressStepChunk(
 
 type AgentGraphNodeUpdate = Partial<Omit<AgentGraphNodeEntry, 'nodeId'>> & Pick<AgentGraphNodeEntry, 'nodeId'>
 
-function getAgentStepPartStatus(graph: AgentGraphTrace): AgentStepPart['status'] {
+function getAgentGraphPartStatus(graph: AgentGraphTrace): AgentGraphPart['status'] {
     if (graph.nodes.some(node => node.status === 'running')) {
         return 'running'
     }
@@ -554,7 +584,7 @@ export function upsertAgentGraphNodePart(
             return message
         }
 
-        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+        const existingPart = message.parts.find((part): part is AgentGraphPart => part.type === 'agent-graph' && part.runId === runId)
 
         if (!existingPart) {
             return {
@@ -571,7 +601,7 @@ export function upsertAgentGraphNodePart(
         return {
             ...message,
             parts: message.parts.map(part => {
-                if (part.type !== 'agent-step' || part.runId !== runId) {
+                if (part.type !== 'agent-graph' || part.runId !== runId) {
                     return part
                 }
 
@@ -579,7 +609,7 @@ export function upsertAgentGraphNodePart(
                     ...part,
                     agentName,
                     graph: nextGraph,
-                    status: getAgentStepPartStatus(nextGraph),
+                    status: getAgentGraphPartStatus(nextGraph),
                 }
             }),
         }
@@ -598,7 +628,7 @@ export function appendAgentGraphRoutePart(
             return message
         }
 
-        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+        const existingPart = message.parts.find((part): part is AgentGraphPart => part.type === 'agent-graph' && part.runId === runId)
 
         if (!existingPart) {
             return {
@@ -606,8 +636,8 @@ export function appendAgentGraphRoutePart(
                 parts: [
                     ...message.parts,
                     {
-                        id: `agent-step:${runId}`,
-                        type: 'agent-step',
+                        id: `agent-graph:${runId}`,
+                        type: 'agent-graph',
                         runId,
                         agentName,
                         graph: {
@@ -629,7 +659,7 @@ export function appendAgentGraphRoutePart(
         return {
             ...message,
             parts: message.parts.map(part => {
-                if (part.type !== 'agent-step' || part.runId !== runId) {
+                if (part.type !== 'agent-graph' || part.runId !== runId) {
                     return part
                 }
 
@@ -637,7 +667,7 @@ export function appendAgentGraphRoutePart(
                     ...part,
                     agentName,
                     graph: nextGraph,
-                    status: getAgentStepPartStatus(nextGraph),
+                    status: getAgentGraphPartStatus(nextGraph),
                 }
             }),
         }
@@ -656,7 +686,7 @@ export function upsertAgentGraphDebugSummaryPart(
             return message
         }
 
-        const existingPart = message.parts.find((part): part is AgentStepPart => part.type === 'agent-step' && part.runId === runId)
+        const existingPart = message.parts.find((part): part is AgentGraphPart => part.type === 'agent-graph' && part.runId === runId)
 
         if (!existingPart) {
             return {
@@ -664,8 +694,8 @@ export function upsertAgentGraphDebugSummaryPart(
                 parts: [
                     ...message.parts,
                     {
-                        id: `agent-step:${runId}`,
-                        type: 'agent-step',
+                        id: `agent-graph:${runId}`,
+                        type: 'agent-graph',
                         runId,
                         agentName,
                         graph: {
@@ -688,7 +718,7 @@ export function upsertAgentGraphDebugSummaryPart(
         return {
             ...message,
             parts: message.parts.map(part => {
-                if (part.type !== 'agent-step' || part.runId !== runId) {
+                if (part.type !== 'agent-graph' || part.runId !== runId) {
                     return part
                 }
 
@@ -696,7 +726,7 @@ export function upsertAgentGraphDebugSummaryPart(
                     ...part,
                     agentName,
                     graph: nextGraph,
-                    status: getAgentStepPartStatus(nextGraph),
+                    status: getAgentGraphPartStatus(nextGraph),
                 }
             }),
         }

@@ -1,5 +1,4 @@
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
-import type { Runnable } from '@langchain/core/runnables'
 
 export const aiMindLlmProviders = ['ollama', 'deepseek', 'qwen', 'doubao'] as const
 
@@ -65,7 +64,6 @@ export interface ResolvedModelSelection {
 }
 
 export interface AiMindChatModelHandle {
-    bindTools?: (tools: unknown[]) => Runnable
     capabilities: ModelProviderCapabilities
     model: BaseChatModel
     modelId: string

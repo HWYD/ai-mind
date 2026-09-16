@@ -1,4 +1,4 @@
-﻿/** @vitest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
@@ -29,7 +29,7 @@ const modelGroups: ChatModelGroup[] = [
         label: '线上模型',
         models: [
             // 注意：这里从当前 catalog 派生 provider，避免把 deepseek family 固定绑到某个供应商。
-            createPublicModel('qwen/qwen3.6-flash'),
+            createPublicModel('deepseek/deepseek-v4-flash'),
             createPublicModel('deepseek/deepseek-v4-pro'),
             createPublicModel('doubao/doubao-seed-2.0-pro'),
             createPublicModel('doubao/Kimi-K2.6'),
@@ -62,6 +62,28 @@ describe('ComposerToolbar model selector', () => {
         })
     })
 
+    it('does not render manual skill mode choices', () => {
+        render(
+            <ComposerToolbar
+                enableReasoning
+                isModelLoading={false}
+                model="deepseek/deepseek-v4-flash"
+                modelGroups={modelGroups}
+                onEnableReasoningChange={vi.fn()}
+                onInsertTrigger={vi.fn()}
+                onModelChange={vi.fn()}
+                onStop={vi.fn()}
+                onSubmit={vi.fn()}
+                sendDisabled={false}
+                status="ready"
+            />
+        )
+
+        expect(screen.queryByLabelText('切换到 自动：根据问题自动选择合适能力')).toBeNull()
+        expect(screen.queryByLabelText('切换到 工具技能：优先使用计算、时间、文本处理与天气等工具能力')).toBeNull()
+        expect(screen.queryByLabelText('切换到 阅读技能：优先消费 demo 文档、项目上下文和 MCP 读取能力')).toBeNull()
+    })
+
     it('按线上模型和本地模型分组展示，并在切换模型时回调 onModelChange', async () => {
         const onModelChange = vi.fn()
 
@@ -69,16 +91,14 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={onModelChange}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -90,12 +110,12 @@ describe('ComposerToolbar model selector', () => {
         })
 
         const menu = await waitFor(() => screen.getByRole('menu'))
-        const onlineQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3.6-flash' })
+        const deepseekFlashItem = within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-flash' })
         const deepseekItem = within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-pro' })
         const doubaoItem = within(menu).getByRole('menuitemradio', { name: 'doubao-seed-2.0-pro' })
         const kimiItem = within(menu).getByRole('menuitemradio', { name: 'Kimi-K2.6' })
         const localQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3-8b' })
-        const onlineQwenIcon = onlineQwenItem.querySelector<SVGElement>('[data-model-icon]')
+        const deepseekFlashIcon = deepseekFlashItem.querySelector<SVGElement>('[data-model-icon]')
         const deepseekIcon = deepseekItem.querySelector<SVGElement>('[data-model-icon]')
         const doubaoIcon = doubaoItem.querySelector<SVGElement>('[data-model-icon]')
         const kimiIcon = kimiItem.querySelector<SVGElement>('[data-model-icon]')
@@ -103,13 +123,13 @@ describe('ComposerToolbar model selector', () => {
 
         expect(within(menu).getByText('线上模型')).toBeTruthy()
         expect(within(menu).getByText('本地模型')).toBeTruthy()
-        expect(onlineQwenItem).toBeTruthy()
+        expect(deepseekFlashItem).toBeTruthy()
         expect(deepseekItem).toBeTruthy()
         expect(doubaoItem).toBeTruthy()
         expect(kimiItem).toBeTruthy()
         expect(localQwenItem).toBeTruthy()
-        expect(onlineQwenIcon?.style.color).toBe('var(--color-violet-500)')
-        expect(onlineQwenIcon?.dataset.modelIcon).toBe('qwen')
+        expect(deepseekFlashIcon?.style.color).toBe('var(--color-sky-500)')
+        expect(deepseekFlashIcon?.dataset.modelIcon).toBe('deepseek')
         expect(deepseekIcon?.style.color).toBe('var(--color-sky-500)')
         expect(localQwenIcon?.style.color).toBe('var(--color-violet-500)')
         expect(localQwenIcon?.dataset.modelIcon).toBe('qwen')
@@ -133,11 +153,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -169,11 +187,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -199,16 +215,14 @@ describe('ComposerToolbar model selector', () => {
                 disabled
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -224,16 +238,14 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -246,32 +258,29 @@ describe('ComposerToolbar model selector', () => {
         expect(modelButton.className).toContain('sm:text-sm')
     })
 
-    it('在工具技能右侧放置无数字的聊天记忆占用圆环', () => {
+    it('在能力自动选择模式下显示无数字的聊天记忆占用圆环', () => {
         const { container } = render(
             <TooltipProvider>
                 <ComposerToolbar
                     contextUsage={{ effectiveWindowTokens: 128000, usedPercent: 13 }}
                     enableReasoning
                     isModelLoading={false}
-                    model="qwen/qwen3.6-flash"
+                    model="deepseek/deepseek-v4-flash"
                     modelGroups={modelGroups}
                     onEnableReasoningChange={vi.fn()}
                     onInsertTrigger={vi.fn()}
                     onModelChange={vi.fn()}
-                    onSkillModeChange={vi.fn()}
                     onStop={vi.fn()}
                     onSubmit={vi.fn()}
                     sendDisabled={false}
-                    skillMode="auto"
                     status="ready"
                 />
             </TooltipProvider>
         )
 
-        const skillModeControl = container.querySelector('[data-slot="toggle-group"]')
         const indicator = screen.getByLabelText('聊天上下文已使用 13%（128K）')
 
-        expect(skillModeControl?.compareDocumentPosition(indicator) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(container.querySelector('[data-slot="toggle-group"]')).toBeNull()
         expect(indicator.textContent).toBe('')
     })
 })

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ContextBudget } from '@/lib/ai/model-provider'
-import { createChatMemoryService } from '@/lib/ai/runtime/chat-memory'
+import { createChatMemoryService, estimateChatMemoryTokens } from '@/lib/ai/runtime/chat-memory'
 import { createUserMemoryService } from '@/lib/ai/runtime/user-memory'
 
 import { createFakeBaseStore } from './fake-base-store'
@@ -114,9 +114,17 @@ describe('runtime/chat-memory pinned decision promotion', () => {
             },
         })
         const threadId = `chat:${'a'.repeat(64)}`
+        const promotionBudget: ContextBudget = {
+            ...budget,
+            postCompactionTargetTokens: estimateChatMemoryTokens({
+                messages: [],
+                pinnedDecisions: ['解释技术问题先大白话'],
+                summary: '这是压缩摘要，不能直接进入长期记忆。',
+            }),
+        }
 
         await service.writeThreadState(threadId, createOversizedState())
-        await service.compactThreadState(threadId, budget, {
+        await service.compactThreadState(threadId, promotionBudget, {
             promotionContext: {
                 sessionId: 'promotion-session',
                 sourceConversationId: 'conv-1',

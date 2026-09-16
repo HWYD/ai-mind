@@ -1,11 +1,17 @@
 import type { BaseMessage } from '@langchain/core/messages'
 import { SystemMessage } from '@langchain/core/messages'
 
-import { resolveToolBindingForSkill } from '@/lib/ai/capabilities'
+import { resolveGeneralToolBinding } from '@/lib/ai/capabilities'
 import { toLangChainMessages } from '@/lib/ai/langchain-message-adapter'
 import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
 import { createChatModel, getModelProviderConfig } from '@/lib/ai/model-provider'
-import { getToolResultSystemPrompt, getToolRetrySystemPrompt, getToolUseSystemPrompt } from '@/lib/ai/prompts/tool-calling'
+import {
+    getActionSystemPrompt,
+    getAnswerSystemPrompt,
+    getCoreResponseSystemPrompt,
+    getToolResultSystemPrompt,
+    getToolUseSystemPrompt,
+} from '@/lib/ai/prompts/tool-calling'
 import type { SkillDefinition } from '@/lib/ai/skills'
 import { resolveSkillDefinitionForRequest } from '@/lib/ai/skills/router'
 import type { ChatRequest } from '@/lib/ai/types/chat'
@@ -39,9 +45,9 @@ function getSkillOutputPolicyPrompt(skillDefinition?: SkillDefinition) {
 
     switch (skillDefinition.outputPolicy) {
         case 'concise-utility':
-            return '请优先输出简洁、结果优先、偏实用的回答；能先给结论就先给结论，不要展开冗长过程。'
+            return '请优先给出直接可用的结果和适中的必要解释。用户明确要求步骤、详细推导、表格或特定格式时，按要求展开。'
         case 'context-reader':
-            return '请优先基于外部上下文先给结论，再用一到两句话补充必要来源或依据；不要展开冗长叙述，也不要假装读取了工具未返回的信息。'
+            return '请优先基于已提供资料先给结论和关键依据。用户要求深入总结、比较、步骤或表格时，按要求展开；不要假装读取未提供的资料。'
     }
 }
 
@@ -63,6 +69,7 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
         config,
         enableReasoning: request.options?.enableReasoning,
         maxOutputTokens: request.options?.maxTokens,
+        maxRetries: 0,
         resolvedModelSelection,
         temperature: request.options?.temperature,
     })
@@ -71,23 +78,38 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
     const skillDefinition = resolveSkillDefinitionForRequest(request)
     const skillSystemPrompt = skillDefinition?.systemPrompt
     const skillOutputPolicyPrompt = getSkillOutputPolicyPrompt(skillDefinition)
-    const toolBinding = await resolveToolBindingForSkill(skillDefinition)
+    const toolBinding = await resolveGeneralToolBinding()
     const { activeToolCapabilityIds, activeToolDefinitionMap, activeToolNames, activeTools } = toolBinding
     const toolUseSystemPrompt = getToolUseSystemPrompt(activeToolNames)
-    const toolRetrySystemPrompt = getToolRetrySystemPrompt(activeToolNames)
     const toolResultSystemPrompt = getToolResultSystemPrompt(activeToolNames)
-    const toolBoundModel =
-        activeTools.length > 0 && modelHandle.bindTools
-            ? modelHandle.bindTools(activeTools.map(toolDefinition => toolDefinition.tool))
-            : null
+    const actionSystemPrompts = [
+        getCoreResponseSystemPrompt(),
+        getActionSystemPrompt(),
+        skillSystemPrompt,
+        skillOutputPolicyPrompt,
+        toolUseSystemPrompt,
+        toolResultSystemPrompt,
+    ].filter((prompt): prompt is string => Boolean(prompt))
+    const answerSystemPrompts = [getCoreResponseSystemPrompt(), skillOutputPolicyPrompt, getAnswerSystemPrompt()].filter(
+        (prompt): prompt is string => Boolean(prompt)
+    )
     const langChainMessages = toLangChainMessages(getLatestUserMessageOnly(request))
-    const directAnswerMessages: BaseMessage[] = [...buildSystemMessages(skillSystemPrompt, skillOutputPolicyPrompt), ...langChainMessages]
 
     return {
         request,
         baseModel,
+        createPhaseModel: options =>
+            createChatModel({
+                config,
+                enableReasoning: request.options?.enableReasoning,
+                maxOutputTokens: request.options?.maxTokens,
+                maxRetries: options.maxRetries,
+                resolvedModelSelection,
+                streaming: true,
+                temperature: request.options?.temperature,
+                timeoutMs: options.timeoutMs,
+            }).model,
         modelHandle,
-        toolBoundModel,
         skillDefinition,
         skillSystemPrompt,
         skillOutputPolicyPrompt,
@@ -95,10 +117,10 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
         activeToolCapabilityIds,
         activeToolDefinitionMap,
         activeToolNames,
+        actionSystemPrompts,
+        answerSystemPrompts,
         langChainMessages,
-        directAnswerMessages,
         toolUseSystemPrompt,
-        toolRetrySystemPrompt,
         toolResultSystemPrompt,
     }
 }

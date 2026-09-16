@@ -47,6 +47,10 @@ class FakeStreamRecoveryPrisma {
 
             return event
         },
+        createMany: async ({ data }: { data: Array<Omit<StreamEventRecord, 'createdAt'>> }) => {
+            this.events.push(...data.map(event => ({ ...event, createdAt: now })))
+            return { count: data.length }
+        },
         deleteMany: async () => ({ count: 0 }),
         findFirst: async ({ orderBy, where }: { where: { runId: string; terminal?: boolean }; orderBy: { sequence: 'asc' | 'desc' } }) => {
             const events = this.events

@@ -15,25 +15,12 @@ import {
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Toggle } from '@/components/ui/toggle'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { type ChatModel, type ChatModelGroup, type PublicChatModel } from '@/lib/ai/models'
 import type { ChatMemoryUsageSummary } from '@/lib/ai/runtime/chat-memory/context-usage-contract'
-import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import type { ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
 
 import { ContextUsageIndicator } from './context-usage-indicator'
-
-const skillModeLabels: Record<ChatSkillMode, string> = {
-    auto: '自动',
-    utility: '工具技能',
-    reader: '阅读技能',
-}
-
-const skillModeDescriptions: Record<ChatSkillMode, string> = {
-    auto: '根据问题自动选择合适能力',
-    utility: '优先使用计算、时间、文本处理与天气等工具能力',
-    reader: '优先消费 demo 文档、项目上下文和 MCP 读取能力',
-}
 
 function SlashTriggerIcon() {
     return (
@@ -75,11 +62,9 @@ export function ComposerToolbar({
     onEnableReasoningChange,
     onInsertTrigger,
     onModelChange,
-    onSkillModeChange,
     onStop,
     onSubmit,
     sendDisabled,
-    skillMode,
     status,
 }: {
     contextUsage?: ChatMemoryUsageSummary | null
@@ -91,11 +76,9 @@ export function ComposerToolbar({
     onEnableReasoningChange: (enabled: boolean) => void
     onInsertTrigger: (trigger: '@' | '/') => void
     onModelChange: (model: ChatModel) => void
-    onSkillModeChange: (mode: ChatSkillMode) => void
     onStop: () => void
     onSubmit: () => void | Promise<void>
     sendDisabled: boolean
-    skillMode: ChatSkillMode
     status: ChatStatus
 }) {
     const isModelMenuReady = useSyncExternalStore(
@@ -201,32 +184,6 @@ export function ComposerToolbar({
                     <Brain className="size-4" strokeWidth={2.1} />
                     <span>深度思考</span>
                 </Toggle>
-
-                <ToggleGroup
-                    type="single"
-                    variant="outline"
-                    size="lg"
-                    value={skillMode}
-                    onValueChange={value => {
-                        if (value && !disabled) {
-                            onSkillModeChange(value as ChatSkillMode)
-                        }
-                    }}
-                    className="hidden overflow-hidden rounded-xl border border-border/80 bg-background shadow-xs md:block"
-                >
-                    {(Object.keys(skillModeLabels) as ChatSkillMode[]).map(mode => (
-                        <ToggleGroupItem
-                            key={mode}
-                            value={mode}
-                            disabled={disabled}
-                            aria-label={`切换到 ${skillModeLabels[mode]}：${skillModeDescriptions[mode]}`}
-                            title={skillModeDescriptions[mode]}
-                            className="min-w-16 border-0 px-3 data-[state=on]:bg-[var(--composer-mode-bg)] data-[state=on]:text-foreground"
-                        >
-                            {skillModeLabels[mode]}
-                        </ToggleGroupItem>
-                    ))}
-                </ToggleGroup>
 
                 <ContextUsageIndicator usage={contextUsage} />
             </div>

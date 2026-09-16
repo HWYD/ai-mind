@@ -130,6 +130,14 @@ export function normalizeKnownRuntimeError(error: unknown): NormalizedKnownRunti
         }
     }
 
+    if (code === 'AGENT_CONTRACT_VIOLATION') {
+        return {
+            code: 'RUNTIME_INVARIANT_FAILED',
+            message: '本次回答未能完成，请稍后重试。',
+            retryable: true,
+        }
+    }
+
     if (name === 'AgentRunServiceError' || code?.startsWith('AGENT_') || code === 'INVALID_AGENT_REVIEW_DECISION') {
         return {
             code: 'RUNTIME_INVARIANT_FAILED',

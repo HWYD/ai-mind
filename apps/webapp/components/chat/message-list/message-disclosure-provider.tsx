@@ -1,6 +1,6 @@
 'use client'
 
-import { type SetStateAction, useCallback, useEffect, useMemo, useState } from 'react'
+import { type SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { MessageDisclosureContext, type MessageDisclosureContextValue } from './message-disclosure-state'
 
@@ -15,53 +15,65 @@ export function MessageDisclosureProvider({
     scopeKey: string
     validKeys: ReadonlySet<string>
 }) {
-    const [store, setStore] = useState<{
-        state: Record<string, boolean>
-        validKeys: ReadonlySet<string>
-    }>(() => ({ state: {}, validKeys }))
+    const [state, setState] = useState<Record<string, boolean>>({})
+    const validKeySignature = Array.from(validKeys).sort().join('\u0000')
+    const validKeysRef = useRef<ReadonlySet<string>>(validKeys)
 
-    if (store.validKeys !== validKeys) {
-        setStore({
-            state: Object.fromEntries(Object.entries(store.state).filter(([key]) => validKeys.has(key))),
-            validKeys,
-        })
-    }
+    useLayoutEffect(() => {
+        validKeysRef.current = validKeys
+    }, [validKeys])
 
-    const setOpen = useCallback((key: string, defaultOpen: boolean, nextOpen: SetStateAction<boolean>) => {
-        setStore(current => {
-            if (!current.validKeys.has(key)) {
+    useLayoutEffect(() => {
+        setState(current => {
+            const staleKeys = Object.keys(current).filter(key => !validKeysRef.current.has(key))
+
+            if (staleKeys.length === 0) {
                 return current
             }
 
-            const previousOpen = current.state[key] ?? defaultOpen
+            const nextState = { ...current }
+            for (const key of staleKeys) {
+                delete nextState[key]
+            }
+            return nextState
+        })
+    }, [validKeySignature])
+
+    const setOpen = useCallback((key: string, defaultOpen: boolean, nextOpen: SetStateAction<boolean>) => {
+        setState(current => {
+            if (!validKeysRef.current.has(key)) {
+                return current
+            }
+
+            const previousOpen = current[key] ?? defaultOpen
             const resolvedOpen = typeof nextOpen === 'function' ? nextOpen(previousOpen) : nextOpen
 
             if (resolvedOpen === defaultOpen) {
-                if (!(key in current.state)) {
+                if (!(key in current)) {
                     return current
                 }
 
-                const nextState = { ...current.state }
+                const nextState = { ...current }
                 delete nextState[key]
 
-                return { ...current, state: nextState }
+                return nextState
             }
 
-            return current.state[key] === resolvedOpen ? current : { ...current, state: { ...current.state, [key]: resolvedOpen } }
+            return current[key] === resolvedOpen ? current : { ...current, [key]: resolvedOpen }
         })
     }, [])
 
     useEffect(() => {
-        onDeviationKeysChange?.(new Set(Object.keys(store.state)))
-    }, [onDeviationKeysChange, store.state])
+        onDeviationKeysChange?.(new Set(Object.keys(state)))
+    }, [onDeviationKeysChange, state])
 
     const value = useMemo<MessageDisclosureContextValue>(
         () => ({
-            state: store.state,
+            state,
             actions: { setOpen },
             meta: { scopeKey },
         }),
-        [scopeKey, setOpen, store.state]
+        [scopeKey, setOpen, state]
     )
 
     return <MessageDisclosureContext value={value}>{children}</MessageDisclosureContext>

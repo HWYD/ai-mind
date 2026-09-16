@@ -1,4 +1,4 @@
-import type { ChatSkillMode, MindMessageInput } from '@/lib/ai/types/chat'
+import type { MindMessageInput } from '@/lib/ai/types/chat'
 import type { MindMessage } from '@/lib/ai/types/message'
 
 // 每次请求最多携带最近 8 轮用户回合上下文，控制请求体体积，同时保留足够的短期对话记忆。
@@ -6,6 +6,10 @@ import type { MindMessage } from '@/lib/ai/types/message'
 const MAX_CONTEXT_TURNS = 8
 
 function toMessageInput(message: MindMessage): MindMessageInput | null {
+    if (message.role === 'assistant' && message.status !== undefined && message.status !== 'completed') {
+        return null
+    }
+
     const parts = message.parts.filter(
         (part): part is MindMessageInput['parts'][number] => part.type === 'text' && part.text.trim().length > 0
     )
@@ -15,12 +19,12 @@ function toMessageInput(message: MindMessage): MindMessageInput | null {
     }
 
     return {
+        ...(message.id ? { id: message.id } : {}),
         role: message.role,
         parts: parts.map(part => ({
             type: part.type,
             text: part.text,
             format: part.format,
-            ...(part.type === 'reasoning' && part.visibility ? { visibility: part.visibility } : {}),
         })),
     }
 }
@@ -59,15 +63,4 @@ function getRecentContextWindow(messages: MindMessage[]): MindMessage[] {
 
 export function buildRequestMessages(messages: MindMessage[]): MindMessageInput[] {
     return toRequestMessages(getRecentContextWindow(messages))
-}
-
-export function toRequestSkill(skillMode: ChatSkillMode) {
-    switch (skillMode) {
-        case 'utility':
-            return 'utility-skill'
-        case 'reader':
-            return 'reader-skill'
-        default:
-            return undefined
-    }
 }

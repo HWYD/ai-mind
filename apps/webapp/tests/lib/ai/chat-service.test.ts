@@ -5,7 +5,9 @@ import type { AgentRunPublicDto } from '@/lib/ai/agent-runs/contracts'
 import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
 import type { StreamEventEnvelopeDto } from '@/lib/ai/stream-recovery/contracts'
+import type { StreamRunRecord } from '@/lib/ai/stream-recovery/stream-event-store'
 import { StreamEventStoreError } from '@/lib/ai/stream-recovery/stream-event-store'
+import { StreamExecutionCoordinator, type StreamExecutionRepository } from '@/lib/ai/stream-recovery/stream-execution-coordinator'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 const runtimeMocks = vi.hoisted(() => ({
@@ -189,6 +191,123 @@ describe('createChatService', () => {
         vi.restoreAllMocks()
     })
 
+    it('只给 General ReAct 请求分配贯穿 preparation 与 projection 的 absolute deadline', async () => {
+        vi.setSystemTime(10_000)
+        runtimeMocks.run.mockResolvedValue(undefined)
+
+        const service = createTestChatService()
+        const ordinaryResponse = await service.streamChat(
+            { conversationId: 'ordinary', messages: [] },
+            withStreamRecovery(createResolvedChatContext(), 'run-ordinary')
+        )
+        await readAllChunks(ordinaryResponse)
+        const summaryResponse = await service.streamChat(
+            {
+                composer: { command: { label: '/summary', name: 'summary' }, plainText: '' },
+                conversationId: 'summary',
+                messages: [],
+            },
+            withStreamRecovery(createResolvedChatContext(), 'run-summary')
+        )
+        await readAllChunks(summaryResponse)
+        const tasklistResponse = await service.streamChat(
+            {
+                composer: { command: { label: '/tasklist', name: 'tasklist' }, plainText: '' },
+                conversationId: 'tasklist',
+                messages: [],
+            },
+            withStreamRecovery(createResolvedChatContext(), 'run-tasklist')
+        )
+        await readAllChunks(tasklistResponse)
+
+        const contexts = runtimeMocks.chatOrchestratorOptions.map(
+            options => (options as { context: ResolvedChatExecutionContext & { runDeadlineAtMs?: number } }).context
+        )
+        expect(contexts.map(context => context.runDeadlineAtMs)).toEqual([190_000, 190_000, undefined])
+    })
+
+    it('把 General ReAct absolute deadline 传给 durable batch projection', async () => {
+        vi.setSystemTime(10_000)
+        runtimeMocks.run.mockImplementation(async (options: unknown) => {
+            await (options as { writeChunk: (chunk: ChatStreamChunk) => Promise<void> }).writeChunk({
+                partId: 'answer',
+                type: 'text-start',
+            })
+        })
+        const projectChunks = vi.fn(async (inputs: readonly { chunk: ChatStreamChunk; runId: string }[]) =>
+            inputs.map((input, index) => ({
+                eventId: `evt_deadline_${index}`,
+                eventKind: 'chunk' as const,
+                payload: input.chunk as StreamEventEnvelopeDto['payload'],
+                protocolVersion: 1 as const,
+                runId: input.runId,
+                sequence: index + 1,
+            }))
+        )
+
+        const response = await createChatService({
+            streamEventProjector: { projectChunk: vi.fn(), projectChunks },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-deadline', signal: new AbortController().signal }),
+            },
+        }).streamChat({ conversationId: 'deadline', messages: [] }, withStreamRecovery(createResolvedChatContext(), 'run-deadline'))
+        await readAllChunks(response)
+
+        expect(projectChunks).toHaveBeenCalledWith(expect.any(Array), { deadlineAtMs: 190_000 })
+    })
+
+    it('在 180 秒硬截止前预留 5 秒完成失败终态投影', async () => {
+        vi.setSystemTime(0)
+        runtimeMocks.run.mockImplementation(
+            (options: unknown) =>
+                new Promise<void>((_resolve, reject) => {
+                    const signal = (options as { context: ResolvedChatExecutionContext }).context.signal!
+                    signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+                })
+        )
+        const terminalProjectionTimes: number[] = []
+        const terminalProjectionOptions: Array<{ deadlineAtMs?: number } | undefined> = []
+        const projectChunk = vi.fn(
+            async (
+                input: { chunk: ChatStreamChunk; runId: string; terminalState?: StreamEventEnvelopeDto['terminalState'] },
+                options?: { deadlineAtMs?: number }
+            ): Promise<StreamEventEnvelopeDto> => {
+                terminalProjectionTimes.push(Date.now())
+                terminalProjectionOptions.push(options)
+
+                return {
+                    eventId: 'evt_run_deadline',
+                    eventKind: 'terminal',
+                    payload: input.chunk as StreamEventEnvelopeDto['payload'],
+                    protocolVersion: 1,
+                    runId: input.runId,
+                    sequence: 1,
+                    terminal: true,
+                    terminalState: input.terminalState ?? 'failed',
+                }
+            }
+        )
+
+        const response = await createChatService({
+            streamEventProjector: { projectChunk },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-run-deadline', signal: new AbortController().signal }),
+            },
+        }).streamChat({ conversationId: 'run-deadline', messages: [] }, withStreamRecovery(createResolvedChatContext(), 'run-deadline'))
+        const ndjsonPromise = readAllChunks(response)
+
+        await vi.advanceTimersByTimeAsync(180_000)
+        const ndjson = await ndjsonPromise
+
+        expect(terminalProjectionTimes).toEqual([175_000])
+        expect(terminalProjectionOptions).toEqual([{ deadlineAtMs: 180_000 }])
+        expect(ndjson).toContain('"terminalState":"failed"')
+    })
+
     it('长时间没有业务 chunk 时写入透明心跳，并在请求结束后清理定时器', async () => {
         let finishRun: (() => void) | undefined
         runtimeMocks.run.mockImplementation(
@@ -345,7 +464,7 @@ describe('createChatService', () => {
         expect(projectionLog).toHaveBeenCalledWith('Chat stream failed:', expect.any(Error))
     })
 
-    it('resumable event projection failure emits failed terminal instead of leaving the run running', async () => {
+    it('未 await 的 lifecycle/static write projection failure 仍会被捕获并追加 failed terminal，而非留下 running run', async () => {
         const projectionLog = vi.spyOn(console, 'error').mockImplementation(() => undefined)
         runtimeMocks.run.mockImplementation(async ({ writeChunk }: { writeChunk: (chunk: ChatStreamChunk) => void }) => {
             writeChunk({
@@ -415,6 +534,402 @@ describe('createChatService', () => {
         expect(projectionLog).toHaveBeenCalledWith('Resumable stream event projection failed:', {
             code: 'STREAM_EVENT_INVALID',
         })
+    })
+
+    it('projection 已失败时不能以 completed terminal fallback 收口', async () => {
+        runtimeMocks.run.mockImplementation(
+            async ({
+                writeChunk,
+                writeTerminalChunk,
+            }: {
+                writeChunk: (chunk: ChatStreamChunk) => void
+                writeTerminalChunk: (chunk: ChatStreamChunk, terminalState: StreamEventEnvelopeDto['terminalState']) => Promise<void>
+            }) => {
+                writeChunk({ delta: 'hello', partId: 'answer', type: 'text-delta' })
+                await vi.advanceTimersByTimeAsync(0)
+                await writeTerminalChunk({ type: 'finish' }, 'completed')
+            }
+        )
+
+        let projectionCallCount = 0
+        const projectChunk = vi.fn(
+            async ({
+                chunk,
+                runId,
+                terminalState,
+            }: {
+                chunk: ChatStreamChunk
+                runId: string
+                terminalState?: StreamEventEnvelopeDto['terminalState']
+            }): Promise<StreamEventEnvelopeDto> => {
+                projectionCallCount += 1
+                if (projectionCallCount === 1) {
+                    throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'projection failed')
+                }
+
+                return {
+                    eventId: 'evt_projection_failed_terminal',
+                    eventKind: 'terminal',
+                    payload: chunk as StreamEventEnvelopeDto['payload'],
+                    protocolVersion: 1,
+                    runId,
+                    sequence: 1,
+                    terminal: true,
+                    terminalState: terminalState ?? 'failed',
+                }
+            }
+        )
+        const response = await createChatService({
+            streamEventProjector: { projectChunk },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-projection-failure', signal: new AbortController().signal }),
+            },
+        }).streamChat({} as ChatRequest, {
+            ...createResolvedChatContext(),
+            streamRecovery: {
+                ownerSessionHash: 'a'.repeat(64),
+                runId: 'run_projection_failed_terminal',
+            },
+        })
+
+        const ndjson = await readAllChunks(response)
+
+        expect(ndjson).toContain('"terminalState":"failed"')
+        expect(ndjson).not.toContain('"terminalState":"completed"')
+        expect(projectChunk).toHaveBeenLastCalledWith(expect.objectContaining({ terminalState: 'failed' }), expect.anything())
+    })
+
+    it('显式取消在投影缓冲区中止后仍只持久化 cancelled terminal', async () => {
+        const runId = 'run-explicit-cancelled-terminal'
+        const ownerSessionHash = 'a'.repeat(64)
+        const now = new Date('2026-09-16T00:00:00.000Z')
+        let streamRun: StreamRunRecord = {
+            agentRunId: null,
+            cancelRequestedAt: null,
+            completedAt: null,
+            createdAt: now,
+            executionOwnerId: null,
+            failureCode: null,
+            id: runId,
+            kind: 'chat',
+            lastSequence: 0,
+            maxEventPayloadBytes: 262_144,
+            maxRetainedEvents: 20_000,
+            ownerSessionHash,
+            publicFailureMessage: null,
+            retentionUntil: new Date('2026-09-16T00:10:00.000Z'),
+            status: 'running',
+            terminalSequence: null,
+            updatedAt: now,
+        }
+        const executionRepository: StreamExecutionRepository = {
+            claimExecution: async input => {
+                streamRun = { ...streamRun, executionOwnerId: input.executionOwnerId }
+                return streamRun
+            },
+            clearExecutionOwner: async input => {
+                if (streamRun.executionOwnerId === input.executionOwnerId) {
+                    streamRun = { ...streamRun, executionOwnerId: null }
+                }
+            },
+            getCancelRequestedAt: async () => streamRun.cancelRequestedAt,
+            markCancelRequested: async input => {
+                streamRun = { ...streamRun, cancelRequestedAt: input.now }
+                return streamRun
+            },
+        }
+        const coordinator = new StreamExecutionCoordinator(executionRepository, () => 'execution-owner-explicit-cancel')
+        let startRun: (() => void) | undefined
+        const runStarted = new Promise<void>(resolve => {
+            startRun = resolve
+        })
+        runtimeMocks.run.mockImplementation(
+            ({ context }: { context: ResolvedChatExecutionContext }) =>
+                new Promise<void>((_resolve, reject) => {
+                    context.signal?.addEventListener('abort', () => reject(new DOMException('explicit cancellation', 'AbortError')), {
+                        once: true,
+                    })
+                    startRun?.()
+                })
+        )
+
+        const persistedEvents: StreamEventEnvelopeDto[] = []
+        const response = await createChatService({
+            streamEventProjector: {
+                projectChunk: async ({ chunk, runId: projectedRunId, terminalState }) => {
+                    const event: StreamEventEnvelopeDto = {
+                        eventId: 'evt_explicit_cancelled_terminal',
+                        eventKind: 'terminal',
+                        payload: chunk as StreamEventEnvelopeDto['payload'],
+                        protocolVersion: 1,
+                        runId: projectedRunId,
+                        sequence: 1,
+                        terminal: true,
+                        terminalState: terminalState!,
+                    }
+                    persistedEvents.push(event)
+                    return event
+                },
+            },
+            streamExecutionCoordinator: coordinator,
+        }).streamChat({ conversationId: 'explicit-cancel', messages: [] }, withStreamRecovery(createResolvedChatContext(), runId))
+
+        await runStarted
+        await coordinator.requestCancel({ now, ownerSessionHash, runId })
+        const ndjson = await readAllChunks(response)
+
+        expect(persistedEvents).toEqual([
+            expect.objectContaining({
+                eventKind: 'terminal',
+                payload: { type: 'finish' },
+                terminalState: 'cancelled',
+            }),
+        ])
+        expect(ndjson.match(/"eventKind":"terminal"/g)).toHaveLength(1)
+        expect(ndjson).toContain('"terminalState":"cancelled"')
+        expect(ndjson).not.toContain('"terminalState":"failed"')
+        expect(ndjson).not.toContain('"terminalState":"completed"')
+        expect(ndjson).not.toContain('thread-memory-status')
+    })
+
+    it('并发终态只由 first terminal 收口', async () => {
+        runtimeMocks.run.mockImplementation(
+            async ({
+                writeTerminalChunk,
+            }: {
+                writeTerminalChunk: (chunk: ChatStreamChunk, terminalState: StreamEventEnvelopeDto['terminalState']) => Promise<void>
+            }) => {
+                await Promise.all([
+                    writeTerminalChunk({ type: 'finish' }, 'completed'),
+                    writeTerminalChunk(
+                        {
+                            errorCode: 'RUNTIME_INVARIANT_FAILED',
+                            message: 'second terminal',
+                            retryable: false,
+                            scope: 'runtime',
+                            stage: 'runtime',
+                            type: 'error',
+                        },
+                        'failed'
+                    ),
+                ])
+            }
+        )
+
+        const committedTerminalStates: StreamEventEnvelopeDto['terminalState'][] = []
+        const projectChunk = vi.fn(
+            async ({
+                chunk,
+                runId,
+                terminalState,
+            }: {
+                chunk: ChatStreamChunk
+                runId: string
+                terminalState?: StreamEventEnvelopeDto['terminalState']
+            }): Promise<StreamEventEnvelopeDto> => {
+                if (terminalState) {
+                    committedTerminalStates.push(terminalState)
+                }
+
+                return {
+                    eventId: `evt_concurrent_${committedTerminalStates.length}`,
+                    eventKind: 'terminal',
+                    payload: chunk as StreamEventEnvelopeDto['payload'],
+                    protocolVersion: 1,
+                    runId,
+                    sequence: committedTerminalStates.length,
+                    terminal: true,
+                    terminalState: terminalState!,
+                }
+            }
+        )
+        const response = await createChatService({
+            streamEventProjector: { projectChunk },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-concurrent-terminal', signal: new AbortController().signal }),
+            },
+        }).streamChat({} as ChatRequest, withStreamRecovery(createResolvedChatContext(), 'run-concurrent-terminal'))
+
+        const ndjson = await readAllChunks(response)
+
+        expect(committedTerminalStates).toEqual(['completed'])
+        expect(ndjson.match(/"eventKind":"terminal"/g)).toHaveLength(1)
+    })
+
+    it('并发终态的 first projection failure 只以一个 failed terminal 收口', async () => {
+        runtimeMocks.run.mockImplementation(
+            async ({
+                writeTerminalChunk,
+            }: {
+                writeTerminalChunk: (chunk: ChatStreamChunk, terminalState: StreamEventEnvelopeDto['terminalState']) => Promise<void>
+            }) => {
+                await Promise.all([
+                    writeTerminalChunk({ type: 'finish' }, 'completed'),
+                    writeTerminalChunk(
+                        {
+                            errorCode: 'RUNTIME_INVARIANT_FAILED',
+                            message: 'second terminal',
+                            retryable: false,
+                            scope: 'runtime',
+                            stage: 'runtime',
+                            type: 'error',
+                        },
+                        'failed'
+                    ),
+                ])
+            }
+        )
+
+        let projectionCallCount = 0
+        const committedTerminalStates: StreamEventEnvelopeDto['terminalState'][] = []
+        const projectChunk = vi.fn(
+            async ({
+                chunk,
+                runId,
+                terminalState,
+            }: {
+                chunk: ChatStreamChunk
+                runId: string
+                terminalState?: StreamEventEnvelopeDto['terminalState']
+            }): Promise<StreamEventEnvelopeDto> => {
+                projectionCallCount += 1
+                if (projectionCallCount === 1) {
+                    throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'first terminal projection failed')
+                }
+
+                committedTerminalStates.push(terminalState!)
+                return {
+                    eventId: `evt_concurrent_failure_${projectionCallCount}`,
+                    eventKind: 'terminal',
+                    payload: chunk as StreamEventEnvelopeDto['payload'],
+                    protocolVersion: 1,
+                    runId,
+                    sequence: committedTerminalStates.length,
+                    terminal: true,
+                    terminalState: terminalState!,
+                }
+            }
+        )
+        const response = await createChatService({
+            streamEventProjector: { projectChunk },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-concurrent-projection-failure', signal: new AbortController().signal }),
+            },
+        }).streamChat({} as ChatRequest, withStreamRecovery(createResolvedChatContext(), 'run-concurrent-projection-failure'))
+
+        const ndjson = await readAllChunks(response)
+
+        expect(committedTerminalStates).toEqual(['failed'])
+        expect(ndjson.match(/"eventKind":"terminal"/g)).toHaveLength(1)
+        expect(ndjson).not.toContain('"terminalState":"completed"')
+    })
+
+    it('连续投影失败时仍执行一次 run-owned cleanup', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        const order: string[] = []
+        const release = vi.fn(() => order.push('release'))
+        runtimeMocks.run.mockImplementation(
+            async ({
+                deferCleanup,
+                writeChunk,
+            }: {
+                deferCleanup: (cleanup: () => void) => void
+                writeChunk: (chunk: ChatStreamChunk) => Promise<void>
+            }) => {
+                deferCleanup(release)
+                await writeChunk({ delta: 'hello', partId: 'answer', type: 'text-delta' }).catch(() => undefined)
+            }
+        )
+
+        let projectionCallCount = 0
+        const projectChunk = vi.fn(async ({ chunk, runId }: { chunk: ChatStreamChunk; runId: string }): Promise<StreamEventEnvelopeDto> => {
+            projectionCallCount += 1
+            order.push(`project-${projectionCallCount}`)
+            if (projectionCallCount <= 2) {
+                throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'projection failed')
+            }
+
+            return {
+                eventId: 'evt_cleanup_failed',
+                eventKind: 'terminal',
+                payload: chunk as StreamEventEnvelopeDto['payload'],
+                protocolVersion: 1,
+                runId,
+                sequence: 1,
+                terminal: true,
+                terminalState: 'failed',
+            }
+        })
+
+        const response = await createChatService({
+            streamEventProjector: { projectChunk },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-cleanup', signal: new AbortController().signal }),
+            },
+        }).streamChat(
+            { conversationId: 'cleanup-failure', messages: [] },
+            withStreamRecovery(createResolvedChatContext(), 'run-cleanup-failure')
+        )
+
+        await readAllChunks(response)
+
+        expect(projectChunk).toHaveBeenCalledTimes(3)
+        expect(release).toHaveBeenCalledTimes(1)
+        expect(order).toEqual(['project-1', 'project-2', 'project-3', 'release'])
+    })
+
+    it('一个 deferred cleanup 抛错时仍执行剩余的 run-owned cleanup', async () => {
+        vi.spyOn(console, 'error').mockImplementation(() => undefined)
+        const cleanups: string[] = []
+        runtimeMocks.run.mockImplementation(async ({ deferCleanup }: { deferCleanup: (cleanup: () => void) => void }) => {
+            deferCleanup(() => {
+                cleanups.push('first')
+            })
+            deferCleanup(() => {
+                cleanups.push('throwing')
+                throw new Error('cleanup failed')
+            })
+            deferCleanup(() => {
+                cleanups.push('last')
+            })
+        })
+
+        const response = await createChatService({
+            streamEventProjector: {
+                projectChunk: vi.fn(
+                    async ({ chunk, runId }: { chunk: ChatStreamChunk; runId: string }): Promise<StreamEventEnvelopeDto> => ({
+                        eventId: 'evt_cleanup_isolated',
+                        eventKind: 'terminal',
+                        payload: chunk as StreamEventEnvelopeDto['payload'],
+                        protocolVersion: 1,
+                        runId,
+                        sequence: 1,
+                        terminal: true,
+                        terminalState: 'failed',
+                    })
+                ),
+            },
+            streamExecutionCoordinator: {
+                getCancelRequestedAt: async () => null,
+                startExecution: async ({ execute }) =>
+                    execute({ executionOwnerId: 'execution-owner-cleanup-isolated', signal: new AbortController().signal }),
+            },
+        }).streamChat(
+            { conversationId: 'cleanup-isolated', messages: [] },
+            withStreamRecovery(createResolvedChatContext(), 'run-cleanup-isolated')
+        )
+
+        await readAllChunks(response)
+
+        expect(cleanups).toEqual(['last', 'throwing', 'first'])
     })
 
     it('resumable 模式下响应 cancel 不会让后台执行流的 isClosed 变成 true', async () => {

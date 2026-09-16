@@ -157,6 +157,10 @@ function createSubagentChatToolDefinition(
     )
 
     return {
+        executionPolicy: {
+            kind: 'agent-tool',
+            profile: 'delegated-agent',
+        },
         formatInput: formatSubagentToolInput,
         formatOutput: formatSubagentToolOutput,
         getDisplayConfig: () => ({

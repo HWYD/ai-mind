@@ -204,6 +204,12 @@ export const datetimeTool = tool(
 )
 
 export const datetimeToolDefinition: ChatToolDefinition<z.infer<typeof datetimeToolSchema>> = {
+    executionPolicy: {
+        attemptTimeoutMs: 1000,
+        kind: 'standard-tool',
+        profile: 'local-deterministic',
+        retrySafe: true,
+    },
     name: 'datetime',
     tool: datetimeTool,
     schema: datetimeToolSchema,
@@ -214,4 +220,5 @@ export const datetimeToolDefinition: ChatToolDefinition<z.infer<typeof datetimeT
         action: args.action,
         inputPreview: formatDateTimeToolInput(args),
     }),
+    runtimeScopes: ['skill-binding', 'general-react-agent'],
 }

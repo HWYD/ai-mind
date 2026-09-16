@@ -37,4 +37,33 @@ describe('MessageDisclosureProvider', () => {
         fireEvent.click(screen.getByRole('button', { name: 'open' }))
         await waitFor(() => expect(onDeviationKeysChange).toHaveBeenLastCalledWith(new Set()))
     })
+
+    it('does not emit a new disclosure state when valid keys have unchanged members', async () => {
+        const onDeviationKeysChange = vi.fn()
+        const disclosureKey = 'conversation-a:message-a:general-agent-trace'
+        const { rerender } = render(
+            <MessageDisclosureProvider
+                onDeviationKeysChange={onDeviationKeysChange}
+                scopeKey="conversation-a"
+                validKeys={new Set([disclosureKey])}
+            >
+                <DisclosureProbe disclosureKey={disclosureKey} />
+            </MessageDisclosureProvider>
+        )
+
+        await waitFor(() => expect(onDeviationKeysChange).toHaveBeenLastCalledWith(new Set()))
+        onDeviationKeysChange.mockClear()
+
+        rerender(
+            <MessageDisclosureProvider
+                onDeviationKeysChange={onDeviationKeysChange}
+                scopeKey="conversation-a"
+                validKeys={new Set([disclosureKey])}
+            >
+                <DisclosureProbe disclosureKey={disclosureKey} />
+            </MessageDisclosureProvider>
+        )
+
+        expect(onDeviationKeysChange).not.toHaveBeenCalled()
+    })
 })

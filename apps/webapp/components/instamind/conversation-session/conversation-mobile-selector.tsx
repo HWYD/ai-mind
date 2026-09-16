@@ -136,7 +136,7 @@ export function ConversationMobileSelector({
                                             aria-current={conversation.selected ? 'page' : undefined}
                                             aria-label={conversation.title}
                                             className={cn(
-                                                'h-9 w-full cursor-pointer justify-start rounded-[10px] px-3 pr-9 text-sm font-normal text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                                                'h-9 w-full cursor-pointer justify-start rounded-[10px] px-3 pr-9 text-sm font-normal text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-100',
                                                 !disabled &&
                                                     'group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground group-focus-within:bg-sidebar-accent group-focus-within:text-sidebar-accent-foreground group-has-[[data-state=open]]:bg-sidebar-accent group-has-[[data-state=open]]:text-sidebar-accent-foreground',
                                                 conversation.selected && 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'

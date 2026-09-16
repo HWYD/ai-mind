@@ -118,6 +118,36 @@ Spec Kit full skills 是复杂变更的默认执行入口，不是所有任务�
 
 `speckit-taskstoissues` 暂时是 optional，不进入 AI Mind 默认主流程。双轨职责、official baseline 和失败回退见 [Spec Kit Tooling](./spec-kit-tooling.md)。
 
+## Complex-work Collaboration And Decision Revalidation
+
+本节约束的是 AI coding 过程，不改变 AI Mind 产品 Runtime 的 Agent、子 Agent、Tool 或并行执行范围。
+
+### Delegability Gate
+
+在进入实施前，满足下列任一条件的任务必须先判断是否可安全委派：
+
+- Level C / D 或跨 Runtime、协议、数据、前后端边界的改动；
+- 两个以上可独立验证、可由不同文件或模块承接的工作包；
+- 存在多个技术方向、多个未知根因，且单一实现路径尚不足以消除风险；
+- 需要独立安全、性能、兼容性或回归判断的高风险变更。
+
+Agent 可用且工作能隔离时，优先使用子 Agent 承接调研、诊断、实现或 review。每项委派必须明确目标、输入、预期产出、文件/模块归属、验证方式和整合 owner。只有不同 Agent 不会修改同一文件或共享核心边界时，才允许并发实施；强耦合核心由单一 owner 集成，其他 Agent 提供独立证据、测试或 review。
+
+如果任务强耦合、范围过小，或当前环境没有可用 Agent，可以不委派；当前 task 或交付记录必须简短说明原因。多 Agent 是交付策略，不是把产品能力提前扩展为多 Agent Runtime。
+
+### Candidate Revalidation Gate
+
+事实来源顺序继续用于确认当前状态和已绑定约束，但不能将“项目已经这样实现”推导为“该方案必然正确”。出现下列任一触发条件时，必须执行候选重评：
+
+- 用户要求最佳实践、调研、替代方案或方案比较；
+- 新的架构、依赖、安全、性能、可靠性或可运维性选择；
+- 当前代码、测试、规格、运行结果或外部权威资料之间存在冲突；
+- 既有决策的前提、依赖版本或运行边界已经变化。
+
+先将输入分为两类：用户明确的不可变需求、外部契约、安全与合规边界只评估可行性和风险；现有实现、spec、plan、decisions、ADR 与 architecture docs 中的可变技术方案则作为候选基线。每次重评至少比较需求匹配、架构边界、安全、兼容性、可运维性、验证成本和迁移风险。
+
+在 `research.md`、`decisions.md` 或等价交付记录中保留：现有基线、可行替代、证据来源、比较结论、保留或拒绝理由及迁移影响。若新结论覆盖既有决定，必须在当前 canonical workspace 同步更新受影响的 spec、plan、tasks、contracts、ADR、architecture docs 和实现，并把旧结论标为 superseded；不得创建第二套默认事实源。Level A / B 的局部变更不因本 gate 自动扩大为完整调研。
+
 ## Codex Execution Rule
 
 在修改 AI Mind 代码前，必须先阅读：
@@ -135,6 +165,7 @@ Spec Kit full skills 是复杂变更的默认执行入口，不是所有任务�
 
 - Level C / D 默认使用 official full skills；如果 tooling 不可用，则先完成人工等价 specify / clarify / plan / checklist / tasks / analyze，再进入实现。
 - Level C / D 实现后执行 converge 或人工等价收口检查。
+- 触发 Delegability Gate 时，先记录委派或不委派的判断；触发 Candidate Revalidation Gate 时，先记录候选比较结论，再锁定实施方案。
 - 读取中文 specs 时，必须保留原文中的英文技术名词、文件路径、命令、类型名、API 名称和 package 名称。
 - 只实现当前 task。
 - 不提前实现后续 task。

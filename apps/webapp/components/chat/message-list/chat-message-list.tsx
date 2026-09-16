@@ -1,7 +1,6 @@
 'use client'
 
 import {
-    type CSSProperties,
     memo,
     type ReactNode,
     type Ref,
@@ -36,6 +35,7 @@ import {
 } from './message-height-hints'
 import { AssistantMessage } from './messages/assistant-message'
 import { UserMessage } from './messages/user-message'
+import { GeneralAgentTracePanel } from './parts/general-agent/general-agent-trace-panel'
 import {
     type AssistantFeedback,
     buildCombinedReasoning,
@@ -44,7 +44,6 @@ import {
     getMessageTextContent,
     hasVisibleContent,
 } from './shared/message-list-utils'
-import { ThinkingText } from './shared/thinking-text'
 import type { EmptyStateSuggestion } from './suggestions/empty-state-suggestion-options'
 import { EmptyStateSuggestions } from './suggestions/empty-state-suggestions'
 
@@ -69,16 +68,38 @@ type MessageListEntry = MessageEntry | TurnEntry
 
 const DEFAULT_MESSAGE_COLUMN_WIDTH = 856
 const HEIGHT_HINT_READ_TIMEOUT_MS = 500
-const MAX_ESTIMATED_MESSAGE_HEIGHT = 8_000
-const MAX_ESTIMATED_TEXT_LINE_COUNT = 240
 const MESSAGE_ITEM_VERTICAL_PADDING = 20
 const TEXT_LINE_HEIGHT = 28
+const ACCEPTED_TURN_RESPONSE_RESERVE_HEIGHT = 288
+const GENERAL_AGENT_TRACE_HEADER_HEIGHT = 30
+const GENERAL_AGENT_TRACE_MARGIN = 12
+const GENERAL_AGENT_TRACE_ROW_HEIGHT = 30
+
+function InitialGeneralAgentTrace() {
+    return (
+        <article className="flex justify-start">
+            <div className="flow-root w-full max-w-[var(--chat-content-column-width,51rem)] text-foreground">
+                <GeneralAgentTracePanel finalAnswerStarted={false} parts={[]} />
+            </div>
+        </article>
+    )
+}
+
+function isDedicatedAgentRequest(requestComposer: ChatComposerPayload | undefined) {
+    const commandName = requestComposer?.command?.name
+
+    return commandName === 'tasklist' || commandName === 'delivery-chain' || commandName === 'image'
+}
+
+const GENERAL_AGENT_TRACE_CONTENT_TOP = 8
+const GENERAL_AGENT_TRACE_SOURCE_SEPARATOR_HEIGHT = 12
+const GENERAL_AGENT_TRACE_SOURCE_HEADER_HEIGHT = 20
+const GENERAL_AGENT_TRACE_SOURCE_LINK_HEIGHT = 16
 const WIDE_TEXT_CHARACTER_PATTERN = /[\u1100-\u115f\u2e80-\ua4cf\uf900-\ufaff\uff01-\uff60\uffe0-\uffe6]/
 
 interface MessageListContext {
-    acceptedTurnReplyRunway?: string
-    acceptedTurnRunwayItemKey?: string
-    acceptedTurnRunwayMode?: 'assistant-slot'
+    acceptedTurnResponseReserveItemKey?: string
+    acceptedTurnResponseReserveMode?: 'assistant-slot' | 'assistant-message'
     bottomInset: number
     header?: ReactNode
     onUserReading?: () => void
@@ -89,6 +110,59 @@ interface MessageListContext {
 interface MessageHeightEstimateContext {
     enableReasoning: boolean
     requestComposer?: ChatComposerPayload
+}
+
+function isGeneralAgentTracePart(part: MindMessage['parts'][number]) {
+    return part.type === 'prompt' || part.type === 'resource' || part.type === 'skill' || part.type === 'tool'
+}
+
+function countGeneralAgentReadSources(parts: MindMessage['parts']) {
+    const readUrls = new Set<string>()
+
+    for (const part of parts) {
+        if (part.type !== 'tool') continue
+
+        for (const source of part.sources ?? []) {
+            if (source.originTool !== 'read-url' || source.status !== 'read') continue
+
+            try {
+                const url = new URL(source.url)
+
+                if (url.protocol === 'http:' || url.protocol === 'https:') {
+                    url.hash = ''
+                    readUrls.add(url.toString())
+                }
+            } catch {
+                // Invalid source URLs are not rendered in the trace source list.
+            }
+        }
+    }
+
+    return Math.min(5, readUrls.size)
+}
+
+function estimateGeneralAgentTraceHeight(parts: MindMessage['parts']) {
+    let height = GENERAL_AGENT_TRACE_HEADER_HEIGHT + GENERAL_AGENT_TRACE_MARGIN
+    const rows = parts.filter(isGeneralAgentTracePart)
+
+    if (parts.some(part => part.type === 'text' && part.text.trim().length > 0)) {
+        return height
+    }
+
+    if (rows.length > 0) {
+        height += GENERAL_AGENT_TRACE_CONTENT_TOP + rows.length * GENERAL_AGENT_TRACE_ROW_HEIGHT
+    }
+
+    const readSourceCount = countGeneralAgentReadSources(parts)
+
+    if (readSourceCount > 0) {
+        height +=
+            GENERAL_AGENT_TRACE_SOURCE_SEPARATOR_HEIGHT +
+            GENERAL_AGENT_TRACE_SOURCE_HEADER_HEIGHT +
+            readSourceCount * GENERAL_AGENT_TRACE_SOURCE_LINK_HEIGHT
+    }
+
+    return height
 }
 
 interface MessageHeightHintReadState {
@@ -122,10 +196,12 @@ function MessageListItem({
 }: ItemProps<MessageListEntry> & { context?: MessageListContext }) {
     const onItemMounted = context?.onItemMounted
     const onItemUnmounted = context?.onItemUnmounted
-    const acceptedTurnRunwayMode = context?.acceptedTurnRunwayItemKey === item.itemKey ? context.acceptedTurnRunwayMode : undefined
-    const itemStyle: CSSProperties & { '--accepted-turn-reply-runway'?: string } = {
+    const itemKey = computeMessageItemKey(itemIndex, item)
+    const acceptedTurnResponseReserveMode =
+        context?.acceptedTurnResponseReserveItemKey === itemKey ? context.acceptedTurnResponseReserveMode : undefined
+    const itemStyle = {
         ...style,
-        '--accepted-turn-reply-runway': acceptedTurnRunwayMode ? context?.acceptedTurnReplyRunway : undefined,
+        minHeight: acceptedTurnResponseReserveMode === 'assistant-message' ? `${ACCEPTED_TURN_RESPONSE_RESERVE_HEIGHT}px` : undefined,
         paddingBlock: item.kind === 'turn' ? 0 : '0.625rem',
     }
 
@@ -138,7 +214,6 @@ function MessageListItem({
     return (
         <div
             {...props}
-            data-accepted-turn-runway={acceptedTurnRunwayMode}
             data-item-index={itemIndex}
             style={itemStyle}
             onClickCapture={event => {
@@ -170,10 +245,6 @@ const messageListComponents: Components<MessageListEntry, MessageListContext> = 
     Footer: MessageListFooter,
     Header: MessageListHeader,
     Item: MessageListItem,
-}
-
-function getAcceptedTurnRunwayItemKey(userMessageId: string) {
-    return `accepted-turn-runway:${userMessageId}`
 }
 
 function computeMessageItemKey(_index: number, entry: MessageListEntry) {
@@ -227,13 +298,13 @@ function estimateTextHeight(text: string, messageColumnWidth: number): number {
 
     return (
         20 +
-        Math.min(MAX_ESTIMATED_TEXT_LINE_COUNT, visualLineCount) * TEXT_LINE_HEIGHT +
+        visualLineCount * TEXT_LINE_HEIGHT +
         codeBlockLineCount * 17 +
         codeBlocks.length * 28 +
         tableDataRowCount * 37 +
         headingCount * 32 +
-        Math.min(40, listItemCount) * 40 +
-        Math.min(16, paragraphBreakCount) * 16
+        listItemCount * 40 +
+        paragraphBreakCount * 16
     )
 }
 
@@ -250,14 +321,19 @@ function estimateMessageHeight(message: MindMessage, messageColumnWidth: number,
             .filter(part => part.type === 'text')
             .map(part => part.text)
             .join('\n')
-        return Math.min(280, 32 + estimateTextHeight(text, messageColumnWidth) + MESSAGE_ITEM_VERTICAL_PADDING)
+        return 32 + estimateTextHeight(text, messageColumnWidth) + MESSAGE_ITEM_VERTICAL_PADDING
     }
 
     let estimatedHeight = message.artifacts?.length ? 128 : 0
     const isDeliveryChainMessage = context.requestComposer?.command?.name === 'delivery-chain'
+    const isGeneralAgentMessage = message.parts.some(part => part.type === 'agent-run')
 
     for (const part of message.parts) {
         if (!hasVisibleContent(part)) {
+            continue
+        }
+
+        if (isGeneralAgentMessage && isGeneralAgentTracePart(part)) {
             continue
         }
 
@@ -294,8 +370,11 @@ function estimateMessageHeight(message: MindMessage, messageColumnWidth: number,
             case 'image-result':
                 estimatedHeight += estimateImageResultHeight(part.width, part.height, messageColumnWidth)
                 break
-            case 'agent-step':
-                estimatedHeight += 198 + Math.min(6, part.graph.nodes.length) * 32
+            case 'agent-graph':
+                estimatedHeight += 198 + part.graph.nodes.length * 32
+                break
+            case 'agent-run':
+                estimatedHeight += estimateGeneralAgentTraceHeight(message.parts)
                 break
             case 'agent-interrupt':
                 estimatedHeight += 160
@@ -303,7 +382,7 @@ function estimateMessageHeight(message: MindMessage, messageColumnWidth: number,
         }
     }
 
-    return Math.min(MAX_ESTIMATED_MESSAGE_HEIGHT, Math.max(64, estimatedHeight + MESSAGE_ITEM_VERTICAL_PADDING))
+    return Math.max(64, estimatedHeight + MESSAGE_ITEM_VERTICAL_PADDING)
 }
 
 const ChatMessageItem = memo(function ChatMessageItem({
@@ -371,14 +450,8 @@ const ChatMessageItem = memo(function ChatMessageItem({
     }
 
     if (visibleParts.length === 0 && !hasArtifacts) {
-        if (message.role === 'assistant' && isThinking) {
-            return (
-                <article className="flex justify-start">
-                    <div className="inline-flex items-center py-1 text-sm font-medium text-muted-foreground">
-                        <ThinkingText />
-                    </div>
-                </article>
-            )
+        if (message.role === 'assistant' && isThinking && !isDedicatedAgentRequest(requestComposer)) {
+            return <InitialGeneralAgentTrace />
         }
 
         return null
@@ -638,7 +711,7 @@ export function ChatMessageList({
             .then(result => {
                 const entries =
                     result.status === 'valid' &&
-                    result.data.geometryVersion === 1 &&
+                    result.data.geometryVersion === MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION &&
                     result.data.messageColumnWidth === messageColumnWidth &&
                     result.data.layoutKey === heightHintLayoutKey
                         ? result.data.entries
@@ -689,7 +762,7 @@ export function ChatMessageList({
                 const userMessage = message
                 const turnEntry: TurnEntry = {
                     assistantMessage,
-                    itemKey: getAcceptedTurnRunwayItemKey(userMessage.id),
+                    itemKey: userMessage.id,
                     kind: 'turn',
                     renderFingerprint: createMessageRenderFingerprint(
                         assistantMessage ?? userMessage,
@@ -700,26 +773,30 @@ export function ChatMessageList({
                 }
 
                 entries.push(turnEntry)
-                const assistantEstimate = assistantMessage
-                    ? estimateMessageHeight(assistantMessage, messageColumnWidth, {
-                          enableReasoning,
-                          requestComposer: userMessage.composer,
-                      })
-                    : 0
                 const frozenAssistantEstimate =
-                    assistantMessage !== undefined && assistantMessage.id === activeStreamingAssistantId
-                        ? (() => {
-                              const current = streamingHeightEstimatesRef.current.get(assistantMessage.id)
-                              if (current?.layoutKey === heightHintLayoutKey) return current.estimate
-                              streamingHeightEstimatesRef.current.set(assistantMessage.id, {
-                                  estimate: assistantEstimate,
-                                  layoutKey: heightHintLayoutKey,
-                              })
-                              return assistantEstimate
-                          })()
-                        : assistantEstimate
+                    assistantMessage === undefined
+                        ? 0
+                        : assistantMessage.id === activeStreamingAssistantId
+                          ? (() => {
+                                const current = streamingHeightEstimatesRef.current.get(assistantMessage.id)
+                                if (current?.layoutKey === heightHintLayoutKey) return current.estimate
+                                const estimate = estimateMessageHeight(assistantMessage, messageColumnWidth, {
+                                    enableReasoning,
+                                    requestComposer: userMessage.composer,
+                                })
+                                streamingHeightEstimatesRef.current.set(assistantMessage.id, {
+                                    estimate,
+                                    layoutKey: heightHintLayoutKey,
+                                })
+                                return estimate
+                            })()
+                          : estimateMessageHeight(assistantMessage, messageColumnWidth, {
+                                enableReasoning,
+                                requestComposer: userMessage.composer,
+                            })
                 structuralEstimates.push(
-                    estimateMessageHeight(userMessage, messageColumnWidth, { enableReasoning }) + frozenAssistantEstimate
+                    estimateMessageHeight(userMessage, messageColumnWidth, { enableReasoning }) +
+                        Math.max(frozenAssistantEstimate, ACCEPTED_TURN_RESPONSE_RESERVE_HEIGHT)
                 )
                 if (assistantMessage) messageIndex += 1
                 continue
@@ -737,16 +814,23 @@ export function ChatMessageList({
             }
 
             entries.push(entry)
-            const estimate = estimateMessageHeight(message, messageColumnWidth, { enableReasoning, requestComposer: entry.requestComposer })
             const frozenEstimate =
                 message.id === activeStreamingAssistantId && message.role === 'assistant'
                     ? (() => {
                           const current = streamingHeightEstimatesRef.current.get(message.id)
                           if (current?.layoutKey === heightHintLayoutKey) return current.estimate
+                          const estimate = estimateMessageHeight(message, messageColumnWidth, {
+                              enableReasoning,
+                              requestComposer: entry.requestComposer,
+                          })
                           streamingHeightEstimatesRef.current.set(message.id, { estimate, layoutKey: heightHintLayoutKey })
                           return estimate
                       })()
                     : (() => {
+                          const estimate = estimateMessageHeight(message, messageColumnWidth, {
+                              enableReasoning,
+                              requestComposer: entry.requestComposer,
+                          })
                           streamingHeightEstimatesRef.current.delete(message.id)
                           return estimate
                       })()
@@ -784,9 +868,16 @@ export function ChatMessageList({
             ),
         [messageEntries]
     )
-    const acceptedTurnRunwayEntry = positionAcceptedTurn && isStreamingOutput ? messageEntries.at(-1) : undefined
-    const acceptedTurnRunwayMode: MessageListContext['acceptedTurnRunwayMode'] =
-        acceptedTurnRunwayEntry?.kind === 'turn' ? 'assistant-slot' : undefined
+    const acceptedTurnResponseReserveEntry = positionAcceptedTurn ? messageEntries.at(-1) : undefined
+    const acceptedTurnResponseReserveMode: MessageListContext['acceptedTurnResponseReserveMode'] =
+        acceptedTurnResponseReserveEntry?.kind === 'turn'
+            ? 'assistant-slot'
+            : acceptedTurnResponseReserveEntry?.kind === 'message' && acceptedTurnResponseReserveEntry.message.role === 'assistant'
+              ? 'assistant-message'
+              : undefined
+    const acceptedTurnResponseReserveItemKey = acceptedTurnResponseReserveEntry
+        ? computeMessageItemKey(messageEntries.length - 1, acceptedTurnResponseReserveEntry)
+        : undefined
 
     heightHintRuntimeRef.current = {
         conversationId,
@@ -817,16 +908,23 @@ export function ChatMessageList({
 
     const listContext = useMemo(
         () => ({
-            acceptedTurnReplyRunway: acceptedTurnRunwayMode ? `clamp(10rem, calc(72dvh - ${bottomInset}px - 4rem), 48rem)` : undefined,
-            acceptedTurnRunwayItemKey: acceptedTurnRunwayEntry?.itemKey,
-            acceptedTurnRunwayMode,
+            acceptedTurnResponseReserveItemKey,
+            acceptedTurnResponseReserveMode,
             bottomInset,
             header,
             onItemMounted,
             onItemUnmounted,
             onUserReading,
         }),
-        [acceptedTurnRunwayEntry?.itemKey, acceptedTurnRunwayMode, bottomInset, header, onItemMounted, onItemUnmounted, onUserReading]
+        [
+            acceptedTurnResponseReserveItemKey,
+            acceptedTurnResponseReserveMode,
+            bottomInset,
+            header,
+            onItemMounted,
+            onItemUnmounted,
+            onUserReading,
+        ]
     )
     const disclosureScopeKey = presentationKey ?? conversationId ?? 'draft'
     const { disclosureMessageIdByKey, validDisclosureKeys } = useMemo(() => {
@@ -851,7 +949,9 @@ export function ChatMessageList({
             message.parts.forEach((part, partIndex) => {
                 const identity = getDisclosurePartIdentity(part, partIndex)
 
-                if (part.type === 'agent-step') {
+                if (part.type === 'agent-run') {
+                    addDisclosureKey(message.id, 'general-agent-trace')
+                } else if (part.type === 'agent-graph') {
                     addDisclosureKey(message.id, `${identity}:agent-main`)
                     addDisclosureKey(message.id, `${identity}:agent-debug`)
                 } else if (part.type === 'workflow-progress') {
@@ -1114,8 +1214,9 @@ export function ChatMessageList({
             }
 
             if (entry.kind === 'turn') {
-                const hasAcceptedTurnRunway =
-                    entry.itemKey === acceptedTurnRunwayEntry?.itemKey && acceptedTurnRunwayMode === 'assistant-slot'
+                const hasAcceptedTurnResponseReserve =
+                    computeMessageItemKey(messageIndex, entry) === acceptedTurnResponseReserveItemKey &&
+                    acceptedTurnResponseReserveMode === 'assistant-slot'
 
                 return (
                     <>
@@ -1123,17 +1224,13 @@ export function ChatMessageList({
                         <div
                             data-slot="assistant-loading-slot"
                             className="py-2.5"
-                            style={hasAcceptedTurnRunway ? { minHeight: 'var(--accepted-turn-reply-runway)' } : undefined}
+                            style={hasAcceptedTurnResponseReserve ? { minHeight: `${ACCEPTED_TURN_RESPONSE_RESERVE_HEIGHT}px` } : undefined}
                         >
                             {entry.assistantMessage ? (
                                 renderChatMessage(entry.assistantMessage, true, entry.requestComposer)
-                            ) : (
-                                <article className="flex justify-start">
-                                    <div className="inline-flex items-center py-1 text-sm font-medium text-muted-foreground">
-                                        <ThinkingText />
-                                    </div>
-                                </article>
-                            )}
+                            ) : !isDedicatedAgentRequest(entry.requestComposer) ? (
+                                <InitialGeneralAgentTrace />
+                            ) : null}
                         </div>
                     </>
                 )
@@ -1158,8 +1255,8 @@ export function ChatMessageList({
             isBusy,
             messageEntries.length,
             status,
-            acceptedTurnRunwayEntry?.itemKey,
-            acceptedTurnRunwayMode,
+            acceptedTurnResponseReserveItemKey,
+            acceptedTurnResponseReserveMode,
             toggleAssistantFeedback,
         ]
     )

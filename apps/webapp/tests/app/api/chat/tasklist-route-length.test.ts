@@ -119,7 +119,7 @@ describe('POST /api/chat tasklist input length routing', () => {
                 },
             ],
             options: {
-                modelId: 'qwen/qwen3.6-flash',
+                modelId: 'deepseek/deepseek-v4-flash',
             },
         }
 

@@ -9,6 +9,12 @@ const globalForPrisma = globalThis as unknown as {
     aiMindPrisma?: PrismaClient
 }
 
+export const prismaPoolConfig = Object.freeze({
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
+    max: 10,
+})
+
 function createPrismaClient() {
     const connectionString = process.env.DATABASE_URL?.trim()
 
@@ -17,16 +23,14 @@ function createPrismaClient() {
     }
 
     return new PrismaClient({
-        adapter: new PrismaPg({ connectionString }),
+        adapter: new PrismaPg({ connectionString, ...prismaPoolConfig }),
     })
 }
 
 export function getPrismaClient(): PrismaClient {
-    const client = globalForPrisma.aiMindPrisma ?? createPrismaClient()
-
-    if (process.env.NODE_ENV !== 'production') {
-        globalForPrisma.aiMindPrisma = client
+    if (!globalForPrisma.aiMindPrisma) {
+        globalForPrisma.aiMindPrisma = createPrismaClient()
     }
 
-    return client
+    return globalForPrisma.aiMindPrisma
 }

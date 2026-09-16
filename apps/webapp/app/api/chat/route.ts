@@ -135,6 +135,7 @@ export async function POST(request: NextRequest) {
         const routeType = imageCommand.kind === 'accepted' ? 'image' : resolveRouteType(payload)
         const resolvedModelSelection = resolveModelSelection({
             modelId: payload.options?.modelId,
+            requireToolCalling: routeType === 'chat',
             routeType,
         })
 

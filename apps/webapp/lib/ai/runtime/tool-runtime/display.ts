@@ -54,11 +54,12 @@ function getToolDefinition(toolName: string, toolDefinitionMap?: ToolDefinitionM
  */
 export function formatToolInput(toolCall: ToolCall, toolDefinitionMap?: ToolDefinitionMap) {
     const toolDefinition = getToolDefinition(toolCall.name, toolDefinitionMap)
+    const fallback = toolDefinition?.source === 'mcp' ? '远程工具' : JSON.stringify(toolCall.args)
 
     try {
-        return toolDefinition?.formatInput ? toolDefinition.formatInput(toolCall.args) : JSON.stringify(toolCall.args)
+        return toolDefinition?.formatInput ? toolDefinition.formatInput(toolCall.args) : fallback
     } catch {
-        return JSON.stringify(toolCall.args)
+        return fallback
     }
 }
 
@@ -126,10 +127,14 @@ export function getResourceResultFields(toolCall: ToolCall, result: unknown, out
     const toolDefinition = getToolDefinition(toolCall.name, toolDefinitionMap)
 
     if (toolDefinition?.getResourceResult) {
-        const resourceResult = toolDefinition.getResourceResult(toolCall.args, result)
+        try {
+            const resourceResult = toolDefinition.getResourceResult(toolCall.args, result)
 
-        if (resourceResult) {
-            return resourceResult
+            if (resourceResult) {
+                return resourceResult
+            }
+        } catch {
+            // Public formatter 失败只退化展示，不改变已经成功的 Tool 执行结果。
         }
     }
 
@@ -162,4 +167,19 @@ export function formatToolExecutionOutput(toolDefinition: ChatToolDefinition, re
     }
 
     return JSON.stringify(result)
+}
+
+/**
+ * Public formatter 与模型内部 observation 分离；异常时只返回通用成功摘要。
+ */
+export function formatToolPublicOutput(toolDefinition: ChatToolDefinition, result: unknown, internalOutput: string) {
+    if (!toolDefinition.formatPublicOutput) {
+        return toolDefinition.source === 'mcp' ? '工具已完成。' : internalOutput
+    }
+
+    try {
+        return toolDefinition.formatPublicOutput(result)
+    } catch {
+        return '工具已完成。'
+    }
 }

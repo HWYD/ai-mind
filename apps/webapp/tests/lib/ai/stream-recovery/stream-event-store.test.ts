@@ -13,9 +13,14 @@ const now = new Date('2026-07-21T10:00:00.000Z')
 const retentionUntil = new Date('2026-07-21T10:10:00.000Z')
 
 class FakeStreamRecoveryPrisma {
+    createManyCalls = 0
     deleteManyCalls = 0
+    failRunUpdate = false
+    lastTransactionOptions: { maxWait: number; timeout: number } | undefined
     runs = new Map<string, StreamRunRecord>()
     events: StreamEventRecord[] = []
+    streamRunUpdateCalls = 0
+    transactionCalls = 0
     private transactionQueue = Promise.resolve()
 
     streamRun = {
@@ -32,6 +37,9 @@ class FakeStreamRecoveryPrisma {
                 >
             >
         }) => {
+            this.streamRunUpdateCalls += 1
+            if (this.failRunUpdate) throw new Error('fake streamRun update failure')
+
             const run = this.runs.get(where.id)
 
             if (!run) {
@@ -58,6 +66,11 @@ class FakeStreamRecoveryPrisma {
             this.events.push(event)
 
             return event
+        },
+        createMany: async ({ data }: { data: Array<Omit<StreamEventRecord, 'createdAt'>> }) => {
+            this.createManyCalls += 1
+            this.events.push(...data.map(event => ({ ...event, createdAt: now })))
+            return { count: data.length }
         },
         deleteMany: async ({ where }: { where: { expiresAt?: { lte: Date }; runId?: string; sequence?: { lte: number } } }) => {
             this.deleteManyCalls += 1
@@ -105,8 +118,21 @@ class FakeStreamRecoveryPrisma {
                 .sort((first, second) => first.sequence - second.sequence),
     }
 
-    async $transaction<T>(callback: (transaction: this) => Promise<T>): Promise<T> {
-        const result = this.transactionQueue.then(() => callback(this))
+    async $transaction<T>(callback: (transaction: this) => Promise<T>, options?: { maxWait: number; timeout: number }): Promise<T> {
+        this.transactionCalls += 1
+        this.lastTransactionOptions = options
+        const result = this.transactionQueue.then(async () => {
+            const eventsBefore = [...this.events]
+            const runsBefore = new Map(this.runs)
+
+            try {
+                return await callback(this)
+            } catch (error) {
+                this.events = eventsBefore
+                this.runs = runsBefore
+                throw error
+            }
+        })
         this.transactionQueue = result.then(
             () => undefined,
             () => undefined
@@ -155,6 +181,180 @@ describe('stream-event-store', () => {
         fake = new FakeStreamRecoveryPrisma()
         fake.runs.set(runId, createRun())
         store = createStore(fake)
+    })
+
+    it('用一个事务批量写入连续 sequence，并只更新一次 StreamRun', async () => {
+        const events = await store.appendEvents([
+            {
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: { partId: 'answer', type: 'text-start' },
+                runId,
+            },
+            {
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: { delta: 'hello', partId: 'answer', type: 'text-delta' },
+                runId,
+            },
+            {
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: { partId: 'answer', type: 'text-end' },
+                runId,
+            },
+        ])
+
+        expect(events.map(event => event.sequence)).toEqual([1, 2, 3])
+        expect(fake.events.map(event => event.sequence)).toEqual([1, 2, 3])
+        expect(fake.transactionCalls).toBe(1)
+        expect(fake.createManyCalls).toBe(1)
+        expect(fake.streamRunUpdateCalls).toBe(1)
+        expect(fake.deleteManyCalls).toBeLessThanOrEqual(1)
+        expect(fake.lastTransactionOptions).toEqual({ maxWait: 2000, timeout: 5000 })
+    })
+
+    it('只允许 terminal 位于 batch 最后一项', async () => {
+        await expect(
+            store.appendEvents([
+                {
+                    eventKind: 'chunk',
+                    ownerSessionHash,
+                    payload: { type: 'finish' },
+                    runId,
+                    terminalState: 'completed',
+                },
+                {
+                    eventKind: 'chunk',
+                    ownerSessionHash,
+                    payload: { delta: 'late', partId: 'answer', type: 'text-delta' },
+                    runId,
+                },
+            ])
+        ).rejects.toMatchObject({ code: 'STREAM_EVENT_INVALID' })
+
+        expect(fake.events).toHaveLength(0)
+        expect(fake.runs.get(runId)?.lastSequence).toBe(0)
+    })
+
+    it('batch 写入后更新失败会整体回滚，不返回可发布 envelope', async () => {
+        fake.failRunUpdate = true
+
+        await expect(
+            store.appendEvents([
+                {
+                    eventKind: 'chunk',
+                    ownerSessionHash,
+                    payload: { delta: 'uncommitted', partId: 'answer', type: 'text-delta' },
+                    runId,
+                },
+            ])
+        ).rejects.toThrow('fake streamRun update failure')
+
+        expect(fake.events).toHaveLength(0)
+        expect(fake.runs.get(runId)?.lastSequence).toBe(0)
+    })
+
+    it('批量写入跨过保留上限时至多裁剪一次', async () => {
+        fake.runs.set(runId, createRun({ maxRetainedEvents: 2 }))
+
+        await store.appendEvents([
+            {
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: { delta: 'a', partId: 'answer', type: 'text-delta' },
+                runId,
+            },
+            {
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: { delta: 'b', partId: 'answer', type: 'text-delta' },
+                runId,
+            },
+            {
+                eventKind: 'chunk',
+                ownerSessionHash,
+                payload: { delta: 'c', partId: 'answer', type: 'text-delta' },
+                runId,
+            },
+        ])
+
+        expect(fake.deleteManyCalls).toBe(1)
+        expect(fake.events.map(event => event.sequence)).toEqual([2, 3])
+    })
+
+    it('把 pool 等待与事务执行限制在同一个剩余 deadline 内', async () => {
+        const realDateNow = Date.now
+        Date.now = () => now.getTime()
+
+        try {
+            await store.appendEvents(
+                [
+                    {
+                        eventKind: 'chunk',
+                        ownerSessionHash,
+                        payload: { delta: 'bounded', partId: 'answer', type: 'text-delta' },
+                        runId,
+                    },
+                ],
+                { deadlineAtMs: now.getTime() + 750 }
+            )
+        } finally {
+            Date.now = realDateNow
+        }
+
+        expect(fake.lastTransactionOptions).toEqual({ maxWait: 375, timeout: 375 })
+    })
+
+    it('near-hard-deadline 不会给连接等待和事务执行重复发放同一时间预算', async () => {
+        const realDateNow = Date.now
+        Date.now = () => now.getTime()
+
+        try {
+            await store.appendEvents(
+                [
+                    {
+                        eventKind: 'chunk',
+                        ownerSessionHash,
+                        payload: { delta: 'near-deadline', partId: 'answer', type: 'text-delta' },
+                        runId,
+                    },
+                ],
+                { deadlineAtMs: now.getTime() + 3 }
+            )
+        } finally {
+            Date.now = realDateNow
+        }
+
+        expect(fake.lastTransactionOptions).toEqual({ maxWait: 1, timeout: 2 })
+    })
+
+    it('剩余不足 2ms 时直接拒绝，而不放大 transaction deadline budget', async () => {
+        const realDateNow = Date.now
+        Date.now = () => now.getTime()
+
+        try {
+            await expect(
+                store.appendEvents(
+                    [
+                        {
+                            eventKind: 'chunk',
+                            ownerSessionHash,
+                            payload: { delta: 'expired', partId: 'answer', type: 'text-delta' },
+                            runId,
+                        },
+                    ],
+                    { deadlineAtMs: now.getTime() + 1 }
+                )
+            ).rejects.toMatchObject({
+                code: 'STREAM_EVENT_INVALID',
+                message: 'Stream event batch deadline has insufficient transaction budget.',
+            })
+        } finally {
+            Date.now = realDateNow
+        }
+
+        expect(fake.transactionCalls).toBe(0)
     })
 
     it('allocates monotonic sequences and replays events after a cursor', async () => {
@@ -232,6 +432,89 @@ describe('stream-event-store', () => {
             })
         ).rejects.toMatchObject({
             code: 'STREAM_RUN_TERMINAL',
+        })
+    })
+
+    it('accepts a matching run-status payload for a cancelled terminal event', async () => {
+        await expect(
+            store.appendEvent({
+                eventKind: 'lifecycle',
+                ownerSessionHash,
+                payload: {
+                    status: 'cancelled',
+                    type: 'run-status',
+                },
+                runId,
+                runStatus: 'cancelled',
+                terminalState: 'cancelled',
+            })
+        ).resolves.toMatchObject({
+            eventKind: 'terminal',
+            runStatus: 'cancelled',
+            terminalState: 'cancelled',
+        })
+    })
+
+    it('恢复时断言 StreamRun status 与 terminal event 的终态一致', async () => {
+        fake.runs.set(runId, createRun({ status: 'failed', terminalSequence: 1 }))
+        fake.events.push({
+            createdAt: now,
+            eventKind: 'terminal',
+            expiresAt: retentionUntil,
+            id: 'evt_terminal-mismatch',
+            payload: {
+                status: 'completed',
+                type: 'run-status',
+            },
+            payloadByteLength: 48,
+            protocolVersion: 1,
+            runId,
+            runStatus: 'completed',
+            sequence: 1,
+            terminal: true,
+            terminalState: 'completed',
+        })
+
+        await expect(store.replayEvents({ after: 0, now, ownerSessionHash, runId })).rejects.toMatchObject({
+            code: 'STREAM_EVENT_INVALID',
+        })
+    })
+
+    it('恢复时拒绝 terminalSequence 或 terminal event 不在 StreamRun 最后序列的状态', async () => {
+        fake.runs.set(runId, createRun({ lastSequence: 2, status: 'completed', terminalSequence: 1 }))
+        fake.events.push({
+            createdAt: now,
+            eventKind: 'terminal',
+            expiresAt: retentionUntil,
+            id: 'evt_terminal-not-last',
+            payload: { type: 'finish' },
+            payloadByteLength: 20,
+            protocolVersion: 1,
+            runId,
+            runStatus: 'completed',
+            sequence: 1,
+            terminal: true,
+            terminalState: 'completed',
+        })
+
+        await expect(store.replayEvents({ after: 0, now, ownerSessionHash, runId })).rejects.toMatchObject({
+            code: 'STREAM_EVENT_INVALID',
+        })
+    })
+
+    it('终态事件已经超出 retention 时返回 CURSOR_EXPIRED，而不是误报终态损坏', async () => {
+        fake.runs.set(
+            runId,
+            createRun({
+                lastSequence: 1,
+                retentionUntil: new Date('2026-07-21T09:59:00.000Z'),
+                status: 'completed',
+                terminalSequence: 1,
+            })
+        )
+
+        await expect(store.replayEvents({ after: 0, now, ownerSessionHash, runId })).rejects.toMatchObject({
+            code: 'CURSOR_EXPIRED',
         })
     })
 

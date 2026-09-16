@@ -23,11 +23,6 @@ const budget: ContextBudget = {
     runtimeReserveTokens: 100,
 }
 
-const retentionBudget: ContextBudget = {
-    ...budget,
-    postCompactionTargetTokens: 300,
-}
-
 function message(index: number): ChatThreadMessage {
     return {
         createdAt: new Date(index).toISOString(),
@@ -129,13 +124,23 @@ describe('runtime/chat-memory compaction', () => {
 
     it('候选只从最新向前保留完整 user/assistant turns', async () => {
         const original = state(6)
+        const generatedSummary = '覆盖全部旧对话的摘要。'
+        const retentionBudget: ContextBudget = {
+            ...budget,
+            postCompactionTargetTokens: estimateChatMemoryTokens({
+                messages: original.messages.slice(-2),
+                pinnedDecisions: [],
+                summary: generatedSummary,
+            }),
+        }
         const compacted = await compactThreadState(original, retentionBudget, async () => ({
             pinnedDecisions: [],
-            summary: '覆盖全部旧对话的摘要。',
+            summary: generatedSummary,
         }))
 
         expect(compacted?.messages).toEqual(original.messages.slice(-2))
         expect(compacted?.messages.map(item => item.role)).toEqual(['user', 'assistant'])
+        expect(estimateChatMemoryTokens(compacted!)).toBeLessThanOrEqual(retentionBudget.postCompactionTargetTokens)
     })
 
     it('超过 target 的 candidate 被拒绝，即使生成输出通过 schema', async () => {

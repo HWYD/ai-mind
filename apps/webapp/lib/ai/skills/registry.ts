@@ -1,23 +1,11 @@
-import type { CapabilityLocation, CapabilityProviderKind, CapabilityType } from '@/lib/ai/capabilities/types'
-
 /**
  * Skill Registry 的核心类型定义。
- * v0.0.11 起 Skill 通过结构化字段声明可承接能力范围，供 runtime 与路由层消费。
+ * Skill 只声明提示词、输出风格与路由信息；Tool Policy 和 MCP 权限由各自 Runtime 管理。
  */
 export type SkillOutputPolicy = 'concise-utility' | 'context-reader'
 export type SkillResultPolicy = 'tool-first'
 
 export type SkillFallbackPolicy = 'direct-answer'
-export type SkillSourceKind = CapabilityProviderKind
-
-export interface SkillCapabilitySelector {
-    capabilityIds?: string[]
-    capabilityType?: CapabilityType
-    location?: CapabilityLocation
-    names?: string[]
-    providerKind?: CapabilityProviderKind
-    serverId?: string
-}
 
 export interface SkillDefinition {
     // Skill 的机器标识，供请求层和 Runtime 做映射（例如 utility-skill）。
@@ -38,10 +26,6 @@ export interface SkillDefinition {
     isAvailable?: () => boolean
     // 命中示例，用于路由调试和后续展示。
     triggerExamples?: string[]
-    // 声明该 Skill 主要消费哪些能力来源类型。
-    sourceKinds?: SkillSourceKind[]
-    // 声明该 Skill 可承接的 capability 选择范围。
-    capabilitySelectors?: SkillCapabilitySelector[]
     // 声明能力不可用时的回退策略。
     fallbackPolicy?: SkillFallbackPolicy
 }

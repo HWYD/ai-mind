@@ -52,7 +52,7 @@ describe('GET /api/chat/context-usage', () => {
             createGetRequest({
                 conversationId,
                 cookie: `ai-mind-session-id=${sessionId}`,
-                modelId: 'qwen/qwen3.6-flash',
+                modelId: 'deepseek/deepseek-v4-flash',
             })
         )
         const body = await response.json()
@@ -95,7 +95,7 @@ describe('GET /api/chat/context-usage', () => {
             createGetRequest({
                 conversationId: 'conv-not-owned',
                 cookie: 'ai-mind-session-id=context-usage-other-session',
-                modelId: 'qwen/qwen3.6-flash',
+                modelId: 'deepseek/deepseek-v4-flash',
             })
         )
         const body = await response.json()

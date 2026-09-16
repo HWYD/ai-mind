@@ -1,8 +1,21 @@
+<!--
+Sync Impact Report
+- Version change: v0.3.3 -> v0.4.0
+- Modified principles: none
+- Added sections: 12. Complex Work Delegation First; 13. Evidence-Based Decision Revalidation;
+  Governance
+- Removed sections: none
+- Templates reviewed: `.specify/templates/{plan,spec,tasks}-template.md` ✅ no update; the
+  official baseline remains unchanged and this project rule is applied through the adapter layer.
+- Runtime guidance updated: `AGENTS.md` and `docs/architecture/ai-coding-workflow.md` ✅
+- Follow-up TODOs: none
+-->
+
 # AI Mind Constitution
 
 状态：Active
-版本：v0.3.3
-最后更新：2026-07-04
+版本：v0.4.0
+最后更新：2026-09-16
 
 这份 Constitution 是 AI Mind 的长期治理基线，适用于版本规划、Codex 执行、代码 review、release 收口和后续 Agent / Runtime 扩展。
 
@@ -136,3 +149,34 @@ AI Mind 的 `specs/` 文档可以以中文正文为主，但必须保留 officia
 - 代码标识符必须使用英文；代码注释按现有代码风格处理，不因 specs 中文而强制新增中文注释。
 - Codex 读取中文 specs 时，必须保留原文中的英文技术名词、文件路径、命令、类型名、API 名称和 package 名称，并且不得忽略 `Non-goals`、安全边界、兼容性边界和 release closing 检查。
 - official generated / vendored baseline 不直接中文化；如确需模板策略，先在 `.specify/templates/overrides/` 说明或新增 override，不直接魔改 core templates。
+
+## 12. Complex Work Delegation First
+
+对于 Level C / D、跨边界改动、存在两个以上可独立验证的工作包，或尚未定位单一根因的问题，进入实施前必须完成可委派性判断。Agent 可用且工作能安全隔离时，优先委派独立调研、诊断、实现或 review。
+
+- 并发修改必须有明确且不重叠的文件或模块归属；强耦合核心由单一 owner 集成，其他 Agent 提供独立证据或 review。
+- 每个委派任务必须明确目标、输入、产出、文件归属、验证方式与整合 owner；不得用多个 Agent 在共享核心文件上无序并发写入。
+- 因任务强耦合、范围过小或 Agent 不可用而不委派时，必须在当前 task 或交付记录中说明原因。
+- 多 Agent 是 AI coding 的实施策略，不等同于新增 AI Mind 产品 Runtime 的多 Agent、子 Agent 或并行执行能力。
+
+目的：在可拆分问题上获得独立视角与更快反馈，同时保持变更归属、集成责任和验证链路清晰。
+
+## 13. Evidence-Based Decision Revalidation
+
+当前代码、测试、spec、plan、decisions、ADR 与 architecture docs 是理解项目现状、既有约束和兼容性的证据，不自动证明其中可变的技术方案仍然最优。
+
+- 当任务要求调研最佳实践或替代方案，或涉及架构、依赖、安全、性能、可靠性等重要技术选择时，必须把现有实现与既有决策作为候选之一，与可行替代方案比较。
+- 比较至少覆盖需求匹配、架构边界、安全、兼容性、可运维性、验证成本与迁移风险；保留既有方案也必须写明比较依据。
+- 用户明确指定的不可变需求、外部契约、已批准的安全边界与法律合规要求不是可替换候选，只评估其可行性、风险和实现路径。
+- 结论必须记录在当前 canonical workspace 的 `research.md`、`decisions.md` 或等价交付记录中；若结论改变既有决策，必须在同一工作区同步更新受影响的规格、任务、ADR、文档与实现，并标记旧决策为 superseded。
+- Level A / B 的局部改动不因本原则被强制开展无关调研；仅在存在上述触发条件时执行重评。
+
+目的：把项目历史作为可验证的基线，而不是未经检验的默认答案，防止实现惯性替代工程判断。
+
+## Governance
+
+本 Constitution 是长期工程治理基线；它约束项目规则与质量门，但不替代当前代码、测试和版本资产对现状的事实描述。
+
+- 修订必须记录动机、影响资产、版本和日期；删除或重新定义既有原则使用 MAJOR，新增原则或实质扩展使用 MINOR，澄清或文字修订使用 PATCH。
+- Level C / D 的 plan 必须在设计前后执行 Constitution Check；实现与 release closing 必须检查本 Constitution、spec、决策、文档和实际 diff 是否一致。
+- 无法使用 CLI、skills 或网络时，仍必须通过人工等价流程完成同等判断，并在交付记录中说明。

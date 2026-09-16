@@ -39,25 +39,25 @@ describe('resolveChatModelsInitialState', () => {
     // 注意：deepseek 这类 family 可以切换到底层不同 provider，测试应跟随 catalog 当前 provider，
     // 不能把 family -> provider 映射写死，否则切换供应商时首屏模型初始态测试会无意义地失败。
     it('服务端可直接返回公开模型列表给首屏使用，并按 catalog 当前 provider 暴露 deepseek family', () => {
-        const qwenModel = requireCatalogItem('qwen/qwen3.6-flash')
+        const kimiModel = requireCatalogItem('doubao/Kimi-K2.6')
         const deepseekModel = requireCatalogItem('deepseek/deepseek-v4-flash')
 
         vi.stubEnv('NODE_ENV', 'production')
-        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', [...new Set([qwenModel.provider, deepseekModel.provider])].join(','))
-        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', qwenModel.id)
-        stubProviderAvailability(qwenModel.provider)
+        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', [...new Set([kimiModel.provider, deepseekModel.provider])].join(','))
+        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', kimiModel.id)
+        stubProviderAvailability(kimiModel.provider)
         stubProviderAvailability(deepseekModel.provider)
 
         const result = resolveChatModelsInitialState()
 
         expect(result.modelError).toBeNull()
-        expect(result.defaultModelId).toBe(qwenModel.id)
+        expect(result.defaultModelId).toBe(kimiModel.id)
         expect(result.models).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    family: qwenModel.family,
-                    id: qwenModel.id,
-                    provider: qwenModel.provider,
+                    family: kimiModel.family,
+                    id: kimiModel.id,
+                    provider: kimiModel.provider,
                 }),
                 expect.objectContaining({
                     family: deepseekModel.family,
@@ -70,9 +70,9 @@ describe('resolveChatModelsInitialState', () => {
 
     it('Provider 配置不可用时返回前端可展示的错误初始态', () => {
         vi.stubEnv('NODE_ENV', 'production')
-        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'qwen')
-        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'qwen/qwen3.6-flash')
-        vi.stubEnv('AI_MIND_QWEN_API_KEY', '')
+        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'doubao')
+        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'doubao/doubao-seed-2.0-pro')
+        vi.stubEnv('AI_MIND_DOUBAO_API_KEY', '')
 
         const result = resolveChatModelsInitialState()
 

@@ -36,4 +36,6 @@ function Toggle({
     return <TogglePrimitive.Root data-slot="toggle" className={cn(toggleVariants({ variant, size, className }))} {...props} />
 }
 
+// shadcn 组合组件需要使用该 variant builder。
+// eslint-disable-next-line react-refresh/only-export-components
 export { Toggle, toggleVariants }

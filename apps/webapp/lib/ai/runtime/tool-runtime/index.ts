@@ -1,3 +1,10 @@
 export { formatToolInput } from './display'
-export { executeToolCall, writeToolValidationErrors } from './execution'
-export { normalizeAndValidateToolCalls } from './validation'
+export {
+    executeToolCall,
+    normalizeToolExecutionError,
+    resolveToolAttemptTimeoutMs,
+    resolveToolRetryDelayMs,
+    writeToolValidationErrors,
+} from './execution'
+export type { ExecuteToolCallOptions, NormalizedToolExecutionError, ToolExecutionFailureCategory } from './execution'
+export { normalizeAndValidateToolCall } from './validation'

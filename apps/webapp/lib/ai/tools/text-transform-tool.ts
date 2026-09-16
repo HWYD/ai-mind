@@ -225,10 +225,16 @@ function getTextTransformDisplayConfig(args: unknown): ToolDisplayConfig {
 }
 
 export const textTransformToolDefinition: ChatToolDefinition<z.infer<typeof textTransformToolSchema>> = {
+    executionPolicy: {
+        kind: 'standard-tool',
+        profile: 'local-deterministic',
+        retrySafe: true,
+    },
     name: 'text-transform',
     tool: textTransformTool,
     schema: textTransformToolSchema,
     normalizeArgs: normalizeTextTransformToolArgs,
     formatInput: formatTextTransformToolInput,
     getDisplayConfig: getTextTransformDisplayConfig,
+    runtimeScopes: ['skill-binding', 'general-react-agent'],
 }

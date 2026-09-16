@@ -28,25 +28,68 @@ import {
 import { createStdioClientTransport } from '@/lib/ai/mcp/transport/stdio-transport'
 import { createStreamableHttpClientTransport } from '@/lib/ai/mcp/transport/streamable-http-transport'
 
-type MCPRequestOptions = Parameters<Client['callTool']>[2]
+type MCPRequestOptions = NonNullable<Parameters<Client['callTool']>[2]>
+type MCPCallToolOptions = MCPRequestOptions & {
+    allowSessionRecovery?: boolean
+}
 type MCPClientTransport = ReturnType<typeof createStdioClientTransport> | ReturnType<typeof createStreamableHttpClientTransport>
 
 /**
  * 给单次 MCP SDK 异步调用统一加超时，避免某个 server 卡住后拖慢整条主链。
+ * timeout 会同时 abort 传给 SDK 的 signal；迟到的底层结果只会落在已被 Promise.race
+ * 丢弃的分支，不得触发 session recovery 或覆盖已经返回的 Host 错误。
  */
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+function withTimeout<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+    timeoutMs: number,
+    operationName: string,
+    parentSignal?: AbortSignal
+): Promise<T> {
+    const controller = new AbortController()
     let timeoutId: NodeJS.Timeout | undefined
+    let parentAbortListener: (() => void) | undefined
+    let settled = false
+    let rejectParentAbort: ((reason?: unknown) => void) | undefined
 
     const timeoutPromise = new Promise<T>((_, reject) => {
         timeoutId = setTimeout(() => {
-            reject(new MCPHostError('TIMEOUT', `${operationName} 超时（${timeoutMs}ms）。`))
+            if (settled) return
+            settled = true
+            const timeoutError = new MCPHostError('TIMEOUT', `${operationName} 超时（${timeoutMs}ms）。`)
+            controller.abort(timeoutError)
+            reject(timeoutError)
         }, timeoutMs)
     })
+    const parentAbortPromise = new Promise<T>((_, reject) => {
+        rejectParentAbort = reject
+    })
 
-    return Promise.race([promise, timeoutPromise]).finally(() => {
-        if (timeoutId) {
-            clearTimeout(timeoutId)
+    const operationPromise = Promise.resolve().then(() => {
+        if (controller.signal.aborted) {
+            return Promise.reject(controller.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
         }
+
+        return operation(controller.signal)
+    })
+    if (parentSignal) {
+        parentAbortListener = () => {
+            if (settled) return
+            settled = true
+            const reason = parentSignal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+            controller.abort(reason)
+            rejectParentAbort?.(reason)
+        }
+        if (parentSignal.aborted) {
+            parentAbortListener()
+        } else {
+            parentSignal.addEventListener('abort', parentAbortListener, { once: true })
+        }
+    }
+
+    return Promise.race([operationPromise, timeoutPromise, parentAbortPromise]).finally(() => {
+        settled = true
+        if (timeoutId) clearTimeout(timeoutId)
+        if (parentSignal && parentAbortListener) parentSignal.removeEventListener('abort', parentAbortListener)
     })
 }
 
@@ -218,7 +261,7 @@ export class MCPClient {
      */
     private async resetConnection() {
         try {
-            await withTimeout(this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} reset`)
+            await withTimeout(() => this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} reset`)
         } catch {
             // 旧 session 已失效时 close 也可能失败；这里继续重建，保证下一次请求能重新 initialize。
         }
@@ -229,16 +272,22 @@ export class MCPClient {
     /**
      * 执行一次 MCP 请求；如果遇到可恢复的 session 失效错误，则重建连接后只重试一次。
      */
-    private async runWithSessionRecovery<T>(operation: () => Promise<T>) {
+    private async runWithSessionRecovery<T>(operation: () => Promise<T>, signal?: AbortSignal, allowSessionRecovery = true) {
         try {
             return await operation()
         } catch (error) {
-            if (!isMCPStreamableHttpServerDefinition(this.serverDefinition) || !isRecoverableSessionError(error)) {
+            if (signal?.aborted) {
+                throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+            }
+            if (!allowSessionRecovery || !isMCPStreamableHttpServerDefinition(this.serverDefinition) || !isRecoverableSessionError(error)) {
                 throw error
             }
 
             await this.resetConnection()
             await this.connect()
+            if (signal?.aborted) {
+                throw signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+            }
             return operation()
         }
     }
@@ -265,16 +314,26 @@ export class MCPClient {
      * 调用 MCP Tool。
      * 如果当前连接还没完成初始化，会先执行 `connect()`。
      */
-    async callTool(params: CallToolRequest['params'], options?: MCPRequestOptions): Promise<MCPCallToolResponse> {
+    async callTool(params: CallToolRequest['params'], options?: MCPCallToolOptions): Promise<MCPCallToolResponse> {
+        const { allowSessionRecovery = true, ...requestOptions } = options ?? {}
+
+        if (requestOptions.signal?.aborted) {
+            throw requestOptions.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+        }
+
         await this.connect()
 
         try {
-            const result = await this.runWithSessionRecovery(() =>
-                withTimeout(
-                    this.client.callTool(params, undefined, options),
-                    this.getTimeoutMs('request'),
-                    `${this.serverDefinition.serverId} tools/call`
-                )
+            const result = await this.runWithSessionRecovery(
+                () =>
+                    withTimeout(
+                        signal => this.client.callTool(params, undefined, { ...requestOptions, signal }),
+                        this.getTimeoutMs('request'),
+                        `${this.serverDefinition.serverId} tools/call`,
+                        requestOptions.signal
+                    ),
+                requestOptions.signal,
+                allowSessionRecovery
             )
 
             return {
@@ -300,7 +359,11 @@ export class MCPClient {
 
         try {
             const result = await this.runWithSessionRecovery(() =>
-                withTimeout(this.client.listPrompts(), this.getTimeoutMs('list'), `${this.serverDefinition.serverId} prompts/list`)
+                withTimeout(
+                    signal => this.client.listPrompts(undefined, { signal }),
+                    this.getTimeoutMs('list'),
+                    `${this.serverDefinition.serverId} prompts/list`
+                )
             )
 
             return {
@@ -323,7 +386,7 @@ export class MCPClient {
      */
     async close() {
         try {
-            await withTimeout(this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} close`)
+            await withTimeout(() => this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} close`)
         } catch (error) {
             throw new MCPHostError(
                 resolveHostErrorCode(error, 'REQUEST_FAILED'),
@@ -361,18 +424,19 @@ export class MCPClient {
         this.state = 'connecting'
 
         this.connectPromise = withTimeout(
-            this.client.connect(this.transport).then(() => {
-                this.state = 'ready'
-                this.lastError = null
+            () =>
+                this.client.connect(this.transport).then(() => {
+                    this.state = 'ready'
+                    this.lastError = null
 
-                return {
-                    clientInfo: MCP_CLIENT_INFO,
-                    serverCapabilities: this.client.getServerCapabilities(),
-                    serverDefinition: this.serverDefinition,
-                    serverInstructions: this.client.getInstructions(),
-                    serverVersion: this.client.getServerVersion(),
-                }
-            }),
+                    return {
+                        clientInfo: MCP_CLIENT_INFO,
+                        serverCapabilities: this.client.getServerCapabilities(),
+                        serverDefinition: this.serverDefinition,
+                        serverInstructions: this.client.getInstructions(),
+                        serverVersion: this.client.getServerVersion(),
+                    }
+                }),
             this.getTimeoutMs('initialize'),
             `${this.serverDefinition.serverId} initialize`
         ).catch(error => {
@@ -414,7 +478,11 @@ export class MCPClient {
 
         try {
             const result = await this.runWithSessionRecovery(() =>
-                withTimeout(this.client.listResources(), this.getTimeoutMs('list'), `${this.serverDefinition.serverId} resources/list`)
+                withTimeout(
+                    signal => this.client.listResources(undefined, { signal }),
+                    this.getTimeoutMs('list'),
+                    `${this.serverDefinition.serverId} resources/list`
+                )
             )
 
             return {
@@ -440,7 +508,11 @@ export class MCPClient {
 
         try {
             const result = await this.runWithSessionRecovery(() =>
-                withTimeout(this.client.listTools(), this.getTimeoutMs('list'), `${this.serverDefinition.serverId} tools/list`)
+                withTimeout(
+                    signal => this.client.listTools(undefined, { signal }),
+                    this.getTimeoutMs('list'),
+                    `${this.serverDefinition.serverId} tools/list`
+                )
             )
 
             return {
@@ -467,9 +539,10 @@ export class MCPClient {
         try {
             const result = await this.runWithSessionRecovery(() =>
                 withTimeout(
-                    this.client.getPrompt(params, options),
+                    signal => this.client.getPrompt(params, { ...options, signal }),
                     this.getTimeoutMs('request'),
-                    `${this.serverDefinition.serverId} prompts/get`
+                    `${this.serverDefinition.serverId} prompts/get`,
+                    options?.signal
                 )
             )
 
@@ -498,9 +571,10 @@ export class MCPClient {
         try {
             const result = await this.runWithSessionRecovery(() =>
                 withTimeout(
-                    this.client.readResource(params, options),
+                    signal => this.client.readResource(params, { ...options, signal }),
                     this.getTimeoutMs('request'),
-                    `${this.serverDefinition.serverId} resources/read`
+                    `${this.serverDefinition.serverId} resources/read`,
+                    options?.signal
                 )
             )
 

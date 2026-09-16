@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { buildRequestMessages } from '@/components/instamind/chat-stream/request-message-builder'
 import {
     LOCAL_CHAT_RECENT_LIMIT,
     type LocalConversationMetadata,
@@ -234,6 +235,208 @@ afterEach(() => {
 })
 
 describe('local chat persistence schema and projection', () => {
+    it('recovers completed agent-run and agent-graph parts while rejecting legacy agent-step snapshots', () => {
+        const conversation = createConversation('conv-agent-parts')
+        const graph = {
+            nodes: [
+                {
+                    nodeId: 'readVersionPlan',
+                    partId: 'graph-node-1',
+                    patchSummaries: [],
+                    status: 'completed' as const,
+                    stepIndex: 1,
+                    summary: '已读取版本方案。',
+                    title: '读取版本方案',
+                },
+            ],
+            routes: [],
+            runtime: 'LangGraph' as const,
+        }
+        const snapshot = createLocalConversationSnapshot({
+            conversation,
+            messages: [
+                createTextMessage('user-agent-parts', 'user', '继续'),
+                {
+                    ...createTextMessage('assistant-run', 'assistant', '通用回答'),
+                    parts: [
+                        { id: 'agent-run:run-1', runId: 'run-1', status: 'completed', type: 'agent-run' },
+                        { format: 'markdown', text: '通用回答', type: 'text' },
+                    ],
+                },
+                {
+                    ...createTextMessage('assistant-graph', 'assistant', '任务清单回答'),
+                    parts: [
+                        {
+                            agentName: 'version-plan-to-tasklist-agent',
+                            graph,
+                            id: 'agent-graph:graph-1',
+                            runId: 'graph-1',
+                            status: 'completed',
+                            type: 'agent-graph',
+                        },
+                        { format: 'markdown', text: '任务清单回答', type: 'text' },
+                    ],
+                },
+            ],
+        })
+
+        expect(snapshot?.messages.map(message => message.parts.map(part => part.type))).toEqual([
+            ['text'],
+            ['agent-run', 'text'],
+            ['agent-graph', 'text'],
+        ])
+        expect(localConversationSnapshotSchema.safeParse(snapshot).success).toBe(true)
+        expect(
+            localConversationSnapshotSchema.safeParse({
+                ...snapshot,
+                messages: snapshot!.messages.map(message =>
+                    message.id === 'assistant-graph'
+                        ? {
+                              ...message,
+                              parts: message.parts.map(part => (part.type === 'agent-graph' ? { ...part, type: 'agent-step' } : part)),
+                          }
+                        : message
+                ),
+            }).success
+        ).toBe(false)
+    })
+
+    it('drops completed-message snapshots whose General ReAct run is not completed', () => {
+        const conversation = createConversation('conv-agent-terminal')
+        const messages: MindMessage[] = ['running', 'cancelled', 'failed'].map(status => ({
+            createdAt: conversation.createdAt,
+            id: `assistant-${status}`,
+            parts: [
+                { runId: `run-${status}`, status: status as 'running' | 'cancelled' | 'failed', type: 'agent-run' },
+                { format: 'markdown', text: `partial-${status}`, type: 'text' },
+            ],
+            role: 'assistant',
+            status: 'completed',
+        }))
+
+        const snapshot = createLocalConversationSnapshot({
+            conversation,
+            messages: [createTextMessage('user-terminal', 'user', '问题'), ...messages],
+        })
+
+        expect(snapshot?.messages.map(message => message.id)).toEqual(['user-terminal'])
+        expect(JSON.stringify(snapshot)).not.toContain('partial-')
+    })
+
+    it('excludes cancelled, failed and streaming assistant text from the next request context', () => {
+        const messages: MindMessage[] = [
+            createTextMessage('user-before', 'user', '上一问'),
+            createTextMessage('assistant-completed', 'assistant', '稳定回答'),
+            { ...createTextMessage('assistant-cancelled', 'assistant', '取消半截'), status: 'cancelled' },
+            { ...createTextMessage('assistant-failed', 'assistant', '失败半截'), status: 'failed' },
+            { ...createTextMessage('assistant-streaming', 'assistant', '流式半截'), status: 'streaming' },
+            createTextMessage('user-current', 'user', '下一问'),
+        ]
+
+        const requestMessages = buildRequestMessages(messages)
+
+        expect(requestMessages.map(message => message.parts.map(part => part.text).join(''))).toEqual(['上一问', '稳定回答', '下一问'])
+    })
+
+    it('projects completed generic Trace parts through the public allowlist', () => {
+        const conversation = createConversation('conv-trace')
+        const snapshot = createLocalConversationSnapshot({
+            conversation,
+            messages: [
+                createTextMessage('user-trace', 'user', '查一下 React'),
+                {
+                    createdAt: conversation.createdAt,
+                    id: 'assistant-trace',
+                    parts: [
+                        {
+                            error: 'provider-secret-error',
+                            id: 'tool-1',
+                            input: '{"apiKey":"secret"}',
+                            output: '网页正文和内部观察',
+                            sources: [
+                                {
+                                    originTool: 'read-url',
+                                    sourceId: 'source-1',
+                                    status: 'read',
+                                    title: 'React',
+                                    url: 'https://example.com/react',
+                                },
+                            ],
+                            status: 'completed',
+                            title: '读取页面',
+                            toolName: 'read-url',
+                            type: 'tool',
+                        },
+                        {
+                            id: 'prompt-1',
+                            input: 'raw internal prompt',
+                            messageCount: 1,
+                            promptName: 'research',
+                            status: 'completed',
+                            type: 'prompt',
+                        },
+                        {
+                            id: 'reasoning-1',
+                            format: 'markdown',
+                            text: 'private chain of thought',
+                            type: 'reasoning',
+                        },
+                        {
+                            contentPreview: 'raw page body',
+                            id: 'resource-1',
+                            resourceName: 'React',
+                            serverId: 'web',
+                            status: 'completed',
+                            type: 'resource',
+                            uri: 'https://example.com/react',
+                        },
+                        {
+                            format: 'markdown',
+                            id: 'text-1',
+                            text: '最终回答',
+                            type: 'text',
+                        },
+                    ],
+                    role: 'assistant',
+                    status: 'completed',
+                },
+            ],
+        })
+
+        expect(snapshot).not.toBeNull()
+        const serialized = JSON.stringify(snapshot)
+
+        expect(serialized).not.toContain('secret')
+        expect(serialized).not.toContain('private chain of thought')
+        expect(serialized).not.toContain('raw page body')
+        expect(serialized).not.toContain('raw internal prompt')
+        expect(serialized).not.toContain('provider-secret-error')
+        expect(snapshot?.messages.find(message => message.id === 'assistant-trace')?.parts.map(part => part.type)).toEqual([
+            'tool',
+            'prompt',
+            'resource',
+            'text',
+        ])
+    })
+
+    it('does not persist cancelled, failed, or partial assistant turns', () => {
+        const conversation = createConversation('conv-partial')
+        const snapshot = createLocalConversationSnapshot({
+            conversation,
+            messages: [
+                createTextMessage('user-partial', 'user', '未完成问题'),
+                {
+                    createdAt: conversation.createdAt,
+                    id: 'assistant-partial',
+                    parts: [{ format: 'markdown', text: '半截', type: 'text' }],
+                    role: 'assistant',
+                    status: 'streaming',
+                },
+            ],
+        })
+
+        expect(snapshot?.messages.map(message => message.id)).toEqual(['user-partial'])
+    })
     it('keeps rich stable UI parts and filters transient control state', () => {
         const messages: MindMessage[] = [
             createTextMessage('user-1', 'user', '问题'),
@@ -278,6 +481,143 @@ describe('local chat persistence schema and projection', () => {
         expect(recoverableMessages[1]?.artifacts?.map(artifact => artifact.artifactId)).toEqual(['artifact-1'])
     })
 
+    it('uses an explicit strict message and artifact allowlist for local snapshots', () => {
+        const messages: MindMessage[] = [
+            {
+                ...createTextMessage('assistant-public-only', 'assistant', '稳定回答'),
+                artifacts: [
+                    {
+                        artifactId: 'artifact-public-only',
+                        artifactKind: 'plan',
+                        artifactType: 'text',
+                        content: '公开交付内容',
+                        format: 'markdown',
+                        internalArtifactSentinel: 'must-not-persist',
+                        status: 'completed',
+                        title: '交付物',
+                    } as MindMessage['artifacts'][number],
+                ],
+                internalMessageSentinel: 'must-not-persist',
+            } as MindMessage,
+        ]
+
+        const snapshot = createLocalConversationSnapshot({ conversation: createConversation('conv-public-only'), messages })
+
+        expect(snapshot).not.toBeNull()
+        expect(JSON.stringify(snapshot)).not.toContain('must-not-persist')
+        expect(Object.keys(snapshot!.messages[0]!).sort()).toEqual(['artifacts', 'createdAt', 'id', 'parts', 'role', 'status'])
+        expect(localConversationSnapshotSchema.safeParse({ ...snapshot!.messages[0], internalMessageSentinel: true }).success).toBe(false)
+        expect(
+            localConversationSnapshotSchema.safeParse({
+                ...snapshot,
+                messages: [
+                    {
+                        ...snapshot!.messages[0],
+                        artifacts: [{ ...snapshot!.messages[0]!.artifacts![0], internalArtifactSentinel: true }],
+                    },
+                ],
+            }).success
+        ).toBe(false)
+    })
+
+    it('does not retain private, credential-bearing, or signed resource and source URLs', () => {
+        const snapshot = createLocalConversationSnapshot({
+            conversation: createConversation('conv-safe-links'),
+            messages: [
+                {
+                    ...createTextMessage('assistant-safe-links', 'assistant', '稳定回答'),
+                    parts: [
+                        {
+                            id: 'tool-private-source',
+                            input: '{}',
+                            sources: [
+                                {
+                                    originTool: 'read-url',
+                                    sourceId: 'private-source',
+                                    status: 'read',
+                                    title: 'Private',
+                                    url: 'https://user:password@example.com/private',
+                                },
+                                {
+                                    originTool: 'web-search',
+                                    sourceId: 'signed-source',
+                                    status: 'discovered',
+                                    title: 'Signed',
+                                    url: 'https://example.com/file?X-Amz-Signature=secret',
+                                },
+                            ],
+                            status: 'completed',
+                            toolName: 'read-url',
+                            type: 'tool',
+                        },
+                        {
+                            id: 'resource-private-uri',
+                            resourceName: 'Private resource',
+                            serverId: 'web',
+                            status: 'completed',
+                            type: 'resource',
+                            uri: 'http://127.0.0.1/metadata',
+                        },
+                        { format: 'markdown', text: '稳定回答', type: 'text' },
+                    ],
+                },
+            ],
+        })
+
+        expect(snapshot).not.toBeNull()
+        expect(JSON.stringify(snapshot)).not.toContain('user:password')
+        expect(JSON.stringify(snapshot)).not.toContain('X-Amz-Signature')
+        expect(JSON.stringify(snapshot)).not.toContain('127.0.0.1')
+    })
+
+    it('persists only discovered or read public sources', () => {
+        const snapshot = createLocalConversationSnapshot({
+            conversation: createConversation('conv-source-status'),
+            messages: [
+                {
+                    ...createTextMessage('assistant-source-status', 'assistant', '稳定回答'),
+                    parts: [
+                        {
+                            id: 'tool-source-status',
+                            input: '{}',
+                            sources: [
+                                {
+                                    originTool: 'web-search',
+                                    sourceId: 'discovered-source',
+                                    status: 'discovered',
+                                    title: 'Discovered',
+                                    url: 'https://example.com/discovered',
+                                },
+                                {
+                                    originTool: 'web-search',
+                                    sourceId: 'unavailable-source',
+                                    status: 'unavailable',
+                                    title: 'Unavailable',
+                                    url: 'https://example.com/unavailable',
+                                },
+                            ],
+                            status: 'completed',
+                            toolName: 'web-search',
+                            type: 'tool',
+                        },
+                        { format: 'markdown', text: '稳定回答', type: 'text' },
+                    ],
+                },
+            ],
+        })
+
+        const toolPart = snapshot?.messages[0]?.parts.find(part => part.type === 'tool')
+
+        expect(toolPart).toMatchObject({
+            sources: [
+                {
+                    sourceId: 'discovered-source',
+                    status: 'discovered',
+                },
+            ],
+        })
+    })
+
     it('creates a versioned snapshot and rejects forbidden raw fields during validation', () => {
         const snapshot = createLocalConversationSnapshot({
             conversation: createConversation('conv-a', 'Conversation A'),
@@ -292,6 +632,17 @@ describe('local chat persistence schema and projection', () => {
             schemaVersion: 1,
         })
         expect(localConversationSnapshotSchema.safeParse({ ...snapshot, rawGraphState: {} }).success).toBe(false)
+        expect(
+            localConversationSnapshotSchema.safeParse({
+                ...snapshot,
+                messages: [
+                    {
+                        ...snapshot!.messages[0],
+                        parts: [{ input: 'secret', status: 'completed', toolName: 'read-url', type: 'tool' }],
+                    },
+                ],
+            }).success
+        ).toBe(false)
     })
 
     it('persists public image metadata but rejects Blob and object URL injection', () => {
@@ -359,7 +710,49 @@ describe('local chat persistence schema and projection', () => {
         ).toBe(false)
     })
 
-    it('accepts only opaque, bounded message height hint entries', () => {
+    it('round-trips completed workflow progress with its disclosure presentation state', () => {
+        const snapshot = createLocalConversationSnapshot({
+            conversation: createConversation('conv-workflow'),
+            messages: [
+                createTextMessage('user-workflow', 'user', '生成图片'),
+                {
+                    createdAt: '2026-07-05T10:00:01.000Z',
+                    id: 'assistant-workflow',
+                    parts: [
+                        {
+                            durationMs: 1_200,
+                            id: 'workflow-1',
+                            status: 'completed',
+                            steps: [
+                                {
+                                    details: ['已完成'],
+                                    endedAt: 1_200,
+                                    id: 'step-1',
+                                    startedAt: 0,
+                                    status: 'completed',
+                                    title: '生成',
+                                },
+                            ],
+                            title: '图片生成',
+                            type: 'workflow-progress',
+                            visibility: 'collapsed',
+                            workflowId: 'image-generation-run-1',
+                            workflowKind: 'image_generation',
+                        },
+                        { format: 'markdown', text: '图片已生成', type: 'text' },
+                    ],
+                    role: 'assistant',
+                    status: 'completed',
+                },
+            ],
+        })
+
+        expect(snapshot).not.toBeNull()
+        expect(localConversationSnapshotSchema.safeParse(snapshot).success).toBe(true)
+        expect(snapshot?.messages[1]?.parts[0]).toMatchObject({ type: 'workflow-progress', visibility: 'collapsed' })
+    })
+
+    it('accepts opaque normalized message height hint entries without a content-size ceiling', () => {
         const record = {
             conversationId: 'conv-height-hints',
             entries: [
@@ -379,6 +772,12 @@ describe('local chat persistence schema and projection', () => {
         }
 
         expect(localMessageHeightHintRecordSchema.safeParse(record).success).toBe(true)
+        expect(
+            localMessageHeightHintRecordSchema.safeParse({
+                ...record,
+                entries: [{ ...record.entries[0], height: 12_345.5 }],
+            }).success
+        ).toBe(true)
         expect(
             localMessageHeightHintRecordSchema.safeParse({
                 ...record,

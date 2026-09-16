@@ -377,45 +377,7 @@ describe('AssistantMessage', () => {
         expect(screen.getByText('输入来源')).toBeTruthy()
         expect(screen.getByText('需求摘要')).toBeTruthy()
         expect(screen.getByText('实现方案')).toBeTruthy()
-    })
-
-    it('非 delivery-chain route 仍保持普通 ResourcePanel 展示', () => {
-        const message: MindMessage = {
-            id: 'assistant-tasklist-resource',
-            role: 'assistant',
-            createdAt: '2026-06-29T12:10:00.000Z',
-            parts: [createResourcePart('v034-langsmith-observability.md', 'demo://version-plans/v034-langsmith-observability.md')],
-        }
-
-        render(
-            <AssistantMessage
-                message={message}
-                requestComposer={{
-                    command: {
-                        label: '生成任务清单',
-                        name: 'tasklist',
-                    },
-                    plainText: '',
-                    references: [],
-                }}
-                combinedReasoning=""
-                contentParts={message.parts}
-                feedbackState={null}
-                hasTextContent={false}
-                isAssistantReplyCompleted
-                isCopied={false}
-                isLatestAssistantMessage
-                isThinking={false}
-                onCopy={vi.fn()}
-                onFeedbackChange={vi.fn()}
-                onRegenerateLastTurn={vi.fn()}
-                onSelectFollowUpQuestion={vi.fn()}
-                showFollowUpSuggestions={false}
-            />
-        )
-
-        expect(screen.getByText('资源读取：v034-langsmith-observability.md')).toBeTruthy()
-        expect(screen.queryByText(/已读取 demo 上下文/)).toBeNull()
+        expect(screen.queryByText('正在思考')).toBeNull()
     })
 
     it('does not render thread-memory-status part inside the assistant message list', () => {
@@ -476,6 +438,7 @@ describe('AssistantMessage', () => {
         expect(placeholder?.querySelector('.sr-only')?.textContent).toBe('正在生成图片')
         expect(screen.getByText('生成结果')).toBeTruthy()
         expect(screen.getByText('临时结果')).toBeTruthy()
+        expect(screen.queryByText('正在思考')).toBeNull()
         expect(skeleton).toBeTruthy()
         expect(skeleton?.className).toContain('animate-none')
         expect(placeholder?.querySelectorAll('[data-slot="image-generation-preview-art"] svg')).toHaveLength(2)

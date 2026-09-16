@@ -1,106 +1,93 @@
-import { AIMessage, type ToolCall } from '@langchain/core/messages'
+import type { ToolCall } from '@langchain/core/messages'
 import { ZodError } from 'zod'
 
 import { createId } from '@/lib/ai/create-id'
 
-import type { ToolValidationResult } from '../types'
+import type { ToolValidationError } from '../types'
 import { formatToolInput, getResourceDisplayFields, getToolDisplayFields, type ToolDefinitionMap } from './display'
 
+export type SingleToolCallValidationResult =
+    | {
+          success: true
+          toolCall: ToolCall
+      }
+    | {
+          success: false
+          toolError: ToolValidationError
+      }
+
 /**
- * 对模型返回的 tool calls 做统一归一化与 schema 校验，拆分成：
- * 1. 可执行调用
- * 2. 可展示校验错误
+ * 单个 Tool Call 的统一边界：先补 ID，再 normalize，最后只放行 schema 解析后的参数。
  */
-export function normalizeAndValidateToolCalls(message: AIMessage, toolDefinitionMap: ToolDefinitionMap): ToolValidationResult {
-    const validatedToolCalls: ToolCall[] = []
-    const toolErrors: ToolValidationResult['toolErrors'] = []
+export function normalizeAndValidateToolCall(rawToolCall: ToolCall, toolDefinitionMap: ToolDefinitionMap): SingleToolCallValidationResult {
+    const toolCall = {
+        ...rawToolCall,
+        id: rawToolCall.id ?? createId(),
+    }
+    const toolDefinition = toolDefinitionMap.get(toolCall.name)
+    const displayFields = getToolDisplayFields(toolCall, toolDefinitionMap)
+    const resourceDisplayFields =
+        displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, toolDefinitionMap) : undefined
 
-    for (const rawToolCall of message.tool_calls ?? []) {
-        const toolCall = {
-            ...rawToolCall,
-            id: rawToolCall.id ?? createId(),
-        }
-
-        const toolDefinition = toolDefinitionMap.get(toolCall.name)
-        const displayFields = getToolDisplayFields(toolCall, toolDefinitionMap)
-        const resourceDisplayFields =
-            displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, toolDefinitionMap) : undefined
-
-        if (!toolDefinition) {
-            toolErrors.push({
-                id: toolCall.id,
-                toolName: toolCall.name,
-                title: displayFields.title,
+    if (!toolDefinition) {
+        return {
+            success: false,
+            toolError: {
                 action: displayFields.action,
+                id: toolCall.id,
                 input: formatToolInput(toolCall, toolDefinitionMap),
+                location: displayFields.location,
                 message: '工具 ' + toolCall.name + ' 未注册。',
                 outputPartType: displayFields.outputPartType,
                 resourceName: resourceDisplayFields?.resourceName,
                 serverId: displayFields.serverId,
                 source: displayFields.source,
-                location: displayFields.location,
-                uri: resourceDisplayFields?.uri,
-            })
-            continue
-        }
-
-        const normalizedArgs = toolDefinition.normalizeArgs ? toolDefinition.normalizeArgs(toolCall.args) : toolCall.args
-        const parsedArgs = toolDefinition.schema.safeParse(normalizedArgs)
-
-        if (!parsedArgs.success) {
-            const normalizedToolCall = {
-                ...toolCall,
-                args: normalizedArgs,
-            }
-            const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall, toolDefinitionMap)
-            const normalizedResourceDisplayFields =
-                normalizedDisplayFields.outputPartType === 'resource'
-                    ? getResourceDisplayFields(normalizedToolCall, toolDefinitionMap)
-                    : undefined
-
-            toolErrors.push({
-                id: toolCall.id,
+                title: displayFields.title,
                 toolName: toolCall.name,
-                title: normalizedDisplayFields.title,
+                uri: resourceDisplayFields?.uri,
+            },
+        }
+    }
+
+    const normalizedArgs = toolDefinition.normalizeArgs ? toolDefinition.normalizeArgs(toolCall.args) : toolCall.args
+    const parsedArgs = toolDefinition.schema.safeParse(normalizedArgs)
+
+    if (!parsedArgs.success) {
+        const normalizedToolCall = {
+            ...toolCall,
+            args: normalizedArgs,
+        }
+        const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall, toolDefinitionMap)
+        const normalizedResourceDisplayFields =
+            normalizedDisplayFields.outputPartType === 'resource'
+                ? getResourceDisplayFields(normalizedToolCall, toolDefinitionMap)
+                : undefined
+
+        return {
+            success: false,
+            toolError: {
                 action: normalizedDisplayFields.action,
+                id: toolCall.id,
                 input: formatToolInput(normalizedToolCall, toolDefinitionMap),
+                location: normalizedDisplayFields.location,
                 message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
                 outputPartType: normalizedDisplayFields.outputPartType,
                 resourceName: normalizedResourceDisplayFields?.resourceName,
                 serverId: normalizedDisplayFields.serverId,
                 source: normalizedDisplayFields.source,
-                location: normalizedDisplayFields.location,
+                title: normalizedDisplayFields.title,
+                toolName: toolCall.name,
                 uri: normalizedResourceDisplayFields?.uri,
-            })
-            continue
-        }
-
-        validatedToolCalls.push({
-            ...toolCall,
-            args: parsedArgs.data,
-        })
-    }
-
-    if (validatedToolCalls.length === 0) {
-        return {
-            planningMessage: message,
-            toolCalls: validatedToolCalls,
-            toolErrors,
+            },
         }
     }
 
     return {
-        planningMessage: new AIMessage({
-            id: message.id,
-            content: '',
-            additional_kwargs: message.additional_kwargs,
-            response_metadata: message.response_metadata,
-            usage_metadata: message.usage_metadata,
-            tool_calls: validatedToolCalls,
-            invalid_tool_calls: message.invalid_tool_calls,
-        }),
-        toolCalls: validatedToolCalls,
-        toolErrors,
+        success: true,
+        toolCall: {
+            ...toolCall,
+            args: parsedArgs.data,
+        },
     }
 }
 

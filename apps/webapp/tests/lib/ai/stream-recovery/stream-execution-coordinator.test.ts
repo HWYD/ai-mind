@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { StreamRunRecord } from '@/lib/ai/stream-recovery/stream-event-store'
 import { StreamExecutionCoordinator, type StreamExecutionRepository } from '@/lib/ai/stream-recovery/stream-execution-coordinator'
@@ -203,5 +203,111 @@ describe('stream-execution-coordinator', () => {
                 runId,
             })
         ).resolves.toBe(true)
+    })
+
+    it('clears the cancel poller and execution owner after projection-side failure', async () => {
+        vi.useFakeTimers()
+        try {
+            await expect(
+                coordinator.startExecution({
+                    execute: async () => {
+                        throw new Error('projection failed')
+                    },
+                    ownerSessionHash,
+                    pollIntervalMs: 5,
+                    runId,
+                })
+            ).rejects.toThrow('projection failed')
+
+            expect(repository.run.executionOwnerId).toBeNull()
+            expect(vi.getTimerCount()).toBe(0)
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('cancels a run waiting behind projection backpressure without leaking the poller', async () => {
+        vi.useFakeTimers()
+        try {
+            let releaseExecution: (() => void) | undefined
+            const execution = coordinator.startExecution({
+                execute: async context => {
+                    await new Promise<void>(resolve => {
+                        releaseExecution = resolve
+                        context.signal.addEventListener('abort', () => resolve(), { once: true })
+                    })
+                    return context.signal.aborted ? 'cancelled' : 'completed'
+                },
+                ownerSessionHash,
+                pollIntervalMs: 5,
+                runId,
+            })
+
+            await Promise.resolve()
+            await coordinator.requestCancel({ now, ownerSessionHash, runId })
+            releaseExecution?.()
+
+            await expect(execution).resolves.toBe('cancelled')
+            expect(repository.run.executionOwnerId).toBeNull()
+            expect(vi.getTimerCount()).toBe(0)
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('retries clearExecutionOwner on transient failure without leaking the owner', async () => {
+        vi.useFakeTimers()
+        try {
+            let clearAttempts = 0
+            const flakyRepository = new FakeExecutionRepository()
+            const clear = flakyRepository.clearExecutionOwner.bind(flakyRepository)
+            flakyRepository.clearExecutionOwner = async input => {
+                clearAttempts += 1
+                if (clearAttempts < 3) {
+                    throw new Error('transient database error')
+                }
+                await clear(input)
+            }
+            const flakyCoordinator = new StreamExecutionCoordinator(flakyRepository, () => 'owner_retry')
+
+            const execution = flakyCoordinator.startExecution({
+                execute: async () => 'completed',
+                ownerSessionHash,
+                runId,
+            })
+
+            await vi.runAllTimersAsync()
+            await expect(execution).resolves.toBe('completed')
+            expect(clearAttempts).toBe(3)
+            expect(flakyRepository.run.executionOwnerId).toBeNull()
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('does not override the execution result when owner cleanup keeps failing', async () => {
+        vi.useFakeTimers()
+        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+            const failingRepository = new FakeExecutionRepository()
+            failingRepository.clearExecutionOwner = async () => {
+                throw new Error('persistent database error')
+            }
+            const failingCoordinator = new StreamExecutionCoordinator(failingRepository, () => 'owner_leak')
+
+            const execution = failingCoordinator.startExecution({
+                execute: async () => 'still-completed',
+                ownerSessionHash,
+                runId,
+            })
+
+            await vi.runAllTimersAsync()
+            await expect(execution).resolves.toBe('still-completed')
+            expect(failingRepository.run.executionOwnerId).toBe('owner_leak')
+            expect(errorSpy).toHaveBeenCalled()
+        } finally {
+            errorSpy.mockRestore()
+            vi.useRealTimers()
+        }
     })
 })

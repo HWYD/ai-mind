@@ -30,12 +30,12 @@ describe('useChatModels', () => {
     it('使用服务端注入的初始模型列表，并按线上 / 本地分组', async () => {
         // 注意：前端首屏模型列表要跟随当前 catalog 的 provider，不要把 deepseek family 写死到某个供应商。
         const initialState: ChatModelsInitialState = {
-            defaultModelId: 'qwen/qwen3.6-flash',
+            defaultModelId: 'deepseek/deepseek-v4-flash',
             modelError: null,
             models: [
                 createPublicModel('deepseek/deepseek-v4-flash'),
-                createPublicModel('qwen/qwen3.6-flash'),
-                createPublicModel('qwen/qwen3.7-max'),
+                createPublicModel('deepseek/deepseek-v4-pro'),
+                createPublicModel('doubao/Kimi-K2.6'),
                 createPublicModel('ollama/qwen3-8b'),
             ],
         }
@@ -46,14 +46,14 @@ describe('useChatModels', () => {
             expect(result.current.isLoading).toBe(false)
         })
 
-        expect(result.current.model).toBe('qwen/qwen3.6-flash')
-        expect(result.current.selectedModel?.label).toBe('qwen3.6-flash')
-        expect(result.current.selectedModel?.family).toBe('qwen')
+        expect(result.current.model).toBe('deepseek/deepseek-v4-flash')
+        expect(result.current.selectedModel?.label).toBe('deepseek-v4-flash')
+        expect(result.current.selectedModel?.family).toBe('deepseek')
         expect(result.current.modelGroups.map(group => group.label)).toEqual(['线上模型', '本地模型'])
         expect(result.current.modelGroups[0]?.models.map(model => model.id)).toEqual([
             'deepseek/deepseek-v4-flash',
-            'qwen/qwen3.6-flash',
-            'qwen/qwen3.7-max',
+            'deepseek/deepseek-v4-pro',
+            'doubao/Kimi-K2.6',
         ])
         expect(result.current.modelGroups[1]?.models.map(model => model.id)).toEqual(['ollama/qwen3-8b'])
     })

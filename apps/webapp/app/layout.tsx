@@ -5,11 +5,14 @@ import type { Metadata, Viewport } from 'next'
 import { Messages } from '@/components/ui/messages'
 import { TooltipProvider } from '@/components/ui/tooltip'
 
+// Next.js 要求路由元数据导出保留在此模块。
+// eslint-disable-next-line react-refresh/only-export-components
 export const metadata: Metadata = {
     title: 'AI Mind',
     description: '基于 LangChain.js 与 Ollama 的AI Runtime 实验台：支持普通问答、深度思考、Tool 调用与多来源上下文读取。',
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const viewport: Viewport = {
     width: 'device-width',
     initialScale: 1,

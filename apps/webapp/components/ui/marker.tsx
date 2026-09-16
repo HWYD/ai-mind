@@ -53,4 +53,6 @@ function MarkerContent({ className, ...props }: React.ComponentProps<'span'>) {
     )
 }
 
+// shadcn 组合组件需要使用该 variant builder。
+// eslint-disable-next-line react-refresh/only-export-components
 export { Marker, MarkerIcon, MarkerContent, markerVariants }

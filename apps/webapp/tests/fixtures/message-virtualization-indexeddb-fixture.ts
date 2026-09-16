@@ -1,6 +1,6 @@
 import type { LocalConversationSnapshot } from '@/components/instamind/local-chat-persistence/schema'
 import type { LocalImageResultCacheEntry } from '@/components/instamind/local-chat-persistence/store'
-import type { AgentStepPart, MindMessage, MindMessagePart } from '@/lib/ai/types/message'
+import type { AgentGraphPart, MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
 export const INDEXED_DB_FIXTURE_CONVERSATION_ID = 'v053-message-virtualization-fixture'
 export const INDEXED_DB_FIXTURE_IMAGE_RUN_ID = 'v053-message-virtualization-fixture:image'
@@ -87,7 +87,7 @@ function findAgentDonor(snapshots: LocalConversationSnapshot[]): MessageDonor | 
     for (const snapshot of snapshots) {
         const message = snapshot.messages.find(
             candidate =>
-                isCompletedMessage(candidate) && candidate.parts.some(part => part.type === 'agent-step' && part.status === 'completed')
+                isCompletedMessage(candidate) && candidate.parts.some(part => part.type === 'agent-graph' && part.status === 'completed')
         )
 
         if (message) {
@@ -121,7 +121,7 @@ function createFixtureId(kind: string, messageIndex: number, partIndex?: number)
     return `${INDEXED_DB_FIXTURE_CONVERSATION_ID}:${kind}:${messageIndex}${partIndex === undefined ? '' : `:${partIndex}`}`
 }
 
-function cloneAgentPart(part: AgentStepPart, messageIndex: number, partIndex: number): AgentStepPart {
+function cloneAgentPart(part: AgentGraphPart, messageIndex: number, partIndex: number): AgentGraphPart {
     const runId = createFixtureId('agent-run', messageIndex, partIndex)
     const nodeIds = new Map(
         part.graph.nodes.map((node, nodeIndex) => [node.nodeId, createFixtureId('agent-node', messageIndex, partIndex * 100 + nodeIndex)])
@@ -158,7 +158,7 @@ function cloneAgentPart(part: AgentStepPart, messageIndex: number, partIndex: nu
 }
 
 function clonePart(part: MindMessagePart, messageIndex: number, partIndex: number): MindMessagePart {
-    if (part.type === 'agent-step') {
+    if (part.type === 'agent-graph') {
         return cloneAgentPart(part, messageIndex, partIndex)
     }
 
@@ -213,7 +213,7 @@ export function buildIndexedDbFixturePayload(input: IndexedDbFixtureInput): Inde
     const primary = ensureDonor(snapshots[0], '缺少可用于扩容的已完成本地会话。')
     const textDonor = ensureDonor(findTextDonor(snapshots), '缺少包含文本的已完成消息 donor。')
     const imageDonor = ensureDonor(findImageDonor(snapshots, input.imageCacheEntries), '缺少带本地缓存 Blob 的 image-result donor。')
-    const agentDonor = ensureDonor(findAgentDonor(snapshots), '缺少已完成 agent-step donor。')
+    const agentDonor = ensureDonor(findAgentDonor(snapshots), '缺少已完成 agent-graph donor。')
     const now = input.now ?? new Date().toISOString()
     const baseTime = Date.parse(now)
 

@@ -1494,6 +1494,7 @@ describe('conversation session UI', () => {
         expect((initialCreateButtons[0] as HTMLButtonElement).disabled).toBe(true)
         expect((initialCreateButtons[1] as HTMLButtonElement).disabled).toBe(true)
         expect((initialConversationButtons[0] as HTMLButtonElement).disabled).toBe(true)
+        expect((initialConversationButtons[0] as HTMLButtonElement).className).toContain('disabled:opacity-100')
         expect((screen.getByRole('button', { name: '打开会话抽屉' }) as HTMLButtonElement).disabled).toBe(false)
         expect((screen.getByRole('button', { name: '打开访客菜单' }) as HTMLButtonElement).disabled).toBe(false)
         expect(document.querySelectorAll('button[aria-haspopup="menu"]')).toHaveLength(1)
@@ -1518,6 +1519,7 @@ describe('conversation session UI', () => {
 
         expect(allConversationButtons).toHaveLength(1)
         expect((allConversationButtons[0] as HTMLButtonElement).disabled).toBe(true)
+        expect((allConversationButtons[0] as HTMLButtonElement).className).toContain('disabled:opacity-100')
         expect(mobileActionButtons).toHaveLength(1)
         expect((mobileActionButtons[0] as HTMLButtonElement).disabled).toBe(true)
         expect((mobileActionButtons[0] as HTMLButtonElement).className).toContain('disabled:opacity-100')

@@ -51,7 +51,7 @@ function extractToolText(result: Awaited<ReturnType<typeof mcpClientManager.call
  */
 function toZodSchema(schema: JsonSchemaLike | undefined): z.ZodTypeAny {
     if (!schema) {
-        return z.unknown()
+        return z.object({}).strict()
     }
 
     if (Array.isArray(schema.enum) && schema.enum.every(value => typeof value === 'string')) {
@@ -81,12 +81,12 @@ function toZodSchema(schema: JsonSchemaLike | undefined): z.ZodTypeAny {
                 })
             )
 
-            return z.object(shape).passthrough()
+            return z.object(shape).strict()
         }
         case 'string':
             return z.string()
         default:
-            return z.unknown()
+            return z.never()
     }
 }
 
@@ -95,17 +95,7 @@ function toZodSchema(schema: JsonSchemaLike | undefined): z.ZodTypeAny {
  * 保持简单 key=value 展示，和现有本地工具的 tool part 风格对齐。
  */
 function formatRemoteToolInput(args: unknown) {
-    if (!args || typeof args !== 'object') {
-        return JSON.stringify(args ?? {}, null, 2)
-    }
-
-    const entries = Object.entries(args as Record<string, unknown>)
-
-    if (entries.length === 0) {
-        return '{}'
-    }
-
-    return entries.map(([key, value]) => `${key}=${String(value ?? '')}`).join(', ')
+    return '远程工具'
 }
 
 /**
@@ -117,15 +107,27 @@ function createRemoteMcpToolDefinition(serverId: MCPServerId, toolMetadata: Remo
     const title = toolMetadata.title ?? toolMetadata.name
 
     return {
+        executionPolicy: {
+            kind: 'standard-tool',
+            profile: 'remote-readonly',
+            retrySafe: false,
+        },
         name: toolMetadata.name,
         tool: tool(
-            async args => {
+            async (args, config) => {
                 const toolArguments = args && typeof args === 'object' ? (args as Record<string, unknown>) : {}
 
-                const response = await mcpClientManager.callTool(serverId, {
-                    name: toolMetadata.name,
-                    arguments: toolArguments,
-                })
+                const response = await mcpClientManager.callTool(
+                    serverId,
+                    {
+                        name: toolMetadata.name,
+                        arguments: toolArguments,
+                    },
+                    {
+                        allowSessionRecovery: false,
+                        ...(config?.signal ? { signal: config.signal } : {}),
+                    }
+                )
                 const outputText = extractToolText(response.result)
 
                 if (response.result.isError) {
@@ -146,6 +148,7 @@ function createRemoteMcpToolDefinition(serverId: MCPServerId, toolMetadata: Remo
         ),
         schema,
         formatInput: formatRemoteToolInput,
+        formatPublicOutput: () => '工具已完成。',
         getDisplayConfig: args => ({
             title,
             action: 'call',
@@ -153,6 +156,7 @@ function createRemoteMcpToolDefinition(serverId: MCPServerId, toolMetadata: Remo
         }),
         source: 'mcp',
         serverId,
+        runtimeScopes: ['skill-binding', 'general-react-agent'],
     }
 }
 

@@ -82,9 +82,5 @@ export function createChatModel(options: CreateChatModelOptions): AiMindChatMode
         providerModel: resolvedModelSelection.providerModel,
     }
 
-    if (provider.capabilities.toolCalling) {
-        handle.bindTools = (tools: unknown[]) => model.bindTools(tools as Parameters<typeof model.bindTools>[0])
-    }
-
     return handle
 }

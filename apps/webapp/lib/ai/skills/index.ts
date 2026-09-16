@@ -23,12 +23,4 @@ export function getChatSkillDefinition(skillId: string): SkillDefinition | undef
 }
 
 export { readerSkillDefinition, utilitySkillDefinition }
-export type {
-    ChatSkillRegistry,
-    SkillCapabilitySelector,
-    SkillDefinition,
-    SkillFallbackPolicy,
-    SkillOutputPolicy,
-    SkillResultPolicy,
-    SkillSourceKind,
-} from './registry'
+export type { ChatSkillRegistry, SkillDefinition, SkillFallbackPolicy, SkillOutputPolicy, SkillResultPolicy } from './registry'

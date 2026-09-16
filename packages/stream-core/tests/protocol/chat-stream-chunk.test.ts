@@ -1,6 +1,38 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ChatStreamChunk } from '../../src/protocol'
+import type { ChatStreamChunk, PublicSourceRecord } from '../../src/protocol'
+
+describe('chat stream tool source projection', () => {
+    it('keeps legacy tool-end valid and accepts an optional public source projection', () => {
+        const source = {
+            originTool: 'read-url',
+            sourceId: 'source-1',
+            status: 'read',
+            title: 'LangChain documentation',
+            url: 'https://docs.langchain.com/oss/javascript/langchain/agents',
+        } satisfies PublicSourceRecord
+        const chunks = [
+            {
+                input: '1 + 1',
+                output: '2',
+                partId: 'tool-legacy',
+                toolName: 'calculator',
+                type: 'tool-end',
+            },
+            {
+                input: '',
+                output: '已读取页面',
+                partId: 'tool-source',
+                sources: [source],
+                toolName: 'read-url',
+                type: 'tool-end',
+            },
+        ] satisfies ChatStreamChunk[]
+
+        expect(chunks[0]).not.toHaveProperty('sources')
+        expect(chunks[1]).toHaveProperty('sources', [source])
+    })
+})
 
 describe('chat stream graph chunks', () => {
     it('accepts graph node, route and state patch chunks in the protocol union', () => {
@@ -287,6 +319,18 @@ describe('chat stream backward-compatible chunk inventory', () => {
         expect(knownChunkTypes).toContain('thread-memory-status')
         expect(knownChunkTypes).toContain('image-result-ready')
         expect(knownChunkTypes).toContain('finish')
+    })
+
+    it('keeps the standardized retryable capacity error in the public error-code union', () => {
+        const chunk = {
+            errorCode: 'STREAM_SERVICE_UNAVAILABLE',
+            message: '服务繁忙，请稍后重试。',
+            retryable: true,
+            scope: 'runtime',
+            type: 'error',
+        } satisfies ChatStreamChunk
+
+        expect(chunk.errorCode).toBe('STREAM_SERVICE_UNAVAILABLE')
     })
 
     it('does not require any tool or agent final-turn specific stream chunk types', () => {

@@ -1,10 +1,45 @@
-import { afterAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getPrismaClient } from '../src'
+import { getPrismaClient, prismaPoolConfig } from '../src'
 
 const hasDatabase = Boolean(process.env.DATABASE_URL?.trim())
 const describeWithDatabase = hasDatabase ? describe : describe.skip
 const prisma = hasDatabase ? getPrismaClient() : undefined
+
+describe('@ai-mind/database process client lifecycle', () => {
+    afterEach(() => {
+        vi.unstubAllEnvs()
+    })
+
+    it('固定每进程 pool max、connection timeout 和 idle timeout', () => {
+        expect(prismaPoolConfig).toEqual({
+            connectionTimeoutMillis: 5000,
+            idleTimeoutMillis: 30000,
+            max: 10,
+        })
+        expect(Object.isFrozen(prismaPoolConfig)).toBe(true)
+    })
+
+    it.each(['development', 'production'] as const)('%s 环境都复用同一个 Prisma/PrismaPg client', async nodeEnv => {
+        const globalRuntime = globalThis as unknown as { aiMindPrisma?: ReturnType<typeof getPrismaClient> }
+        const existingClient = globalRuntime.aiMindPrisma
+        delete globalRuntime.aiMindPrisma
+        vi.stubEnv('DATABASE_URL', process.env.DATABASE_URL?.trim() || 'postgresql://user:password@localhost:5432/ai_mind_test')
+        vi.stubEnv('NODE_ENV', nodeEnv)
+
+        const first = getPrismaClient()
+        const second = getPrismaClient()
+
+        try {
+            expect(second === first).toBe(true)
+        } finally {
+            await first.$disconnect()
+            if (second !== first) await second.$disconnect()
+            delete globalRuntime.aiMindPrisma
+            if (existingClient) globalRuntime.aiMindPrisma = existingClient
+        }
+    })
+})
 
 describeWithDatabase('@ai-mind/database Prisma PostgreSQL integration', () => {
     afterAll(async () => {

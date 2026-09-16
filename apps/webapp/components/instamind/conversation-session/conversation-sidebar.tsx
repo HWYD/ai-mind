@@ -172,7 +172,7 @@ export function ConversationSidebar({
                                                         disabled={disabled}
                                                         onClick={() => onSelectConversation(conversation.id)}
                                                         className={cn(
-                                                            'h-11 min-w-0 max-w-full cursor-pointer justify-start rounded-2xl px-4 pr-4 text-[15px] font-normal transition-[padding] data-[active=true]:font-normal',
+                                                            'h-11 min-w-0 max-w-full cursor-pointer justify-start rounded-2xl px-4 pr-4 text-[15px] font-normal transition-[padding] data-[active=true]:font-normal disabled:opacity-100',
                                                             !disabled &&
                                                                 'group-hover:bg-sidebar-accent group-hover:pr-11 group-hover:text-sidebar-accent-foreground group-focus-within:bg-sidebar-accent group-focus-within:pr-11 group-focus-within:text-sidebar-accent-foreground group-has-[[data-state=open]]:bg-sidebar-accent group-has-[[data-state=open]]:pr-11 group-has-[[data-state=open]]:text-sidebar-accent-foreground',
                                                             conversation.selected && 'bg-sidebar-accent text-sidebar-accent-foreground'

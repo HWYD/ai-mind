@@ -7,19 +7,13 @@ import { Card, CardContent } from '@/components/ui/card'
 import { hasComposerSemanticInput, normalizeImageComposerSubmission, resolveComposerSubmissionText } from '@/lib/ai/composer-submission'
 import { type ChatModel, type ChatModelGroup } from '@/lib/ai/models'
 import type { ChatMemoryUsageSummary } from '@/lib/ai/runtime/chat-memory/context-usage-contract'
-import type { ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import type { ChatStatus } from '@/lib/ai/types/chat'
 import { cn } from '@/lib/utils'
 
 import type { ComposerDisplaySegment, ComposerPayload } from './composer-types'
 import { ComposerEditor } from './editor/composer-editor'
 import { serializeComposerDisplaySegments, serializeComposerPayload } from './editor/composer-serialization'
 import { ComposerToolbar } from './toolbar/composer-toolbar'
-
-const footerTextBySkillMode: Record<ChatSkillMode, string> = {
-    auto: '当前会自动在本轮上下文内选择最合适的能力。',
-    utility: '实用模式更适合计算、时间日期、文本转换和单位换算。',
-    reader: '阅读模式优先消费 demo 文档与 remote context 等已注入上下文。',
-}
 
 export function ChatComposer({
     contextUsage = null,
@@ -32,11 +26,9 @@ export function ChatComposer({
     modelGroups,
     onEnableReasoningChange,
     onModelChange,
-    onSkillModeChange,
     onStop,
     onSubmit,
     placeholder,
-    skillMode,
     status,
     submitDisabled = false,
 }: {
@@ -50,11 +42,9 @@ export function ChatComposer({
     modelGroups: ChatModelGroup[]
     onEnableReasoningChange: (enabled: boolean) => void
     onModelChange: (model: ChatModel) => void
-    onSkillModeChange: (mode: ChatSkillMode) => void
     onStop: () => void
     onSubmit: (value: string, composer?: ComposerPayload, displaySegments?: ComposerDisplaySegment[]) => Promise<boolean> | boolean
     placeholder?: string
-    skillMode: ChatSkillMode
     status: ChatStatus
     submitDisabled?: boolean
 }) {
@@ -77,7 +67,7 @@ export function ChatComposer({
               ? '正在加载可用模型...'
               : !hasAvailableModels
                 ? '当前没有可用模型，暂时无法发送消息。'
-                : footerTextBySkillMode[skillMode]
+                : '当前会自动在本轮上下文内选择最合适的能力。'
 
     const handleSubmit = useCallback(
         async (value = input) => {
@@ -160,12 +150,10 @@ export function ChatComposer({
                         onComposerChange={setComposerDraft}
                         onEditorChange={setEditor}
                         onSubmit={handleSubmit}
-                        onStop={onStop}
                     />
                     <ComposerToolbar
                         contextUsage={contextUsage}
                         status={status}
-                        skillMode={skillMode}
                         modelGroups={modelGroups}
                         model={model}
                         isModelLoading={isModelLoading}
@@ -173,7 +161,6 @@ export function ChatComposer({
                         disabled={disabled}
                         sendDisabled={sendDisabled}
                         onInsertTrigger={handleInsertTrigger}
-                        onSkillModeChange={onSkillModeChange}
                         onModelChange={onModelChange}
                         onEnableReasoningChange={onEnableReasoningChange}
                         onSubmit={handleSubmit}

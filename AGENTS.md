@@ -45,6 +45,16 @@
 - `private-folder/` 是草稿、历史、个人内部材料和博客 / 面试素材区，不是默认开发事实源。
 - tasklist 的 `[x]` 是开发记录，不单独构成完成证据；仍要看 spec、实现、测试和实际 diff。
 
+## 事实与方案正确性
+
+“事实来源优先级”用于确认当前项目状态、既有约束和兼容性，不表示当前代码、spec、决策或历史实现天然正确。
+
+- 用户明确指定的不可变需求、外部契约、安全边界与合规要求必须遵守，只评估可行性和风险，不将其改写为替代候选。
+- 当任务要求调研最佳实践、替代方案，或触及架构、依赖、安全、性能、可靠性等重要选择时，现有代码、测试、spec、plan、decisions、ADR 与 architecture docs 必须作为候选基线之一，而不是默认答案。
+- 比较结论至少说明需求匹配、架构边界、安全、兼容性、可运维性、验证成本和迁移风险；保留既有方案也必须记录比较依据。
+- 结论写入当前 canonical workspace 的 `research.md`、`decisions.md` 或等价交付记录。若改变既有决策，在同一工作区同步更新受影响资产，并将旧决策删除、改写或标记为 superseded。
+- Level A / B 局部改动不强制重研；仅在明确请求调研或上述重要选择触发时执行。
+
 ## 开始大改前先读什么
 
 如果任务涉及版本规划、架构调整、运行时改动或能力扩展，先读：
@@ -59,6 +69,16 @@
 
 - 先对齐本版目标和非目标，再改代码。
 - 不要跳过方案背景直接动主运行时。
+
+## 复杂任务协作与委派
+
+对于 Level C / D、跨边界改动、存在两个以上可独立验证的工作包，或尚未定位单一根因的问题，实施前必须先进行可委派性判断。
+
+- Agent 可用且工作能安全拆分时，优先委派独立调研、诊断、实现或 review；“优先多 Agent”不等同于所有工作都并发写代码。
+- 每个委派任务必须声明目标、输入、预期产出、文件或模块归属、验证方式和整合 owner。并发修改不得覆盖同一文件或共享核心边界。
+- 强耦合核心变更由单一 owner 集成；其他 Agent 可承担替代方案调研、根因验证、专项测试或 review。
+- 因任务强耦合、范围过小或 Agent 不可用而不委派时，在 task 或交付记录中说明原因。
+- 这里的多 Agent 只约束 AI coding 过程；不得据此扩大当前版本产品 Runtime 的多 Agent、子 Agent、并行执行或权限范围。
 
 ## 全局分层与边界
 
@@ -183,6 +203,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/v0.5.4-token-aware-memory-compaction/plan.md
+at specs/v0.6.0-general-react-agent-mvp/plan.md
 
 <!-- SPECKIT END -->
