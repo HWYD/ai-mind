@@ -1,9 +1,6 @@
-import { CircleAlert, CircleCheckBig, LoaderCircle } from 'lucide-react'
-
 import type { MindMessage, MindMessagePart, PromptPart, ReasoningPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
 
 export type ChatListStatus = 'ready' | 'submitted' | 'streaming' | 'error'
-export type RuntimePartStatus = 'called' | 'completed' | 'failed' | 'loading'
 export type AssistantFeedback = 'up' | 'down' | null
 
 export interface RateLimitNoticeViewModel {
@@ -30,7 +27,8 @@ export function hasVisibleContent(part: MindMessagePart) {
         case 'workflow-progress':
         case 'image-brief':
         case 'image-result':
-        case 'agent-step':
+        case 'agent-run':
+        case 'agent-graph':
             return true
         case 'thread-memory-status':
         case 'agent-interrupt':
@@ -144,39 +142,6 @@ export function parsePromptInputRows(input: string) {
             }
         })
         .filter((row): row is { key: string; label: string; value: string } => row !== null)
-}
-
-export function renderStatusIcon(status: RuntimePartStatus) {
-    switch (status) {
-        case 'completed':
-            return <CircleCheckBig className="size-3.5" strokeWidth={2.2} />
-        case 'failed':
-            return <CircleAlert className="size-3.5" strokeWidth={2.2} />
-        default:
-            return <LoaderCircle className="size-3.5 animate-spin" strokeWidth={2.2} />
-    }
-}
-
-export function getStatusVariant(status: RuntimePartStatus): 'secondary' | 'destructive' | 'outline' {
-    switch (status) {
-        case 'completed':
-            return 'secondary'
-        case 'failed':
-            return 'destructive'
-        default:
-            return 'outline'
-    }
-}
-
-export function getStatusClassName(status: RuntimePartStatus) {
-    switch (status) {
-        case 'completed':
-            return 'border-emerald-200 bg-emerald-50 text-emerald-700'
-        case 'failed':
-            return 'border-rose-200 bg-rose-50 text-rose-700'
-        default:
-            return 'border-sky-200 bg-sky-50 text-sky-700'
-    }
 }
 
 export function getSourceLabel(source?: ToolPart['source']) {

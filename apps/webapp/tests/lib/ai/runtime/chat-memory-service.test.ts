@@ -126,6 +126,119 @@ describe('runtime/chat-memory service', () => {
         expect((await service.readThreadState(threadId)).state.messages).toHaveLength(2)
     })
 
+    it('同一会话的并发 completed turn append 不会丢失任一完整轮次', async () => {
+        const service = createChatMemoryService({ checkpointMode: 'memory' }, {})
+        const threadId = `chat:${'n'.repeat(64)}`
+
+        await Promise.all([
+            service.appendCompletedTurn(threadId, {
+                assistantMessageId: 'assistant-one',
+                assistantText: 'first assistant answer',
+                userMessageId: 'user-one',
+                userText: 'first user question',
+            }),
+            service.appendCompletedTurn(threadId, {
+                assistantMessageId: 'assistant-two',
+                assistantText: 'second assistant answer',
+                userMessageId: 'user-two',
+                userText: 'second user question',
+            }),
+        ])
+
+        expect((await service.readThreadState(threadId)).state.messages.map(message => message.id)).toEqual([
+            'user-one',
+            'assistant-one',
+            'user-two',
+            'assistant-two',
+        ])
+    })
+
+    it('取消在 checkpoint read 期间发生时，不会继续 append completed turn', async () => {
+        const service = createChatMemoryService({ checkpointMode: 'memory' }, {})
+        const threadId = `chat:${'o'.repeat(64)}`
+        const abortController = new AbortController()
+
+        const append = service.appendCompletedTurn(
+            threadId,
+            {
+                assistantText: 'cancelled assistant answer',
+                userText: 'cancelled user question',
+            },
+            { signal: abortController.signal }
+        )
+        abortController.abort()
+
+        await expect(append).rejects.toMatchObject({ name: 'AbortError' })
+        expect((await service.readThreadState(threadId)).state.messages).toEqual([])
+    })
+
+    it('取消在 checkpoint write 期间发生时，writeThreadState 以 AbortError 收口', async () => {
+        const service = createChatMemoryService({ checkpointMode: 'memory' }, {})
+        const threadId = `chat:${'p'.repeat(64)}`
+        const abortController = new AbortController()
+
+        const write = service.writeThreadState(
+            threadId,
+            {
+                messages: [],
+                pinnedDecisions: ['should not become visible after cancellation'],
+                summary: 'cancelled write',
+            },
+            { signal: abortController.signal }
+        )
+        abortController.abort()
+
+        await expect(write).rejects.toMatchObject({ name: 'AbortError' })
+    })
+
+    it('排队的 append 在取消后立即退出，且不在前一写入完成后补写', async () => {
+        const service = createChatMemoryService({ checkpointMode: 'memory' }, {})
+        const threadId = `chat:${'q'.repeat(64)}`
+        const originalWrite = service.writeThreadState.bind(service)
+        let releaseFirstWrite: (() => void) | undefined
+        const firstWriteStarted = new Promise<void>(resolve => {
+            releaseFirstWrite = resolve
+        })
+        let writeCount = 0
+
+        vi.spyOn(service, 'writeThreadState').mockImplementation(async (...args) => {
+            writeCount += 1
+            if (writeCount === 1) {
+                await firstWriteStarted
+            }
+            return originalWrite(...args)
+        })
+
+        const firstAppend = service.appendCompletedTurn(threadId, {
+            assistantText: 'first assistant answer',
+            userText: 'first user question',
+        })
+        await Promise.resolve()
+
+        const abortController = new AbortController()
+        const queuedAppend = service.appendCompletedTurn(
+            threadId,
+            {
+                assistantText: 'cancelled assistant answer',
+                userText: 'cancelled user question',
+            },
+            { signal: abortController.signal }
+        )
+        abortController.abort()
+
+        await expect(queuedAppend).rejects.toMatchObject({ name: 'AbortError' })
+        expect(writeCount).toBe(1)
+
+        releaseFirstWrite?.()
+        await firstAppend
+        await Promise.resolve()
+
+        expect((await service.readThreadState(threadId)).state.messages.map(message => message.text)).toEqual([
+            'first user question',
+            'first assistant answer',
+        ])
+    })
+
     it('append completed turns no longer compacts solely because the old message-count threshold is exceeded', async () => {
         const compactionGenerator = vi.fn()
         const service = createChatMemoryService({ checkpointMode: 'memory' }, {}, { compactionGenerator })

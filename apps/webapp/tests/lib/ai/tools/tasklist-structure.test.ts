@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveToolBindingForSkill } from '@/lib/ai/capabilities/tool-binding'
+import { resolveGeneralToolBinding } from '@/lib/ai/capabilities/tool-binding'
 import {
     getVersionPlanTasklistAgentToolDefinitionMap,
     isVersionPlanTasklistAgentToolAllowed,
 } from '@/lib/ai/runtime/version-plan-tasklist-agent/testing'
-import { utilitySkillDefinition } from '@/lib/ai/skills/utility-skill'
 import { getActiveChatToolDefinitionsForScope } from '@/lib/ai/tools'
 import { validateTasklistStructure, validateTasklistStructureWithDetail } from '@/lib/ai/tools/tasklist-structure'
 
@@ -206,8 +205,8 @@ describe('tasklist-structure', () => {
         expect(detail.structure.steps[0]?.taskCount).toBe(2)
     })
 
-    it('keeps validate_tasklist_structure inside Agent scope instead of utility-skill binding', async () => {
-        const toolBinding = await resolveToolBindingForSkill(utilitySkillDefinition)
+    it('keeps validate_tasklist_structure inside Agent scope instead of General Tool Policy', async () => {
+        const toolBinding = await resolveGeneralToolBinding()
         const agentToolDefinitionMap = getVersionPlanTasklistAgentToolDefinitionMap()
         const skillBindingToolNames = getActiveChatToolDefinitionsForScope('skill-binding').map(toolDefinition => toolDefinition.name)
         const tasklistAgentToolNames = getActiveChatToolDefinitionsForScope('version-plan-tasklist-agent').map(

@@ -3,6 +3,19 @@
     line-height: 1.75rem;
 }
 
+/* Streamdown v2.5.0 代码块容器默认 content-visibility:auto + contain-intrinsic-size:auto 200px，
+   在聊天虚拟列表滚动容器内会错误跳过代码渲染，只留约 200px 占位；改为 visible 强制渲染。 */
+.ai-message-markdown [data-streamdown='code-block'] {
+    content-visibility: visible !important;
+}
+
+/* v2.5.0 的 sticky 与负边距都作用在外层 wrapper 上，data-streamdown='code-block-actions'
+   只是内层按钮容器；关闭外层 sticky，避免滚动时按钮吸附视口顶部而脱离代码块标题。 */
+.ai-message-markdown [data-streamdown='code-block'] > div:has(> [data-streamdown='code-block-actions']) {
+    position: relative;
+    top: auto;
+}
+
 /* .ai-message-markdown,
 .ai-message-markdown * {
     transition-property: none !important;

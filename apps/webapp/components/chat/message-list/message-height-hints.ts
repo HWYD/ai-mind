@@ -1,11 +1,10 @@
+import { normalizeSafePublicHttpUrl, normalizeSafeResourceUri } from '@/lib/ai/safe-public-url'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
-import type { MindMessage } from '@/lib/ai/types/message'
+import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
-import type { LocalMessageHeightHintEntry } from '../../instamind/local-chat-persistence/schema'
+import { type LocalMessageHeightHintEntry, recoverableAgentGraphPartSchema } from '../../instamind/local-chat-persistence/schema'
 
-export const MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION = 1
-
-const MAX_MESSAGE_HEIGHT_HINT = 8_000
+export const MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION = 2
 
 export interface MessageHeightHintEstimateEntry {
     estimatedHeight: number
@@ -20,11 +19,13 @@ export interface MessageHeightHintCandidate {
 }
 
 function normalizeMessageHeightHintValue(value: number) {
-    if (!Number.isFinite(value) || value <= 0 || value > MAX_MESSAGE_HEIGHT_HINT) {
+    if (!Number.isFinite(value) || value <= 0) {
         return undefined
     }
 
-    return Math.round(value * 4) / 4
+    const normalized = Math.round(value * 4) / 4
+
+    return Number.isFinite(normalized) ? normalized : undefined
 }
 
 function formatLayoutWidth(messageColumnWidth: number) {
@@ -75,8 +76,183 @@ export function createMessageHeightHintLayoutKey({
     return `g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w${formatLayoutWidth(messageColumnWidth)}|r${enableReasoning ? 1 : 0}|history-default`
 }
 
+function projectPublicSourceRecords(sources: Extract<MindMessagePart, { type: 'tool' }>['sources']) {
+    return (sources ?? []).flatMap(source => {
+        if (source.status !== 'discovered' && source.status !== 'read') {
+            return []
+        }
+
+        const url = normalizeSafePublicHttpUrl(source.url)
+
+        if (!url) {
+            return []
+        }
+
+        return [
+            {
+                originTool: source.originTool,
+                sourceId: source.sourceId,
+                status: source.status,
+                title: source.title,
+                url,
+            },
+        ]
+    })
+}
+
+// 与 stable snapshot 的 public allowlist 对齐，避免 raw 字段变化让已测量高度在刷新后失配。
+function isPersistedPart(part: MindMessagePart) {
+    if (part.type === 'agent-run') {
+        return part.status === 'completed'
+    }
+
+    if (
+        part.type !== 'agent-graph' &&
+        part.type !== 'image-brief' &&
+        part.type !== 'image-result' &&
+        part.type !== 'prompt' &&
+        part.type !== 'resource' &&
+        part.type !== 'skill' &&
+        part.type !== 'text' &&
+        part.type !== 'tool' &&
+        part.type !== 'workflow-progress'
+    ) {
+        return false
+    }
+
+    if ('status' in part) {
+        return part.status === undefined || part.status === 'completed' || part.status === 'failed'
+    }
+
+    return true
+}
+
+function projectMessagePartForFingerprint(part: MindMessagePart) {
+    if (!isPersistedPart(part)) {
+        return { id: part.id, type: 'ephemeral', originalType: part.type }
+    }
+
+    if (part.type === 'tool') {
+        const sources = projectPublicSourceRecords(part.sources)
+
+        return {
+            ...(part.id ? { id: part.id } : {}),
+            ...(part.action ? { action: part.action } : {}),
+            ...(part.location ? { location: part.location } : {}),
+            ...(part.serverId ? { serverId: part.serverId } : {}),
+            ...(sources.length > 0 ? { sources } : {}),
+            ...(part.source ? { source: part.source } : {}),
+            status: part.status,
+            title: part.title,
+            toolName: part.toolName,
+            type: 'tool',
+        }
+    }
+
+    if (part.type === 'resource') {
+        const uri = normalizeSafeResourceUri(part.uri) ?? 'resource://unknown'
+
+        return {
+            ...(part.id ? { id: part.id } : {}),
+            ...(part.location ? { location: part.location } : {}),
+            resourceName: part.resourceName,
+            serverId: part.serverId,
+            ...(part.source ? { source: part.source } : {}),
+            status: part.status,
+            type: 'resource',
+            uri,
+        }
+    }
+
+    if (part.type === 'prompt') {
+        return {
+            ...(part.id ? { id: part.id } : {}),
+            ...(part.location ? { location: part.location } : {}),
+            ...(typeof part.messageCount === 'number' ? { messageCount: part.messageCount } : {}),
+            promptName: part.promptName,
+            ...(part.serverId ? { serverId: part.serverId } : {}),
+            ...(part.source ? { source: part.source } : {}),
+            status: part.status,
+            type: 'prompt',
+        }
+    }
+
+    if (part.type === 'skill') {
+        return {
+            ...(part.id ? { id: part.id } : {}),
+            name: part.name,
+            skillId: part.skillId,
+            type: 'skill',
+        }
+    }
+
+    if (part.type === 'text') {
+        return {
+            ...(part.displaySegments?.length ? { displaySegments: part.displaySegments } : {}),
+            ...(part.id ? { id: part.id } : {}),
+            format: 'markdown',
+            text: part.text,
+            type: 'text',
+        }
+    }
+
+    if (part.type === 'image-brief') {
+        return {
+            ...(part.id ? { id: part.id } : {}),
+            runId: part.runId,
+            summary: {
+                ...part.summary,
+                assumptions: [...part.summary.assumptions],
+                avoid: [...part.summary.avoid],
+                mustInclude: [...part.summary.mustInclude],
+                subjects: [...part.summary.subjects],
+                ...(part.summary.visibleText ? { visibleText: [...part.summary.visibleText] } : {}),
+            },
+            type: 'image-brief',
+        }
+    }
+
+    if (part.type === 'image-result') {
+        return {
+            ...(part.height ? { height: part.height } : {}),
+            ...(part.id ? { id: part.id } : {}),
+            ...(part.mimeType ? { mimeType: part.mimeType } : {}),
+            contentPath: part.contentPath,
+            expiresAt: part.expiresAt,
+            runId: part.runId,
+            suggestedFileName: part.suggestedFileName,
+            temporary: true,
+            type: 'image-result',
+            ...(part.width ? { width: part.width } : {}),
+        }
+    }
+
+    if (part.type === 'agent-run') {
+        return {
+            ...(part.id ? { id: part.id } : {}),
+            runId: part.runId,
+            status: part.status,
+            type: 'agent-run',
+        }
+    }
+
+    if (part.type === 'agent-graph') {
+        const parsed = recoverableAgentGraphPartSchema.safeParse(part)
+
+        return parsed.success ? parsed.data : { id: part.id, originalType: part.type, type: 'ephemeral' }
+    }
+
+    return part
+}
+
 export function createMessageRenderFingerprint(message: MindMessage, requestComposer?: ChatComposerPayload) {
-    return hashRenderInput(stableSerialize({ message, requestComposer }))
+    const fingerprintMessage = {
+        ...message,
+        parts: message.parts.map(projectMessagePartForFingerprint),
+        status: message.status ?? 'completed',
+    }
+
+    return hashRenderInput(stableSerialize({ message: fingerprintMessage, requestComposer }))
 }
 
 export function mergeMessageHeightHints(entries: MessageHeightHintEstimateEntry[], hints: LocalMessageHeightHintEntry[]): number[] {

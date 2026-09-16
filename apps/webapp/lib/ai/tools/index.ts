@@ -5,6 +5,8 @@ import { type ChatToolDefinition, createChatToolRegistry, type ToolRuntimeScope 
 import { textTransformToolDefinition } from './text-transform-tool'
 import { unitConvertToolDefinition } from './unit-convert-tool'
 import { validateTasklistStructureToolDefinition } from './validate-tasklist-structure-tool'
+import { readUrlToolDefinition } from './web/read-url-tool'
+import { webSearchToolDefinition } from './web/web-search-tool'
 
 const chatToolDefinitions: ChatToolDefinition[] = [
     calculatorToolDefinition,
@@ -13,6 +15,8 @@ const chatToolDefinitions: ChatToolDefinition[] = [
     textTransformToolDefinition,
     unitConvertToolDefinition,
     validateTasklistStructureToolDefinition,
+    webSearchToolDefinition,
+    readUrlToolDefinition,
 ]
 
 export const chatToolRegistry = createChatToolRegistry(chatToolDefinitions)
@@ -45,6 +49,22 @@ export {
     textTransformToolDefinition,
     unitConvertToolDefinition,
     validateTasklistStructureToolDefinition,
+    webSearchToolDefinition,
+    readUrlToolDefinition,
 }
-export { createChatToolRegistry, toolRuntimeScopes, toolSupportsRuntimeScope } from './registry'
-export type { ChatToolDefinition, ChatToolRegistry, ToolDisplayConfig, ToolExecutionResult, ToolRuntimeScope } from './registry'
+export {
+    createChatToolRegistry,
+    parseToolExecutionPolicy,
+    toolExecutionPolicySchema,
+    toolExecutionProfiles,
+    toolRuntimeScopes,
+    toolSupportsRuntimeScope,
+} from './registry'
+export type {
+    ChatToolDefinition,
+    ChatToolRegistry,
+    ToolDisplayConfig,
+    ToolExecutionPolicy,
+    ToolExecutionResult,
+    ToolRuntimeScope,
+} from './registry'

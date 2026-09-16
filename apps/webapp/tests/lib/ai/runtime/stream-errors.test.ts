@@ -34,4 +34,16 @@ describe('normalizeKnownRuntimeError', () => {
 
         expect(result?.message).toContain('Tasklist Agent 数据库结构未就绪')
     })
+
+    it('hides internal General Agent contract details from the assistant error reply', () => {
+        const error = Object.assign(new Error('Agent 未产生内部终态。'), { code: 'AGENT_CONTRACT_VIOLATION' })
+        const result = normalizeKnownRuntimeError(error)
+
+        expect(result).toEqual({
+            code: 'RUNTIME_INVARIANT_FAILED',
+            message: '本次回答未能完成，请稍后重试。',
+            retryable: true,
+        })
+        expect(result?.message).not.toContain('内部终态')
+    })
 })

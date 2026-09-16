@@ -2,7 +2,12 @@ import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 
 import { chatStreamChunkSchema, streamLifecyclePayloadSchema } from '@/lib/ai/stream-chunk-schema'
 import type { StreamEventEnvelopeDto, StreamRunStatusDto, StreamTerminalStateDto } from '@/lib/ai/stream-recovery/contracts'
-import { type StreamEventKindDto, StreamEventStore, StreamEventStoreError } from '@/lib/ai/stream-recovery/stream-event-store'
+import {
+    type AppendStreamEventsOptions,
+    type StreamEventKindDto,
+    StreamEventStore,
+    StreamEventStoreError,
+} from '@/lib/ai/stream-recovery/stream-event-store'
 
 export type ProjectChatStreamChunkInput = {
     agentRunId?: string
@@ -25,7 +30,42 @@ export type ProjectLifecycleEventInput = {
 export class StreamEventProjector {
     constructor(private readonly eventStore = new StreamEventStore()) {}
 
-    async projectChunk(input: ProjectChatStreamChunkInput): Promise<StreamEventEnvelopeDto> {
+    async projectChunks(
+        inputs: readonly ProjectChatStreamChunkInput[],
+        options: AppendStreamEventsOptions = {}
+    ): Promise<StreamEventEnvelopeDto[]> {
+        if (inputs.length === 0) {
+            throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event batch must not be empty.')
+        }
+
+        const preparedInputs = inputs.map(input => {
+            const parsedChunk = chatStreamChunkSchema.safeParse(input.chunk)
+
+            if (!parsedChunk.success) {
+                throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Chat stream chunk is not a public stream DTO.')
+            }
+
+            const publicChunk = sanitizePublicPayload(parsedChunk.data as ChatStreamChunk)
+            assertPublicPayload(publicChunk)
+            const terminalState = input.terminalState ?? inferTerminalState(publicChunk)
+            const runStatus = input.runStatus ?? inferRunStatus(publicChunk, terminalState)
+            const agentRunId = input.agentRunId ?? extractTasklistAgentRunId(publicChunk)
+
+            return {
+                ...(agentRunId ? { agentRunId } : {}),
+                eventKind: inferEventKind(publicChunk, terminalState),
+                ownerSessionHash: input.ownerSessionHash,
+                payload: publicChunk as StreamEventEnvelopeDto['payload'],
+                runId: input.runId,
+                ...(runStatus ? { runStatus } : {}),
+                ...(terminalState ? { terminalState } : {}),
+            }
+        })
+
+        return this.eventStore.appendEvents(preparedInputs, options)
+    }
+
+    async projectChunk(input: ProjectChatStreamChunkInput, options: AppendStreamEventsOptions = {}): Promise<StreamEventEnvelopeDto> {
         const parsedChunk = chatStreamChunkSchema.safeParse(input.chunk)
 
         if (!parsedChunk.success) {
@@ -39,15 +79,18 @@ export class StreamEventProjector {
         const runStatus = input.runStatus ?? inferRunStatus(publicChunk, terminalState)
         const agentRunId = input.agentRunId ?? extractTasklistAgentRunId(publicChunk)
 
-        return this.eventStore.appendEvent({
-            ...(agentRunId ? { agentRunId } : {}),
-            eventKind: inferEventKind(publicChunk, terminalState),
-            ownerSessionHash: input.ownerSessionHash,
-            payload: publicChunk as StreamEventEnvelopeDto['payload'],
-            runId: input.runId,
-            ...(runStatus ? { runStatus } : {}),
-            ...(terminalState ? { terminalState } : {}),
-        })
+        return this.eventStore.appendEvent(
+            {
+                ...(agentRunId ? { agentRunId } : {}),
+                eventKind: inferEventKind(publicChunk, terminalState),
+                ownerSessionHash: input.ownerSessionHash,
+                payload: publicChunk as StreamEventEnvelopeDto['payload'],
+                runId: input.runId,
+                ...(runStatus ? { runStatus } : {}),
+                ...(terminalState ? { terminalState } : {}),
+            },
+            options
+        )
     }
 
     async projectLifecycle(input: ProjectLifecycleEventInput): Promise<StreamEventEnvelopeDto> {

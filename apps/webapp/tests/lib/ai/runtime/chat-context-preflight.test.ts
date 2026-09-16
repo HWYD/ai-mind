@@ -206,6 +206,27 @@ describe('runtime/chat context preflight', () => {
         )
     })
 
+    it('读取 Chat Memory 时将 run cancellation signal 传到持久化边界', async () => {
+        const abortController = new AbortController()
+        const memoryService = createMemoryService({
+            messages: [],
+            pinnedDecisions: [],
+            summary: '',
+        })
+        const preflight = createChatContextPreflight({
+            memoryService,
+            resolvedModelSelection,
+            signal: abortController.signal,
+            threadId: 'chat:' + 'r'.repeat(64),
+        })
+
+        await preflight.prepare(memoryMessages => [new HumanMessage('latest user question'), ...memoryMessages])
+
+        expect(memoryService.readThreadState).toHaveBeenCalledWith('chat:' + 'r'.repeat(64), {
+            signal: abortController.signal,
+        })
+    })
+
     it('system、tool 等 non-memory 动态输入自身超限时不触发压缩，而是抛出已有输入过长错误', async () => {
         const memoryService = createMemoryService()
         const preflight = createChatContextPreflight({

@@ -197,6 +197,11 @@ export const unitConvertTool = tool(
 )
 
 export const unitConvertToolDefinition: ChatToolDefinition<z.infer<typeof unitConvertToolSchema>> = {
+    executionPolicy: {
+        kind: 'standard-tool',
+        profile: 'local-deterministic',
+        retrySafe: true,
+    },
     name: 'unit-convert',
     tool: unitConvertTool,
     schema: unitConvertToolSchema,
@@ -208,4 +213,5 @@ export const unitConvertToolDefinition: ChatToolDefinition<z.infer<typeof unitCo
         inputPreview: formatUnitConvertToolInput(args),
     }),
     resultIsAuthoritative: true,
+    runtimeScopes: ['skill-binding', 'general-react-agent'],
 }

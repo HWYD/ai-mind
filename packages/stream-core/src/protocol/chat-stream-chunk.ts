@@ -3,6 +3,21 @@ export interface StartChunk {
     messageId: string
 }
 
+export type AgentRunTerminalStatus = 'cancelled' | 'completed' | 'failed'
+
+export interface AgentRunStartChunk {
+    type: 'agent-run-start'
+    partId: string
+    runId: string
+}
+
+export interface AgentRunEndChunk {
+    type: 'agent-run-end'
+    partId: string
+    runId: string
+    status: AgentRunTerminalStatus
+}
+
 export interface SkillSelectedChunk {
     type: 'skill-selected'
     skillId: string
@@ -316,6 +331,21 @@ export interface ToolStartChunk {
     input: string
 }
 
+export const publicSourceOriginTools = ['web-search', 'read-url'] as const
+export type PublicSourceOriginTool = (typeof publicSourceOriginTools)[number]
+
+export const publicSourceStatuses = ['discovered', 'read', 'unavailable'] as const
+export type PublicSourceStatus = (typeof publicSourceStatuses)[number]
+
+export interface PublicSourceRecord {
+    originTool: PublicSourceOriginTool
+    snippet?: string
+    sourceId: string
+    status: PublicSourceStatus
+    title: string
+    url: string
+}
+
 export interface ToolEndChunk {
     type: 'tool-end'
     partId: string
@@ -327,6 +357,7 @@ export interface ToolEndChunk {
     serverId?: string
     input: string
     output: string
+    sources?: PublicSourceRecord[]
 }
 
 export interface PromptStartChunk {
@@ -390,6 +421,7 @@ export const streamErrorCodes = [
     'MODEL_PROVIDER_INVALID_REQUEST',
     'MODEL_PROVIDER_TIMEOUT',
     'MODEL_PROVIDER_UNAVAILABLE',
+    'STREAM_SERVICE_UNAVAILABLE',
     'TOOL_VALIDATION_FAILED',
     'TOOL_EXECUTION_FAILED',
     'PROMPT_FETCH_FAILED',
@@ -440,6 +472,8 @@ export interface ErrorChunk {
 
 export type ChatStreamChunk =
     | StartChunk
+    | AgentRunStartChunk
+    | AgentRunEndChunk
     | SkillSelectedChunk
     | ThreadMemoryStatusChunk
     | AgentGraphNodeStartChunk

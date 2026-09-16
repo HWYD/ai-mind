@@ -12,7 +12,7 @@ type StreamTextBufferHandle = ReturnType<typeof useStreamTextBuffer>
 const StreamTextBufferHarness = forwardRef<StreamTextBufferHandle, { flushTextDeltas: (deltas: PendingTextDelta[]) => void }>(
     function StreamTextBufferHarness({ flushTextDeltas }, ref) {
         const buffer = useStreamTextBuffer({
-            flushIntervalMs: 40,
+            flushIntervalMs: 20,
             flushTextDeltas,
         })
 
@@ -41,7 +41,7 @@ describe('useStreamTextBuffer', () => {
 
         act(() => {
             ref.current?.enqueue('message-1', 'part-1', 'text', '第一行\n')
-            vi.advanceTimersByTime(39)
+            vi.advanceTimersByTime(19)
         })
 
         expect(flushTextDeltas).not.toHaveBeenCalled()
@@ -73,5 +73,26 @@ describe('useStreamTextBuffer', () => {
         })
 
         expect(flushTextDeltas).toHaveBeenCalledTimes(1)
+    })
+
+    it('卸载时 flush pending delta，而不是丢弃最后一批文本', () => {
+        const flushTextDeltas = vi.fn()
+        const ref = createRef<StreamTextBufferHandle>()
+        const { unmount } = render(<StreamTextBufferHarness ref={ref} flushTextDeltas={flushTextDeltas} />)
+
+        act(() => {
+            ref.current?.enqueue('message-1', 'part-1', 'text', '尾部')
+        })
+
+        unmount()
+
+        expect(flushTextDeltas).toHaveBeenCalledWith([
+            {
+                delta: '尾部',
+                messageId: 'message-1',
+                partId: 'part-1',
+                partType: 'text',
+            },
+        ])
     })
 })

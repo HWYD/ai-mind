@@ -156,3 +156,15 @@ v0.4.12 将 `image_generation` 加入 StreamRun kind。它沿用同一 owner ses
 - `StreamRun.agentRunId` is nullable for generic streams, but Tasklist associations use a foreign key and unique index. The association is written explicitly after `AgentRun` creation and is never inferred from an arbitrary event.
 - Cancel is a durable intent. The route does not project a terminal status before the executor stops; the existing optimistic client aborts local reading/retry immediately without a visible cancelling state.
 - Same-page reconnect is supported. Refresh/close does not reattach an active subscription; persisted final conversation results remain readable through normal hydration.
+
+# v0.6.0 Durable Projection And Backpressure
+
+Generic chat 和现有可恢复 stream 共用 `StreamEventStore`。`StreamEventProjector.projectChunks()` 将安全 public chunks 作为一个 batch 交给 `appendEvents()`；单 transaction lock 一次、连续分配 sequence、批量 insert、更新 StreamRun 一次，terminal 只能是 batch 最后一项。数据库提交成功前不向当前 writer 投递。
+
+`DurableStreamProjectionBuffer` 对每个 Run 做 40ms/256-char microbatch，首个 text delta、结构事件和 terminal 强制 flush。pending queue 的高水位为 64 items/256KiB，低水位为 32 items/128KiB；高水位时 producer 等待，取消、截止或 projection failure 会唤醒 waiter 并清理 timer/listener。SSE disconnect 只关闭当前 writer，run-scoped signal 继续执行，之后可由 cursor replay 恢复。
+
+终态一致性在写入和恢复时均 fail-closed：terminal event 必须占据 `StreamRun.lastSequence`，即 `terminalSequence === lastSequence`；`status`、`runStatus`、`terminalState` 与 payload 类型（completed/finish、failed/error、rejected/finish、cancelled/finish 或 error、version_mismatch/run-status）必须一致。任何不一致都回滚写入或拒绝恢复，禁止把损坏状态投影为完成。
+
+General ReAct 的可回放生命周期事件是 `agent-run-start/end`，前端投影为 `agent-run`；Tasklist 等专用 LangGraph 事件继续使用 `agent-graph-*` 并投影为 `agent-graph`。两者共享 StreamRun/StreamEvent envelope、cursor 和 terminal 语义，但不共享 UI 类型或 Graph metadata。
+
+General ReAct 的 Action `createAgent` stream 只用于内部 Tool trajectory，绝不写入 `text-*` 或 `StreamEvent`。非取消、非 hard-deadline 的 Action outcome 固定进入一次同模型未绑定 Tool 的 Answer stream；其首个安全 delta 才可 durable-project 为最终文本。正常空白 Answer 可在剩余收口时间内使用确定性 fallback；Answer provider error、Tool contract violation 或部分文本后的异常必须以 failed terminal 收口，不拼接 fallback，且不会形成可持久化的 completed turn。

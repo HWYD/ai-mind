@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import type { ChatComposerDisplaySegment } from '@/lib/ai/types/chat'
 import type { MindMessage } from '@/lib/ai/types/message'
 
-import { TextPartView } from '../parts/text-part'
+import { TextPartView } from '../parts/shared/text-part'
 import { getCopiedButtonClassName } from '../shared/message-list-utils'
 
 function renderDisplaySegment(segment: ChatComposerDisplaySegment, key: string): ReactNode {

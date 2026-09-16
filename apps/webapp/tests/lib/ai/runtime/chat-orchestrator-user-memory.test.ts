@@ -11,45 +11,37 @@ const runtimeMocks = vi.hoisted(() => ({
     buildUserMemoryContextMessages: vi.fn(),
     createChatContextPreflight: vi.fn(),
     createChatSession: vi.fn(),
-    decideAuthoritativeToolAnswer: vi.fn(),
-    executeCapabilityContextInvocations: vi.fn(),
     executeComposerContextInvocation: vi.fn(),
     executeToolCall: vi.fn(),
     formatToolInput: vi.fn(),
-    hasVisibleAssistantText: vi.fn(),
     normalizeAndValidateToolCalls: vi.fn(),
     processCompletedTurnForMemory: vi.fn(),
     prepareChatContext: vi.fn(),
+    prepareComposerContextInvocation: vi.fn(),
     readThreadState: vi.fn(),
-    resolveCapabilityContextInvocations: vi.fn(),
     resolveComposerContextInvocation: vi.fn(),
     retrieveRelevantMemories: vi.fn(),
-    shouldBypassAuthoritativeAnswer: vi.fn(),
-    startDeliveryChainRun: vi.fn(),
-    startVersionPlanTasklistAgentRun: vi.fn(),
+    createGeneralReActRunContext: vi.fn(),
+    runGeneralReAct: vi.fn(),
+    hasVisibleAssistantText: vi.fn(),
     streamAssistantParts: vi.fn(),
     streamPlanningResponse: vi.fn(),
     stripMessageText: vi.fn(),
+    startDeliveryChainRun: vi.fn(),
+    startVersionPlanTasklistAgentRun: vi.fn(),
     touchConversation: vi.fn(),
     writeStaticTextPart: vi.fn(),
     writeToolValidationErrors: vi.fn(),
 }))
 
-vi.mock('@/lib/ai/runtime/assistant-stream', () => ({
-    hasVisibleAssistantText: runtimeMocks.hasVisibleAssistantText,
-    streamAssistantParts: runtimeMocks.streamAssistantParts,
-    streamPlanningResponse: runtimeMocks.streamPlanningResponse,
-    stripMessageText: runtimeMocks.stripMessageText,
+const remoteMcpMocks = vi.hoisted(() => ({
+    getPrompt: vi.fn(),
+    listTools: vi.fn(),
+    readResource: vi.fn(),
 }))
 
-vi.mock('@/lib/ai/runtime/authoritative-answer', () => ({
-    decideAuthoritativeToolAnswer: runtimeMocks.decideAuthoritativeToolAnswer,
-    shouldBypassAuthoritativeAnswer: runtimeMocks.shouldBypassAuthoritativeAnswer,
-}))
-
-vi.mock('@/lib/ai/runtime/capability-context', () => ({
-    executeCapabilityContextInvocations: runtimeMocks.executeCapabilityContextInvocations,
-    resolveCapabilityContextInvocations: runtimeMocks.resolveCapabilityContextInvocations,
+vi.mock('@/lib/ai/mcp/client/mcp-client-manager', () => ({
+    mcpClientManager: remoteMcpMocks,
 }))
 
 vi.mock('@/lib/ai/runtime/chat-session', () => ({
@@ -104,6 +96,7 @@ vi.mock('@/lib/ai/runtime/chat-context-preflight', () => ({
 
 vi.mock('@/lib/ai/runtime/composer-context', () => ({
     executeComposerContextInvocation: runtimeMocks.executeComposerContextInvocation,
+    prepareComposerContextInvocation: runtimeMocks.prepareComposerContextInvocation,
     resolveComposerContextInvocation: runtimeMocks.resolveComposerContextInvocation,
 }))
 
@@ -133,6 +126,20 @@ vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent', () => ({
     resolveVersionPlanTasklistAgentInvocation: vi.fn(() => null),
     startVersionPlanTasklistAgentRun: runtimeMocks.startVersionPlanTasklistAgentRun,
 }))
+
+vi.mock('@/lib/ai/runtime/general-react-agent', async importOriginal => {
+    const actual = await importOriginal<typeof import('@/lib/ai/runtime/general-react-agent')>()
+
+    return {
+        ...actual,
+        createGeneralReActRunContext: runtimeMocks.createGeneralReActRunContext,
+        GeneralReActAgentRunner: class {
+            run(input: unknown) {
+                return runtimeMocks.runGeneralReAct(input)
+            }
+        },
+    }
+})
 
 vi.mock('@ai-mind/stream-core', async importOriginal => {
     const actual = await importOriginal<typeof import('@ai-mind/stream-core')>()
@@ -328,13 +335,13 @@ function createSession(overrides: Record<string, unknown> = {}) {
 
     return {
         activeToolCapabilityIds: {},
-        activeToolDefinitionMap: new Map(),
         activeToolNames: [],
         activeTools: [],
+        actionSystemPrompts: [],
+        answerSystemPrompts: [],
         baseModel: {
             stream: baseModelStream,
         },
-        directAnswerMessages: [],
         langChainMessages: [],
         modelHandle: {
             normalizeError: vi.fn().mockReturnValue({
@@ -345,13 +352,28 @@ function createSession(overrides: Record<string, unknown> = {}) {
             }),
         },
         request: createRequest(),
-        toolBoundModel: null,
         ...overrides,
     }
 }
 
 function collectChunkTypes(chunks: Array<{ type: string }>) {
     return chunks.map(chunk => chunk.type)
+}
+
+function mockGeneralAnswer(assistantText: string, source: 'chat' | 'tool' = 'chat') {
+    runtimeMocks.runGeneralReAct.mockResolvedValueOnce({
+        assistantText,
+        executedToolCallCount: source === 'tool' ? 1 : 0,
+        finalizationMode: 'natural',
+        modelCallCount: source === 'tool' ? 2 : 1,
+        modelRetryCount: 0,
+        source,
+        sources: [],
+        stopReason: 'natural_completion',
+        toolCallCount: source === 'tool' ? 1 : 0,
+        toolRequestCount: source === 'tool' ? 1 : 0,
+        toolRetryCount: 0,
+    })
 }
 
 describe('runtime/chat-orchestrator user-memory integration', () => {
@@ -362,10 +384,9 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([])
         runtimeMocks.buildSystemMessages.mockReturnValue([])
         runtimeMocks.buildUserMemoryContextMessages.mockReturnValue([])
-        runtimeMocks.executeCapabilityContextInvocations.mockResolvedValue([])
         runtimeMocks.executeComposerContextInvocation.mockResolvedValue([])
+        runtimeMocks.prepareComposerContextInvocation.mockResolvedValue({ messages: [], nonMessagePayloads: [] })
         runtimeMocks.formatToolInput.mockReturnValue('1+1')
-        runtimeMocks.hasVisibleAssistantText.mockReturnValue(false)
         runtimeMocks.normalizeAndValidateToolCalls.mockReturnValue({
             planningMessage: new AIMessage({ content: '', tool_calls: [] }),
             toolCalls: [],
@@ -387,17 +408,26 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
                 summary: '旧摘要',
             },
         })
-        runtimeMocks.resolveCapabilityContextInvocations.mockReturnValue([])
         runtimeMocks.resolveComposerContextInvocation.mockReturnValue(null)
         runtimeMocks.retrieveRelevantMemories.mockResolvedValue([])
-        runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(false)
         runtimeMocks.startDeliveryChainRun.mockResolvedValue(false)
         runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue({
             graphResult: { status: 'completed' },
         })
-        runtimeMocks.streamAssistantParts.mockResolvedValue('好的，推荐桃子。')
-        runtimeMocks.streamPlanningResponse.mockResolvedValue(new AIMessage({ content: '', tool_calls: [] }))
-        runtimeMocks.stripMessageText.mockImplementation((message: AIMessage) => message)
+        runtimeMocks.createGeneralReActRunContext.mockReturnValue({ runSignal: new AbortController().signal })
+        runtimeMocks.runGeneralReAct.mockResolvedValue({
+            assistantText: '好的，推荐桃子。',
+            executedToolCallCount: 0,
+            finalizationMode: 'natural',
+            modelCallCount: 1,
+            modelRetryCount: 0,
+            source: 'chat',
+            sources: [],
+            stopReason: 'natural_completion',
+            toolCallCount: 0,
+            toolRequestCount: 0,
+            toolRetryCount: 0,
+        })
         runtimeMocks.touchConversation.mockResolvedValue(undefined)
         runtimeMocks.writeToolValidationErrors.mockReturnValue([])
         runtimeMocks.prepareChatContext.mockImplementation(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
@@ -428,9 +458,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
     it('ordinary chat 会先注入 UserMemory，再注入 short-term memory，并在 final turn 后异步启动 extraction', async () => {
         const userMemoryMessage = new SystemMessage('user memory')
         const chatMemoryMessage = new SystemMessage('chat memory')
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), new HumanMessage('current user')],
-        })
+        const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
         runtimeMocks.retrieveRelevantMemories.mockResolvedValue([
             {
@@ -460,10 +488,9 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
             path: 'ordinary_chat',
             sessionId: 'test-session',
         })
-        expect(session.baseModel.stream).toHaveBeenCalledWith(
-            [new SystemMessage('base system'), userMemoryMessage, chatMemoryMessage, new HumanMessage('current user')],
+        expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledWith(
             expect.objectContaining({
-                signal: undefined,
+                messages: expect.arrayContaining([userMemoryMessage, chatMemoryMessage]),
             })
         )
         expect(runtimeMocks.processCompletedTurnForMemory).toHaveBeenCalledWith({
@@ -479,50 +506,10 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         })
     })
 
-    it('tool-assisted ordinary chat 的 authoritative answer 也会触发 tool_assisted extraction', async () => {
-        const toolCall = {
-            args: { expression: '1+1' },
-            id: 'tool-call-1',
-            name: 'calculator',
-            type: 'tool_call' as const,
-        }
-        const session = createSession({
-            toolBoundModel: {
-                stream: vi.fn().mockResolvedValue({ name: 'planning' }),
-            },
-        })
+    it('tool-assisted ordinary chat 会触发 tool_assisted extraction', async () => {
+        const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamPlanningResponse.mockResolvedValue(
-            new AIMessage({
-                content: '',
-                tool_calls: [toolCall],
-            })
-        )
-        runtimeMocks.normalizeAndValidateToolCalls.mockReturnValue({
-            planningMessage: new AIMessage({
-                content: '',
-                tool_calls: [toolCall],
-            }),
-            toolCalls: [toolCall],
-            toolErrors: [],
-        })
-        runtimeMocks.executeToolCall.mockResolvedValue({
-            output: '2',
-            success: true,
-            toolCall,
-            toolMessage: new ToolMessage({
-                content: '2',
-                status: 'success',
-                tool_call_id: 'tool-call-1',
-            }),
-        })
-        runtimeMocks.shouldBypassAuthoritativeAnswer.mockReturnValue(true)
-        runtimeMocks.decideAuthoritativeToolAnswer.mockReturnValue({
-            answerText: '`1+1` 的结果是 **2**。',
-            reason: 'single-authoritative-tool',
-            shouldBypassModel: true,
-            toolNames: ['calculator'],
-        })
+        mockGeneralAnswer('`1+1` 的结果是 **2**。', 'tool')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -569,7 +556,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
             serverId: undefined,
             source: 'composer',
         })
-        runtimeMocks.streamAssistantParts.mockResolvedValue('summary answer')
+        mockGeneralAnswer('summary answer')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -588,12 +575,10 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
 
     it('ordinary technical question 不注入无关的 UserMemory', async () => {
         const chatMemoryMessage = new SystemMessage('chat memory')
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), new HumanMessage('解释一下 React useEffect。')],
-        })
+        const session = createSession({})
         runtimeMocks.createChatSession.mockReturnValue(session)
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([chatMemoryMessage])
-        runtimeMocks.streamAssistantParts.mockResolvedValue('useEffect 用来处理副作用。')
+        mockGeneralAnswer('useEffect 用来处理副作用。')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -612,20 +597,15 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
             sessionId: 'test-session',
         })
         expect(runtimeMocks.buildUserMemoryContextMessages).toHaveBeenCalledWith([])
-        expect(session.baseModel.stream).toHaveBeenCalledWith(
-            [new SystemMessage('base system'), chatMemoryMessage, new HumanMessage('解释一下 React useEffect。')],
-            expect.objectContaining({
-                signal: undefined,
-            })
+        expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledWith(
+            expect.objectContaining({ messages: expect.arrayContaining([chatMemoryMessage]) })
         )
     })
 
     it('用户询问工作背景时会把 stable_user_context 注入 ordinary chat 上下文', async () => {
         const userMemoryMessage = new SystemMessage('work background memory')
         const chatMemoryMessage = new SystemMessage('chat memory')
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), new HumanMessage('你知道我的工作吗？')],
-        })
+        const session = createSession({})
         runtimeMocks.createChatSession.mockReturnValue(session)
         runtimeMocks.retrieveRelevantMemories.mockResolvedValue([
             {
@@ -638,7 +618,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         ])
         runtimeMocks.buildUserMemoryContextMessages.mockReturnValue([userMemoryMessage])
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([chatMemoryMessage])
-        runtimeMocks.streamAssistantParts.mockResolvedValue('你是一名前端工程师，主要使用 Vue 和 React。')
+        mockGeneralAnswer('你是一名前端工程师，主要使用 Vue 和 React。')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -662,26 +642,14 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
                 type: 'stable_user_context',
             }),
         ])
-        expect(session.baseModel.stream).toHaveBeenCalledWith(
-            [new SystemMessage('base system'), userMemoryMessage, chatMemoryMessage, new HumanMessage('你知道我的工作吗？')],
-            expect.objectContaining({
-                signal: undefined,
-            })
+        expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledWith(
+            expect.objectContaining({ messages: expect.arrayContaining([userMemoryMessage, chatMemoryMessage]) })
         )
     })
 
-    it('reader-skill capability-context final answer stage 仍可读取 UserMemory，但不会把它传进 raw capability 调用', async () => {
+    it('reader-skill 命中不触发隐式 remote capability context，仍可读取 UserMemory', async () => {
         const userMemoryMessage = new SystemMessage('user memory')
         const chatMemoryMessage = new SystemMessage('chat memory')
-        const capabilityContextMessage = new HumanMessage('remote capability context')
-        const capabilityInvocations = [
-            {
-                capabilityType: 'resource',
-                input: 'project://latest-context',
-                name: 'latest-context',
-                serverId: 'project-assistant-service',
-            },
-        ]
         const session = createSession({
             langChainMessages: [new HumanMessage('结合当前项目上下文，用大白话解释一下这个方案。')],
             skillDefinition: {
@@ -702,9 +670,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         ])
         runtimeMocks.buildUserMemoryContextMessages.mockReturnValue([userMemoryMessage])
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([chatMemoryMessage])
-        runtimeMocks.resolveCapabilityContextInvocations.mockReturnValue(capabilityInvocations)
-        runtimeMocks.executeCapabilityContextInvocations.mockResolvedValue([capabilityContextMessage])
-        runtimeMocks.streamAssistantParts.mockResolvedValue('这是结合项目上下文后的回答。')
+        mockGeneralAnswer('这是结合项目上下文后的回答。')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -728,27 +694,11 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
                 type: 'communication_preference',
             }),
         ])
-        expect(runtimeMocks.resolveCapabilityContextInvocations).toHaveBeenCalledWith(
-            createReaderSkillCapabilityRequest(),
-            expect.objectContaining({
-                skillId: 'reader-skill',
-            })
-        )
-        expect(runtimeMocks.executeCapabilityContextInvocations).toHaveBeenCalledWith(
-            capabilityInvocations,
-            expect.objectContaining({
-                context: expect.objectContaining({
-                    sessionId: 'test-session',
-                    validatedConversationId: 'test-conversation',
-                }),
-                writeChunk: expect.any(Function),
-            })
-        )
-        expect(session.baseModel.stream).toHaveBeenCalledWith(
-            [chatMemoryMessage, new HumanMessage('结合当前项目上下文，用大白话解释一下这个方案。'), capabilityContextMessage],
-            expect.objectContaining({
-                signal: undefined,
-            })
+        expect(remoteMcpMocks.listTools).not.toHaveBeenCalled()
+        expect(remoteMcpMocks.readResource).not.toHaveBeenCalled()
+        expect(remoteMcpMocks.getPrompt).not.toHaveBeenCalled()
+        expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledWith(
+            expect.objectContaining({ messages: expect.arrayContaining([chatMemoryMessage, userMemoryMessage]) })
         )
         expect(runtimeMocks.prepareChatContext).toHaveBeenCalledTimes(1)
     })
@@ -757,7 +707,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         const session = createSession()
         const writtenChunks: Array<{ type: string }> = []
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValue('正常回答。')
+        mockGeneralAnswer('正常回答。')
         runtimeMocks.processCompletedTurnForMemory.mockRejectedValueOnce(new Error('store unavailable'))
 
         const orchestrator = new ChatOrchestrator({
@@ -779,7 +729,10 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
                 userText: '给我推荐几种水果。',
             }),
             expect.objectContaining({
-                onStatus: expect.any(Function),
+                promotionContext: {
+                    sessionId: 'test-session',
+                    sourceConversationId: 'test-conversation',
+                },
             })
         )
         expect(runtimeMocks.touchConversation).toHaveBeenCalledWith('test-session', 'test-conversation', {
@@ -791,7 +744,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
     it('chat-memory append 失败时，仍会 touch conversation 并继续后台 UserMemory extraction', async () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValue('正常回答。')
+        mockGeneralAnswer('正常回答。')
         runtimeMocks.appendCompletedTurn.mockRejectedValueOnce(new Error('append failed'))
 
         const orchestrator = new ChatOrchestrator({
@@ -820,7 +773,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
     it('conversation touch 失败时，仍会继续后台 UserMemory extraction', async () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValue('正常回答。')
+        mockGeneralAnswer('正常回答。')
         runtimeMocks.touchConversation.mockRejectedValueOnce(new Error('touch failed'))
 
         const orchestrator = new ChatOrchestrator({
@@ -863,7 +816,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
 
         runtimeMocks.createChatSession.mockReturnValue(session)
         runtimeMocks.readThreadState.mockResolvedValue(frozenThreadState)
-        runtimeMocks.streamAssistantParts.mockResolvedValue('保持当前回答。')
+        mockGeneralAnswer('保持当前回答。')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -898,12 +851,10 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
 
     it('suppressed memory 后的相关问题不再注入旧偏好', async () => {
         const chatMemoryMessage = new SystemMessage('chat memory')
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), new HumanMessage('给我推荐几种水果。')],
-        })
+        const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([chatMemoryMessage])
-        runtimeMocks.streamAssistantParts.mockResolvedValue('可以考虑苹果、梨和葡萄。')
+        mockGeneralAnswer('可以考虑苹果、梨和葡萄。')
 
         const orchestrator = new ChatOrchestrator({
             context: createExecutionContext(),
@@ -922,11 +873,8 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
             sessionId: 'test-session',
         })
         expect(runtimeMocks.buildUserMemoryContextMessages).toHaveBeenCalledWith([])
-        expect(session.baseModel.stream).toHaveBeenCalledWith(
-            [new SystemMessage('base system'), chatMemoryMessage, new HumanMessage('给我推荐几种水果。')],
-            expect.objectContaining({
-                signal: undefined,
-            })
+        expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledWith(
+            expect.objectContaining({ messages: expect.arrayContaining([chatMemoryMessage]) })
         )
     })
 
@@ -1005,7 +953,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
     it('draft conversation identity 不会 enqueue UserMemory extraction', async () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValue('草稿回答。')
+        mockGeneralAnswer('草稿回答。')
 
         const orchestrator = new ChatOrchestrator({
             context: {
@@ -1028,14 +976,14 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         expect(runtimeMocks.processCompletedTurnForMemory).not.toHaveBeenCalled()
     })
 
-    it('UserMemory 后处理保持 final-turn memory 先 append 再 finish，后台提取随后执行', async () => {
+    it('UserMemory 后处理只在 durable terminal 后启动，后台提取随后执行', async () => {
         const order: string[] = []
         const session = createSession()
         const writtenChunks: Array<{ type: string }> = []
         let resolveExtraction: (() => void) | undefined
 
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValue('兼容回答。')
+        mockGeneralAnswer('兼容回答。')
         runtimeMocks.appendCompletedTurn.mockImplementationOnce(async () => {
             order.push('append')
         })
@@ -1074,19 +1022,20 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
             request: createRequest(),
             writeChunk: chunk => {
                 writtenChunks.push(chunk)
-                if (chunk.type === 'finish') {
-                    order.push('finish')
-                }
+            },
+            writeTerminalChunk: async chunk => {
+                writtenChunks.push(chunk)
+                order.push('terminal')
             },
         })
 
         await orchestrator.run()
-        expect(order).toEqual(['append', 'touch', 'extract-start', 'finish'])
+        expect(order).toEqual(['terminal', 'append', 'touch', 'extract-start'])
 
         resolveExtraction?.()
         await Promise.resolve()
 
-        expect(order).toEqual(['append', 'touch', 'extract-start', 'finish', 'extract-done'])
+        expect(order).toEqual(['terminal', 'append', 'touch', 'extract-start', 'extract-done'])
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
     })
 })

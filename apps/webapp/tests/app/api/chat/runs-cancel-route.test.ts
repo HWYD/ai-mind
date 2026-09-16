@@ -46,9 +46,9 @@ vi.mock('@/lib/ai/rate-limit', () => ({
 }))
 
 vi.mock('@/lib/ai/stream-recovery/stream-execution-coordinator', () => ({
-    StreamExecutionCoordinator: class StreamExecutionCoordinatorMock {
-        requestCancel = coordinatorMocks.requestCancelMock
-    },
+    getSharedStreamExecutionCoordinator: () => ({
+        requestCancel: coordinatorMocks.requestCancelMock,
+    }),
     StreamExecutionCoordinatorError: coordinatorMocks.MockStreamExecutionCoordinatorError,
 }))
 

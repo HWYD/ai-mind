@@ -56,6 +56,12 @@ export const cityWeatherTool = tool(
 )
 
 export const cityWeatherToolDefinition: ChatToolDefinition<z.infer<typeof cityWeatherToolSchema>> = {
+    executionPolicy: {
+        attemptTimeoutMs: 20000,
+        kind: 'standard-tool',
+        profile: 'remote-readonly',
+        retrySafe: true,
+    },
     name: 'city-weather',
     tool: cityWeatherTool,
     schema: cityWeatherToolSchema,
@@ -67,6 +73,7 @@ export const cityWeatherToolDefinition: ChatToolDefinition<z.infer<typeof cityWe
         action: 'current',
         inputPreview: formatCityWeatherToolInput(args),
     }),
+    runtimeScopes: ['skill-binding', 'general-react-agent'],
     source: 'mcp',
     serverId: 'weather-server',
 }

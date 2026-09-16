@@ -1,5 +1,7 @@
+import { agentArtifactFormats, agentArtifactKinds } from '@ai-mind/stream-core/protocol'
 import { z } from 'zod'
 
+import { agentGraphDebugSummarySchema } from '@/lib/ai/stream-chunk-schema'
 import type { MindMessage } from '@/lib/ai/types/message'
 
 export const LOCAL_CHAT_SCHEMA_VERSION = 1
@@ -29,11 +31,144 @@ export const localConversationIndexSchema = z
     })
     .strict()
 
-const recoverablePartSchema = z
+const publicSourceRecordSchema = z
     .object({
-        type: z.enum(['agent-step', 'prompt', 'reasoning', 'resource', 'skill', 'text', 'tool', 'workflow-progress']),
+        originTool: z.enum(['web-search', 'read-url']),
+        snippet: z.string().optional(),
+        sourceId: z.string().min(1),
+        status: z.enum(['discovered', 'read']),
+        title: z.string().min(1),
+        url: z.string().url(),
     })
-    .passthrough()
+    .strict()
+
+const agentGraphNodeSchema = z
+    .object({
+        durationMs: z.number().int().nonnegative().optional(),
+        error: z.string().optional(),
+        nodeId: z.string().min(1),
+        partId: z.string().min(1),
+        patchSummaries: z.array(z.string()),
+        severity: z.enum(['error', 'info', 'warning']).optional(),
+        status: z.enum(['completed', 'failed', 'paused', 'running', 'skipped']),
+        stepIndex: z.number().int().nonnegative(),
+        summary: z.string().optional(),
+        tags: z.array(z.string()).optional(),
+        title: z.string().min(1),
+    })
+    .strict()
+
+const agentGraphRouteSchema = z
+    .object({
+        fromNodeId: z.string().min(1),
+        reason: z.string().optional(),
+        routeLabel: z.string().min(1),
+        toNodeId: z.string().min(1),
+    })
+    .strict()
+
+export const recoverableAgentGraphPartSchema = z
+    .object({
+        agentName: z.string().min(1),
+        graph: z
+            .object({
+                debugSummary: agentGraphDebugSummarySchema.optional(),
+                nodes: z.array(agentGraphNodeSchema),
+                routes: z.array(agentGraphRouteSchema),
+                runtime: z.literal('LangGraph'),
+            })
+            .strict(),
+        id: z.string().min(1).optional(),
+        runId: z.string().min(1),
+        status: z.enum(['completed', 'failed', 'paused', 'running', 'skipped']),
+        type: z.literal('agent-graph'),
+    })
+    .strict()
+
+export const recoverableAgentRunPartSchema = z
+    .object({
+        id: z.string().min(1).optional(),
+        runId: z.string().min(1),
+        status: z.literal('completed'),
+        type: z.literal('agent-run'),
+    })
+    .strict()
+
+const recoverablePartSchema = z.discriminatedUnion('type', [
+    recoverableAgentRunPartSchema,
+    recoverableAgentGraphPartSchema,
+    z
+        .object({
+            id: z.string().min(1).optional(),
+            messageCount: z.number().int().nonnegative().optional(),
+            promptName: z.string().min(1),
+            serverId: z.string().min(1).optional(),
+            source: z.enum(['internal', 'mcp']).optional(),
+            status: z.enum(['completed', 'failed']),
+            type: z.literal('prompt'),
+        })
+        .strict(),
+    z
+        .object({
+            id: z.string().min(1).optional(),
+            location: z.enum(['local', 'remote']).optional(),
+            resourceName: z.string().min(1),
+            serverId: z.string().min(1),
+            source: z.enum(['internal', 'mcp']).optional(),
+            status: z.enum(['completed', 'failed']),
+            type: z.literal('resource'),
+            uri: z.string().min(1),
+        })
+        .strict(),
+    z
+        .object({
+            id: z.string().min(1).optional(),
+            name: z.string().min(1),
+            skillId: z.string().min(1),
+            type: z.literal('skill'),
+        })
+        .strict(),
+    z
+        .object({
+            displaySegments: z.array(z.record(z.string(), z.unknown())).optional(),
+            format: z.literal('markdown'),
+            id: z.string().min(1).optional(),
+            text: z.string(),
+            type: z.literal('text'),
+        })
+        .strict(),
+    z
+        .object({
+            action: z.string().min(1).optional(),
+            id: z.string().min(1).optional(),
+            location: z.enum(['local', 'remote']).optional(),
+            serverId: z.string().min(1).optional(),
+            sources: z.array(publicSourceRecordSchema).max(5).optional(),
+            source: z.enum(['internal', 'mcp']).optional(),
+            status: z.enum(['completed', 'failed']),
+            title: z.string().min(1).optional(),
+            toolName: z.string().min(1),
+            type: z.literal('tool'),
+        })
+        .strict(),
+    z
+        .object({
+            durationMs: z.number().int().nonnegative().optional(),
+            endedAt: z.number().int().nonnegative().optional(),
+            failureMessage: z.string().optional(),
+            id: z.string().min(1).optional(),
+            status: z.enum(['completed', 'failed', 'cancelled']),
+            steps: z.array(z.record(z.string(), z.unknown())),
+            startedAt: z.number().int().nonnegative().optional(),
+            summary: z.string().optional(),
+            title: z.string().min(1),
+            type: z.literal('workflow-progress'),
+            visibility: z.enum(['collapsed', 'expanded']),
+            workflowId: z.string().min(1),
+            workflowKind: z.string().min(1),
+        })
+        .strict(),
+])
 
 const recoverableImageBriefPartSchema = z
     .object({
@@ -77,17 +212,41 @@ const recoverableImageResultPartSchema = z
     })
     .strict()
 
+const recoverableArtifactMetadataSchema = z
+    .object({
+        charCount: z.number().int().nonnegative().optional(),
+        generatedFrom: z.string().min(1).optional(),
+        revision: z.number().int().positive().optional(),
+        sectionCount: z.number().int().nonnegative().optional(),
+        targetVersion: z.string().min(1).optional(),
+        validated: z.boolean().optional(),
+    })
+    .strict()
+
+const recoverableArtifactSchema = z
+    .object({
+        artifactId: z.string().min(1),
+        artifactKind: z.enum(agentArtifactKinds),
+        artifactType: z.literal('text'),
+        content: z.string(),
+        error: z.string().optional(),
+        format: z.enum(agentArtifactFormats),
+        metadata: recoverableArtifactMetadataSchema.optional(),
+        status: z.enum(['completed', 'failed']),
+        title: z.string().min(1),
+    })
+    .strict()
+
 const recoverableMessageSchema: z.ZodType<MindMessage> = z
     .object({
-        artifacts: z.array(z.record(z.string(), z.unknown())).optional(),
-        composer: z.record(z.string(), z.unknown()).optional(),
+        artifacts: z.array(recoverableArtifactSchema).optional(),
         createdAt: z.string().datetime(),
         id: z.string().min(1),
         parts: z.array(z.union([recoverablePartSchema, recoverableImageBriefPartSchema, recoverableImageResultPartSchema])).min(1),
         role: z.union([z.literal('user'), z.literal('assistant')]),
         status: z.literal('completed').optional(),
     })
-    .passthrough() as unknown as z.ZodType<MindMessage>
+    .strict() as unknown as z.ZodType<MindMessage>
 
 export const localConversationSnapshotSchema = z
     .object({
@@ -108,7 +267,6 @@ export const localMessageHeightHintEntrySchema = z
             .number()
             .finite()
             .positive()
-            .max(8_000)
             .refine(value => Number.isInteger(value * 4), 'Height hints must be normalized to quarter CSS pixels.'),
         measuredAt: z.string().datetime(),
         messageId: z.string().min(1),

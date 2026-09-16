@@ -64,6 +64,33 @@ function isEmptyState(state: AiMindThreadState): boolean {
     return state.messages.length === 0 && state.pinnedDecisions.length === 0 && state.summary.trim().length === 0
 }
 
+function awaitWithAbortSignal<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+    throwIfAborted(signal)
+
+    if (!signal) {
+        return operation
+    }
+
+    return new Promise<T>((resolve, reject) => {
+        const onAbort = () => {
+            signal.removeEventListener('abort', onAbort)
+            reject(new DOMException('Request aborted', 'AbortError'))
+        }
+
+        signal.addEventListener('abort', onAbort, { once: true })
+        operation.then(
+            value => {
+                signal.removeEventListener('abort', onAbort)
+                resolve(value)
+            },
+            error => {
+                signal.removeEventListener('abort', onAbort)
+                reject(error)
+            }
+        )
+    })
+}
+
 export interface ChatMemoryReadResult {
     restored: boolean
     state: AiMindThreadState
@@ -93,6 +120,15 @@ export interface AppendCompletedTurnOptions {
         sessionId: string
         sourceConversationId: string
     }
+    signal?: AbortSignal
+}
+
+export interface ChatMemoryReadOptions {
+    signal?: AbortSignal
+}
+
+export interface ChatMemoryWriteOptions {
+    signal?: AbortSignal
 }
 
 export interface CompactThreadStateOptions {
@@ -112,9 +148,9 @@ export interface ChatMemoryService {
         budget: ContextBudget,
         options?: CompactThreadStateOptions
     ): Promise<ChatMemoryCompactionResult | null>
-    deleteThreadState(threadId: string): Promise<void>
-    readThreadState(threadId: string): Promise<ChatMemoryReadResult>
-    writeThreadState(threadId: string, state: AiMindThreadState): Promise<void>
+    deleteThreadState(threadId: string, options?: ChatMemoryWriteOptions): Promise<void>
+    readThreadState(threadId: string, options?: ChatMemoryReadOptions): Promise<ChatMemoryReadResult>
+    writeThreadState(threadId: string, state: AiMindThreadState, options?: ChatMemoryWriteOptions): Promise<void>
 }
 
 interface CreateChatMemoryServiceOptions {
@@ -137,27 +173,59 @@ export function createChatMemoryService(
     const checkpointer = getChatMemoryCheckpointer(config.checkpointMode, env)
     const graph = checkpointer ? createChatMemoryGraph(checkpointer) : null
     const pinnedDecisionPromotionService = options.userMemoryService ?? userMemoryService
+    const writeQueueByThread = new Map<string, Promise<void>>()
 
-    const getConfig = (threadId: string) => ({
+    const getConfig = (threadId: string, signal?: AbortSignal) => ({
         configurable: {
             thread_id: threadId,
         },
         durability: 'sync' as const,
+        ...(signal ? { signal } : {}),
     })
 
-    const readCheckpointState = async (threadId: string) => {
+    const readCheckpointState = async (threadId: string, signal?: AbortSignal) => {
         if (!graph) {
             logChatMemoryServiceEvent('read-skipped-disabled', {})
             return createEmptyThreadState()
         }
 
-        const snapshot = await graph.getState(getConfig(threadId))
+        throwIfAborted(signal)
+        const snapshot = await graph.getState(getConfig(threadId, signal))
+        throwIfAborted(signal)
 
         return normalizeCheckpointThreadState(snapshot.values)
     }
 
+    const writeCheckpointState = async (threadId: string, state: AiMindThreadState, signal?: AbortSignal) => {
+        if (!graph) {
+            return
+        }
+
+        throwIfAborted(signal)
+        await graph.invoke(normalizeThreadState(state), getConfig(threadId, signal))
+        throwIfAborted(signal)
+    }
+
+    const serializeThreadWrite = <T>(threadId: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> => {
+        const previous = writeQueueByThread.get(threadId) ?? Promise.resolve()
+        const result = previous.then(operation, operation)
+        const completion = result.then(
+            () => undefined,
+            () => undefined
+        )
+
+        writeQueueByThread.set(threadId, completion)
+        void completion.then(() => {
+            if (writeQueueByThread.get(threadId) === completion) {
+                writeQueueByThread.delete(threadId)
+            }
+        })
+
+        return awaitWithAbortSignal(result, signal)
+    }
+
     return {
-        async deleteThreadState(threadId) {
+        async deleteThreadState(threadId, deleteOptions = {}) {
             if (!checkpointer) {
                 return
             }
@@ -168,10 +236,12 @@ export function createChatMemoryService(
                 throw new Error('The configured chat memory checkpointer does not support thread deletion.')
             }
 
+            throwIfAborted(deleteOptions.signal)
             await deleteThread.call(checkpointer, threadId)
+            throwIfAborted(deleteOptions.signal)
         },
 
-        async readThreadState(threadId) {
+        async readThreadState(threadId, readOptions = {}) {
             if (!graph) {
                 return {
                     restored: false,
@@ -179,7 +249,7 @@ export function createChatMemoryService(
                 }
             }
 
-            const checkpointState = await readCheckpointState(threadId)
+            const checkpointState = await readCheckpointState(threadId, readOptions.signal)
             const state = normalizeThreadState(checkpointState)
             const restored = !isEmptyState(checkpointState)
 
@@ -197,12 +267,8 @@ export function createChatMemoryService(
             }
         },
 
-        async writeThreadState(threadId, state) {
-            if (!graph) {
-                return
-            }
-
-            await graph.invoke(normalizeThreadState(state), getConfig(threadId))
+        async writeThreadState(threadId, state, writeOptions = {}) {
+            await writeCheckpointState(threadId, state, writeOptions.signal)
         },
 
         async compactThreadState(threadId, budget, compactOptions = {}) {
@@ -210,146 +276,162 @@ export function createChatMemoryService(
                 return null
             }
 
-            throwIfAborted(compactOptions.signal)
-            const state = await readCheckpointState(threadId)
-            throwIfAborted(compactOptions.signal)
-
-            if (!compactOptions.force && estimateChatMemoryTokens(state) < budget.compactionTriggerTokens) {
-                return null
-            }
-
-            compactOptions.onStatus?.({
-                status: 'started',
-                message: '自动压缩上下文中',
-            })
-
-            let compactionResult: ChatMemoryCompactionResult | null
-
-            try {
-                compactionResult = await compactThreadStateWithResult(state, budget, options.compactionGenerator, {
-                    force: compactOptions.force,
-                    signal: compactOptions.signal,
-                })
-                throwIfAborted(compactOptions.signal)
-            } catch (error) {
-                compactOptions.onStatus?.({
-                    status: 'failed',
-                    message: isAbortError(error) || compactOptions.signal?.aborted ? '上下文自动压缩已取消' : '上下文自动压缩失败',
-                })
-                if (compactOptions.signal?.aborted) {
+            return serializeThreadWrite(
+                threadId,
+                async () => {
                     throwIfAborted(compactOptions.signal)
-                }
-                throw error
-            }
-
-            if (!compactionResult?.wasCompacted) {
-                compactOptions.onStatus?.({
-                    status: 'failed',
-                    message: '上下文自动压缩失败',
-                })
-                logChatMemoryServiceEvent('compaction-write-skipped', {})
-                return null
-            }
-
-            try {
-                throwIfAborted(compactOptions.signal)
-                await this.writeThreadState(threadId, compactionResult.state)
-            } catch (error) {
-                compactOptions.onStatus?.({
-                    status: 'failed',
-                    message: isAbortError(error) || compactOptions.signal?.aborted ? '上下文自动压缩已取消' : '上下文自动压缩失败',
-                })
-                if (compactOptions.signal?.aborted) {
+                    const state = await readCheckpointState(threadId, compactOptions.signal)
                     throwIfAborted(compactOptions.signal)
-                }
-                throw error
-            }
 
-            compactOptions.onStatus?.({
-                status: 'succeeded',
-                message: '上下文已自动压缩',
-                pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
-                summaryLength: compactionResult.state.summary.length,
-            })
-            logChatMemoryServiceEvent('compaction-write-succeeded', {
-                messageCount: compactionResult.state.messages.length,
-                pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
-                summaryLength: compactionResult.state.summary.length,
-            })
+                    if (!compactOptions.force && estimateChatMemoryTokens(state) < budget.compactionTriggerTokens) {
+                        return null
+                    }
 
-            const promotionContext = compactOptions.promotionContext
-
-            if (promotionContext?.sessionId && promotionContext.sourceConversationId) {
-                try {
-                    await pinnedDecisionPromotionService.promotePinnedDecisionDiff({
-                        nextPinnedDecisions: compactionResult.nextPinnedDecisions,
-                        previousPinnedDecisions: compactionResult.previousPinnedDecisions,
-                        sessionId: promotionContext.sessionId,
-                        sourceConversationId: promotionContext.sourceConversationId,
+                    compactOptions.onStatus?.({
+                        status: 'started',
+                        message: '自动压缩上下文中',
                     })
-                } catch (error) {
-                    logChatMemoryServiceEvent('pinned-decision-promotion-failed', {
-                        errorName: error instanceof Error ? error.name : 'UnknownError',
-                    })
-                }
-            }
 
-            return compactionResult
+                    let compactionResult: ChatMemoryCompactionResult | null
+
+                    try {
+                        compactionResult = await compactThreadStateWithResult(state, budget, options.compactionGenerator, {
+                            force: compactOptions.force,
+                            signal: compactOptions.signal,
+                        })
+                        throwIfAborted(compactOptions.signal)
+                    } catch (error) {
+                        compactOptions.onStatus?.({
+                            status: 'failed',
+                            message: isAbortError(error) || compactOptions.signal?.aborted ? '上下文自动压缩已取消' : '上下文自动压缩失败',
+                        })
+                        if (compactOptions.signal?.aborted) {
+                            throwIfAborted(compactOptions.signal)
+                        }
+                        throw error
+                    }
+
+                    if (!compactionResult?.wasCompacted) {
+                        compactOptions.onStatus?.({
+                            status: 'failed',
+                            message: '上下文自动压缩失败',
+                        })
+                        logChatMemoryServiceEvent('compaction-write-skipped', {})
+                        return null
+                    }
+
+                    try {
+                        throwIfAborted(compactOptions.signal)
+                        await this.writeThreadState(threadId, compactionResult.state, { signal: compactOptions.signal })
+                    } catch (error) {
+                        compactOptions.onStatus?.({
+                            status: 'failed',
+                            message: isAbortError(error) || compactOptions.signal?.aborted ? '上下文自动压缩已取消' : '上下文自动压缩失败',
+                        })
+                        if (compactOptions.signal?.aborted) {
+                            throwIfAborted(compactOptions.signal)
+                        }
+                        throw error
+                    }
+
+                    compactOptions.onStatus?.({
+                        status: 'succeeded',
+                        message: '上下文已自动压缩',
+                        pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
+                        summaryLength: compactionResult.state.summary.length,
+                    })
+                    logChatMemoryServiceEvent('compaction-write-succeeded', {
+                        messageCount: compactionResult.state.messages.length,
+                        pinnedDecisionCount: compactionResult.state.pinnedDecisions.length,
+                        summaryLength: compactionResult.state.summary.length,
+                    })
+
+                    const promotionContext = compactOptions.promotionContext
+
+                    if (promotionContext?.sessionId && promotionContext.sourceConversationId) {
+                        try {
+                            await pinnedDecisionPromotionService.promotePinnedDecisionDiff({
+                                nextPinnedDecisions: compactionResult.nextPinnedDecisions,
+                                previousPinnedDecisions: compactionResult.previousPinnedDecisions,
+                                sessionId: promotionContext.sessionId,
+                                sourceConversationId: promotionContext.sourceConversationId,
+                            })
+                        } catch (error) {
+                            logChatMemoryServiceEvent('pinned-decision-promotion-failed', {
+                                errorName: error instanceof Error ? error.name : 'UnknownError',
+                            })
+                        }
+                    }
+
+                    return compactionResult
+                },
+                compactOptions.signal
+            )
         },
 
         async appendCompletedTurn(threadId, input, appendOptions = {}) {
-            const candidate = adaptFinalTurnCandidate(input)
+            return serializeThreadWrite(
+                threadId,
+                async () => {
+                    throwIfAborted(appendOptions.signal)
+                    const candidate = adaptFinalTurnCandidate(input)
 
-            if (!candidate || !graph) {
-                logChatMemoryServiceEvent('append-skipped', {
-                    assistantTextLength: typeof input.assistantText === 'string' ? input.assistantText.trim().length : 0,
-                    hasGraph: Boolean(graph),
-                    source: input.source ?? 'chat',
-                    userTextLength: typeof input.userText === 'string' ? input.userText.trim().length : 0,
-                })
-                return
-            }
+                    if (!candidate || !graph) {
+                        logChatMemoryServiceEvent('append-skipped', {
+                            assistantTextLength: typeof input.assistantText === 'string' ? input.assistantText.trim().length : 0,
+                            hasGraph: Boolean(graph),
+                            source: input.source ?? 'chat',
+                            userTextLength: typeof input.userText === 'string' ? input.userText.trim().length : 0,
+                        })
+                        return
+                    }
 
-            const state = await readCheckpointState(threadId)
+                    const state = await readCheckpointState(threadId, appendOptions.signal)
 
-            if (hasDuplicateFinalTurn(state.messages, candidate)) {
-                logChatMemoryServiceEvent('append-skipped-duplicate', {
-                    source: candidate.source,
-                })
-                return
-            }
+                    if (hasDuplicateFinalTurn(state.messages, candidate)) {
+                        logChatMemoryServiceEvent('append-skipped-duplicate', {
+                            source: candidate.source,
+                        })
+                        return
+                    }
 
-            const userMessage = createChatThreadMessage('user', candidate.userText, candidate.userMessageId)
-            const assistantMessage = createChatThreadMessage('assistant', candidate.assistantText, candidate.assistantMessageId)
+                    const userMessage = createChatThreadMessage('user', candidate.userText, candidate.userMessageId)
+                    const assistantMessage = createChatThreadMessage('assistant', candidate.assistantText, candidate.assistantMessageId)
 
-            if (!userMessage || !assistantMessage) {
-                logChatMemoryServiceEvent('append-skipped', {
-                    assistantTextLength: candidate.assistantText.length,
-                    hasGraph: Boolean(graph),
-                    source: candidate.source,
-                    userTextLength: candidate.userText.length,
-                })
-                return
-            }
+                    if (!userMessage || !assistantMessage) {
+                        logChatMemoryServiceEvent('append-skipped', {
+                            assistantTextLength: candidate.assistantText.length,
+                            hasGraph: Boolean(graph),
+                            source: candidate.source,
+                            userTextLength: candidate.userText.length,
+                        })
+                        return
+                    }
 
-            const messages = [...state.messages, userMessage, assistantMessage]
-            const nextState = {
-                ...state,
-                messages,
-            }
+                    const messages = [...state.messages, userMessage, assistantMessage]
+                    const nextState = {
+                        ...state,
+                        messages,
+                    }
 
-            try {
-                await this.writeThreadState(threadId, nextState)
-            } catch (error) {
-                logChatMemoryServiceEvent('raw-append-failed', {
-                    errorName: error instanceof Error ? error.name : 'UnknownError',
-                })
-                return
-            }
-            logChatMemoryServiceEvent('append-write-succeeded', {
-                messageCount: nextState.messages.length,
-                source: candidate.source,
-            })
+                    try {
+                        await this.writeThreadState(threadId, nextState, { signal: appendOptions.signal })
+                    } catch (error) {
+                        if (isAbortError(error) || appendOptions.signal?.aborted) {
+                            throw error
+                        }
+                        logChatMemoryServiceEvent('raw-append-failed', {
+                            errorName: error instanceof Error ? error.name : 'UnknownError',
+                        })
+                        return
+                    }
+                    logChatMemoryServiceEvent('append-write-succeeded', {
+                        messageCount: nextState.messages.length,
+                        source: candidate.source,
+                    })
+                },
+                appendOptions.signal
+            )
         },
     }
 }
@@ -376,13 +458,13 @@ export const chatMemoryService: ChatMemoryService = {
     compactThreadState(threadId, budget, options) {
         return getChatMemoryService().compactThreadState(threadId, budget, options)
     },
-    deleteThreadState(threadId) {
-        return getChatMemoryService().deleteThreadState(threadId)
+    deleteThreadState(threadId, options) {
+        return getChatMemoryService().deleteThreadState(threadId, options)
     },
-    readThreadState(threadId) {
-        return getChatMemoryService().readThreadState(threadId)
+    readThreadState(threadId, options) {
+        return getChatMemoryService().readThreadState(threadId, options)
     },
-    writeThreadState(threadId, state) {
-        return getChatMemoryService().writeThreadState(threadId, state)
+    writeThreadState(threadId, state, options) {
+        return getChatMemoryService().writeThreadState(threadId, state, options)
     },
 }

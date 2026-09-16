@@ -153,6 +153,10 @@ export class FakeStreamRecoveryPrisma {
 
             return event
         },
+        createMany: async ({ data }: { data: Array<Omit<StreamEventRecord, 'createdAt'>> }) => {
+            this.events.push(...data.map(event => ({ ...event, createdAt: testNow })))
+            return { count: data.length }
+        },
         deleteMany: async ({ where }: { where: { expiresAt?: { lte: Date }; runId?: string; sequence?: { lte: number } } }) => {
             const before = this.events.length
             this.events = this.events.filter(event => {

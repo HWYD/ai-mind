@@ -5,7 +5,11 @@ import { createRef } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatMessageList, type ChatMessageListHandle } from '@/components/chat/message-list/chat-message-list'
-import { createMessageHeightHintLayoutKey, createMessageRenderFingerprint } from '@/components/chat/message-list/message-height-hints'
+import {
+    createMessageHeightHintLayoutKey,
+    createMessageRenderFingerprint,
+    MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION,
+} from '@/components/chat/message-list/message-height-hints'
 import { getMessageCopyText } from '@/components/chat/message-list/shared/message-list-utils'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type { MindMessage } from '@/lib/ai/types/message'
@@ -229,7 +233,7 @@ function createDisclosureMessages(reasoningPartId = 'reasoning-disclosure'): Min
             createdAt: '2026-08-24T10:01:00.000Z',
             parts: [
                 {
-                    type: 'agent-step',
+                    type: 'agent-graph',
                     agentName: 'version-plan-to-tasklist-agent',
                     runId: 'agent-disclosure-run',
                     status: 'completed',
@@ -305,9 +309,9 @@ describe('ChatMessageList', () => {
                         renderFingerprint: createMessageRenderFingerprint(message),
                     },
                 ],
-                geometryVersion: 1,
-                key: 'conv-height-hints::g1|w856|r0|history-default',
-                layoutKey: 'g1|w856|r0|history-default',
+                geometryVersion: MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION,
+                key: `conv-height-hints::g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w856|r0|history-default`,
+                layoutKey: `g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w856|r0|history-default`,
                 messageColumnWidth: 856,
                 updatedAt: '2026-08-30T10:00:00.000Z',
             },
@@ -419,9 +423,9 @@ describe('ChatMessageList', () => {
             data: {
                 conversationId: props.conversationId,
                 entries: [],
-                geometryVersion: 1,
-                key: 'conv-stale-height-hints::g1|w856|r0|history-default',
-                layoutKey: 'g1|w856|r0|history-default',
+                geometryVersion: MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION,
+                key: `conv-stale-height-hints::g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w856|r0|history-default`,
+                layoutKey: `g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w856|r0|history-default`,
                 messageColumnWidth: 856,
                 updatedAt: '2026-08-30T10:00:00.000Z',
             },
@@ -434,9 +438,9 @@ describe('ChatMessageList', () => {
             data: {
                 conversationId: props.conversationId,
                 entries: [],
-                geometryVersion: 1,
-                key: 'conv-stale-height-hints::g1|w856|r1|history-default',
-                layoutKey: 'g1|w856|r1|history-default',
+                geometryVersion: MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION,
+                key: `conv-stale-height-hints::g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w856|r1|history-default`,
+                layoutKey: `g${MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION}|w856|r1|history-default`,
                 messageColumnWidth: 856,
                 updatedAt: '2026-08-30T10:00:00.000Z',
             },
@@ -750,7 +754,63 @@ describe('ChatMessageList', () => {
         expect(virtuosoHarness.scrollToIndex).not.toHaveBeenCalled()
     })
 
-    it('keeps an accepted follow-up as one turn while the assistant slot changes from loading to content', () => {
+    it('renders the General Agent Trace header while an assistant message awaits agent-run', () => {
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[
+                    {
+                        id: 'assistant-awaiting-agent-run',
+                        role: 'assistant',
+                        createdAt: '2026-09-13T00:00:00.000Z',
+                        parts: [],
+                    },
+                ]}
+                status="streaming"
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+            />
+        )
+
+        const traceTrigger = screen.getByRole('button', { name: '正在思考' })
+        expect(traceTrigger.className).toContain('h-[30px]')
+        expect(traceTrigger.className).toContain('text-[15px]')
+        expect(traceTrigger.querySelector('span.shimmer')?.textContent).toBe('正在思考')
+    })
+
+    it.each(['tasklist', 'delivery-chain', 'image'] as const)(
+        'does not render the General Trace before the dedicated %s agent emits its first part',
+        command => {
+            render(
+                <ChatMessageList
+                    enableReasoning={false}
+                    messages={[
+                        {
+                            ...createUserMessage(`user-${command}`),
+                            composer: { command: { label: command, name: command }, plainText: '' },
+                        },
+                        {
+                            createdAt: '2026-09-16T00:00:00.000Z',
+                            id: `assistant-${command}`,
+                            parts: [],
+                            role: 'assistant',
+                        },
+                    ]}
+                    status="streaming"
+                    onDeleteUserTurn={vi.fn(() => true)}
+                    onRegenerateLastTurn={vi.fn(() => true)}
+                    onSelectFollowUpQuestion={vi.fn()}
+                    onSelectSuggestion={vi.fn()}
+                />
+            )
+
+            expect(screen.queryByRole('button', { name: '正在思考' })).toBeNull()
+        }
+    )
+
+    it('keeps a 288px response reserve for an accepted follow-up through its terminal state', () => {
         const scrollParent = document.createElement('div')
         const historyMessages = [createUserMessage('history-question'), createAssistantMessage('history-answer')]
         const followUpMessage = createUserMessage('follow-up-question', '新的 follow-up 问题')
@@ -769,19 +829,25 @@ describe('ChatMessageList', () => {
             />
         )
 
+        const historyAssistantItem = screen.getByText('最终答案').closest('[data-item-index]') as HTMLElement
+        expect(historyAssistantItem.style.minHeight).toBe('')
         const submittedUserItem = screen.getByText('新的 follow-up 问题').closest('[data-item-index]') as HTMLElement
-        expect(submittedUserItem.dataset.acceptedTurnRunway).toBe('assistant-slot')
+        expect(submittedUserItem.dataset.acceptedTurnRunway).toBeUndefined()
         expect(submittedUserItem.style.paddingBlock).toBe('0px')
         const submittedRunway = submittedUserItem.style.getPropertyValue('--accepted-turn-reply-runway')
-        expect(submittedRunway).toBe('clamp(10rem, calc(72dvh - 198px - 4rem), 48rem)')
+        expect(submittedRunway).toBe('')
         const submittedAssistantSlot = submittedUserItem.querySelector('[data-slot="assistant-loading-slot"]') as HTMLElement
-        expect(submittedAssistantSlot.style.minHeight).toBe('var(--accepted-turn-reply-runway)')
-        expect(screen.getByText('正在思考')).toBeTruthy()
+        expect(submittedAssistantSlot.style.minHeight).toBe('288px')
+        const pendingTraceTrigger = screen.getByRole('button', { name: '正在思考' })
+        expect(pendingTraceTrigger.className).toContain('h-[30px]')
+        expect(pendingTraceTrigger.className).toContain('text-[15px]')
+        expect(pendingTraceTrigger.querySelector('span.shimmer')?.textContent).toBe('正在思考')
         const submittedData = virtuosoHarness.props?.data as Array<{ itemKey?: string; message?: MindMessage }>
         const submittedKey = (
             virtuosoHarness.props?.computeItemKey as (index: number, item: { itemKey?: string; message?: MindMessage }) => string
         )(submittedData.length - 1, submittedData.at(-1)!)
         expect(submittedData).toHaveLength(historyMessages.length + 1)
+        expect((virtuosoHarness.props?.heightEstimates as number[]).at(-1)).toBeGreaterThanOrEqual(288)
 
         const streamingAssistant = createAssistantMessage('follow-up-answer', '正在回答')
         page.rerender(
@@ -801,11 +867,9 @@ describe('ChatMessageList', () => {
 
         const streamingTurnItem = screen.getByText('正在回答').closest('[data-item-index]') as HTMLElement
         expect(screen.getByText('新的 follow-up 问题').closest('[data-item-index]')).toBe(streamingTurnItem)
-        expect(streamingTurnItem.dataset.acceptedTurnRunway).toBe('assistant-slot')
+        expect(streamingTurnItem.dataset.acceptedTurnRunway).toBeUndefined()
         expect(streamingTurnItem.style.minHeight).toBe('')
-        expect((streamingTurnItem.querySelector('[data-slot="assistant-loading-slot"]') as HTMLElement).style.minHeight).toBe(
-            'var(--accepted-turn-reply-runway)'
-        )
+        expect((streamingTurnItem.querySelector('[data-slot="assistant-loading-slot"]') as HTMLElement).style.minHeight).toBe('288px')
         expect(streamingTurnItem.style.getPropertyValue('--accepted-turn-reply-runway')).toBe(submittedRunway)
         const streamingData = virtuosoHarness.props?.data as Array<{ itemKey?: string; message?: MindMessage }>
         const streamingKey = (
@@ -813,6 +877,7 @@ describe('ChatMessageList', () => {
         )(streamingData.length - 1, streamingData.at(-1)!)
         expect(streamingData).toHaveLength(submittedData.length)
         expect(streamingKey).toBe(submittedKey)
+        expect((virtuosoHarness.props?.heightEstimates as number[]).at(-1)).toBeGreaterThanOrEqual(288)
 
         page.rerender(
             <ChatMessageList
@@ -831,7 +896,9 @@ describe('ChatMessageList', () => {
 
         const completedAssistantItem = screen.getByText('正在回答').closest('[data-item-index]') as HTMLElement
         expect(completedAssistantItem.dataset.acceptedTurnRunway).toBeUndefined()
-        expect(completedAssistantItem.style.minHeight).toBe('')
+        expect(completedAssistantItem.style.minHeight).toBe('288px')
+        const completedHistoryAssistantItem = screen.getByText('最终答案').closest('[data-item-index]') as HTMLElement
+        expect(completedHistoryAssistantItem.style.minHeight).toBe('')
 
         page.rerender(
             <ChatMessageList
@@ -850,7 +917,9 @@ describe('ChatMessageList', () => {
 
         const failedAssistantItem = screen.getByText('正在回答').closest('[data-item-index]') as HTMLElement
         expect(failedAssistantItem.dataset.acceptedTurnRunway).toBeUndefined()
-        expect(failedAssistantItem.style.minHeight).toBe('')
+        expect(failedAssistantItem.style.minHeight).toBe('288px')
+        const failedHistoryAssistantItem = screen.getByText('最终答案').closest('[data-item-index]') as HTMLElement
+        expect(failedHistoryAssistantItem.style.minHeight).toBe('')
     })
 
     it('reports committed item DOM indices through the Virtuoso Item component', () => {
@@ -922,7 +991,7 @@ describe('ChatMessageList', () => {
 
         expect([...fixturePartTypes]).toEqual(
             expect.arrayContaining([
-                'agent-step',
+                'agent-graph',
                 'image-brief',
                 'image-result',
                 'prompt',
@@ -1038,6 +1107,104 @@ describe('ChatMessageList', () => {
         expect(heightEstimates[998]).toBeGreaterThanOrEqual(380) // fixture 997: Resource
     })
 
+    it('uses a compact collapsed estimate for completed General Trace details', () => {
+        const defaultProps = {
+            enableReasoning: false,
+            onDeleteUserTurn: vi.fn(() => true),
+            onRegenerateLastTurn: vi.fn(() => true),
+            onSelectFollowUpQuestion: vi.fn(),
+            onSelectSuggestion: vi.fn(),
+            status: 'ready' as const,
+        }
+        const plainText: MindMessage = {
+            id: 'plain-text-estimate',
+            role: 'assistant',
+            createdAt: '2026-08-30T10:00:00.000Z',
+            parts: [{ id: 'plain-text-part', type: 'text', format: 'markdown', text: '最终答案' }],
+        }
+        const generalAgentMessage: MindMessage = {
+            id: 'general-agent-estimate',
+            role: 'assistant',
+            createdAt: '2026-08-30T10:01:00.000Z',
+            parts: [
+                { id: 'run-1', runId: 'run-1', status: 'completed', type: 'agent-run' },
+                {
+                    id: 'tool-1',
+                    input: '{"query":"a very large raw input"}',
+                    output: '{"result":"a very large raw output"}',
+                    status: 'completed',
+                    title: '搜索网页',
+                    toolName: 'web-search',
+                    type: 'tool',
+                },
+                { id: 'answer-1', type: 'text', format: 'markdown', text: '最终答案' },
+            ],
+        }
+
+        render(<ChatMessageList {...defaultProps} messages={[plainText, generalAgentMessage]} />)
+
+        const heightEstimates = virtuosoHarness.props?.heightEstimates as number[]
+
+        expect(heightEstimates[1] - heightEstimates[0]).toBe(42)
+    })
+
+    it('keeps the General Trace estimate expanded until an empty text-start gets visible text', () => {
+        const message: MindMessage = {
+            id: 'general-agent-empty-text-start',
+            role: 'assistant',
+            createdAt: '2026-08-30T10:00:00.000Z',
+            parts: [
+                { id: 'run-empty-text-start', runId: 'run-empty-text-start', status: 'running', type: 'agent-run' },
+                {
+                    id: 'tool-empty-text-start',
+                    input: '{}',
+                    status: 'completed',
+                    title: '搜索网页',
+                    toolName: 'web-search',
+                    type: 'tool',
+                },
+                { id: 'text-empty-text-start', type: 'text', format: 'markdown', text: '' },
+            ],
+        }
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[message]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="streaming"
+            />
+        )
+
+        expect((virtuosoHarness.props?.heightEstimates as number[])[0]).toBe(100)
+    })
+
+    it('does not cap structural estimates for text messages above 8,000px', () => {
+        const message: MindMessage = {
+            id: 'uncapped-long-text',
+            role: 'assistant',
+            createdAt: '2026-08-30T10:00:00.000Z',
+            parts: [{ type: 'text', format: 'markdown', text: Array.from({ length: 400 }, () => '超长消息行').join('\n') }],
+        }
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[message]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="ready"
+            />
+        )
+
+        expect((virtuosoHarness.props?.heightEstimates as number[])[0]).toBeGreaterThan(8_000)
+    })
+
     it('estimates only parts that the current assistant presentation can render', () => {
         const defaultProps = {
             enableReasoning: false,
@@ -1087,6 +1254,76 @@ describe('ChatMessageList', () => {
 
         expect(revealedHeightEstimates[1]).toBeGreaterThan(revealedHeightEstimates[0])
         expect(revealedHeightEstimates[2]).toBe(revealedHeightEstimates[0])
+    })
+
+    it('keeps the general agent run anchor visible for the assistant trace renderer', async () => {
+        const assistantWithGeneralRun: MindMessage = {
+            id: 'assistant-general-run-anchor',
+            role: 'assistant',
+            createdAt: '2026-08-30T10:02:00.000Z',
+            parts: [
+                { id: 'agent-run-anchor', type: 'agent-run', runId: 'run-general-anchor', status: 'completed' },
+                { id: 'agent-run-text', type: 'text', format: 'markdown', text: '通用 Agent 完成。' },
+            ],
+        }
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[assistantWithGeneralRun]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="ready"
+            />
+        )
+
+        await waitFor(() => expect(assistantMessageRenderSpy).toHaveBeenCalled())
+        const renderedProps = assistantMessageRenderSpy.mock.calls.at(-1)?.[0] as { contentParts: MindMessage['parts'] } | undefined
+
+        expect(renderedProps?.contentParts.some(part => part.type === 'agent-run')).toBe(true)
+    })
+
+    it('keeps the general agent trace disclosure key valid for manual reopen', () => {
+        const assistantWithGeneralTrace: MindMessage = {
+            id: 'assistant-general-run-disclosure',
+            role: 'assistant',
+            createdAt: '2026-08-30T10:02:30.000Z',
+            parts: [
+                { id: 'agent-run-disclosure', type: 'agent-run', runId: 'run-general-disclosure', status: 'completed' },
+                {
+                    id: 'tool-disclosure',
+                    input: '{}',
+                    status: 'completed',
+                    title: '搜索网页',
+                    toolName: 'web-search',
+                    type: 'tool',
+                },
+                { id: 'agent-run-disclosure-text', type: 'text', format: 'markdown', text: '通用 Agent 完成。' },
+            ],
+        }
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[assistantWithGeneralTrace]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="ready"
+            />
+        )
+
+        const trigger = screen.getByRole('button', { name: '已完成思考' })
+
+        expect(trigger.getAttribute('aria-expanded')).toBe('false')
+
+        fireEvent.click(trigger)
+
+        expect(trigger.getAttribute('aria-expanded')).toBe('true')
+        expect(screen.getByText('已搜索到 0 个来源')).toBeTruthy()
     })
 
     it('uses wider visual units for unbroken CJK prose than equal-length ASCII prose', () => {
@@ -1196,9 +1433,6 @@ describe('ChatMessageList', () => {
 
         fireEvent.click(screen.getByText('已完成思考'))
         fireEvent.click(screen.getByRole('button', { name: '已处理 3s' }))
-        const resourceDetails = screen.getByText('查看原始预览（最多 3000 字）').closest('details') as HTMLDetailsElement
-        resourceDetails.open = true
-        fireEvent(resourceDetails, new Event('toggle'))
         fireEvent.click(screen.getByRole('button', { name: 'Debug' }))
         fireEvent.click(screen.getByRole('button', { name: '收起详情' }))
 
@@ -1212,7 +1446,6 @@ describe('ChatMessageList', () => {
 
             expect(screen.getByText('已完成思考').closest('button')?.getAttribute('aria-expanded')).toBe('true')
             expect(screen.getByText('持久工作流详情')).toBeTruthy()
-            expect((screen.getByText('查看原始预览（最多 3000 字）').closest('details') as HTMLDetailsElement).open).toBe(true)
             expect(screen.getByRole('button', { name: '展开详情' })).toBeTruthy()
             fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
             expect(screen.getByText('Run')).toBeTruthy()

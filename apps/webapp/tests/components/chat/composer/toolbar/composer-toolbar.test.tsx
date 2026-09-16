@@ -62,6 +62,28 @@ describe('ComposerToolbar model selector', () => {
         })
     })
 
+    it('does not render manual skill mode choices', () => {
+        render(
+            <ComposerToolbar
+                enableReasoning
+                isModelLoading={false}
+                model="qwen/qwen3.6-flash"
+                modelGroups={modelGroups}
+                onEnableReasoningChange={vi.fn()}
+                onInsertTrigger={vi.fn()}
+                onModelChange={vi.fn()}
+                onStop={vi.fn()}
+                onSubmit={vi.fn()}
+                sendDisabled={false}
+                status="ready"
+            />
+        )
+
+        expect(screen.queryByLabelText('切换到 自动：根据问题自动选择合适能力')).toBeNull()
+        expect(screen.queryByLabelText('切换到 工具技能：优先使用计算、时间、文本处理与天气等工具能力')).toBeNull()
+        expect(screen.queryByLabelText('切换到 阅读技能：优先消费 demo 文档、项目上下文和 MCP 读取能力')).toBeNull()
+    })
+
     it('按线上模型和本地模型分组展示，并在切换模型时回调 onModelChange', async () => {
         const onModelChange = vi.fn()
 
@@ -74,11 +96,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={onModelChange}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -133,11 +153,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -169,11 +187,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -204,11 +220,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -229,11 +243,9 @@ describe('ComposerToolbar model selector', () => {
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
                 onModelChange={vi.fn()}
-                onSkillModeChange={vi.fn()}
                 onStop={vi.fn()}
                 onSubmit={vi.fn()}
                 sendDisabled={false}
-                skillMode="auto"
                 status="ready"
             />
         )
@@ -246,7 +258,7 @@ describe('ComposerToolbar model selector', () => {
         expect(modelButton.className).toContain('sm:text-sm')
     })
 
-    it('在工具技能右侧放置无数字的聊天记忆占用圆环', () => {
+    it('在能力自动选择模式下显示无数字的聊天记忆占用圆环', () => {
         const { container } = render(
             <TooltipProvider>
                 <ComposerToolbar
@@ -258,20 +270,17 @@ describe('ComposerToolbar model selector', () => {
                     onEnableReasoningChange={vi.fn()}
                     onInsertTrigger={vi.fn()}
                     onModelChange={vi.fn()}
-                    onSkillModeChange={vi.fn()}
                     onStop={vi.fn()}
                     onSubmit={vi.fn()}
                     sendDisabled={false}
-                    skillMode="auto"
                     status="ready"
                 />
             </TooltipProvider>
         )
 
-        const skillModeControl = container.querySelector('[data-slot="toggle-group"]')
         const indicator = screen.getByLabelText('聊天上下文已使用 13%（128K）')
 
-        expect(skillModeControl?.compareDocumentPosition(indicator) ?? 0).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expect(container.querySelector('[data-slot="toggle-group"]')).toBeNull()
         expect(indicator.textContent).toBe('')
     })
 })

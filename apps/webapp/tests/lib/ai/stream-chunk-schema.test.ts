@@ -721,3 +721,65 @@ describe('chatStreamChunkSchema HITL chunks', () => {
         ).toBe(false)
     })
 })
+
+describe('chatStreamChunkSchema public tool sources', () => {
+    const baseToolEnd = {
+        input: '',
+        output: '已读取页面',
+        partId: 'tool-source',
+        toolName: 'read-url',
+        type: 'tool-end',
+    } as const
+
+    const safeSource = {
+        originTool: 'read-url',
+        snippet: 'Agent documentation.',
+        sourceId: 'source-1',
+        status: 'read',
+        title: 'LangChain documentation',
+        url: 'https://docs.langchain.com/oss/javascript/langchain/agents',
+    } as const
+
+    it('兼容无 sources 的旧 tool-end，并接受最多五项安全来源', () => {
+        expect(chatStreamChunkSchema.safeParse(baseToolEnd).success).toBe(true)
+        expect(chatStreamChunkSchema.safeParse({ ...baseToolEnd, sources: [safeSource] }).success).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                ...baseToolEnd,
+                sources: Array.from({ length: 5 }, (_, index) => ({
+                    ...safeSource,
+                    sourceId: `source-${index}`,
+                    url: `https://example.com/${index}`,
+                })),
+            }).success
+        ).toBe(true)
+    })
+
+    it('拒绝超量、非 HTTP(S)、带凭据或带 raw 私有字段的来源', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                ...baseToolEnd,
+                sources: Array.from({ length: 6 }, (_, index) => ({
+                    ...safeSource,
+                    sourceId: `source-${index}`,
+                    url: `https://example.com/${index}`,
+                })),
+            }).success
+        ).toBe(false)
+        expect(chatStreamChunkSchema.safeParse({ ...baseToolEnd, sources: [{ ...safeSource, url: 'ftp://example.com' }] }).success).toBe(
+            false
+        )
+        expect(
+            chatStreamChunkSchema.safeParse({
+                ...baseToolEnd,
+                sources: [{ ...safeSource, url: 'https://user:password@example.com/private' }],
+            }).success
+        ).toBe(false)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                ...baseToolEnd,
+                sources: [{ ...safeSource, rawContent: 'private page body' }],
+            }).success
+        ).toBe(false)
+    })
+})

@@ -52,6 +52,12 @@ D:\secrets\ai-mind\production
 
 GitHub Actions 不持有模型 API Key、MCP Token、数据库密码或 SSL 私钥。
 
+## v0.6.0 Webapp Runtime Budget
+
+每个 webapp Node.js 进程最多接纳 8 个 active General ReAct Run；第 9 个请求 fail-fast，不在进程内排队。数据库连接预算按 `instanceCount x 10` 计算，`@ai-mind/database` 的 PrismaPg pool 固定为 `max=10`、`connectionTimeoutMillis=5000`、`idleTimeoutMillis=30000`，请求结束不得 disconnect process singleton。
+
+生产 webapp 如启用 Web Search/Extract，使用 server-only `TAVILY_API_KEY`。该 key 不得写入 `NEXT_PUBLIC_*`、浏览器、stream payload、Trace、Memory、snapshot 或日志；未配置时 external smoke 记录为未执行，普通测试使用 fake provider。
+
 ## Repository And Server Path Mapping
 
 仓库里的部署资产位于：

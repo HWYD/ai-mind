@@ -248,7 +248,7 @@ class ChatContextPreflightImpl implements ChatContextPreflight {
         }
 
         try {
-            this.memoryState = (await this.memoryService.readThreadState(this.options.threadId)).state
+            this.memoryState = (await this.memoryService.readThreadState(this.options.threadId, { signal: this.options.signal })).state
         } catch {
             this.memoryState = createEmptyThreadState()
         }

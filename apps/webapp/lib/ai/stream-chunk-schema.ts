@@ -1,6 +1,8 @@
 import {
     agentArtifactFormats,
     agentArtifactKinds,
+    publicSourceOriginTools,
+    publicSourceStatuses,
     streamErrorCodes,
     streamErrorScopes,
     streamErrorStages,
@@ -19,6 +21,32 @@ import {
 } from '@/lib/ai/tools/tasklist-structure/tasklist-structure-types'
 
 const strictObject = <Shape extends z.ZodRawShape>(shape: Shape) => z.object(shape).strict()
+
+const publicSourceUrlSchema = z
+    .string()
+    .trim()
+    .min(1)
+    .max(2048)
+    .url()
+    .superRefine((value, context) => {
+        const url = new URL(value)
+
+        if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.username || url.password || url.hash) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Public source URL must be canonical public HTTP(S) without credentials or fragments.',
+            })
+        }
+    })
+
+const publicSourceRecordSchema = strictObject({
+    originTool: z.enum(publicSourceOriginTools),
+    snippet: z.string().trim().min(1).max(500).optional(),
+    sourceId: z.string().trim().min(1).max(128),
+    status: z.enum(publicSourceStatuses),
+    title: z.string().trim().min(1).max(300),
+    url: publicSourceUrlSchema,
+})
 
 const agentTextArtifactMetadataSchema = z.object({
     charCount: z.number().int().nonnegative().optional(),
@@ -47,7 +75,7 @@ const agentGraphExpectedStepRangeSchema = z.custom<[number, number]>(
     value => Array.isArray(value) && value.length === 2 && value.every(item => Number.isInteger(item) && item > 0)
 )
 
-const agentGraphDebugSummarySchema = z
+export const agentGraphDebugSummarySchema = z
     .object({
         checkpointMode: z.enum(['memory', 'off', 'postgres']),
         currentNode: z.string().min(1).optional(),
@@ -253,6 +281,17 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
     strictObject({
         type: z.literal('start'),
         messageId: z.string().min(1),
+    }),
+    strictObject({
+        type: z.literal('agent-run-start'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+    }),
+    strictObject({
+        type: z.literal('agent-run-end'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        status: z.enum(['cancelled', 'completed', 'failed']),
     }),
     strictObject({
         type: z.literal('skill-selected'),
@@ -465,6 +504,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         serverId: z.string().min(1).optional(),
         input: z.string(),
         output: z.string(),
+        sources: z.array(publicSourceRecordSchema).max(5).optional(),
     }),
     strictObject({
         type: z.literal('prompt-start'),

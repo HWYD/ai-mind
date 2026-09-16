@@ -4,8 +4,9 @@ import { createId } from '@/lib/ai/create-id'
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
     AgentGraphNodeEntry,
+    AgentGraphPart,
     AgentInterruptPart,
-    AgentStepPart,
+    AgentRunPart,
     AgentTextArtifactViewModel,
     ImageBriefPart,
     ImageResultPart,
@@ -129,10 +130,10 @@ export function createPromptPart(
     }
 }
 
-export function createAgentGraphStepPart(node: AgentGraphNodeEntry, runId: string, agentName: string): AgentStepPart {
+export function createAgentGraphStepPart(node: AgentGraphNodeEntry, runId: string, agentName: string): AgentGraphPart {
     return {
-        id: `agent-step:${runId}`,
-        type: 'agent-step',
+        id: `agent-graph:${runId}`,
+        type: 'agent-graph',
         runId,
         agentName,
         graph: {
@@ -141,6 +142,15 @@ export function createAgentGraphStepPart(node: AgentGraphNodeEntry, runId: strin
             runtime: 'LangGraph',
         },
         status: node.status,
+    }
+}
+
+export function createAgentRunPart(runId: string, status: AgentRunPart['status'], id = `agent-run:${runId}`): AgentRunPart {
+    return {
+        id,
+        runId,
+        status,
+        type: 'agent-run',
     }
 }
 

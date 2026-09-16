@@ -1,5 +1,6 @@
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 
+import { normalizeSafeResourceUri } from '@/lib/ai/safe-public-url'
 import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
 import {
@@ -36,6 +37,7 @@ import {
     upsertAgentGraphDebugSummaryPart,
     upsertAgentGraphNodePart,
     upsertAgentInterruptPart,
+    upsertAgentRunPart,
     upsertImageBriefPart,
     upsertImageResultPart,
     upsertThreadMemoryStatusPart,
@@ -56,6 +58,7 @@ export interface StreamActiveState {
 export interface StreamMessageState {
     activeStream: StreamActiveState
     messages: MindMessage[]
+    terminalState: 'cancelled' | 'completed' | 'failed' | 'rejected' | 'version_mismatch' | null
 }
 
 /** text/reasoning buffer flush 时提交给 reducer 的最小文本增量。 */
@@ -87,6 +90,7 @@ export function createStreamMessageState(messages: MindMessage[] = []): StreamMe
     return {
         activeStream: createInitialActiveStreamState(),
         messages,
+        terminalState: null,
     }
 }
 
@@ -95,6 +99,7 @@ function applyMessages(state: StreamMessageState, messages: MindMessage[]): Stre
         state: {
             ...state,
             messages,
+            terminalState: state.terminalState,
         },
     }
 }
@@ -108,6 +113,7 @@ function applyMessagesAndActiveStream(
         state: {
             activeStream,
             messages,
+            terminalState: state.terminalState,
         },
     }
 }
@@ -239,7 +245,11 @@ export function reduceStreamTextDeltas(state: StreamMessageState, deltas: Pendin
  * 处理“结构性 chunk -> 消息树”的纯转换。
  * 请求、React status、AbortController 等副作用仍留在 useChatStream。
  */
-export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamChunk): StreamMessageReducerResult {
+export function reduceStreamChunk(
+    state: StreamMessageState,
+    chunk: ChatStreamChunk,
+    terminalState: StreamMessageState['terminalState'] = chunk.type === 'finish' ? 'completed' : state.terminalState
+): StreamMessageReducerResult {
     switch (chunk.type) {
         case 'start':
             return applyMessagesAndActiveStream(state, [...state.messages, createAssistantPlaceholder(chunk.messageId)], {
@@ -247,6 +257,14 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                 reasoningPartId: null,
                 textPartId: null,
             })
+        case 'agent-run-start':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertAgentRunPart(messages, messageId, chunk.runId, 'running', chunk.partId)
+            )
+        case 'agent-run-end':
+            return updateActiveMessage(state, (messages, messageId) =>
+                upsertAgentRunPart(messages, messageId, chunk.runId, chunk.status, chunk.partId)
+            )
         case 'agent-interrupt':
             return applyMessagesAndActiveStream(
                 state,
@@ -439,6 +457,7 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                     location: chunk.location ?? part.location,
                     output: chunk.output,
                     serverId: chunk.serverId ?? part.serverId,
+                    sources: chunk.sources,
                     source: chunk.source ?? part.source,
                     status: 'completed',
                     title: chunk.title ?? part.title,
@@ -464,7 +483,14 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
         case 'resource-start':
             return appendActivePart(
                 state,
-                createResourcePart(chunk.partId, chunk.resourceName, chunk.uri, chunk.serverId, chunk.source, chunk.location)
+                createResourcePart(
+                    chunk.partId,
+                    chunk.resourceName,
+                    normalizeSafeResourceUri(chunk.uri) ?? 'resource://unknown',
+                    chunk.serverId,
+                    chunk.source,
+                    chunk.location
+                )
             )
         case 'resource-end':
             return updateActiveMessage(state, (messages, messageId) =>
@@ -478,17 +504,24 @@ export function reduceStreamChunk(state: StreamMessageState, chunk: ChatStreamCh
                     serverId: chunk.serverId,
                     source: chunk.source ?? part.source,
                     status: 'completed',
-                    uri: chunk.uri,
+                    uri: normalizeSafeResourceUri(chunk.uri) ?? 'resource://unknown',
                 }))
             )
         case 'finish': {
             const activeMessage = findMessage(state.messages, state.activeStream.messageId)
+            const messageStatus = terminalState === 'cancelled' ? 'cancelled' : terminalState === 'completed' ? 'completed' : 'failed'
             const messages =
-                activeMessage?.status === 'paused' || !state.activeStream.messageId
+                activeMessage?.status === 'paused' || !state.activeStream.messageId || !terminalState
                     ? state.messages
-                    : updateMessageStatus(state.messages, state.activeStream.messageId, 'completed')
+                    : updateMessageStatus(state.messages, state.activeStream.messageId, messageStatus)
 
-            return applyMessagesAndActiveStream(state, pruneTransientMessages(messages), createInitialActiveStreamState())
+            return {
+                state: {
+                    activeStream: createInitialActiveStreamState(),
+                    messages: pruneTransientMessages(messages),
+                    terminalState,
+                },
+            }
         }
         case 'error':
             return handleStreamPartError(state, chunk)

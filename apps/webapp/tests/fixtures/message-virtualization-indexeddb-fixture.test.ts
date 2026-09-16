@@ -109,7 +109,7 @@ describe('buildIndexedDbFixturePayload', () => {
                         id: 'source-agent-part',
                         runId: 'source-agent-run',
                         status: 'completed',
-                        type: 'agent-step',
+                        type: 'agent-graph',
                     },
                 ],
                 role: 'assistant',
@@ -172,10 +172,10 @@ describe('buildIndexedDbFixturePayload', () => {
                 {
                     agentName: 'Tasklist Agent',
                     graph: { nodes: [], routes: [], runtime: 'LangGraph' },
-                    id: 'agent-step',
+                    id: 'agent-graph',
                     runId: 'agent-run',
                     status: 'completed',
-                    type: 'agent-step',
+                    type: 'agent-graph',
                 },
             ],
             role: 'assistant',
@@ -231,7 +231,7 @@ describe('buildIndexedDbFixturePayload', () => {
                 imageCacheEntries: [cachedImage],
                 snapshots: [createSnapshot('largest', [createTextMessage('text', 'assistant', 'text'), imageMessage])],
             })
-        ).toThrow('缺少已完成 agent-step donor。')
+        ).toThrow('缺少已完成 agent-graph donor。')
     })
 
     it('does not copy Agent Interrupt messages into the read-only fixture', () => {
@@ -279,10 +279,10 @@ describe('buildIndexedDbFixturePayload', () => {
                 {
                     agentName: 'Tasklist Agent',
                     graph: { nodes: [], routes: [], runtime: 'LangGraph' },
-                    id: 'agent-step',
+                    id: 'agent-graph',
                     runId: 'agent-run',
                     status: 'completed',
-                    type: 'agent-step',
+                    type: 'agent-graph',
                 },
             ],
             role: 'assistant',

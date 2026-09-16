@@ -1,11 +1,12 @@
 import type { AgentArtifactFormat, AgentArtifactKind, AgentGraphDebugSummary, PublicImageBriefSummary } from '@ai-mind/stream-core/protocol'
+import type { PublicSourceRecord } from '@ai-mind/stream-core/protocol'
 
 import type { TasklistAgentInterruptPayload } from '@/lib/ai/runtime/version-plan-tasklist-agent/contract/hitl-review-schema'
 
 import type { ChatComposerDisplaySegment, ChatComposerPayload } from './chat'
 
 export type MindRole = 'system' | 'user' | 'assistant'
-export type MindMessageStatus = 'completed' | 'failed' | 'paused' | 'resuming' | 'streaming'
+export type MindMessageStatus = 'cancelled' | 'completed' | 'failed' | 'paused' | 'resuming' | 'streaming'
 export type CapabilitySource = 'internal' | 'mcp'
 export type CapabilityLocation = 'local' | 'remote'
 
@@ -40,6 +41,7 @@ export interface ToolPart extends BasePart {
     input: string
     output?: string
     error?: string
+    sources?: PublicSourceRecord[]
 }
 
 export interface ResourcePart extends BasePart {
@@ -162,12 +164,20 @@ export interface AgentGraphTrace {
     runtime: 'LangGraph'
 }
 
-export interface AgentStepPart extends BasePart {
-    type: 'agent-step'
+export interface AgentGraphPart extends BasePart {
+    type: 'agent-graph'
     agentName: string
     graph: AgentGraphTrace
     runId: string
     status: AgentStepStatus
+}
+
+export type AgentRunPartStatus = 'cancelled' | 'completed' | 'failed' | 'running'
+
+export interface AgentRunPart extends BasePart {
+    type: 'agent-run'
+    runId: string
+    status: AgentRunPartStatus
 }
 
 export type AgentInterruptPartStatus = 'decided' | 'failed' | 'pending' | 'rejected' | 'submitting'
@@ -212,7 +222,8 @@ export type MindMessagePart =
     | WorkflowProgressPart
     | ImageBriefPart
     | ImageResultPart
-    | AgentStepPart
+    | AgentRunPart
+    | AgentGraphPart
     | AgentInterruptPart
 
 export interface MindMessage {

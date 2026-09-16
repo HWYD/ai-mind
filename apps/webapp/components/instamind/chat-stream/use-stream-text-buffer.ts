@@ -17,9 +17,22 @@ export function useStreamTextBuffer({ flushIntervalMs, flushTextDeltas }: UseStr
     const pendingTextDeltasRef = useRef<Map<string, PendingTextDelta>>(new Map())
     const flushTimerRef = useRef<number | null>(null)
     const flushRafRef = useRef<number | null>(null)
+    const flushTextDeltasRef = useRef(flushTextDeltas)
 
     useEffect(() => {
+        flushTextDeltasRef.current = flushTextDeltas
+    }, [flushTextDeltas])
+
+    useEffect(() => {
+        const pendingTextDeltas = pendingTextDeltasRef.current
+
         return () => {
+            if (pendingTextDeltas.size > 0) {
+                const pending = Array.from(pendingTextDeltas.values())
+                pendingTextDeltas.clear()
+                flushTextDeltasRef.current(pending)
+            }
+
             if (flushTimerRef.current !== null) {
                 window.clearTimeout(flushTimerRef.current)
             }
@@ -57,7 +70,7 @@ export function useStreamTextBuffer({ flushIntervalMs, flushTextDeltas }: UseStr
         const pending = Array.from(pendingTextDeltasRef.current.values())
         pendingTextDeltasRef.current.clear()
 
-        flushTextDeltas(pending)
+        flushTextDeltasRef.current(pending)
     }
 
     function clear() {

@@ -1,17 +1,15 @@
 import { StreamLifecycle, writeStaticTextPart } from '@ai-mind/stream-core'
-import type { StreamErrorCode } from '@ai-mind/stream-core/protocol'
-import type { AIMessage, BaseMessage, ToolCall, ToolMessage } from '@langchain/core/messages'
+import type { ChatStreamChunk, StreamErrorCode } from '@ai-mind/stream-core/protocol'
+import type { BaseMessage } from '@langchain/core/messages'
 import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
 
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError, isInvalidSkillError } from '@/lib/ai/error-utils'
 import type { AiMindChatModelHandle } from '@/lib/ai/model-provider'
 import { logProviderError } from '@/lib/ai/model-provider'
+import type { StreamTerminalStateDto } from '@/lib/ai/stream-recovery/contracts'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
-import { hasVisibleAssistantText, streamAssistantParts, streamPlanningResponse, stripMessageText } from './assistant-stream'
-import { decideAuthoritativeToolAnswer, shouldBypassAuthoritativeAnswer } from './authoritative-answer'
-import { executeCapabilityContextInvocations, resolveCapabilityContextInvocations } from './capability-context'
 import { type ChatContextPreflight, createChatContextPreflight } from './chat-context-preflight'
 import {
     buildChatConversationThreadId,
@@ -23,19 +21,12 @@ import {
     type ThreadMemoryStatusEvent,
 } from './chat-memory'
 import { buildSystemMessages, createChatSession, withChatMemoryContextMessages } from './chat-session'
-import { executeComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
+import { prepareComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
 import { startDeliveryChainRun } from './delivery-chain'
-import { PromptRuntimeError, resolvePromptContextInvocation } from './prompt-context'
-import { logSkillRuntime, normalizeKnownRuntimeError, throwIfAborted, writeStreamErrorChunk } from './stream-errors'
-import { executeToolCall, formatToolInput, normalizeAndValidateToolCalls, writeToolValidationErrors } from './tool-runtime'
-import type {
-    ChatExecutionContext,
-    ChatSession,
-    ExecutedToolResult,
-    ResolvedChatExecutionContext,
-    ToolValidationResult,
-    WriteChunk,
-} from './types'
+import { createGeneralReActRunContext, GeneralReActAgentRunner, RetryPermitPool } from './general-react-agent'
+import { generalReActExecutionGate, type GeneralReActExecutionPermit } from './general-react-agent/execution-gate'
+import { logSkillRuntime, normalizeKnownRuntimeError, throwIfAborted } from './stream-errors'
+import type { ChatSession, PreparedGeneralChatContext, ResolvedChatExecutionContext, WriteChunk } from './types'
 import { buildUserMemoryContextMessages, processCompletedTurnForMemory, userMemoryService } from './user-memory'
 import {
     createTasklistAgentModelSet,
@@ -47,56 +38,11 @@ import {
 
 interface ChatOrchestratorOptions {
     context: ResolvedChatExecutionContext
+    deferCleanup?: (cleanup: () => void | Promise<void>) => void
     isClosed: () => boolean
     request: ChatRequest
     writeChunk: WriteChunk
-}
-
-interface PlanningAttemptResult {
-    hasVisibleText: boolean
-    validationResult: ToolValidationResult
-}
-
-interface PlanningToolingResult {
-    kind: 'tooling'
-    planningMessage: AIMessage
-    toolCalls: ToolCall[]
-    toolErrors: ToolValidationResult['toolErrors']
-}
-
-interface PlanningValidationOnlyResult {
-    kind: 'validation-only'
-    toolErrors: ToolValidationResult['toolErrors']
-}
-
-interface PlanningDirectFallbackResult {
-    kind: 'direct-fallback'
-}
-
-type PlanningStageResult = PlanningToolingResult | PlanningValidationOnlyResult | PlanningDirectFallbackResult
-
-interface ToolExecutionStageResult {
-    executedToolResults: ExecutedToolResult[]
-    toolMessages: ToolMessage[]
-}
-
-// ChatOrchestrator 是单轮聊天请求的总调度器：
-// - 更具体的结构化能力先尝试接管，例如 v0.1.0 的受控单 Agent。
-// - 未命中结构化能力时，再依次回落到 Composer Context、Capability Context、Tool Calling 或普通直答。
-// 这里不直接实现具体 Agent / Tool / Resource 细节，只负责确定本轮应该走哪条主链路。
-async function streamDirectAnswer(
-    model: ChatSession['baseModel'],
-    langChainMessages: BaseMessage[],
-    context: ChatExecutionContext,
-    writeChunk: WriteChunk,
-    isClosed: () => boolean,
-    emitReasoning: boolean
-) {
-    const stream = await model.stream(langChainMessages, {
-        signal: context.signal,
-    })
-
-    return streamAssistantParts(stream, context, writeChunk, isClosed, emitReasoning)
+    writeTerminalChunk?: (chunk: ChatStreamChunk, terminalState: StreamTerminalStateDto) => Promise<void>
 }
 
 function getLastUserMessageText(request: ChatRequest) {
@@ -116,6 +62,20 @@ function getLastUserMessageText(request: ChatRequest) {
     return ''
 }
 
+function getLastUserMessageId(request: ChatRequest) {
+    for (let index = request.messages.length - 1; index >= 0; index -= 1) {
+        const message = request.messages[index]
+
+        if (message.role !== 'user') {
+            continue
+        }
+
+        return message.id
+    }
+
+    return undefined
+}
+
 function isUserMemoryContextEligibleRequest(request: ChatRequest): boolean {
     return !request.composer?.command
 }
@@ -132,9 +92,11 @@ function isDraftConversationIdentity(conversationId: string | undefined): boolea
 
 export class ChatOrchestrator {
     private readonly context: ResolvedChatExecutionContext
+    private readonly deferCleanup?: ChatOrchestratorOptions['deferCleanup']
     private readonly isClosed: () => boolean
     private readonly request: ChatRequest
     private readonly writeChunk: WriteChunk
+    private readonly writeTerminalChunk?: ChatOrchestratorOptions['writeTerminalChunk']
     private readonly assistantMessageId = createId()
     private chatContextPreflight: ChatContextPreflight | null = null
     private threadMemoryStatusActive = false
@@ -143,9 +105,11 @@ export class ChatOrchestrator {
 
     constructor(options: ChatOrchestratorOptions) {
         this.context = options.context
+        this.deferCleanup = options.deferCleanup
         this.isClosed = options.isClosed
         this.request = options.request
         this.writeChunk = options.writeChunk
+        this.writeTerminalChunk = options.writeTerminalChunk
     }
 
     private shouldEmitReasoning() {
@@ -197,7 +161,82 @@ export class ChatOrchestrator {
         return buildChatConversationThreadId(this.context.sessionId, this.resolveValidatedConversationId())
     }
 
-    private async appendCompletedChatMemoryTurn(assistantText: string | undefined, source: FinalTurnSource = 'chat') {
+    /**
+     * completed terminal 已经 durable-project 后，Memory 属于可降级的后置副作用。
+     * 它不能继续占住 Run 的 execution owner；真正的底层 I/O 取消由 Memory
+     * service 的 signal 契约负责，这里只保证 orchestration 不等待迟到工作。
+     */
+    private async runPostTerminalMemorySideEffect(
+        stage: 'append-turn' | 'touch-conversation',
+        operation: () => Promise<unknown>
+    ): Promise<'aborted' | 'completed' | 'failed'> {
+        const signal = this.context.signal
+
+        if (signal?.aborted) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'post-terminal-side-effect-aborted',
+                stage,
+            })
+            return 'aborted'
+        }
+
+        const operationResult = Promise.resolve()
+            .then(operation)
+            .then(
+                () => 'completed' as const,
+                error => {
+                    // 即使取消已先结束 orchestration，也要消费迟到 rejection，避免它变成未处理的 Promise。
+                    logSkillRuntime('chat-memory-append-failed', {
+                        errorName: error instanceof Error ? error.name : 'UnknownError',
+                        stage,
+                    })
+                    return 'failed' as const
+                }
+            )
+
+        if (!signal) {
+            return operationResult
+        }
+
+        let removeAbortListener: (() => void) | undefined
+        const aborted = new Promise<'aborted'>(resolve => {
+            const onAbort = () => resolve('aborted')
+
+            signal.addEventListener('abort', onAbort, { once: true })
+            removeAbortListener = () => signal.removeEventListener('abort', onAbort)
+        })
+
+        if (signal.aborted) {
+            removeAbortListener()
+            return 'aborted'
+        }
+
+        const result = await Promise.race([operationResult, aborted])
+        removeAbortListener()
+
+        if (result === 'aborted') {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'post-terminal-side-effect-aborted',
+                stage,
+            })
+        }
+
+        return result
+    }
+
+    private async appendCompletedChatMemoryTurn(
+        assistantText: string | undefined,
+        source: FinalTurnSource = 'chat',
+        memoryWriteEligible = true
+    ) {
+        if (!memoryWriteEligible) {
+            logSkillRuntime('chat-memory-append-skipped', {
+                reason: 'run-not-memory-write-eligible',
+                source,
+            })
+            return
+        }
+
         const normalizedAssistantText = assistantText?.trim()
 
         if (!normalizedAssistantText) {
@@ -230,6 +269,7 @@ export class ChatOrchestrator {
         }
 
         const userText = getLastUserMessageText(this.request)
+        const userMessageId = getLastUserMessageId(this.request)
 
         if (!userText) {
             logSkillRuntime('chat-memory-append-skipped', {
@@ -259,40 +299,38 @@ export class ChatOrchestrator {
             return
         }
 
-        try {
-            await chatMemoryService.appendCompletedTurn(
+        const appendResult = await this.runPostTerminalMemorySideEffect('append-turn', () =>
+            chatMemoryService.appendCompletedTurn(
                 threadId,
                 {
                     assistantMessageId: this.assistantMessageId,
                     assistantText: normalizedAssistantText,
                     source,
+                    ...(userMessageId ? { userMessageId } : {}),
                     userText,
                 },
                 {
-                    onStatus: event => this.writeThreadMemoryStatus(event),
                     promotionContext: {
-                        sessionId: this.context.sessionId,
+                        sessionId: this.context.sessionId!,
                         sourceConversationId,
                     },
+                    signal: this.context.signal,
                 }
             )
-        } catch (error) {
-            logSkillRuntime('chat-memory-append-failed', {
-                errorName: error instanceof Error ? error.name : 'UnknownError',
-                stage: 'append-turn',
-            })
-            // Chat memory 是可降级能力，失败不影响已经完成的用户回答。
+        )
+
+        if (appendResult === 'aborted') {
+            return
         }
 
-        try {
-            await conversationRegistryService.touchConversation(this.context.sessionId, sourceConversationId, {
+        const touchResult = await this.runPostTerminalMemorySideEffect('touch-conversation', () =>
+            conversationRegistryService.touchConversation(this.context.sessionId!, sourceConversationId, {
                 hasMessages: true,
             })
-        } catch (error) {
-            logSkillRuntime('chat-memory-append-failed', {
-                errorName: error instanceof Error ? error.name : 'UnknownError',
-                stage: 'touch-conversation',
-            })
+        )
+
+        if (touchResult === 'aborted' || this.context.signal?.aborted) {
+            return
         }
 
         void this.enqueueCompletedUserMemoryExtraction({
@@ -304,7 +342,7 @@ export class ChatOrchestrator {
 
     private async enqueueCompletedUserMemoryExtraction(input: { assistantText: string; source: FinalTurnSource; userText: string }) {
         try {
-            if (!this.context.sessionId) {
+            if (!this.context.sessionId || this.context.signal?.aborted) {
                 return
             }
 
@@ -329,7 +367,12 @@ export class ChatOrchestrator {
                 const threadId = this.resolveConversationThreadId()
 
                 if (threadId) {
-                    const threadState = await chatMemoryService.readThreadState(threadId)
+                    const threadState = await chatMemoryService.readThreadState(threadId, { signal: this.context.signal })
+
+                    if (this.context.signal?.aborted) {
+                        return
+                    }
+
                     safeShortTermContext = {
                         pinnedDecisions: threadState.state.pinnedDecisions,
                         summary: threadState.state.summary,
@@ -337,6 +380,10 @@ export class ChatOrchestrator {
                 }
             } catch {
                 safeShortTermContext = undefined
+            }
+
+            if (this.context.signal?.aborted) {
+                return
             }
 
             const result = await processCompletedTurnForMemory({
@@ -402,281 +449,6 @@ export class ChatOrchestrator {
         )
 
         return prepared.messages
-    }
-
-    private buildPlanningMessages(session: ChatSession, withRetryPrompt: boolean) {
-        // 普通 Tool Calling 的 planning 阶段仍沿用 Skill + Tool prompt 组合。
-        return [
-            ...buildSystemMessages(
-                session.skillSystemPrompt,
-                session.skillOutputPolicyPrompt,
-                session.toolUseSystemPrompt,
-                withRetryPrompt ? session.toolRetrySystemPrompt : undefined
-            ),
-            ...session.langChainMessages,
-        ]
-    }
-
-    private async runPlanningAttempt(session: ChatSession, withRetryPrompt: boolean): Promise<PlanningAttemptResult> {
-        if (!session.toolBoundModel) {
-            throw new Error('toolBoundModel is required for planning stage')
-        }
-
-        const planningMessages = await this.prepareChatContextMessages(
-            this.buildPlanningMessages(session, withRetryPrompt),
-            true,
-            session.activeTools.map(toolDefinition => convertToOpenAITool(toolDefinition.tool))
-        )
-
-        // Planning stage consumes one bound-model stream and folds it into:
-        // - executable tool calls
-        // - normalized validation errors
-        // - visibility status for assistant text content
-        const planningStream = await session.toolBoundModel.stream(planningMessages, {
-            signal: this.context.signal,
-        })
-        const response = await streamPlanningResponse(
-            planningStream,
-            this.context,
-            this.writeChunk,
-            this.isClosed,
-            this.shouldEmitReasoning()
-        )
-        const validationResult = normalizeAndValidateToolCalls(response, session.activeToolDefinitionMap)
-        const hasVisibleText = hasVisibleAssistantText(response)
-
-        logSkillRuntime(withRetryPrompt ? 'retry-finished' : 'planning-finished', {
-            skill: session.skillDefinition?.skillId ?? null,
-            toolCalls: validationResult.toolCalls.map(toolCall => toolCall.name),
-            hasVisibleText,
-            validationErrors: validationResult.toolErrors.length,
-        })
-
-        return {
-            hasVisibleText,
-            validationResult,
-        }
-    }
-
-    private toPlanningStageResult(attempt: PlanningAttemptResult): PlanningStageResult {
-        if (attempt.validationResult.toolCalls.length === 0) {
-            return {
-                kind: 'validation-only',
-                toolErrors: attempt.validationResult.toolErrors,
-            }
-        }
-
-        return {
-            kind: 'tooling',
-            planningMessage: attempt.validationResult.planningMessage,
-            toolCalls: attempt.validationResult.toolCalls,
-            toolErrors: attempt.validationResult.toolErrors,
-        }
-    }
-
-    private async runPlanningStage(session: ChatSession): Promise<PlanningStageResult> {
-        const firstAttempt = await this.runPlanningAttempt(session, false)
-
-        if (firstAttempt.validationResult.toolCalls.length === 0 && !firstAttempt.hasVisibleText) {
-            const retryAttempt = await this.runPlanningAttempt(session, true)
-
-            if (retryAttempt.validationResult.toolCalls.length === 0 && !retryAttempt.hasVisibleText) {
-                return {
-                    kind: 'direct-fallback',
-                }
-            }
-
-            return this.toPlanningStageResult(retryAttempt)
-        }
-
-        return this.toPlanningStageResult(firstAttempt)
-    }
-
-    private async runToolExecutionStage(
-        session: ChatSession,
-        toolCalls: ToolCall[],
-        toolErrors: ToolValidationResult['toolErrors']
-    ): Promise<ToolExecutionStageResult> {
-        const toolMessages: ToolMessage[] = [...writeToolValidationErrors(toolErrors, { writeChunk: this.writeChunk, stage: 'planning' })]
-        const executedToolResults: ExecutedToolResult[] = []
-
-        for (const toolCall of toolCalls) {
-            const executedToolResult = await executeToolCall(toolCall, this.context, this.writeChunk, {
-                errorStage: 'tool-execution',
-                toolDefinitionMap: session.activeToolDefinitionMap,
-            })
-            executedToolResults.push(executedToolResult)
-            toolMessages.push(executedToolResult.toolMessage)
-        }
-
-        return {
-            executedToolResults,
-            toolMessages,
-        }
-    }
-
-    private async runFinalAnswerStage(
-        session: ChatSession,
-        planningMessage: AIMessage,
-        executedToolResults: ExecutedToolResult[],
-        toolMessages: ToolMessage[]
-    ) {
-        throwIfAborted(this.context.signal)
-
-        let promptContextMessages: BaseMessage[] = []
-        const promptInvocation = resolvePromptContextInvocation(this.request, executedToolResults)
-
-        if (promptInvocation) {
-            const promptPartId = createId()
-
-            this.writeChunk({
-                type: 'prompt-start',
-                partId: promptPartId,
-                promptName: promptInvocation.promptName,
-                source: promptInvocation.source,
-                location: promptInvocation.location,
-                serverId: promptInvocation.serverId,
-                input: promptInvocation.input,
-            })
-
-            try {
-                promptContextMessages = await promptInvocation.execute()
-                this.writeChunk({
-                    type: 'prompt-end',
-                    partId: promptPartId,
-                    promptName: promptInvocation.promptName,
-                    source: promptInvocation.source,
-                    location: promptInvocation.location,
-                    serverId: promptInvocation.serverId,
-                    status: 'completed',
-                    messageCount: promptContextMessages.length,
-                })
-            } catch (error) {
-                const promptError =
-                    error instanceof PromptRuntimeError
-                        ? error
-                        : new PromptRuntimeError(
-                              'PROMPT_FETCH_FAILED',
-                              error instanceof Error ? error.message : 'Prompt context build failed.',
-                              {
-                                  promptName: promptInvocation.promptName,
-                                  serverId: promptInvocation.serverId,
-                              }
-                          )
-
-                writeStreamErrorChunk(this.writeChunk, {
-                    scope: 'prompt',
-                    errorCode: promptError.code,
-                    retryable: true,
-                    message: promptError.message,
-                    stage: 'final-answer',
-                    partId: promptPartId,
-                    source: promptInvocation.source,
-                    location: promptInvocation.location,
-                    serverId: promptError.serverId,
-                    promptName: promptError.promptName,
-                })
-                this.writeChunk({
-                    type: 'prompt-end',
-                    partId: promptPartId,
-                    promptName: promptInvocation.promptName,
-                    source: promptInvocation.source,
-                    location: promptInvocation.location,
-                    serverId: promptInvocation.serverId,
-                    status: 'failed',
-                    messageCount: 0,
-                })
-            }
-        }
-
-        // 普通 Tool Calling 的最终回答阶段：把 planning 消息、ToolMessage 和可选 Prompt 上下文合并，
-        // 再交给基础模型生成自然语言收束。Agent 的最终回答由 Agent runner 自己生成，不复用这里。
-        const finalMessages = await this.prepareChatContextMessages(
-            [
-                ...buildSystemMessages(
-                    session.skillSystemPrompt,
-                    session.skillOutputPolicyPrompt,
-                    session.toolUseSystemPrompt,
-                    session.toolResultSystemPrompt
-                ),
-                ...session.langChainMessages,
-                stripMessageText(planningMessage),
-                ...toolMessages,
-                ...promptContextMessages,
-            ],
-            true
-        )
-        const finalStream = await session.baseModel.stream(finalMessages, {
-            signal: this.context.signal,
-        })
-
-        return streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
-    }
-
-    private async runCapabilityContextAnswerStage(session: ChatSession): Promise<false | string> {
-        // Capability Context 是比普通 Tool Calling 更早的“上下文注入”分支。
-        // 它只处理固定 capability 场景，例如 remote resource / prompt 已被 runtime 主动解析出的情况。
-        // 命中后由 runtime 主动获取上下文，再进入最终回答阶段；未命中则继续原有 tool/direct-answer 链路。
-        const capabilityInvocations = resolveCapabilityContextInvocations(this.request, session.skillDefinition)
-
-        if (capabilityInvocations.length === 0) {
-            return false
-        }
-
-        const capabilityContextMessages = await executeCapabilityContextInvocations(capabilityInvocations, {
-            context: this.context,
-            writeChunk: this.writeChunk,
-        })
-        const finalMessages = await this.prepareChatContextMessages(
-            [
-                ...buildSystemMessages(
-                    session.skillSystemPrompt,
-                    session.skillOutputPolicyPrompt,
-                    // 这条 prompt 只约束 capability context 的最终回答，避免模型把内部注入状态暴露给用户。
-                    '请优先基于本轮 runtime 已获取的 capability 结果或 Prompt 指令回答；不要向用户暴露“已注入/未注入上下文”等内部执行状态。如果某个 capability 调用失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
-                ),
-                ...session.langChainMessages,
-                ...capabilityContextMessages,
-            ],
-            false
-        )
-        const finalStream = await session.baseModel.stream(finalMessages, {
-            signal: this.context.signal,
-        })
-
-        return streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
-    }
-
-    private async runComposerContextAnswerStage(session: ChatSession): Promise<false | string> {
-        // Composer Context 处理用户在输入框里显式选择的 command / reference。
-        // 注意：/tasklist + demo://version-plans/*.md 会先被 Agent 分支接管，不会落到这里变成普通 docs summary。
-        const composerInvocation = resolveComposerContextInvocation(this.request)
-
-        if (!composerInvocation) {
-            return false
-        }
-
-        const composerContextMessages = await executeComposerContextInvocation(composerInvocation, {
-            context: this.context,
-            writeChunk: this.writeChunk,
-        })
-        const finalMessages = await this.prepareChatContextMessages(
-            [
-                ...buildSystemMessages(
-                    session.skillSystemPrompt,
-                    session.skillOutputPolicyPrompt,
-                    '请优先基于本轮 Composer 引用读取到的上下文或 Prompt 指令回答；不要向用户暴露“已注入上下文”等内部执行状态。如果资源或 Prompt 获取失败，请简短说明能力暂时不可用，不要编造未获取到的信息。'
-                ),
-                ...session.langChainMessages,
-                ...composerContextMessages,
-            ],
-            false
-        )
-        const finalStream = await session.baseModel.stream(finalMessages, {
-            signal: this.context.signal,
-        })
-
-        return streamAssistantParts(finalStream, this.context, this.writeChunk, this.isClosed, this.shouldEmitReasoning())
     }
 
     private async runVersionPlanTasklistAgentEntryStage(session: ChatSession) {
@@ -774,18 +546,116 @@ export class ChatOrchestrator {
         })
     }
 
+    private async prepareGeneralChatContext(): Promise<PreparedGeneralChatContext> {
+        const messages: BaseMessage[] = []
+
+        const composerInvocation = resolveComposerContextInvocation(this.request)
+        if (composerInvocation) {
+            const preparedComposerContext = await prepareComposerContextInvocation(composerInvocation, {
+                context: this.context,
+                writeChunk: this.writeChunk,
+            })
+            messages.push(...preparedComposerContext.messages)
+        }
+
+        return {
+            messages,
+            nonMessagePayloads: [],
+        }
+    }
+
+    private async runGeneralReActEntryStage(
+        session: ChatSession,
+        preparedContext: PreparedGeneralChatContext = { messages: [], nonMessagePayloads: [] }
+    ) {
+        const actionSystemMessages = buildSystemMessages(...session.actionSystemPrompts)
+        const answerSystemMessages = buildSystemMessages(...session.answerSystemPrompts)
+        const preparedMessages = await this.prepareChatContextMessages(
+            [...actionSystemMessages, ...preparedContext.messages, ...session.langChainMessages],
+            true,
+            [...preparedContext.nonMessagePayloads, ...session.activeTools.map(toolDefinition => convertToOpenAITool(toolDefinition.tool))]
+        )
+        const runContext = createGeneralReActRunContext({
+            clock: { now: () => Date.now() },
+            createPhaseModel: session.createPhaseModel,
+            executionContext: this.context,
+            isTransportClosed: this.isClosed,
+            normalizeModelError: session.modelHandle.normalizeError,
+            publishChunk: async chunk => {
+                await this.writeChunk(chunk)
+            },
+            retryPermitPool: new RetryPermitPool(),
+            runSignal: this.context.signal ?? new AbortController().signal,
+            selectedSkill: session.skillDefinition
+                ? {
+                      description: session.skillDefinition.description,
+                      name: session.skillDefinition.name,
+                      skillId: session.skillDefinition.skillId,
+                  }
+                : undefined,
+            toolDefinitionMap: session.activeToolDefinitionMap,
+        })
+
+        return new GeneralReActAgentRunner().run({
+            answerMessages: [...answerSystemMessages, ...preparedMessages.slice(actionSystemMessages.length)],
+            context: runContext,
+            messages: preparedMessages,
+            runId: this.context.streamRecovery?.runId ?? this.assistantMessageId,
+            threadId: this.resolveConversationThreadId() ?? this.assistantMessageId,
+        })
+    }
+
+    private async emitCompletedGeneralReActTerminal(lifecycle: StreamLifecycle) {
+        if (this.context.signal?.aborted || this.isClosed()) {
+            return false
+        }
+
+        if (this.writeTerminalChunk) {
+            await this.writeTerminalChunk({ type: 'finish' }, 'completed')
+            return true
+        }
+
+        // 直接构造 Orchestrator 的测试与非 resumable 调用仍沿用既有 lifecycle。
+        // 生产 ChatService 始终提供可等待的 durable terminal writer。
+        return lifecycle.emitFinishIfOpen()
+    }
+
     async run() {
         const lifecycle = new StreamLifecycle({
             context: this.context,
             isClosed: this.isClosed,
             writeChunk: this.writeChunk,
         })
+        let generalReActPermit: GeneralReActExecutionPermit | null = null
 
         try {
             // 先发 start，让前端立即创建 assistant 占位。
-            // createChatSession 会解析 Skill / Tool Binding，Agent 场景还可能命中远端 capability 可用性判断；
+            // createChatSession 会解析 Skill 提示词和固定 General Tool Policy；
             // 如果等这些前置准备完成再发首包，用户会看到“按钮已禁用但消息区空白”的假死状态。
             lifecycle.emitStartOnce(this.assistantMessageId)
+
+            const routeType = this.context.resolvedModelSelection.routeType
+            const commandName = this.request.composer?.command?.name
+            const isDedicatedRoute = routeType !== 'chat' || commandName === 'tasklist' || commandName === 'delivery-chain'
+
+            if (!isDedicatedRoute) {
+                generalReActPermit = generalReActExecutionGate.tryAcquire()
+
+                if (!generalReActPermit) {
+                    lifecycle.emitRuntimeErrorOnce({
+                        errorCode: 'STREAM_SERVICE_UNAVAILABLE',
+                        message: '服务繁忙，请稍后重试。',
+                        retryable: true,
+                    })
+                    return
+                }
+
+                if (this.deferCleanup) {
+                    const permit = generalReActPermit
+                    this.deferCleanup(() => permit.release())
+                    generalReActPermit = null
+                }
+            }
 
             const session = await createChatSession(this.request, this.context.resolvedModelSelection)
 
@@ -806,7 +676,9 @@ export class ChatOrchestrator {
                 threadId: chatMemoryThreadId,
             })
             this.userMemoryContextMessages = isUserMemoryContextEligibleRequest(this.request)
-                ? await this.resolveUserMemoryContextMessages(session.toolBoundModel ? 'tool_assisted_ordinary_chat' : 'ordinary_chat')
+                ? await this.resolveUserMemoryContextMessages(
+                      session.activeTools.length > 0 ? 'tool_assisted_ordinary_chat' : 'ordinary_chat'
+                  )
                 : []
 
             throwIfAborted(this.context.signal)
@@ -817,22 +689,8 @@ export class ChatOrchestrator {
                 activeTools: session.activeToolNames,
             })
 
-            if (session.skillDefinition) {
-                this.writeChunk({
-                    type: 'skill-selected',
-                    skillId: session.skillDefinition.skillId,
-                    name: session.skillDefinition.name,
-                    description: session.skillDefinition.description,
-                })
-            }
-
-            // 主链路优先级从“最具体”到“最通用”：
-            // - 受控 Agent：/tasklist + version plan，完整接管本轮。
-            // - 受控 workflow：/delivery-chain + scenario 或 inline requirement。
-            // - Composer Context：/summary、@resource 等普通结构化输入。
-            // - Capability Context：runtime 主动消费的固定 capability 场景。
-            // - Tool Calling：模型自行决定是否调用已绑定工具。
-            // - Direct Answer：没有工具或无需工具时直接回答。
+            // 主链路优先级从“最具体”到“最通用”：专用 Tasklist / Delivery / Image route
+            // 由各自 runtime 接管，其他聊天统一准备上下文后进入 General ReAct Runner。
             const tasklistAgentResult = await this.runVersionPlanTasklistAgentEntryStage(session)
 
             if (tasklistAgentResult) {
@@ -847,93 +705,14 @@ export class ChatOrchestrator {
                 return
             }
 
-            const composerAssistantText = await this.runComposerContextAnswerStage(session)
+            const preparedContext = await this.prepareGeneralChatContext()
+            const agentResult = await this.runGeneralReActEntryStage(session, preparedContext)
+            this.finishActiveThreadMemoryStatus()
+            const terminalProjected = await this.emitCompletedGeneralReActTerminal(lifecycle)
 
-            if (composerAssistantText !== false) {
-                await this.appendCompletedChatMemoryTurn(composerAssistantText, 'mcp-resource')
-                lifecycle.emitFinishIfOpen()
-                return
+            if (terminalProjected) {
+                await this.appendCompletedChatMemoryTurn(agentResult.assistantText, agentResult.source, agentResult.memoryWriteEligible)
             }
-
-            const capabilityAssistantText = await this.runCapabilityContextAnswerStage(session)
-
-            if (capabilityAssistantText !== false) {
-                await this.appendCompletedChatMemoryTurn(capabilityAssistantText, 'mcp-resource')
-                lifecycle.emitFinishIfOpen()
-                return
-            }
-
-            if (!session.toolBoundModel) {
-                const assistantText = await streamDirectAnswer(
-                    session.baseModel,
-                    await this.prepareChatContextMessages(session.directAnswerMessages, true),
-                    this.context,
-                    this.writeChunk,
-                    this.isClosed,
-                    this.shouldEmitReasoning()
-                )
-                await this.appendCompletedChatMemoryTurn(assistantText, 'chat')
-                lifecycle.emitFinishIfOpen()
-                return
-            }
-
-            const planningStage = await this.runPlanningStage(session)
-
-            if (planningStage.kind === 'direct-fallback') {
-                const assistantText = await streamDirectAnswer(
-                    session.baseModel,
-                    await this.prepareChatContextMessages(session.directAnswerMessages, true),
-                    this.context,
-                    this.writeChunk,
-                    this.isClosed,
-                    this.shouldEmitReasoning()
-                )
-                await this.appendCompletedChatMemoryTurn(assistantText, 'chat')
-                lifecycle.emitFinishIfOpen()
-                return
-            }
-
-            if (planningStage.kind === 'validation-only') {
-                writeToolValidationErrors(planningStage.toolErrors, { writeChunk: this.writeChunk, stage: 'planning' })
-                lifecycle.emitFinishIfOpen()
-                return
-            }
-
-            const toolExecutionResult = await this.runToolExecutionStage(session, planningStage.toolCalls, planningStage.toolErrors)
-            const canBypassModel = shouldBypassAuthoritativeAnswer({
-                request: this.request,
-                toolDefinitionMap: session.activeToolDefinitionMap,
-                executedToolResults: toolExecutionResult.executedToolResults,
-            })
-            const authoritativeDecision = canBypassModel
-                ? decideAuthoritativeToolAnswer(toolExecutionResult.executedToolResults, session.activeToolDefinitionMap, toolCall =>
-                      formatToolInput(toolCall, session.activeToolDefinitionMap)
-                  )
-                : {
-                      shouldBypassModel: false,
-                      toolNames: toolExecutionResult.executedToolResults.map(result => result.toolCall.name),
-                  }
-
-            if (authoritativeDecision.shouldBypassModel) {
-                logSkillRuntime('authoritative-answer', {
-                    skill: session.skillDefinition?.skillId ?? null,
-                    reason: authoritativeDecision.reason ?? null,
-                    tools: authoritativeDecision.toolNames,
-                })
-                writeStaticTextPart(this.writeChunk, authoritativeDecision.answerText ?? '')
-                await this.appendCompletedChatMemoryTurn(authoritativeDecision.answerText ?? '', 'tool')
-                lifecycle.emitFinishIfOpen()
-                return
-            }
-
-            const assistantText = await this.runFinalAnswerStage(
-                session,
-                planningStage.planningMessage,
-                toolExecutionResult.executedToolResults,
-                toolExecutionResult.toolMessages
-            )
-            await this.appendCompletedChatMemoryTurn(assistantText, 'tool')
-            lifecycle.emitFinishIfOpen()
         } catch (error) {
             if (isAbortError(error) || this.context.signal?.aborted || this.isClosed()) {
                 throw error
@@ -971,6 +750,7 @@ export class ChatOrchestrator {
                 stage: 'runtime',
             })
         } finally {
+            generalReActPermit?.release()
             this.finishActiveThreadMemoryStatus()
         }
     }

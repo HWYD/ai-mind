@@ -8,7 +8,7 @@ import { isAbortError } from '@/lib/ai/error-utils'
 import { type ChatModel, defaultChatModel } from '@/lib/ai/models'
 import type { ChatStreamEventEnvelope } from '@/lib/ai/stream-chunk-schema'
 import type { StreamApiErrorCode, StreamReplayDescriptor } from '@/lib/ai/stream-recovery/contracts'
-import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequestInput, ChatSkillMode, ChatStatus } from '@/lib/ai/types/chat'
+import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatRequestInput, ChatStatus } from '@/lib/ai/types/chat'
 import type { AgentInterruptPart, MindMessage } from '@/lib/ai/types/message'
 
 import { createMessage, createTextPart } from './chat-stream/message-factory'
@@ -21,7 +21,7 @@ import {
     removeUserTurnPair,
     updateMessageStatus,
 } from './chat-stream/message-operations'
-import { buildRequestMessages, toRequestSkill } from './chat-stream/request-message-builder'
+import { buildRequestMessages } from './chat-stream/request-message-builder'
 import {
     createInitialActiveStreamState,
     createStreamMessageState,
@@ -37,10 +37,10 @@ import type { LocalConversationMetadata } from './local-chat-persistence/schema'
 import { createLocalConversationSnapshot } from './local-chat-persistence/stable-snapshot'
 import { readLocalConversationSnapshot, writeLocalConversationSnapshot } from './local-chat-persistence/store'
 
-// 文本/推理 delta 的批量刷新窗口。流式 token 先进入 buffer，再按约 40ms + rAF 合并写入 React state。
+// 文本/推理 delta 的批量刷新窗口。流式 token 先进入 buffer，再按约 20ms + rAF 合并写入 React state。
 // 调大：Markdown 解析和 DOM 更新更少但打字感更钝；调小：更实时但更容易触发渲染/滚动抖动。
-const DEFAULT_STREAM_TEXT_FLUSH_INTERVAL_MS = 40
-// 按模型 id 定制的刷新窗口。未列出的模型走默认值，后续新增只需在这里加一条。
+const DEFAULT_STREAM_TEXT_FLUSH_INTERVAL_MS = 20
+// 仅 allowlist 中已评估 token 粒度与 Markdown 成本的模型可覆盖默认窗口；未列出的模型走 20ms。
 const STREAM_TEXT_FLUSH_INTERVAL_BY_MODEL: Partial<Record<ChatModel, number>> = {
     // deepseek-v4-pro 单 token 更大，缩短合并窗口，避免一个窗口内堆积过多内容导致单帧渲染过重。
     'deepseek/deepseek-v4-pro': 0,
@@ -210,7 +210,6 @@ interface UseChatStreamOptions {
     conversationId?: string
     conversationMetadata?: LocalConversationMetadata | null
     draftMode?: boolean
-    skillMode?: ChatSkillMode
     model?: ChatModel
     enableReasoning?: boolean
     onConversationPromoted?: (conversationId: string) => void | Promise<void>
@@ -275,7 +274,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const conversationId = options.conversationId?.trim() || null
     const conversationMetadata = options.conversationMetadata ?? null
     const draftMode = options.draftMode ?? false
-    const skillMode = options.skillMode ?? 'auto'
     const model = options.model ?? defaultChatModel
     const enableReasoning = options.enableReasoning ?? false
 
@@ -301,6 +299,7 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     const hydratedConversationIdRef = useRef<string | null>(null)
     const localSnapshotRevisionRef = useRef(0)
     const historyEntrySequenceRef = useRef(0)
+    const streamTerminalStateRef = useRef<ChatStreamEventEnvelope['terminalState']>(null)
 
     const streamMessageStateRef = useRef(createStreamMessageState(messages)) //给 stream reducer 用的同步快照，里面有 messages + activeStream。
 
@@ -699,8 +698,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 commitStreamReduction(current => reduceStreamChunk(current, chunk))
                 return
             case 'finish':
-                commitStreamReduction(current => reduceStreamChunk(current, chunk))
-                setStreamCompletionRevision(current => current + 1)
+                commitStreamReduction(current => reduceStreamChunk(current, chunk, streamTerminalStateRef.current ?? 'completed'))
+                if (streamTerminalStateRef.current === 'completed' || !streamTerminalStateRef.current) {
+                    setStreamCompletionRevision(current => current + 1)
+                }
                 return
             default:
                 // 结构性 chunk 统一交给 reducer：start/tool/resource/prompt/artifact/error/finish 等消息树变化都在一个入口收口。
@@ -766,6 +767,11 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     async function consumeRecoverableStream(stream: ReadableStream<Uint8Array>, controller: AbortController) {
         await consumeNdjsonStream(stream, handleChunk, {
             onCursor: updateRecoveryCursor,
+            onEnvelope: envelope => {
+                if (envelope.terminal === true) {
+                    streamTerminalStateRef.current = envelope.terminalState ?? 'failed'
+                }
+            },
             shouldApplyEnvelope: shouldApplyRecoveryEnvelope,
         })
 
@@ -972,10 +978,10 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
             runId: null,
             streamUrl: null,
         }
+        streamTerminalStateRef.current = null
         activeConversationIdRef.current = requestConversationId ?? '__draft__'
 
         try {
-            const skill = toRequestSkill(skillMode)
             const payload: ChatRequestInput = {
                 // composer 是本轮请求的结构化输入补充，后端主输入仍由 messages 中的 plainText 兼容承载。
                 ...(composer ? { composer } : {}),
@@ -984,7 +990,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 options: {
                     modelId: model,
                     enableReasoning,
-                    ...(skill ? { skill } : {}),
                 },
             }
 
@@ -1029,9 +1034,11 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                     }
                 }
 
-                if (!controller.signal.aborted) {
+                if (!controller.signal.aborted && (streamTerminalStateRef.current ?? 'completed') === 'completed') {
                     setStatus('ready')
                     commitStableLocalSnapshot(messagesRef.current, activeConversationIdRef.current ?? requestConversationId)
+                } else if (!controller.signal.aborted) {
+                    setStatus('ready')
                 }
 
                 return true
@@ -1087,9 +1094,11 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
             }
 
-            if (!controller.signal.aborted) {
+            if (!controller.signal.aborted && (streamTerminalStateRef.current ?? 'completed') === 'completed') {
                 setStatus('ready')
                 commitStableLocalSnapshot(messagesRef.current, activeConversationIdRef.current ?? requestConversationId)
+            } else if (!controller.signal.aborted) {
+                setStatus('ready')
             }
         } catch (requestError) {
             // 异常前先 flush，避免最后一批已经收到的文本还停留在 buffer 中。
@@ -1214,9 +1223,11 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 }
             }
 
-            if (!controller.signal.aborted) {
+            if (!controller.signal.aborted && (streamTerminalStateRef.current ?? 'completed') === 'completed') {
                 setStatus('ready')
                 commitStableLocalSnapshot(messagesRef.current)
+            } else if (!controller.signal.aborted) {
+                setStatus('ready')
             }
 
             return true

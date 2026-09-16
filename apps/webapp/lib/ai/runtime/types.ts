@@ -1,14 +1,16 @@
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models'
 import type { BaseMessage, ToolCall, ToolMessage } from '@langchain/core/messages'
-import type { Runnable } from '@langchain/core/runnables'
 
 import type { AiMindChatModelHandle, ResolvedModelSelection } from '@/lib/ai/model-provider'
 import type { SkillDefinition } from '@/lib/ai/skills'
 import type { ChatToolDefinition } from '@/lib/ai/tools'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
+import type { GeneralReActPhaseModelOptions } from './general-react-agent/agent-context'
+
 export interface ChatExecutionContext {
+    runDeadlineAtMs?: number
     sessionId?: string
     setCookie?: string | null
     signal?: AbortSignal
@@ -20,17 +22,22 @@ export interface ChatExecutionContext {
     validatedConversationId?: string
 }
 
+export interface PreparedGeneralChatContext {
+    messages: BaseMessage[]
+    nonMessagePayloads: unknown[]
+}
+
 export interface ResolvedChatExecutionContext extends ChatExecutionContext {
     resolvedModelSelection: ResolvedModelSelection
 }
 
-export type WriteChunk = (chunk: ChatStreamChunk) => void
+export type WriteChunk = (chunk: ChatStreamChunk) => unknown
 
 export interface ChatSession {
     request: ChatRequest
     baseModel: BaseChatModel
+    createPhaseModel: (options: GeneralReActPhaseModelOptions) => BaseChatModel
     modelHandle: AiMindChatModelHandle
-    toolBoundModel: Runnable | null
     skillDefinition?: SkillDefinition
     skillSystemPrompt?: string
     skillOutputPolicyPrompt?: string
@@ -38,10 +45,10 @@ export interface ChatSession {
     activeToolDefinitionMap: Map<string, ChatToolDefinition>
     activeTools: ChatToolDefinition[]
     activeToolNames: string[]
+    actionSystemPrompts: string[]
+    answerSystemPrompts: string[]
     langChainMessages: BaseMessage[]
-    directAnswerMessages: BaseMessage[]
     toolUseSystemPrompt?: string
-    toolRetrySystemPrompt?: string
     toolResultSystemPrompt?: string
 }
 
@@ -67,10 +74,13 @@ export interface ToolValidationResult {
 }
 
 export interface ExecutedToolResult {
+    attemptCount?: number
+    failureCategory?: import('./tool-runtime/execution').ToolExecutionFailureCategory
     toolCall: ToolCall
     toolMessage: ToolMessage
     output: string
     rawResult?: unknown
+    retryable?: boolean
     success: boolean
 }
 

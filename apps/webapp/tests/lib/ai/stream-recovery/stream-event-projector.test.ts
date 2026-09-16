@@ -8,6 +8,7 @@ const runId = 'run_1'
 
 class FakeStreamEventStore {
     appended: AppendStreamEventInput[] = []
+    batches: AppendStreamEventInput[][] = []
 
     async appendEvent(input: AppendStreamEventInput) {
         this.appended.push(input)
@@ -22,6 +23,20 @@ class FakeStreamEventStore {
             sequence: this.appended.length,
             ...(input.terminalState ? { terminal: true, terminalState: input.terminalState } : {}),
         }
+    }
+
+    async appendEvents(inputs: readonly AppendStreamEventInput[]) {
+        this.batches.push([...inputs])
+        return inputs.map((input, index) => ({
+            eventId: `batch_evt_${index + 1}`,
+            eventKind: input.terminalState ? 'terminal' : input.eventKind,
+            payload: input.payload,
+            protocolVersion: 1,
+            runId: input.runId,
+            runStatus: input.runStatus,
+            sequence: index + 1,
+            ...(input.terminalState ? { terminal: true, terminalState: input.terminalState } : {}),
+        }))
     }
 }
 
@@ -54,6 +69,30 @@ describe('stream-event-projector', () => {
             ownerSessionHash,
             runId,
         })
+    })
+
+    it('projects a microbatch through one store append and keeps terminal last', async () => {
+        const events = await projector.projectChunks([
+            {
+                chunk: { partId: 'answer', type: 'text-start' },
+                ownerSessionHash,
+                runId,
+            },
+            {
+                chunk: { delta: 'hello', partId: 'answer', type: 'text-delta' },
+                ownerSessionHash,
+                runId,
+            },
+            {
+                chunk: { type: 'finish' },
+                ownerSessionHash,
+                runId,
+            },
+        ])
+
+        expect(fakeStore.batches).toHaveLength(1)
+        expect(fakeStore.batches[0]?.map(input => input.payload.type)).toEqual(['text-start', 'text-delta', 'finish'])
+        expect(events.at(-1)).toMatchObject({ terminal: true, terminalState: 'completed' })
     })
 
     it('maps finish and error chunks to terminal stream states', async () => {

@@ -1,6 +1,7 @@
 import type { ChatStreamChunk } from '@ai-mind/stream-core/protocol'
 import { describe, expect, it } from 'vitest'
 
+import { buildGeneralAgentTraceView } from '@/components/chat/message-list/parts/general-agent/general-agent-trace-view'
 import {
     createStreamMessageState,
     reduceStreamChunk,
@@ -17,6 +18,144 @@ function getAssistantMessage(state: StreamMessageState) {
 }
 
 describe('stream-message-reducer', () => {
+    it('preserves cancelled terminal state instead of mapping finish to completed', () => {
+        const state = reduceStreamChunk(
+            reduceStreamChunk(reduceStreamChunk(createStreamMessageState(), { messageId: 'assistant-cancelled', type: 'start' }).state, {
+                input: '{}',
+                partId: 'tool-1',
+                toolName: 'calculator',
+                type: 'tool-start',
+            }).state,
+            { type: 'finish' },
+            'cancelled'
+        ).state
+
+        expect(state.messages[0]?.status).toBe('cancelled')
+    })
+
+    it('replaces unsafe Resource URIs before they enter the rendered message state', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-resource-uri' },
+            {
+                location: 'remote',
+                partId: 'resource-private',
+                resourceName: 'Private resource',
+                serverId: 'mcp-server',
+                source: 'mcp',
+                type: 'resource-start',
+                uri: 'https://user:password@example.com/private',
+            },
+            {
+                contentPreview: 'private resource body',
+                isTruncated: false,
+                location: 'remote',
+                partId: 'resource-private',
+                previewChars: 21,
+                resourceName: 'Private resource',
+                serverId: 'mcp-server',
+                source: 'mcp',
+                type: 'resource-end',
+                uri: 'http://127.0.0.1/metadata',
+            },
+        ])
+
+        const resourcePart = getAssistantMessage(state)?.parts.find(part => part.type === 'resource')
+
+        expect(resourcePart).toMatchObject({
+            status: 'completed',
+            uri: 'resource://unknown',
+        })
+        expect(JSON.stringify(resourcePart)).not.toContain('password')
+        expect(JSON.stringify(resourcePart)).not.toContain('127.0.0.1')
+    })
+
+    it('generic trace keeps assistant ordinal, updates retries in place, and deduplicates safe sources', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-1' },
+            {
+                type: 'tool-start',
+                action: 'search',
+                input: '{"query":"react"}',
+                partId: 'tool-search',
+                source: 'internal',
+                title: '搜索网页',
+                toolName: 'web-search',
+            },
+            {
+                type: 'tool-end',
+                action: 'search',
+                input: '{"query":"react"}',
+                output: 'ok',
+                partId: 'tool-search',
+                sources: [
+                    {
+                        originTool: 'web-search',
+                        sourceId: 'source-1',
+                        status: 'discovered',
+                        title: 'React',
+                        url: 'https://example.com/react',
+                    },
+                    {
+                        originTool: 'web-search',
+                        sourceId: 'source-1-retry',
+                        status: 'discovered',
+                        title: 'React duplicate',
+                        url: 'https://example.com/react#section',
+                    },
+                ],
+                toolName: 'web-search',
+            },
+            {
+                type: 'tool-start',
+                action: 'read',
+                input: '{"url":"https://example.com/react"}',
+                partId: 'tool-read',
+                source: 'internal',
+                title: '读取页面',
+                toolName: 'read-url',
+            },
+            {
+                type: 'tool-end',
+                action: 'read',
+                input: '{"url":"https://example.com/react"}',
+                output: 'ok',
+                partId: 'tool-read',
+                sources: [
+                    {
+                        originTool: 'read-url',
+                        sourceId: 'source-1-read',
+                        status: 'read',
+                        title: 'React',
+                        url: 'https://example.com/react',
+                    },
+                    {
+                        originTool: 'read-url',
+                        sourceId: 'unsafe',
+                        status: 'read',
+                        title: 'unsafe',
+                        url: 'javascript:alert(1)',
+                    },
+                ],
+                toolName: 'read-url',
+            },
+            { type: 'finish' },
+        ])
+
+        const assistant = getAssistantMessage(state)
+        const trace = buildGeneralAgentTraceView(assistant?.parts ?? [], 'completed')
+
+        expect(trace.rows.map(row => row.id)).toEqual(['tool-search', 'tool-read'])
+        expect(trace.rows.map(row => row.ordinal)).toEqual([1, 2])
+        expect(trace.searchCount).toBe(1)
+        expect(trace.readCount).toBe(1)
+        expect(trace.readSources).toEqual([
+            {
+                hostname: 'example.com',
+                title: 'React',
+                url: 'https://example.com/react',
+            },
+        ])
+    })
     it('hydrated text messages can coexist with later workflow progress parts without public shape changes', () => {
         const hydratedMessages = [
             {
@@ -494,7 +633,7 @@ describe('stream-message-reducer', () => {
         })
     })
 
-    it('graph node start/end 按 runId 聚合到 agent-step part', () => {
+    it('graph node start/end 按 runId 聚合到 agent-graph part', () => {
         const state = reduceChunks([
             { type: 'start', messageId: 'assistant-graph-node' },
             {
@@ -521,7 +660,7 @@ describe('stream-message-reducer', () => {
             },
         ])
 
-        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-step')
+        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-graph')
 
         expect(agentPart).toMatchObject({
             agentName: 'version-plan-to-tasklist-agent',
@@ -540,7 +679,7 @@ describe('stream-message-reducer', () => {
             },
             runId: 'run-graph',
             status: 'completed',
-            type: 'agent-step',
+            type: 'agent-graph',
         })
     })
 
@@ -571,7 +710,7 @@ describe('stream-message-reducer', () => {
             },
         ])
 
-        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-step')
+        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-graph')
 
         expect(agentPart).toMatchObject({
             graph: {
@@ -612,7 +751,7 @@ describe('stream-message-reducer', () => {
             },
         ])
 
-        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-step')
+        const agentPart = getAssistantMessage(state)?.parts.find(part => part.type === 'agent-graph')
 
         expect(agentPart).toMatchObject({
             graph: {
@@ -653,7 +792,7 @@ describe('stream-message-reducer', () => {
         ])
 
         const assistantMessage = getAssistantMessage(state)
-        const agentPart = assistantMessage?.parts.find(part => part.type === 'agent-step')
+        const agentPart = assistantMessage?.parts.find(part => part.type === 'agent-graph')
 
         expect(assistantMessage?.parts.some(part => part.type === 'text')).toBe(false)
         expect(agentPart).toMatchObject({
@@ -711,7 +850,7 @@ describe('stream-message-reducer', () => {
         ])
 
         const assistantMessage = getAssistantMessage(state)
-        const agentPart = assistantMessage?.parts.find(part => part.type === 'agent-step')
+        const agentPart = assistantMessage?.parts.find(part => part.type === 'agent-graph')
 
         expect(assistantMessage?.parts.some(part => part.type === 'text')).toBe(false)
         expect(agentPart).toMatchObject({

@@ -91,10 +91,30 @@ export class StreamExecutionCoordinator {
             }
 
             this.activeExecutions.delete(input.runId)
-            await this.repository.clearExecutionOwner({
-                executionOwnerId,
-                runId: input.runId,
-            })
+            await this.clearExecutionOwnerBestEffort(input.runId, executionOwnerId)
+        }
+    }
+
+    private async clearExecutionOwnerBestEffort(runId: string, executionOwnerId: string): Promise<void> {
+        const maxAttempts = 3
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+            try {
+                await this.repository.clearExecutionOwner({
+                    executionOwnerId,
+                    runId,
+                })
+                return
+            } catch (error) {
+                if (attempt === maxAttempts) {
+                    // 清理失败不覆盖本次执行结果；owner 泄漏交由后续 claim 校验或人工介入。
+                    // eslint-disable-next-line no-console
+                    console.error('Failed to clear stream execution owner:', { runId, attempt })
+                    return
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 50 * attempt))
+            }
         }
     }
 
@@ -126,6 +146,15 @@ export class StreamExecutionCoordinator {
             controller.abort()
         }
     }
+}
+
+let sharedCoordinator: StreamExecutionCoordinator | undefined
+
+/** 生产环境共享同一 coordinator，确保 chat-service 与 cancel 路由读取同一张活跃执行表。 */
+export function getSharedStreamExecutionCoordinator(): StreamExecutionCoordinator {
+    sharedCoordinator ??= new StreamExecutionCoordinator()
+
+    return sharedCoordinator
 }
 
 type PrismaLike = {

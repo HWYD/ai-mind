@@ -7,19 +7,17 @@ import { cn } from '@/lib/utils'
 const GENERAL_QUESTION_OPTIONS = [
     'Vue 3 的响应式系统为什么要用 Proxy？',
     'React Diff 为什么需要 key？',
-    '前端流式 Markdown 渲染怎么减少闪动？',
     'AI Agent、Tool Calling 和 MCP 有什么区别？',
     '如何设计一个稳定的 AI Runtime 分层？',
-    '普通问答、工具技能和阅读技能分别适合什么场景？',
 ]
 
 const TOOL_TEST_QUESTION_OPTIONS = [
-    '357*28+999 等于多少？',
-    '今天是星期几？',
-    '1.80 米等于多少厘米？',
-    '25 摄氏度等于多少华氏度？',
-    '广州的天气怎么样？',
-    '帮我格式化这个 JSON：{"name":"AI Mind","version":"0.0.12"}',
+    '357*28+999 等于多少？1.80 米等于多少厘米？今天是星期几？',
+    '25 摄氏度等于多少华氏度？广州的天气怎么样？顺便帮我格式化这个 JSON：{"name":"AI Mind","version":"0.0.12"}',
+    '搜索「AI Agent 的 Tool Calling 与 MCP 区别」并总结最新的几篇资料',
+    '读取 https://react.dev/learn 这个页面，总结 React 官方文档的核心内容',
+    '帮我搜一下「React 19 服务端组件」怎么上手，选一篇最靠谱的官方文档或教程读一下，总结关键步骤',
+    '帮我查一下珠穆朗玛峰的官方海拔是多少米，再换算成英尺告诉我，我写文章要用',
 ]
 
 function createSeed(seedText: string) {

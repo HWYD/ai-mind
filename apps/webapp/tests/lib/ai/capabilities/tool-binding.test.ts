@@ -1,8 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
-import { resolveToolBindingForSkill, toCapabilityDefinition } from '@/lib/ai/capabilities'
-import { readerSkillDefinition, utilitySkillDefinition } from '@/lib/ai/skills'
+import { resolveGeneralToolBinding, toCapabilityDefinition } from '@/lib/ai/capabilities'
 import type { ChatToolDefinition } from '@/lib/ai/tools'
 
 const mcpClientManagerMock = vi.hoisted(() => ({
@@ -15,6 +14,10 @@ vi.mock('@/lib/ai/mcp/client/mcp-client-manager', () => ({
 }))
 
 describe('capabilities/tool-binding', () => {
+    afterEach(() => {
+        vi.unstubAllEnvs()
+    })
+
     beforeEach(() => {
         mcpClientManagerMock.callTool.mockReset()
         mcpClientManagerMock.listTools.mockReset()
@@ -41,45 +44,37 @@ describe('capabilities/tool-binding', () => {
         })
     })
 
-    it('binds only utility internal tools for utility-skill', async () => {
-        const binding = await resolveToolBindingForSkill(utilitySkillDefinition)
-        const activeToolNames = [...binding.activeToolNames].sort()
+    it('resolves the fixed General Tool policy without remote MCP discovery', async () => {
+        vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key')
 
-        expect(activeToolNames).toEqual(['calculator', 'datetime', 'text-transform', 'unit-convert'])
-        expect([...binding.activeToolDefinitionMap.keys()].sort()).toEqual(activeToolNames)
-        expect(binding.activeToolCapabilityIds.calculator).toBe('internal:local:tool:calculator')
-        expect(mcpClientManagerMock.listTools).not.toHaveBeenCalled()
-    })
+        const binding = await resolveGeneralToolBinding()
 
-    it('binds available local and remote tool capabilities for reader-skill', async () => {
-        const binding = await resolveToolBindingForSkill(readerSkillDefinition)
-        const activeToolNames = [...binding.activeToolNames].sort()
-
-        expect(activeToolNames).toEqual(['check_doc_consistency', 'city-weather'])
+        expect(binding.activeToolNames.sort()).toEqual([
+            'calculator',
+            'city-weather',
+            'datetime',
+            'read-url',
+            'text-transform',
+            'unit-convert',
+            'web-search',
+        ])
+        expect(binding.activeToolDefinitionMap.size).toBe(7)
         expect(binding.activeToolCapabilityIds['city-weather']).toBe('mcp:local:tool:weather-server:city-weather')
-        expect(binding.activeToolCapabilityIds.check_doc_consistency).toBe(
-            'mcp:remote:tool:project-assistant-service:check_doc_consistency'
-        )
-        expect(binding.activeToolDefinitionMap.get('check_doc_consistency')?.source).toBe('mcp')
-        expect(binding.activeToolDefinitionMap.get('check_doc_consistency')?.serverId).toBe('project-assistant-service')
-    })
-
-    it('does not bind tools without a selected skill', async () => {
-        const binding = await resolveToolBindingForSkill()
-
-        expect(binding.activeTools).toEqual([])
-        expect(binding.activeToolNames).toEqual([])
-        expect(binding.activeToolDefinitionMap.size).toBe(0)
         expect(mcpClientManagerMock.listTools).not.toHaveBeenCalled()
     })
 
-    it('skips remote MCP tools when discovery fails without breaking local reader tools', async () => {
-        mcpClientManagerMock.listTools.mockRejectedValueOnce(new Error('remote discovery failed'))
+    it('keeps generic binding free of dedicated agent tools', async () => {
+        const binding = await resolveGeneralToolBinding()
 
-        const binding = await resolveToolBindingForSkill(readerSkillDefinition)
+        expect(binding.activeToolNames).not.toContain('delegate-review-group')
+        expect(binding.activeTools.every(toolDefinition => toolDefinition.executionPolicy.kind === 'standard-tool')).toBe(true)
+    })
 
-        expect(binding.activeToolNames).toEqual(['city-weather'])
-        expect(binding.activeToolDefinitionMap.has('check_doc_consistency')).toBe(false)
+    it('does not expose undeclared remote MCP tools even when discovery would return one', async () => {
+        const binding = await resolveGeneralToolBinding()
+
+        expect(binding.activeToolNames).not.toContain('check_doc_consistency')
+        expect(mcpClientManagerMock.listTools).not.toHaveBeenCalled()
     })
 
     it('keeps ChatToolDefinition capability type as tool even when rendered as resource', () => {

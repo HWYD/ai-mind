@@ -542,6 +542,20 @@ describe('runtime/delivery-chain-manager contracts', () => {
         ).toBe(true)
     })
 
+    it('Subagent chat tools use delegated-agent policy and cannot enter General ReAct', () => {
+        const subagentTools = createDeliveryChainSubagentTools({ resolveInvocation: () => null })
+
+        expect(
+            subagentTools.every(({ chatToolDefinition }) => {
+                return (
+                    chatToolDefinition.executionPolicy.kind === 'agent-tool' &&
+                    chatToolDefinition.executionPolicy.profile === 'delegated-agent' &&
+                    !chatToolDefinition.runtimeScopes?.includes('general-react-agent')
+                )
+            })
+        ).toBe(true)
+    })
+
     it('未知 invocation 只返回安全 execution failure，不回退到直接 Worker 调用', async () => {
         const subagentTools = createDeliveryChainSubagentTools({ resolveInvocation: () => null })
         const planTool = subagentTools.find(toolDefinition => toolDefinition.id === 'plan-subagent')!.chatToolDefinition
@@ -678,5 +692,22 @@ describe('runtime/delivery-chain-manager contracts', () => {
         expect(definitions.every(definition => definition.allowedTools.every(toolName => !toolName.includes('tasklist')))).toBe(true)
         expect(deliveryChainDelegationPolicy.allowParallel).toBe(false)
         expect(deliveryChainDelegationPolicy.allowNestedDelegation).toBe(false)
+    })
+
+    it('Delivery subagent 明确使用 delegated-agent policy，不继承普通 Tool timeout/retry', () => {
+        const tools = createDeliveryChainSubagentTools({
+            resolveInvocation: () => null,
+        })
+
+        expect(tools).toHaveLength(5)
+        for (const definition of tools) {
+            expect(definition.chatToolDefinition.executionPolicy).toEqual({
+                kind: 'agent-tool',
+                profile: 'delegated-agent',
+            })
+            expect(definition.chatToolDefinition.runtimeScopes).toEqual(['delivery-chain-manager'])
+            expect(definition.chatToolDefinition.executionPolicy).not.toHaveProperty('attemptTimeoutMs')
+            expect(definition.chatToolDefinition.executionPolicy).not.toHaveProperty('retrySafe')
+        }
     })
 })

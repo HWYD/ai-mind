@@ -28,6 +28,7 @@ export type ChatComposerDisplaySegment =
     | { reference: ChatComposerReference; type: 'resource' }
 
 export interface MindMessageInput {
+    id?: string
     role: MindRole
     parts: Array<TextPart | ReasoningPart>
 }
@@ -57,4 +58,3 @@ export interface ChatDraftCreateRequest extends ChatRequestBase {
 export type ChatRequestInput = ChatRequest | ChatDraftCreateRequest
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
-export type ChatSkillMode = 'auto' | 'utility' | 'reader'

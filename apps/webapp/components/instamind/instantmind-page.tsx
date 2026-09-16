@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { message } from '@/components/ui/message'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { ChatModelsInitialState } from '@/lib/ai/models'
-import type { ChatComposerDisplaySegment, ChatComposerPayload, ChatSkillMode } from '@/lib/ai/types/chat'
+import type { ChatComposerDisplaySegment, ChatComposerPayload } from '@/lib/ai/types/chat'
 
 import { ConversationMobileSelector } from './conversation-session/conversation-mobile-selector'
 import { ConversationSidebar } from './conversation-session/conversation-sidebar'
@@ -79,7 +79,6 @@ function ConversationHydrationErrorState({ onRetry }: { onRetry: () => void }) {
 }
 
 export default function InstantMindPage({ initialChatModelsState }: { initialChatModelsState: ChatModelsInitialState }) {
-    const [skillMode, setSkillMode] = useState<ChatSkillMode>('auto')
     const [enableReasoning, setEnableReasoning] = useState(false)
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
     const [interactionLocked, setInteractionLocked] = useState(false)
@@ -139,7 +138,6 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
     } = useChatStream({
         conversationId: selectedConversationId ?? undefined,
         draftMode: isDraft,
-        skillMode,
         model,
         enableReasoning,
         conversationMetadata: selectedConversation,
@@ -578,14 +576,12 @@ export default function InstantMindPage({ initialChatModelsState }: { initialCha
                                 disabled={composerDisabled}
                                 placeholder={hasPendingReview ? '请先处理上方人工审核，普通输入已锁定。' : undefined}
                                 status={status}
-                                skillMode={skillMode}
                                 model={model}
                                 hasAvailableModels={hasAvailableModels}
                                 isModelLoading={isModelLoading}
                                 modelError={modelError}
                                 modelGroups={modelGroups}
                                 enableReasoning={enableReasoning}
-                                onSkillModeChange={setSkillMode}
                                 onModelChange={setModel}
                                 onEnableReasoningChange={setEnableReasoning}
                                 onSubmit={handleSubmit}

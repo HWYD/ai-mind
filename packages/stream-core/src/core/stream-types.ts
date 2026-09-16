@@ -4,4 +4,4 @@ export interface StreamExecutionContext {
     signal?: AbortSignal
 }
 
-export type WriteChunk = (chunk: ChatStreamChunk) => void
+export type WriteChunk = (chunk: ChatStreamChunk) => unknown

@@ -35,4 +35,6 @@ function Badge({
     return <Comp data-slot="badge" data-variant={variant} className={cn(badgeVariants({ variant }), className)} {...props} />
 }
 
+// shadcn 组合组件需要使用该 variant builder。
+// eslint-disable-next-line react-refresh/only-export-components
 export { Badge, badgeVariants }

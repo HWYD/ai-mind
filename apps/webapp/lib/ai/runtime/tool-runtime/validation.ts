@@ -6,6 +6,91 @@ import { createId } from '@/lib/ai/create-id'
 import type { ToolValidationResult } from '../types'
 import { formatToolInput, getResourceDisplayFields, getToolDisplayFields, type ToolDefinitionMap } from './display'
 
+export type SingleToolCallValidationResult =
+    | {
+          success: true
+          toolCall: ToolCall
+      }
+    | {
+          success: false
+          toolError: ToolValidationResult['toolErrors'][number]
+      }
+
+/**
+ * 单个 Tool Call 的统一边界：先补 ID，再 normalize，最后只放行 schema 解析后的参数。
+ */
+export function normalizeAndValidateToolCall(rawToolCall: ToolCall, toolDefinitionMap: ToolDefinitionMap): SingleToolCallValidationResult {
+    const toolCall = {
+        ...rawToolCall,
+        id: rawToolCall.id ?? createId(),
+    }
+    const toolDefinition = toolDefinitionMap.get(toolCall.name)
+    const displayFields = getToolDisplayFields(toolCall, toolDefinitionMap)
+    const resourceDisplayFields =
+        displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, toolDefinitionMap) : undefined
+
+    if (!toolDefinition) {
+        return {
+            success: false,
+            toolError: {
+                action: displayFields.action,
+                id: toolCall.id,
+                input: formatToolInput(toolCall, toolDefinitionMap),
+                location: displayFields.location,
+                message: '工具 ' + toolCall.name + ' 未注册。',
+                outputPartType: displayFields.outputPartType,
+                resourceName: resourceDisplayFields?.resourceName,
+                serverId: displayFields.serverId,
+                source: displayFields.source,
+                title: displayFields.title,
+                toolName: toolCall.name,
+                uri: resourceDisplayFields?.uri,
+            },
+        }
+    }
+
+    const normalizedArgs = toolDefinition.normalizeArgs ? toolDefinition.normalizeArgs(toolCall.args) : toolCall.args
+    const parsedArgs = toolDefinition.schema.safeParse(normalizedArgs)
+
+    if (!parsedArgs.success) {
+        const normalizedToolCall = {
+            ...toolCall,
+            args: normalizedArgs,
+        }
+        const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall, toolDefinitionMap)
+        const normalizedResourceDisplayFields =
+            normalizedDisplayFields.outputPartType === 'resource'
+                ? getResourceDisplayFields(normalizedToolCall, toolDefinitionMap)
+                : undefined
+
+        return {
+            success: false,
+            toolError: {
+                action: normalizedDisplayFields.action,
+                id: toolCall.id,
+                input: formatToolInput(normalizedToolCall, toolDefinitionMap),
+                location: normalizedDisplayFields.location,
+                message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
+                outputPartType: normalizedDisplayFields.outputPartType,
+                resourceName: normalizedResourceDisplayFields?.resourceName,
+                serverId: normalizedDisplayFields.serverId,
+                source: normalizedDisplayFields.source,
+                title: normalizedDisplayFields.title,
+                toolName: toolCall.name,
+                uri: normalizedResourceDisplayFields?.uri,
+            },
+        }
+    }
+
+    return {
+        success: true,
+        toolCall: {
+            ...toolCall,
+            args: parsedArgs.data,
+        },
+    }
+}
+
 /**
  * 对模型返回的 tool calls 做统一归一化与 schema 校验，拆分成：
  * 1. 可执行调用
@@ -16,69 +101,14 @@ export function normalizeAndValidateToolCalls(message: AIMessage, toolDefinition
     const toolErrors: ToolValidationResult['toolErrors'] = []
 
     for (const rawToolCall of message.tool_calls ?? []) {
-        const toolCall = {
-            ...rawToolCall,
-            id: rawToolCall.id ?? createId(),
-        }
+        const result = normalizeAndValidateToolCall(rawToolCall, toolDefinitionMap)
 
-        const toolDefinition = toolDefinitionMap.get(toolCall.name)
-        const displayFields = getToolDisplayFields(toolCall, toolDefinitionMap)
-        const resourceDisplayFields =
-            displayFields.outputPartType === 'resource' ? getResourceDisplayFields(toolCall, toolDefinitionMap) : undefined
-
-        if (!toolDefinition) {
-            toolErrors.push({
-                id: toolCall.id,
-                toolName: toolCall.name,
-                title: displayFields.title,
-                action: displayFields.action,
-                input: formatToolInput(toolCall, toolDefinitionMap),
-                message: '工具 ' + toolCall.name + ' 未注册。',
-                outputPartType: displayFields.outputPartType,
-                resourceName: resourceDisplayFields?.resourceName,
-                serverId: displayFields.serverId,
-                source: displayFields.source,
-                location: displayFields.location,
-                uri: resourceDisplayFields?.uri,
-            })
+        if (result.success === false) {
+            toolErrors.push(result.toolError)
             continue
         }
 
-        const normalizedArgs = toolDefinition.normalizeArgs ? toolDefinition.normalizeArgs(toolCall.args) : toolCall.args
-        const parsedArgs = toolDefinition.schema.safeParse(normalizedArgs)
-
-        if (!parsedArgs.success) {
-            const normalizedToolCall = {
-                ...toolCall,
-                args: normalizedArgs,
-            }
-            const normalizedDisplayFields = getToolDisplayFields(normalizedToolCall, toolDefinitionMap)
-            const normalizedResourceDisplayFields =
-                normalizedDisplayFields.outputPartType === 'resource'
-                    ? getResourceDisplayFields(normalizedToolCall, toolDefinitionMap)
-                    : undefined
-
-            toolErrors.push({
-                id: toolCall.id,
-                toolName: toolCall.name,
-                title: normalizedDisplayFields.title,
-                action: normalizedDisplayFields.action,
-                input: formatToolInput(normalizedToolCall, toolDefinitionMap),
-                message: createToolValidationErrorMessage(toolCall, parsedArgs.error),
-                outputPartType: normalizedDisplayFields.outputPartType,
-                resourceName: normalizedResourceDisplayFields?.resourceName,
-                serverId: normalizedDisplayFields.serverId,
-                source: normalizedDisplayFields.source,
-                location: normalizedDisplayFields.location,
-                uri: normalizedResourceDisplayFields?.uri,
-            })
-            continue
-        }
-
-        validatedToolCalls.push({
-            ...toolCall,
-            args: parsedArgs.data,
-        })
+        validatedToolCalls.push(result.toolCall)
     }
 
     if (validatedToolCalls.length === 0) {

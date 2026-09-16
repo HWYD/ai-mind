@@ -9,7 +9,7 @@ export {
     toCapabilityDefinition,
 } from './catalog'
 export { buildCapabilityId } from './id'
-export { resolveToolBindingForSkill } from './tool-binding'
+export { resolveGeneralToolBinding } from './tool-binding'
 export type {
     CapabilityAvailability,
     CapabilityDefinition,

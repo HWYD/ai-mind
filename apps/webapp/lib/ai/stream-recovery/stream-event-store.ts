@@ -79,6 +79,10 @@ export type AppendStreamEventInput = {
     now?: Date
 }
 
+export type AppendStreamEventsOptions = {
+    deadlineAtMs?: number
+}
+
 export type ReplayStreamEventsInput = {
     runId: string
     ownerSessionHash: string
@@ -121,7 +125,7 @@ type StreamRunDelegate = {
 }
 
 type StreamEventDelegate = {
-    create(args: { data: PersistedStreamEventInput }): Promise<StreamEventRecord>
+    createMany(args: { data: PersistedStreamEventInput[] }): Promise<{ count: number }>
     deleteMany(args: {
         where: {
             expiresAt?: { lte: Date }
@@ -144,7 +148,8 @@ type StreamEventStorePrismaClient = {
     streamEvent: StreamEventDelegate
     $queryRaw?: (strings: TemplateStringsArray, ...values: unknown[]) => Promise<unknown>
     $transaction<T>(
-        callback: (transaction: Pick<StreamEventStorePrismaClient, '$queryRaw' | 'streamEvent' | 'streamRun'>) => Promise<T>
+        callback: (transaction: Pick<StreamEventStorePrismaClient, '$queryRaw' | 'streamEvent' | 'streamRun'>) => Promise<T>,
+        options?: { maxWait: number; timeout: number }
     ): Promise<T>
 }
 
@@ -178,54 +183,100 @@ export class StreamEventStore {
         this.createEventId = options.createEventId ?? (() => crypto.randomUUID())
     }
 
-    async appendEvent(input: AppendStreamEventInput): Promise<StreamEventEnvelopeDto> {
+    async appendEvent(input: AppendStreamEventInput, options: AppendStreamEventsOptions = {}): Promise<StreamEventEnvelopeDto> {
+        const events = await this.appendEvents([input], options)
+        return events[0]!
+    }
+
+    async appendEvents(
+        inputs: readonly AppendStreamEventInput[],
+        options: AppendStreamEventsOptions = {}
+    ): Promise<StreamEventEnvelopeDto[]> {
+        if (inputs.length === 0) {
+            throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event batch must not be empty.')
+        }
+
+        const firstInput = inputs[0]!
+        if (inputs.some(input => input.runId !== firstInput.runId || input.ownerSessionHash !== firstInput.ownerSessionHash)) {
+            throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event batch must belong to one run and owner.')
+        }
+
+        const terminalIndex = inputs.findIndex(input => input.terminalState !== undefined)
+        if (terminalIndex >= 0 && terminalIndex !== inputs.length - 1) {
+            throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Terminal stream event must be the final event in its batch.')
+        }
+
+        const transactionOptions = resolveBatchTransactionOptions(options.deadlineAtMs)
+
         return this.prisma.$transaction(async transaction => {
-            await lockStreamRunForAppend(transaction, input.runId)
-            const run = await this.getOwnedRun(transaction, input.runId, input.ownerSessionHash)
+            await lockStreamRunForAppend(transaction, firstInput.runId)
+            const run = await this.getOwnedRun(transaction, firstInput.runId, firstInput.ownerSessionHash)
 
             if (isTerminalRun(run)) {
                 throw new StreamEventStoreError('STREAM_RUN_TERMINAL', 'Cannot append events to a terminal stream run.')
             }
 
-            const sequence = run.lastSequence + 1
-            const now = input.now ?? new Date()
-            const expiresAt = new Date(now.getTime() + defaultEventRetentionMs)
-            const terminal = Boolean(input.terminalState)
-            const envelope: StreamEventEnvelopeDto = {
-                eventId: this.createEventId(),
-                eventKind: terminal ? 'terminal' : input.eventKind,
-                payload: input.payload,
-                protocolVersion: streamProtocolVersion,
-                runId: run.id,
-                sequence,
-                ...(input.runStatus ? { runStatus: input.runStatus } : {}),
-                ...(terminal ? { terminal: true, terminalState: input.terminalState } : {}),
-            }
-            const parsedEnvelope = streamEventEnvelopeSchema.safeParse(envelope)
-
-            if (!parsedEnvelope.success) {
-                throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event envelope failed validation.')
-            }
-
-            const payloadByteLength = calculatePayloadByteLength(parsedEnvelope.data.payload)
-
-            if (payloadByteLength > run.maxEventPayloadBytes) {
-                throw new StreamEventStoreError(
-                    'STREAM_EVENT_PAYLOAD_TOO_LARGE',
-                    'Stream event payload exceeds the configured per-run payload boundary.'
-                )
-            }
-
-            if (input.agentRunId && run.agentRunId && input.agentRunId !== run.agentRunId) {
+            const agentRunIds = [...new Set(inputs.map(input => input.agentRunId).filter((value): value is string => Boolean(value)))]
+            if (agentRunIds.length > 1 || (agentRunIds[0] && run.agentRunId && agentRunIds[0] !== run.agentRunId)) {
                 throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event agentRunId does not match the linked AgentRun.')
             }
-
-            if (input.agentRunId && run.kind !== 'tasklist_agent') {
+            if (agentRunIds.length > 0 && run.kind !== 'tasklist_agent') {
                 throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Only Tasklist stream runs can link an AgentRun.')
             }
 
-            const persistedEvent = await transaction.streamEvent.create({
-                data: {
+            const persistedInputs: PersistedStreamEventInput[] = []
+            const envelopes: StreamEventEnvelopeDto[] = []
+            let retentionUntilMs = run.retentionUntil.getTime()
+            let nextRunStatus = run.status
+
+            for (const [index, input] of inputs.entries()) {
+                const sequence = run.lastSequence + index + 1
+                const now = input.now ?? new Date()
+                const expiresAt = new Date(now.getTime() + defaultEventRetentionMs)
+                const terminal = input.terminalState !== undefined
+                const effectiveRunStatus = input.runStatus ?? (terminal ? input.terminalState : undefined)
+                if (!terminal && effectiveRunStatus && terminalRunStatuses.has(effectiveRunStatus)) {
+                    throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Terminal StreamRun status requires a terminal event.')
+                }
+                const parsedEnvelope = streamEventEnvelopeSchema.safeParse({
+                    eventId: this.createEventId(),
+                    eventKind: terminal ? 'terminal' : input.eventKind,
+                    payload: input.payload,
+                    protocolVersion: streamProtocolVersion,
+                    runId: run.id,
+                    sequence,
+                    ...(effectiveRunStatus ? { runStatus: effectiveRunStatus } : {}),
+                    ...(terminal ? { terminal: true, terminalState: input.terminalState } : {}),
+                })
+
+                if (!parsedEnvelope.success) {
+                    throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event envelope failed validation.')
+                }
+
+                if (
+                    parsedEnvelope.data.terminal &&
+                    (!parsedEnvelope.data.terminalState ||
+                        parsedEnvelope.data.runStatus !== parsedEnvelope.data.terminalState ||
+                        !isTerminalPayloadConsistent(parsedEnvelope.data.terminalState, parsedEnvelope.data.payload))
+                ) {
+                    throw new StreamEventStoreError(
+                        'STREAM_EVENT_INVALID',
+                        'Terminal stream event payload does not match its terminal state.'
+                    )
+                }
+
+                const payloadByteLength = calculatePayloadByteLength(parsedEnvelope.data.payload)
+                if (payloadByteLength > run.maxEventPayloadBytes) {
+                    throw new StreamEventStoreError(
+                        'STREAM_EVENT_PAYLOAD_TOO_LARGE',
+                        'Stream event payload exceeds the configured per-run payload boundary.'
+                    )
+                }
+
+                retentionUntilMs = Math.max(retentionUntilMs, expiresAt.getTime())
+                nextRunStatus = parsedEnvelope.data.terminalState ?? parsedEnvelope.data.runStatus ?? nextRunStatus
+                envelopes.push(parsedEnvelope.data)
+                persistedInputs.push({
                     eventKind: parsedEnvelope.data.eventKind,
                     expiresAt,
                     id: parsedEnvelope.data.eventId,
@@ -237,32 +288,43 @@ export class StreamEventStore {
                     sequence,
                     terminal,
                     terminalState: parsedEnvelope.data.terminalState ?? null,
-                },
-            })
-            const terminalError = terminal && parsedEnvelope.data.payload.type === 'error' ? parsedEnvelope.data.payload : undefined
+                })
+            }
+
+            const createResult = await transaction.streamEvent.createMany({ data: persistedInputs })
+            if (createResult.count !== persistedInputs.length) {
+                throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event batch insert was incomplete.')
+            }
+
+            const lastEnvelope = envelopes.at(-1)!
+            const lastInput = inputs.at(-1)!
+            const terminal = lastEnvelope.terminal === true
+            const terminalError = terminal && lastEnvelope.payload.type === 'error' ? lastEnvelope.payload : undefined
+            const lastSequence = lastEnvelope.sequence
+
             await transaction.streamRun.update({
                 data: {
-                    ...(input.agentRunId && run.agentRunId === null ? { agentRunId: input.agentRunId } : {}),
-                    completedAt: terminal ? now : run.completedAt,
+                    ...(agentRunIds[0] && run.agentRunId === null ? { agentRunId: agentRunIds[0] } : {}),
+                    completedAt: terminal ? (lastInput.now ?? new Date()) : run.completedAt,
                     ...(terminalError
                         ? {
                               failureCode: terminalError.errorCode,
                               publicFailureMessage: terminalError.message,
                           }
                         : {}),
-                    lastSequence: sequence,
-                    retentionUntil: new Date(Math.max(run.retentionUntil.getTime(), expiresAt.getTime())),
-                    status: parsedEnvelope.data.terminalState ?? parsedEnvelope.data.runStatus ?? run.status,
-                    terminalSequence: terminal ? sequence : run.terminalSequence,
+                    lastSequence,
+                    retentionUntil: new Date(retentionUntilMs),
+                    status: nextRunStatus,
+                    terminalSequence: terminal ? lastSequence : run.terminalSequence,
                 },
                 where: {
                     id: run.id,
                 },
             })
-            await this.trimRunEvents(transaction, run, sequence)
+            await this.trimRunEvents(transaction, run, lastSequence)
 
-            return toEnvelope(persistedEvent)
-        })
+            return envelopes
+        }, transactionOptions)
     }
 
     async replayEvents(input: ReplayStreamEventsInput): Promise<ReplayStreamEventsResult> {
@@ -276,6 +338,17 @@ export class StreamEventStore {
         if (now > run.retentionUntil) {
             throw new StreamEventStoreError('CURSOR_EXPIRED', 'Stream recovery cursor is outside the retained window.')
         }
+
+        const terminalEvent = await this.prisma.streamEvent.findFirst({
+            orderBy: {
+                sequence: 'desc',
+            },
+            where: {
+                runId: run.id,
+                terminal: true,
+            },
+        })
+        assertRunTerminalConsistency(run, terminalEvent)
 
         if (input.after > run.lastSequence) {
             throw new StreamEventStoreError('CURSOR_AHEAD', 'Stream recovery cursor is ahead of the persisted event log.')
@@ -339,6 +412,7 @@ export class StreamEventStore {
                 terminal: true,
             },
         })
+        assertRunTerminalConsistency(run, terminalEvent)
 
         return terminalEvent ? toEnvelope(terminalEvent) : null
     }
@@ -432,8 +506,81 @@ function isTerminalRun(run: StreamRunRecord): boolean {
     return run.terminalSequence !== null || terminalRunStatuses.has(run.status)
 }
 
+function assertRunTerminalConsistency(run: StreamRunRecord, terminalEvent: StreamEventRecord | null): void {
+    const runIsTerminal = terminalRunStatuses.has(run.status)
+    if ((run.terminalSequence !== null) !== runIsTerminal) {
+        throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'StreamRun terminal status and terminalSequence are inconsistent.')
+    }
+
+    if (run.terminalSequence === null) {
+        if (terminalEvent) {
+            throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Terminal event exists for a non-terminal StreamRun.')
+        }
+        return
+    }
+
+    if (
+        !terminalEvent ||
+        run.terminalSequence !== run.lastSequence ||
+        terminalEvent.sequence !== run.terminalSequence ||
+        terminalEvent.sequence !== run.lastSequence ||
+        terminalEvent.terminalState !== run.status ||
+        terminalEvent.runStatus !== run.status ||
+        !isTerminalPayloadConsistent(run.status, terminalEvent.payload)
+    ) {
+        throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'StreamRun status does not match its terminal event.')
+    }
+}
+
+function isTerminalPayloadConsistent(status: StreamRunStatusDto, payload: unknown): boolean {
+    if (!payload || typeof payload !== 'object' || !('type' in payload)) {
+        return false
+    }
+
+    const type = (payload as { type?: unknown }).type
+    if (type === 'run-status') {
+        return (payload as { status?: unknown }).status === status
+    }
+
+    if (status === 'completed') {
+        return type === 'finish'
+    }
+    if (status === 'failed') {
+        return type === 'error'
+    }
+    if (status === 'cancelled' || status === 'rejected') {
+        return type === 'finish' || type === 'error'
+    }
+    return false
+}
+
 function calculatePayloadByteLength(payload: StreamEventEnvelopeDto['payload']): number {
     return new TextEncoder().encode(JSON.stringify(payload)).length
+}
+
+function resolveBatchTransactionOptions(deadlineAtMs: number | undefined) {
+    const remainingMs = deadlineAtMs === undefined ? Number.POSITIVE_INFINITY : deadlineAtMs - Date.now()
+
+    if (remainingMs <= 0) {
+        throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event batch deadline has expired.')
+    }
+
+    if (remainingMs === Number.POSITIVE_INFINITY) {
+        return { maxWait: 2000, timeout: 5000 }
+    }
+
+    // Prisma 的 maxWait 与 timeout 是连续消耗的两个阶段；不能分别拿到完整的剩余 run budget。
+    if (remainingMs < 2) {
+        throw new StreamEventStoreError('STREAM_EVENT_INVALID', 'Stream event batch deadline has insufficient transaction budget.')
+    }
+
+    const totalBudgetMs = Math.floor(remainingMs)
+    const maxWait = Math.min(2000, Math.floor(totalBudgetMs / 2))
+
+    return {
+        maxWait: Math.max(1, maxWait),
+        timeout: Math.max(1, Math.min(5000, totalBudgetMs - maxWait)),
+    }
 }
 
 function toEnvelope(event: StreamEventRecord): StreamEventEnvelopeDto {

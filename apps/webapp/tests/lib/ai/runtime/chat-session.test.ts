@@ -1,5 +1,5 @@
 import { HumanMessage } from '@langchain/core/messages'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest'
 
 const modelProviderMocks = vi.hoisted(() => ({
     createChatModel: vi.fn(() => ({
@@ -27,8 +27,8 @@ vi.mock('@/lib/ai/model-provider', async importOriginal => {
     }
 })
 
-vi.mock('@/lib/ai/capabilities', () => ({
-    resolveToolBindingForSkill: vi.fn(async () => ({
+const capabilityMocks = vi.hoisted(() => ({
+    resolveGeneralToolBinding: vi.fn(async () => ({
         activeToolCapabilityIds: [],
         activeToolDefinitionMap: new Map(),
         activeToolNames: [],
@@ -36,12 +36,21 @@ vi.mock('@/lib/ai/capabilities', () => ({
     })),
 }))
 
-vi.mock('@/lib/ai/skills/router', () => ({
+vi.mock('@/lib/ai/capabilities', () => ({
+    resolveGeneralToolBinding: capabilityMocks.resolveGeneralToolBinding,
+}))
+
+const skillRouterMocks = vi.hoisted(() => ({
     resolveSkillDefinitionForRequest: vi.fn(() => undefined),
+}))
+
+vi.mock('@/lib/ai/skills/router', () => ({
+    resolveSkillDefinitionForRequest: skillRouterMocks.resolveSkillDefinitionForRequest,
 }))
 
 import type { ResolvedModelSelection } from '@/lib/ai/model-provider'
 import { createChatSession } from '@/lib/ai/runtime/chat-session'
+import type { ChatSession } from '@/lib/ai/runtime/types'
 import type { ChatRequest } from '@/lib/ai/types/chat'
 
 const resolvedModelSelection: ResolvedModelSelection = {
@@ -93,12 +102,122 @@ function createRequest(): ChatRequest {
 describe('runtime/chat-session', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        skillRouterMocks.resolveSkillDefinitionForRequest.mockReturnValue(undefined)
     })
 
     it('普通 chat memory 路径只把最新 user message 作为当前 turn 输入', async () => {
         const session = await createChatSession(createRequest(), resolvedModelSelection)
 
         expect(session.langChainMessages).toEqual([new HumanMessage('当前最新问题')])
-        expect(session.directAnswerMessages).toEqual([new HumanMessage('当前最新问题')])
+        expect(session).not.toHaveProperty('directAnswerMessages')
+        expect(session).not.toHaveProperty('toolBoundModel')
+        expect(modelProviderMocks.createChatModel).toHaveBeenCalledWith(
+            expect.objectContaining({
+                maxRetries: 0,
+                resolvedModelSelection,
+            })
+        )
+    })
+
+    it('Action 与 Answer 是仅有的 Agent model phase', () => {
+        type Phase = Parameters<ChatSession['createPhaseModel']>[0]['phase']
+
+        expectTypeOf<Phase>().toEqualTypeOf<'action' | 'answer'>()
+    })
+
+    it('Skill 选择只影响 prompt，不参与 General Tool policy', async () => {
+        skillRouterMocks.resolveSkillDefinitionForRequest.mockReturnValue({
+            description: 'reader prompt only',
+            name: '阅读技能',
+            skillId: 'reader-skill',
+            systemPrompt: '只基于已注入上下文回答。',
+        })
+
+        await createChatSession(createRequest(), resolvedModelSelection)
+
+        expect(capabilityMocks.resolveGeneralToolBinding).toHaveBeenCalledWith()
+        expect(capabilityMocks.resolveGeneralToolBinding).toHaveBeenCalledTimes(1)
+    })
+
+    it('为 Action 与 Answer 构建独立的服务端提示词投影', async () => {
+        capabilityMocks.resolveGeneralToolBinding.mockResolvedValueOnce({
+            activeToolCapabilityIds: [],
+            activeToolDefinitionMap: new Map(),
+            activeToolNames: ['web-search', 'read-url', 'calculator'],
+            activeTools: [],
+        })
+        skillRouterMocks.resolveSkillDefinitionForRequest.mockReturnValue({
+            description: 'reader prompt only',
+            name: '阅读技能',
+            outputPolicy: 'context-reader',
+            skillId: 'reader-skill',
+            systemPrompt: 'ACTION_SKILL: 命中时必须调用工具。',
+        })
+
+        const session = await createChatSession(createRequest(), resolvedModelSelection)
+        const actionPrompt = session.actionSystemPrompts.join('\n')
+        const answerPrompt = session.answerSystemPrompts.join('\n')
+
+        expect(actionPrompt).toContain('直接发起合法的 tool call')
+        expect(actionPrompt).toContain('内部行动阶段')
+        expect(answerPrompt).toContain('适中的必要解释')
+        expect(answerPrompt).toContain('用户明确要求简短、详细、步骤、表格或特定格式时')
+        expect(answerPrompt).not.toContain('直接发起合法的 tool call')
+        expect(answerPrompt).not.toContain('当前这一轮真正可用的工具只有')
+        expect(answerPrompt).not.toContain('ACTION_SKILL: 命中时必须调用工具。')
+    })
+
+    it('Action 与 Answer 使用同一已解析模型和请求配置创建真实模型', async () => {
+        const actionModel = { stream: vi.fn() }
+        const answerModel = { stream: vi.fn() }
+        modelProviderMocks.createChatModel
+            .mockReturnValueOnce({ model: { stream: vi.fn() } })
+            .mockReturnValueOnce({ model: actionModel })
+            .mockReturnValueOnce({ model: answerModel })
+
+        const session = await createChatSession(createRequest(), resolvedModelSelection)
+        const signal = new AbortController().signal
+
+        expect(
+            session.createPhaseModel({
+                maxRetries: 0,
+                phase: 'action',
+                signal,
+                timeoutMs: 321,
+            })
+        ).toBe(actionModel)
+        expect(
+            session.createPhaseModel({
+                maxRetries: 0,
+                phase: 'answer',
+                signal,
+                timeoutMs: 654,
+            })
+        ).toBe(answerModel)
+
+        expect(modelProviderMocks.createChatModel).toHaveBeenNthCalledWith(
+            2,
+            expect.objectContaining({
+                enableReasoning: undefined,
+                maxOutputTokens: undefined,
+                maxRetries: 0,
+                resolvedModelSelection,
+                streaming: true,
+                temperature: undefined,
+                timeoutMs: 321,
+            })
+        )
+        expect(modelProviderMocks.createChatModel).toHaveBeenNthCalledWith(
+            3,
+            expect.objectContaining({
+                enableReasoning: undefined,
+                maxOutputTokens: undefined,
+                maxRetries: 0,
+                resolvedModelSelection,
+                streaming: true,
+                temperature: undefined,
+                timeoutMs: 654,
+            })
+        )
     })
 })

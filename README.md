@@ -8,7 +8,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**，用于验证 A
 
 ![AI Mind 受控 Agent 执行过程演示](./assets/screenshots/ai-mind-v0.4.7-hitll.png)
 
-> 当前本地版本为 v0.5.4：Token-aware Memory Compaction。它以模型感知的 token budget 管理普通聊天记忆，统一完整输入 preflight 与失败回退，并在 Composer 中提供无操作的聊天记忆用量提示；尚未创建 tag 或 GitHub Release。
+> 当前本地版本为 v0.6.0：General ReAct Agent MVP。普通聊天统一进入受控 ReAct loop，同时保留 Tasklist、Delivery Chain 和 Image Agent 专用 runtime；尚未创建 tag 或 GitHub Release。
 
 ## 项目解决的问题
 
@@ -16,7 +16,7 @@ AI Mind 关注的不是“再做一个聊天框”，而是聊天框背后的运
 
 - AI 应用从简单聊天扩展到 Tool、Resource、Prompt 和 Agent 后，运行时边界如何拆分。
 - Tool / Resource / Prompt 等能力如何统一建模，并保持各自执行语义。
-- 流式输出中的 `reasoning / tool / resource / prompt / agent-step / artifact / text / error` 等 chunk 如何统一协议。
+- 流式输出中的 `agent-run / agent-graph / tool / resource / prompt / artifact / text / error` 等 chunk 如何按运行时语义统一协议。
 - Skill Runtime 如何承接不同类型任务，而不是让主链路持续变胖。
 - MCP Server 如何接入本地和远程能力。
 - 第一个 Agent 如何先做成受控单 Agent，并逐步迁移到可观察的 LangGraph 编排，而不是一上来进入开放式规划系统。
@@ -179,7 +179,7 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 
 ## 当前阶段与非目标
 
-当前阶段：`Runtime Skeleton / MVP`，当前本地版本：`v0.5.4 Token-aware Memory Compaction`。
+当前阶段：`Runtime Skeleton / MVP`，当前本地版本：`v0.6.0 General ReAct Agent MVP`。
 
 已经验证：
 
@@ -258,7 +258,19 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 - [ADR](./docs/adr)：长期架构决策。
 - [Specs](./specs)：面向 Codex / AI coding agent 的版本级规格。
 
-## 当前版本：v0.5.4 Token-aware Memory Compaction
+## 当前版本：v0.6.0 General ReAct Agent MVP
+
+v0.6.0 将普通 `routeType=chat` 统一交给受控 General ReAct Agent：
+
+- LangChain v1 `createAgent(version='v2')` 是唯一 generic loop；Composer、Skill、MCP context 先准备安全 observation，再进入同一闭环。
+- `web-search`、`read-url`、`calculator`、`datetime` 是最小 base tools；固定 action/model/tool/deadline/retry budgets 和每进程 8-run admission 保护运行边界。
+- General ReAct Trace 是普通聊天唯一过程容器；完成态 Trace 与回答复用现有 IndexedDB public-safe snapshot，不保存 raw reasoning、原始 Tool 数据或网页正文。
+- StreamEvent 使用 PostgreSQL-first persist-before-publish、40ms/256-char server batching、64/256KiB backpressure；浏览器继续使用 20ms+rAF。
+- Tasklist、Delivery Chain、Image Agent 不进入 generic runner；Delivery subagent 明确为 `agent-tool/delegated-agent`。
+
+详细设计见 [v0.6.0 Version](./docs/versions/v0.6.0-general-react-agent-mvp.md)、[Release Note](./docs/releases/v0.6.0.md)、[ADR-0019](./docs/adr/0019-general-react-agent-runtime.md) 和 [canonical acceptance](./specs/v0.6.0-general-react-agent-mvp/acceptance.md)。
+
+## 上一版本：v0.5.4 Token-aware Memory Compaction
 
 v0.5.4 让普通聊天的可见记忆按 token budget，而不是按固定消息数进行压缩：
 
@@ -371,7 +383,7 @@ v0.4.9 的边界非常明确：
 
 - `LangChain.js + Model Provider Runtime（Ollama / DeepSeek / Qwen）`
 - NDJSON 流式协议。
-- `reasoning / tool / resource / prompt / agent-step / agent-graph-* / artifact / text / error` 多段式消息流。
+- `agent-run-* / agent-graph-* / tool / resource / prompt / artifact / text / error` 多段式消息流；General Run 与专用 Graph 使用独立判别类型。
 - Skill 命中与 Prompt 执行事实展示。
 - 统一 `error` chunk 语义。
 - `authoritative answer`：在单工具确定性结果场景下支持工具结果直出，减少模型二次改写带来的偏差。
@@ -813,6 +825,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.5.2  | Conversation Entry Without Scroll Flash            | 历史会话首次揭示直接到达最新消息；全高消息滚动视口与悬浮 Composer 保持稳定 gutter、列对齐和本地优先切换语义                                                                     |
 | v0.5.3  | Long Message Virtualization                        | 以免费 `react-virtuoso` 实现统一消息虚拟化、动态高度估算与单一滚动所有权，并保留流式阅读意图和离屏详情状态                                                                      |
 | v0.5.4  | Token-aware Memory Compaction                      | 用模型感知 token budget 替代固定消息数压缩，统一完整输入 preflight、失败回退与 128K/32K 运行窗口，并收口虚拟滚动、Composer 用量和全局反馈体验                                   |
+| v0.6.0  | General ReAct Agent MVP                            | 普通聊天统一进入受控 ReAct loop，补齐 base tools、public-safe Trace、durable batching、backpressure、8-run admission 和专用 Agent 隔离                                          |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 

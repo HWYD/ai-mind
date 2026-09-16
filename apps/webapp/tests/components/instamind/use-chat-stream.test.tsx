@@ -248,6 +248,7 @@ describe('useChatStream', () => {
 
         expect(requestBody?.options?.modelId).toBe('qwen/qwen3.6-plus')
         expect(requestBody?.options?.enableReasoning).toBe(false)
+        expect(requestBody?.options?.skill).toBeUndefined()
         expect(requestInit?.headers).toMatchObject({
             'Content-Type': 'application/json',
             'Idempotency-Key': expect.any(String),
@@ -936,7 +937,7 @@ describe('useChatStream', () => {
         ]
 
         vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
-        const { result } = renderHook(() => useChatStream({ skillMode: 'utility', enableReasoning: false }))
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
             await result.current.sendMessage('把 1kg 换算成 m')
@@ -979,7 +980,7 @@ describe('useChatStream', () => {
         ]
 
         vi.stubGlobal('fetch', withThreadHydration(createNdjsonResponse(streamChunks)))
-        const { result } = renderHook(() => useChatStream({ skillMode: 'reader', enableReasoning: false }))
+        const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await act(async () => {
             await result.current.sendMessage('读取 NOT_EXIST.md')
@@ -1661,9 +1662,7 @@ it('signals an accepted turn immediately, but not an empty or duplicate submissi
                 })
         )
     )
-    const { result } = renderHook(() =>
-        useChatStreamBase({ draftMode: true, model: 'deepseek-chat', skillMode: 'auto', enableReasoning: false })
-    )
+    const { result } = renderHook(() => useChatStreamBase({ draftMode: true, model: 'deepseek-chat', enableReasoning: false }))
     await act(async () => {
         expect(await result.current.sendMessage('')).toBe(false)
     })
@@ -1695,7 +1694,7 @@ it('positions only a new accepted question that starts with existing history', a
                 })
         )
     )
-    const { result } = renderChatStreamHook({ model: 'deepseek-chat', skillMode: 'auto' })
+    const { result } = renderChatStreamHook({ model: 'deepseek-chat' })
 
     await waitFor(() => expect(result.current.hydrationStatus).toBe('ready'))
 

@@ -6,7 +6,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-@source "../node_modules/streamdown/dist/*.js";
+@source "../../../node_modules/streamdown/dist/*.js";
 
 :root {
     --card: oklch(1 0 0);
