@@ -7,4 +7,4 @@ export {
     writeToolValidationErrors,
 } from './execution'
 export type { ExecuteToolCallOptions, NormalizedToolExecutionError, ToolExecutionFailureCategory } from './execution'
-export { normalizeAndValidateToolCall, normalizeAndValidateToolCalls } from './validation'
+export { normalizeAndValidateToolCall } from './validation'

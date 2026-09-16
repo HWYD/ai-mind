@@ -5,7 +5,6 @@ import {
     getAnswerSystemPrompt,
     getCoreResponseSystemPrompt,
     getToolResultSystemPrompt,
-    getToolRetrySystemPrompt,
     getToolUseSystemPrompt,
 } from '@/lib/ai/prompts/tool-calling'
 
@@ -65,6 +64,24 @@ describe('tool calling prompt policy', () => {
         expect(actionPrompt).toContain('不需要工具时结束行动')
     })
 
+    it('用通用样板区分显式联网、网页阅读和无需外部资料的任务', () => {
+        const actionPrompt = getActionSystemPrompt()
+        const toolPrompt = getToolUseSystemPrompt(['web-search', 'read-url'])
+        const answerPrompt = getAnswerSystemPrompt()
+
+        expect(actionPrompt).toContain('公开网络取证')
+        expect(toolPrompt).toContain('近期公告或利率是否调整')
+        expect(toolPrompt).toContain('PostgreSQL 慢查询排查')
+        expect(toolPrompt).toContain('先搜索，再只读取一篇本轮搜索结果')
+        expect(toolPrompt).toContain('用户提供合法 URL')
+        expect(toolPrompt).toContain('站点、语言、主题')
+        expect(toolPrompt).toContain('没有符合偏好的结果')
+        expect(toolPrompt).toContain('订单扣库存')
+        expect(toolPrompt).toContain('用户已提供周报')
+        expect(answerPrompt).toContain('没有本轮成功 observation')
+        expect(answerPrompt).toContain('不得声称已搜索、已读取、找到来源、出现授权失败或据网页得出结论')
+    })
+
     it('工具结果只提供事实资料，不把网页中的操作指令当作任务', () => {
         const resultPrompt = getToolResultSystemPrompt(['web-search'])
 
@@ -84,13 +101,5 @@ describe('tool calling prompt policy', () => {
         expect(answerPrompt).toContain('不得从记忆或标题自行构造 URL')
         expect(answerPrompt).toContain('最多 1-3 个')
         expect(answerPrompt).toContain('确定性工具结果')
-    })
-
-    it('重试提示避免重复无效调用并保留澄清优先级', () => {
-        const retryPrompt = getToolRetrySystemPrompt(['calculator'])
-
-        expect(retryPrompt).toContain('上一轮没有成功')
-        expect(retryPrompt).toContain('不要重复同一组无效参数')
-        expect(retryPrompt).toContain('无法安全补全参数时')
     })
 })

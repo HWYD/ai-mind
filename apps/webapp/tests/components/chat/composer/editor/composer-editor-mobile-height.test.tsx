@@ -8,7 +8,7 @@ import { ComposerEditor } from '@/components/chat/composer/editor/composer-edito
 describe('ComposerEditor mobile height', () => {
     it('keeps the mobile minimum height to a single line while preserving desktop classes', async () => {
         const { container } = render(
-            <ComposerEditor value="" onChange={vi.fn()} onStop={vi.fn()} onSubmit={vi.fn()} status="ready" placeholder="测试占位" />
+            <ComposerEditor value="" onChange={vi.fn()} onSubmit={vi.fn()} status="ready" placeholder="测试占位" />
         )
 
         const editorRoot = container.querySelector('.ai-composer-editor')

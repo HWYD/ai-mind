@@ -25,7 +25,6 @@ function toMessageInput(message: MindMessage): MindMessageInput | null {
             type: part.type,
             text: part.text,
             format: part.format,
-            ...(part.type === 'reasoning' && part.visibility ? { visibility: part.visibility } : {}),
         })),
     }
 }

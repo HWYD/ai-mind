@@ -1,4 +1,4 @@
-﻿/** @vitest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
@@ -29,7 +29,7 @@ const modelGroups: ChatModelGroup[] = [
         label: '线上模型',
         models: [
             // 注意：这里从当前 catalog 派生 provider，避免把 deepseek family 固定绑到某个供应商。
-            createPublicModel('qwen/qwen3.6-flash'),
+            createPublicModel('deepseek/deepseek-v4-flash'),
             createPublicModel('deepseek/deepseek-v4-pro'),
             createPublicModel('doubao/doubao-seed-2.0-pro'),
             createPublicModel('doubao/Kimi-K2.6'),
@@ -67,7 +67,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -91,7 +91,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -110,12 +110,12 @@ describe('ComposerToolbar model selector', () => {
         })
 
         const menu = await waitFor(() => screen.getByRole('menu'))
-        const onlineQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3.6-flash' })
+        const deepseekFlashItem = within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-flash' })
         const deepseekItem = within(menu).getByRole('menuitemradio', { name: 'deepseek-v4-pro' })
         const doubaoItem = within(menu).getByRole('menuitemradio', { name: 'doubao-seed-2.0-pro' })
         const kimiItem = within(menu).getByRole('menuitemradio', { name: 'Kimi-K2.6' })
         const localQwenItem = within(menu).getByRole('menuitemradio', { name: 'qwen3-8b' })
-        const onlineQwenIcon = onlineQwenItem.querySelector<SVGElement>('[data-model-icon]')
+        const deepseekFlashIcon = deepseekFlashItem.querySelector<SVGElement>('[data-model-icon]')
         const deepseekIcon = deepseekItem.querySelector<SVGElement>('[data-model-icon]')
         const doubaoIcon = doubaoItem.querySelector<SVGElement>('[data-model-icon]')
         const kimiIcon = kimiItem.querySelector<SVGElement>('[data-model-icon]')
@@ -123,13 +123,13 @@ describe('ComposerToolbar model selector', () => {
 
         expect(within(menu).getByText('线上模型')).toBeTruthy()
         expect(within(menu).getByText('本地模型')).toBeTruthy()
-        expect(onlineQwenItem).toBeTruthy()
+        expect(deepseekFlashItem).toBeTruthy()
         expect(deepseekItem).toBeTruthy()
         expect(doubaoItem).toBeTruthy()
         expect(kimiItem).toBeTruthy()
         expect(localQwenItem).toBeTruthy()
-        expect(onlineQwenIcon?.style.color).toBe('var(--color-violet-500)')
-        expect(onlineQwenIcon?.dataset.modelIcon).toBe('qwen')
+        expect(deepseekFlashIcon?.style.color).toBe('var(--color-sky-500)')
+        expect(deepseekFlashIcon?.dataset.modelIcon).toBe('deepseek')
         expect(deepseekIcon?.style.color).toBe('var(--color-sky-500)')
         expect(localQwenIcon?.style.color).toBe('var(--color-violet-500)')
         expect(localQwenIcon?.dataset.modelIcon).toBe('qwen')
@@ -215,7 +215,7 @@ describe('ComposerToolbar model selector', () => {
                 disabled
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -238,7 +238,7 @@ describe('ComposerToolbar model selector', () => {
             <ComposerToolbar
                 enableReasoning
                 isModelLoading={false}
-                model="qwen/qwen3.6-flash"
+                model="deepseek/deepseek-v4-flash"
                 modelGroups={modelGroups}
                 onEnableReasoningChange={vi.fn()}
                 onInsertTrigger={vi.fn()}
@@ -265,7 +265,7 @@ describe('ComposerToolbar model selector', () => {
                     contextUsage={{ effectiveWindowTokens: 128000, usedPercent: 13 }}
                     enableReasoning
                     isModelLoading={false}
-                    model="qwen/qwen3.6-flash"
+                    model="deepseek/deepseek-v4-flash"
                     modelGroups={modelGroups}
                     onEnableReasoningChange={vi.fn()}
                     onInsertTrigger={vi.fn()}

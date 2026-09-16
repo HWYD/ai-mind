@@ -67,12 +67,6 @@ export interface ToolValidationError {
     uri?: string
 }
 
-export interface ToolValidationResult {
-    planningMessage: import('@langchain/core/messages').AIMessage
-    toolCalls: ToolCall[]
-    toolErrors: ToolValidationError[]
-}
-
 export interface ExecutedToolResult {
     attemptCount?: number
     failureCategory?: import('./tool-runtime/execution').ToolExecutionFailureCategory

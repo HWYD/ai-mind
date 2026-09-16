@@ -104,8 +104,6 @@ export interface ChatToolDefinition<TArgs = unknown> {
     serverId?: string
     // 标记当前工具允许被哪些 runtime 作用域消费；未声明时默认进入 skill-binding。
     runtimeScopes?: ToolRuntimeScope[]
-    // 确认工具结果可直接作为高优先级最终答案。
-    resultIsAuthoritative?: boolean
     // 按需做能力开关判断，决定当前工具是否可用。
     isAvailable?: () => boolean
 }

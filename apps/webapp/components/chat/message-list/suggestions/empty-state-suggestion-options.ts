@@ -1,4 +1,5 @@
 import {
+    BrainCircuit,
     Calculator,
     CalendarDays,
     FileSearch,
@@ -20,6 +21,14 @@ export interface EmptyStateSuggestion {
     label: string
     tag: string
     text: string
+}
+
+export const generalReActDemoSuggestion: EmptyStateSuggestion = {
+    icon: BrainCircuit,
+    tag: 'ReAct Agent',
+    label: '搜索并解读 React 19 教程',
+    description: '先搜索掘金或知乎上的中文教程，再选择一篇读取正文，提炼关键上手步骤。',
+    text: '帮我搜一下「React 19 服务端组件」怎么上手，选一篇掘金或知乎上的中文教程读一下，总结关键步骤。',
 }
 
 const demoReadmeReference = {
@@ -124,6 +133,7 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
     //     description: '解释 AI 应用 Runtime、Skill、MCP、Tool 的边界。',
     //     text: '解释一个 AI 应用里 Runtime、Skill、MCP、Tool 是怎么分层的？',
     // },
+    generalReActDemoSuggestion,
     tasklistDemoSuggestion,
     deliveryChainDemoSuggestion,
     imageGenerationDemoSuggestion,

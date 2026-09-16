@@ -107,7 +107,7 @@ export function normalizeToolExecutionError(error: unknown): NormalizedToolExecu
     const message = error instanceof Error && error.message ? error.message : '工具执行失败。'
     const retryAfterMs = normalizeRetryAfterMs(errorRecord.retryAfterMs)
 
-    if (code === 'TAVILY_CONNECTION_ERROR') {
+    if (code === 'WEB_CONNECTION_ERROR') {
         return { category: 'connection', message, retryAfterMs, retryable: true }
     }
 

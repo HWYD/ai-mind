@@ -287,6 +287,37 @@ Phase 13 的 candidate-release 证据保留为历史记录；当前最终文本 
 - 同日全量 `pnpm --dir apps/webapp lint` 未作为本 Step 的全绿证据：当前工作区已有的 v0.6.0 其他运行时/测试文件包含 22 个格式或规则错误及 8 个既有 React warning；本 Step 相关文件已通过精确 lint，未通过放宽规则或修改无关文件掩盖该环境阻断。
 - 实现范围未改变 GeneralToolPolicy 七项固定集合、Action/Answer 模型预算、Stream DTO、Memory 写入资格或持久化边界；D034 已同步至 `spec.md`、`plan.md`、`data-model.md`、`contracts/general-react-runtime.md`、`decisions.md`、`docs/adr/0019-general-react-agent-runtime.md` 与相关 architecture 文档。
 
+## Phase 20 — Configurable Zhipu Web Search Provider
+
+**Exit criteria**:
+
+- [x] `web-search` / `read-url` 在部署级静态选择 Tavily 或智谱，且智谱只使用 `search_std`；未设置 selector 保持 Tavily 默认。
+- [x] 缺少所选 key、非法 provider 或非法 engine 时两个 Web Tool fail-closed；任何 failure、retry 或 429/5xx 都不会切换 provider。
+- [x] 智谱 Search 与 Reader 均归一化到现有 Web Tool contract，保留最多 5 条、单授权 URL、12,000 字符、URL/Secret Guard、source 与 public-safe stream 边界。
+- [x] D035 的远端只读 Tool timeout、retry permit、取消与预算不变，且两类 server key 都由 Outbound Secret Guard 保护。
+
+**Evidence**:
+
+- 2026-09-16，先得到新增 factory/Zhipu adapter 模块缺失、Web Provider connection error 被归类为 `unknown`、以及 binding 后环境变更会切换 provider 的预期 RED；实现后运行 `node node_modules/vitest/vitest.mjs run --root apps/webapp tests/lib/ai/tools/web/tavily-web-provider.test.ts tests/lib/ai/tools/web/zhipu-web-provider.test.ts tests/lib/ai/tools/web/web-provider-factory.test.ts tests/lib/ai/runtime/tool-runtime-execution.test.ts tests/lib/ai/capabilities/tool-binding.test.ts tests/lib/ai/runtime/general-react-agent/tool-runtime-middleware.test.ts`：6 files、47 tests passed。
+- 同日 `node node_modules/typescript/bin/tsc -p apps/webapp/tsconfig.json --noEmit`、本 Step 文件的 `node node_modules/eslint/bin/eslint.js ...`、`git diff --check` 和 repository key sentinel scan 均无输出；随后在仓库根执行完整 `pnpm test:stable`，exit code `0`。
+- 同日以当前 server-only development key，通过实际 `createConfiguredWebProvider()` → `ZhipuWebProvider.search()` → `ZhipuWebProvider.read()` 链路完成官方智谱 Search-Std/Reader 脱敏 smoke：Search 返回 `5` 条结果、存在安全 HTTPS 来源且未截断；Reader 返回 `2,796` 个字符、带 provider-reported URL 和标题、未截断。整个验证不记录或输出 key、Authorization、原始 response、网页正文或完整 URL。
+- 已按人工等价 Spec Kit consistency/converge 检查对照 D037、FR-055～057、SC-023、plan、tool contract、tasks、env/deployment 与实现；未发现需要新增的未实现需求。真实 smoke 仅保存脱敏的状态、条目数与布尔验收结果，不记录 key、Authorization、原始 response、网页正文或完整 URL。
+
+## Phase 21 — Prompt-Only Explicit Web Intent Policy
+
+**Exit criteria**:
+
+- [x] D038、FR-058 与 SC-024 仅以 server-owned Prompt 生效；不新增 Runtime keyword matcher、Tool choice 强制、Tool/Provider/URL authorization、预算、stream、Memory 或 DTO 行为。
+- [x] Action Prompt contract 覆盖显式网络检索、用户 URL 读取、无 URL 的先搜索后读取、站点/语言/主题筛选和普通零 Tool 场景。
+- [x] Answer Prompt contract 规定：无成功 observation 时不得声称搜索、读取、来源数、授权失败、链接或网页结论。
+- [x] Prompt suite、相关 session/runner 回归、typecheck、scoped lint 与 `git diff --check` 有本次新鲜证据；真实模型 smoke 只能作为概率性观测，不替代 prompt contract 测试。
+
+**Evidence**:
+
+- 2026-09-16，T178 先在 `tests/lib/ai/prompts/tool-calling.test.ts` 添加 Action/Answer Prompt contract；执行 `pnpm --dir apps/webapp exec vitest run --config vitest.stable.config.ts tests/lib/ai/prompts/tool-calling.test.ts` 得到预期 RED：新增样例缺失 `公开网络取证`，共 9 项中 1 项失败。
+- 仅更新 `apps/webapp/lib/ai/prompts/tool-calling.ts` 的 server-owned 文案后重跑同一命令：1 file、9 tests passed。新 Prompt 使用六条非推荐题样板：近期公告/利率、PostgreSQL 慢查询教程、用户 URL 风险提炼、政府网站来源限制、订单扣库存锁解释、用户提供周报摘要；样板明确不是关键词触发器或回答模板。
+- 随后执行 `pnpm --dir apps/webapp exec vitest run --config vitest.stable.config.ts tests/lib/ai/prompts/tool-calling.test.ts tests/lib/ai/runtime/chat-session.test.ts tests/lib/ai/runtime/general-react-agent/general-react-agent-runner.test.ts`：3 files、47 tests passed；`pnpm --dir apps/webapp typecheck`、`pnpm --dir apps/webapp exec eslint lib/ai/prompts/tool-calling.ts tests/lib/ai/prompts/tool-calling.test.ts` 与 `git diff --check` 均 exit `0`。
+
 ## Final Success-Criteria Matrix
 
 | Criteria                     | Required evidence                                                                                                                                  |
@@ -299,6 +330,8 @@ Phase 13 的 candidate-release 证据保留为历史记录；当前最终文本 
 | SC-018, SC-020               | Eight-Run PostgreSQL reference load, batching/backpressure/cleanup metrics, candidate/lifecycle/security regressions, and target-topology p95 gate |
 | SC-021                       | Phase 15 Tool/Skill binding and explicit Composer context regressions                                                                              |
 | SC-022                       | Phase 16 prompt composition, real-user answer policy, source-state and untrusted-context regressions                                               |
+| SC-023                       | Phase 20 Web provider factory/adapter fakes, fail-closed config and known-secret regressions; redacted real Zhipu Search-Std/Reader smoke passed   |
+| SC-024                       | Phase 21 Prompt contract RED→GREEN, Chat Session/General ReAct runner regression, typecheck and scoped lint                                        |
 
 ## Final Decision
 

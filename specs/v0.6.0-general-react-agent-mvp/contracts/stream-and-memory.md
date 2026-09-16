@@ -137,7 +137,7 @@ Automated tests must prove public chunks and persisted final turns do not contai
 
 - `reasoning_content`；
 - internal system prompt；
-- Tavily key/provider config；
+- Tavily 或智谱的 key/provider config；
 - raw tool/provider Error；
 - oversized web body beyond public preview；
 - Token、Cookie、API Key、Authorization 值、签名 URL、session cookie 和 internal MCP token。

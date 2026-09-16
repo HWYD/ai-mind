@@ -263,7 +263,8 @@ MCP 在项目里用于验证“能力来源可以来自外部 server”：
 v0.6.0 将普通 `routeType=chat` 统一交给受控 General ReAct Agent：
 
 - LangChain v1 `createAgent(version='v2')` 是唯一 generic loop；Composer、Skill、MCP context 先准备安全 observation，再进入同一闭环。
-- `web-search`、`read-url`、`calculator`、`datetime` 是最小 base tools；固定 action/model/tool/deadline/retry budgets 和每进程 8-run admission 保护运行边界。
+- `web-search`、`read-url`、`calculator`、`datetime`、`text-transform`、`unit-convert`、`city-weather` 是固定 base tools；固定 action/model/tool/deadline/retry budgets 和每进程 8-run admission 保护运行边界。
+- Web Tool 以 server-only `AI_MIND_WEB_PROVIDER` 在 Tavily（默认）和智谱间静态选择；智谱固定 Search-Std/Reader，缺少所选配置会 fail-closed，运行中不自动切换或 failover。
 - General ReAct Trace 是普通聊天唯一过程容器；完成态 Trace 与回答复用现有 IndexedDB public-safe snapshot，不保存 raw reasoning、原始 Tool 数据或网页正文。
 - StreamEvent 使用 PostgreSQL-first persist-before-publish、40ms/256-char server batching、64/256KiB backpressure；浏览器继续使用 20ms+rAF。
 - Tasklist、Delivery Chain、Image Agent 不进入 generic runner；Delivery subagent 明确为 `agent-tool/delegated-agent`。

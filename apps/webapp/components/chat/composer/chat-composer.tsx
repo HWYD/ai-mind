@@ -150,7 +150,6 @@ export function ChatComposer({
                         onComposerChange={setComposerDraft}
                         onEditorChange={setEditor}
                         onSubmit={handleSubmit}
-                        onStop={onStop}
                     />
                     <ComposerToolbar
                         contextUsage={contextUsage}

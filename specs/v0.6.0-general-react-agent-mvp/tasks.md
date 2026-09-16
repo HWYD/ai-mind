@@ -498,3 +498,49 @@ The smallest demonstrable increment is Phases 1–3. The releasable v0.6.0 MVP r
 - [x] T171 [LOW] Remove or explicitly quarantine the unused `authoritative-answer`/`tool-answer` direct-answer bypass exports left after the breaking cutover, and document the decision per FR-028/D023 (unrequested).
 
 **Checkpoint**: Memory is written only after a durable completed terminal, cancellation and deadlines cannot strand a run, concurrent Tool/Memory operations are atomic or serialized, dedicated and virtualized UI states are stable, snapshots and Web links are strictly public-safe, and the focused suites are green before release closing.
+
+---
+
+## Phase 19: Governance Amendment — AI Coding Collaboration And Decision Revalidation
+
+**Purpose**: Apply the approved project-governance amendment in this canonical workspace without changing v0.6.0 product Runtime scope, numeric policy, protocol, Agent Tool boundary or release acceptance behavior.
+
+- [x] T172 [LOW] Add Constitution principles, root `AGENTS.md` execution rules and `docs/architecture/ai-coding-workflow.md` gates for safe complex-work delegation and candidate-based decision revalidation; record the process-only boundary as D036 in `specs/v0.6.0-general-react-agent-mvp/decisions.md`.
+
+**Checkpoint**: Future AI coding work assesses safe delegation before complex implementation and treats existing technical choices as evidence-backed candidates when research is triggered; this amendment does not add product multi-Agent capability.
+
+---
+
+## Phase 20: Configurable Zhipu Web Search Provider
+
+**Purpose**: Keep the existing `web-search` and `read-url` Tool contract while adding a server-only, deployment-selected Zhipu Search-Std/Reader adapter. This is a provider integration only: no Tool Runtime retry/budget change, no UI selector and no automatic Tavily↔Zhipu failover.
+
+### Tests First
+
+- [x] T173 [P] Add failing Web provider config/factory tests for default Tavily compatibility, selected Zhipu, invalid selector/engine, missing selected key, both provider keys entering the outbound known-secret set, and binding-time provider freeze in `apps/webapp/tests/lib/ai/tools/web/` and `apps/webapp/tests/lib/ai/capabilities/tool-binding.test.ts`.
+- [x] T174 [P] Add failing Zhipu adapter tests for fixed Search-Std and Reader requests, result normalization, URL revalidation, truncation and safe typed error fields in `apps/webapp/tests/lib/ai/tools/web/zhipu-web-provider.test.ts`.
+- [x] T175 [P] Add failing Tool Runtime regression proving provider-neutral connection errors retain the existing D035 classification without adding an adapter retry policy in `apps/webapp/tests/lib/ai/runtime/tool-runtime-execution.test.ts`.
+
+### Implementation And Verification
+
+- [x] T176 Implement the server-only provider config/factory, Zhipu Search-Std/Reader adapter and provider-neutral typed error in `apps/webapp/lib/ai/tools/web/`; retain Tavily and update both Web Tool definitions to use the factory.
+- [x] T177 Synchronize v0.6.0 spec, plan, research, contracts, deployment examples and architecture notes for D037; execute fake-provider regressions, typecheck, lint, diff/sensitive scans, and one redacted real Zhipu Search+Reader smoke using an explicitly supplied development key. Record evidence in `acceptance.md`.
+
+**Checkpoint**: A Run binds only the configured provider; both adapters have the same public Tool contract and D035 retry/timeout/security behavior, while missing/invalid configuration fails closed without secret leakage or provider switching.
+
+---
+
+## Phase 21: Prompt-Only Explicit Web Intent Policy
+
+**Purpose**: Resolve the observed no-Tool Web-answer failure by clarifying Action/Answer Prompt policy only. Do not add deterministic intent matching, forced tool choice, Tool Runtime/Provider/URL-authorization changes, new DTOs, or budget changes.
+
+### Tests First
+
+- [x] T178 [P] Extend `apps/webapp/tests/lib/ai/prompts/tool-calling.test.ts` with RED contract assertions for explicit public-network search, direct-URL reading, no-URL article selection/read requiring search first, site/language/topic preference with no non-matching substitution, stable explanation/writing with no unnecessary search, and Answer prohibition on fabricated Tool observations.
+
+### Implementation And Verification
+
+- [x] T179 Revise only `apps/webapp/lib/ai/prompts/tool-calling.ts`: provide a concise Action decision ladder, Web Tool descriptions covering search→read dependency and preference filtering, and an Answer observation-only Web fact boundary. Preserve exports, Tool schema, runtime policy, URL grants, retry/budget and public contracts.
+- [x] T180 Synchronize D038/FR-058/SC-024 in the current canonical workspace; run the prompt suite, related Chat Session/General ReAct runner suites, typecheck, scoped ESLint and `git diff --check`, recording the exact evidence in `acceptance.md`.
+
+**Checkpoint**: Prompt policy covers explicit external research without degrading ordinary zero-Tool chat. It instructs, but does not pretend to enforce, a deterministic Runtime Tool choice; Answer cannot manufacture Tool/Web execution claims without current Run observations.

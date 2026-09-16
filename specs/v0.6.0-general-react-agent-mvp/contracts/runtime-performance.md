@@ -63,7 +63,7 @@
 
 允许记录不含用户内容的聚合指标：active General ReAct Run 数、capacity rejection 数、projection queue items/bytes high-water、batch event 数、batch text chars、batch wait duration、append transaction duration、writer disconnected count、event-loop delay、Tool/model duration 和 stop reason。进程级 percentile 只从最近 1,024 个数值样本计算，累计 count/total 不保留原始样本。
 
-实施验收的 reference load 使用 scripted/fake model 与 Tool，不依赖外部 Tavily 稳定性：
+实施验收的 reference load 使用 scripted/fake model 与 Tool，不依赖任一外部 Web provider 的稳定性：
 
 - 设置 `AI_MIND_REFERENCE_LOAD_GATE=production-like` 时，必须同时提供非秘密的 `AI_MIND_REFERENCE_LOAD_TOPOLOGY` 与 `AI_MIND_REFERENCE_LOAD_DATABASE_INSTANCE`；基准输出必须记录这两个标签、并发数、`prismaPoolConfig`、预热连接数、预热完成状态和 transaction 样本数。缺少任一标签即拒绝作为 production-like 运行。
 

@@ -1,4 +1,4 @@
-import { AIMessage, type BaseMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
+import { type BaseMessage, HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InputLengthExceededError } from '@/lib/ai/model-provider'
@@ -20,21 +20,13 @@ const runtimeMocks = vi.hoisted(() => {
         executeComposerContextInvocation: vi.fn(),
         prepareComposerContextInvocation: vi.fn(),
         processCompletedTurnForMemory: vi.fn(),
-        executeToolCall: vi.fn(),
-        formatToolInput: vi.fn(),
-        normalizeAndValidateToolCalls: vi.fn(),
         resolveComposerContextInvocation: vi.fn(),
         retrieveRelevantMemories: vi.fn(),
         startDeliveryChainRun: vi.fn(),
         startVersionPlanTasklistAgentRun: vi.fn(),
         writeStaticTextPart: vi.fn(),
-        writeToolValidationErrors: vi.fn(),
         createGeneralReActRunContext: vi.fn(),
         runGeneralReAct: vi.fn(),
-        hasVisibleAssistantText: vi.fn(),
-        streamAssistantParts: vi.fn(),
-        streamPlanningResponse: vi.fn(),
-        stripMessageText: vi.fn(),
     }
 })
 
@@ -114,13 +106,6 @@ vi.mock('@ai-mind/stream-core', async importOriginal => {
         writeStaticTextPart: runtimeMocks.writeStaticTextPart,
     }
 })
-
-vi.mock('@/lib/ai/runtime/tool-runtime', () => ({
-    executeToolCall: runtimeMocks.executeToolCall,
-    formatToolInput: runtimeMocks.formatToolInput,
-    normalizeAndValidateToolCalls: runtimeMocks.normalizeAndValidateToolCalls,
-    writeToolValidationErrors: runtimeMocks.writeToolValidationErrors,
-}))
 
 vi.mock('@/lib/ai/runtime/version-plan-tasklist-agent', async importOriginal => {
     const actual = await importOriginal<typeof import('@/lib/ai/runtime/version-plan-tasklist-agent')>()
@@ -379,8 +364,6 @@ describe('runtime/chat-orchestrator', () => {
             written: 0,
         })
         runtimeMocks.retrieveRelevantMemories.mockResolvedValue([])
-        runtimeMocks.writeToolValidationErrors.mockReturnValue([])
-        runtimeMocks.formatToolInput.mockReturnValue('1+1')
         runtimeMocks.startDeliveryChainRun.mockResolvedValue(false)
         runtimeMocks.startVersionPlanTasklistAgentRun.mockResolvedValue({
             graphResult: {
@@ -431,7 +414,6 @@ describe('runtime/chat-orchestrator', () => {
 
         expect(runtimeMocks.createChatSession).toHaveBeenCalledWith(createRequest(), context.resolvedModelSelection)
         expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
         expect(generalReActExecutionGate.activeCount()).toBe(0)
@@ -598,82 +580,9 @@ describe('runtime/chat-orchestrator', () => {
         }
     })
 
-    it.skip('普通 chat 的模型调用会先通过同一 context preflight；持久化压缩失败时仍继续调用模型', async () => {
-        const vueProxyQuestion = 'Vue 3 的响应式系统为什么要用 Proxy？'
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), new HumanMessage(vueProxyQuestion)],
-        })
-        runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.prepareChatContext.mockImplementationOnce(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
-            kind: 'ephemeral-fit',
-            messages: assemble([]),
-        }))
-
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request: {
-                ...createRequest(),
-                messages: [
-                    {
-                        role: 'user',
-                        parts: [{ format: 'markdown', text: vueProxyQuestion, type: 'text' }],
-                    },
-                ],
-            },
-            writeChunk: vi.fn(),
-        })
-
-        await orchestrator.run()
-
-        expect(runtimeMocks.createChatContextPreflight).toHaveBeenCalledWith(
-            expect.objectContaining({
-                resolvedModelSelection: createExecutionContext().resolvedModelSelection,
-                threadId: 'chat-conversation:test-session:test-conversation',
-            })
-        )
-        expect(runtimeMocks.prepareChatContext).toHaveBeenCalledTimes(1)
-        expect(session.baseModel.stream).toHaveBeenCalledWith([new SystemMessage('base system'), new HumanMessage(vueProxyQuestion)], {
-            signal: undefined,
-        })
-    })
-
-    it.skip('direct-answer 成功完成后写入 chat memory 一次', async () => {
-        const session = createSession()
-        runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('你好，我是 AI Mind。')
-        const writtenChunks: Array<{ type: string; scope?: string }> = []
-        const context = createExecutionContext()
-
-        const orchestrator = new ChatOrchestrator({
-            context,
-            isClosed: () => false,
-            request: createRequest(),
-            writeChunk: chunk => writtenChunks.push(chunk),
-        })
-
-        await orchestrator.run()
-
-        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat-conversation:test-session:test-conversation',
-            {
-                assistantMessageId: expect.any(String),
-                assistantText: '你好，我是 AI Mind。',
-                source: 'chat',
-                userText: '你好',
-            },
-            expect.objectContaining({
-                onStatus: expect.any(Function),
-            })
-        )
-        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
-    })
-
     it('completed terminal 后的 chat memory append 不会再写入 stream chunk', async () => {
         const session = createSession()
         runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('压缩后的回答')
         runtimeMocks.appendCompletedTurn.mockImplementationOnce(
             async (_threadId, _input, options?: { onStatus?: (event: unknown) => void }) => {
                 options?.onStatus?.({
@@ -739,171 +648,6 @@ describe('runtime/chat-orchestrator', () => {
             'failed',
         ])
         expect(runtimeMocks.createChatContextPreflight).toHaveBeenCalledWith(expect.objectContaining({ signal: abortController.signal }))
-    })
-
-    it.skip('assistant 文本已完整返回后，会先写 chat memory 再发 finish 收口', async () => {
-        const session = createSession()
-        runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('完整回答文本')
-        const writtenChunks: Array<{ type: string; scope?: string }> = []
-        let chatMemoryAppended = false
-        runtimeMocks.appendCompletedTurn.mockImplementationOnce(async () => {
-            chatMemoryAppended = true
-        })
-        let finishObservedAfterAppend = false
-
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request: createRequest(),
-            writeChunk: chunk => {
-                writtenChunks.push(chunk)
-                if (chunk.type === 'finish' && chatMemoryAppended) {
-                    finishObservedAfterAppend = true
-                }
-            },
-        })
-
-        await orchestrator.run()
-
-        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
-        expect(finishObservedAfterAppend).toBe(true)
-        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat-conversation:test-session:test-conversation',
-            {
-                assistantMessageId: expect.any(String),
-                assistantText: '完整回答文本',
-                source: 'chat',
-                userText: '你好',
-            },
-            expect.objectContaining({
-                onStatus: expect.any(Function),
-            })
-        )
-    })
-
-    it.skip('direct-answer 路径会把 chat memory context 注入模型上下文', async () => {
-        const memoryMessage = new SystemMessage('memory summary')
-        const userMessage = new HumanMessage('current user')
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), userMessage],
-        })
-
-        runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.prepareChatContext.mockImplementationOnce(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
-            messages: assemble([memoryMessage]),
-        }))
-
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request: createRequest(),
-            writeChunk: vi.fn(),
-        })
-
-        await orchestrator.run()
-
-        expect(session.baseModel.stream).toHaveBeenCalledWith([new SystemMessage('base system'), memoryMessage, userMessage], {
-            signal: undefined,
-        })
-    })
-
-    it.skip('direct-answer server-authoritative 路径只组合 memory context 和最新 user 输入，不重复前端旧历史', async () => {
-        const memorySummary = new SystemMessage('memory summary')
-        const memoryRecentUser = new HumanMessage('thread recent user')
-        const memoryRecentAssistant = new AIMessage('thread recent assistant')
-        const latestUser = new HumanMessage('当前最新问题')
-        const session = createSession({
-            directAnswerMessages: [new SystemMessage('base system'), latestUser],
-        })
-        const request = {
-            ...createRequest(),
-            messages: [
-                {
-                    role: 'user' as const,
-                    parts: [{ format: 'markdown' as const, text: '前端旧问题不应进入模型', type: 'text' as const }],
-                },
-                {
-                    role: 'assistant' as const,
-                    parts: [{ format: 'markdown' as const, text: '前端旧回答不应进入模型', type: 'text' as const }],
-                },
-                {
-                    role: 'user' as const,
-                    parts: [{ format: 'markdown' as const, text: '当前最新问题', type: 'text' as const }],
-                },
-            ],
-        }
-
-        runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.prepareChatContext.mockImplementationOnce(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
-            messages: assemble([memorySummary, memoryRecentUser, memoryRecentAssistant]),
-        }))
-
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request,
-            writeChunk: vi.fn(),
-        })
-
-        await orchestrator.run()
-
-        const modelMessages = session.baseModel.stream.mock.calls[0]?.[0] ?? []
-        const modelContent = modelMessages.map(message => String(message.content)).join('\n')
-
-        expect(modelMessages).toEqual([
-            new SystemMessage('base system'),
-            memorySummary,
-            memoryRecentUser,
-            memoryRecentAssistant,
-            latestUser,
-        ])
-        expect(modelContent).not.toContain('前端旧问题不应进入模型')
-        expect(modelContent).not.toContain('前端旧回答不应进入模型')
-    })
-
-    it.skip('composer docs-summary 路径会注入 chat memory context', async () => {
-        const memoryMessage = new SystemMessage('memory for docs summary')
-        const request = createSummaryDocsRequest()
-        const session = createSession({
-            langChainMessages: [new HumanMessage('summary current user')],
-        })
-
-        runtimeMocks.createChatSession.mockReturnValue(session)
-        runtimeMocks.resolveComposerContextInvocation.mockReturnValue({
-            kind: 'docs-summary',
-        })
-        runtimeMocks.buildSystemMessages.mockReturnValue([new SystemMessage('summary system')])
-        runtimeMocks.prepareChatContext.mockImplementationOnce(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
-            messages: assemble([memoryMessage]),
-        }))
-        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('docs summary final answer')
-
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request,
-            writeChunk: vi.fn(),
-        })
-
-        await orchestrator.run()
-
-        expect(session.baseModel.stream).toHaveBeenCalledWith(
-            [new SystemMessage('summary system'), memoryMessage, new HumanMessage('summary current user')],
-            {
-                signal: undefined,
-            }
-        )
-        expect(runtimeMocks.prepareChatContext).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat-conversation:test-session:test-conversation',
-            expect.objectContaining({
-                source: 'mcp-resource',
-            }),
-            expect.objectContaining({
-                onStatus: expect.any(Function),
-            })
-        )
     })
 
     it('generic chat 的 Composer context 先准备再进入同一个 General ReAct runner', async () => {
@@ -1029,7 +773,6 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.startDeliveryChainRun).toHaveBeenCalledTimes(1)
         expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).not.toHaveBeenCalled()
-        expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
@@ -1090,7 +833,6 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.executeComposerContextInvocation).not.toHaveBeenCalled()
         expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).not.toHaveBeenCalled()
-        expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
@@ -1113,184 +855,6 @@ describe('runtime/chat-orchestrator', () => {
         expect(runtimeMocks.startVersionPlanTasklistAgentRun).not.toHaveBeenCalled()
         expect(runtimeMocks.runGeneralReAct).toHaveBeenCalledTimes(1)
         expect(session.baseModel.stream).not.toHaveBeenCalled()
-        expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
-        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
-        expectSingleTerminalChunk(writtenChunks)
-    })
-
-    it.skip('planning + retry 后仍为空时会携带绑定 tool schema 预检、回退 direct-answer 并只收口一次 finish', async () => {
-        const toolBoundModelStream = vi.fn().mockResolvedValueOnce({ name: 'planning-1' }).mockResolvedValueOnce({ name: 'planning-2' })
-        const session = createSession({
-            activeTools: [calculatorToolDefinition],
-            toolBoundModel: {
-                stream: toolBoundModelStream,
-            },
-        })
-        runtimeMocks.createChatSession.mockReturnValue(session)
-
-        const firstResponse = new AIMessage({ content: '', tool_calls: [] })
-        const retryResponse = new AIMessage({ content: '', tool_calls: [] })
-        runtimeMocks.streamPlanningResponse.mockResolvedValueOnce(firstResponse).mockResolvedValueOnce(retryResponse)
-        runtimeMocks.normalizeAndValidateToolCalls
-            .mockReturnValueOnce({
-                planningMessage: firstResponse,
-                toolCalls: [],
-                toolErrors: [],
-            })
-            .mockReturnValueOnce({
-                planningMessage: retryResponse,
-                toolCalls: [],
-                toolErrors: [],
-            })
-        runtimeMocks.hasVisibleAssistantText.mockReturnValue(false)
-
-        const writtenChunks: Array<{ type: string; scope?: string }> = []
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request: createRequest(),
-            writeChunk: chunk => writtenChunks.push(chunk),
-        })
-
-        await orchestrator.run()
-
-        expect(toolBoundModelStream).toHaveBeenCalledTimes(2)
-        expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.prepareChatContext.mock.calls[0]?.[1]).toEqual([
-            expect.objectContaining({
-                function: expect.objectContaining({ name: 'calculator' }),
-                type: 'function',
-            }),
-        ])
-        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
-        expectSingleTerminalChunk(writtenChunks)
-    })
-
-    it.skip('validation-only 路径会写出校验错误并只收口一次 finish', async () => {
-        const toolBoundModelStream = vi.fn().mockResolvedValue({ name: 'planning' })
-        const session = createSession({
-            toolBoundModel: {
-                stream: toolBoundModelStream,
-            },
-        })
-        runtimeMocks.createChatSession.mockReturnValue(session)
-
-        const response = new AIMessage({ content: 'planning text', tool_calls: [] })
-        runtimeMocks.streamPlanningResponse.mockResolvedValue(response)
-        runtimeMocks.normalizeAndValidateToolCalls.mockReturnValue({
-            planningMessage: response,
-            toolCalls: [],
-            toolErrors: [
-                {
-                    id: 'tool-error-1',
-                    toolName: 'calculator',
-                    input: '1+1',
-                    message: '工具参数不合法',
-                    outputPartType: 'tool',
-                    source: 'internal',
-                },
-            ],
-        })
-        runtimeMocks.hasVisibleAssistantText.mockReturnValue(true)
-        runtimeMocks.writeToolValidationErrors.mockReturnValue([
-            new ToolMessage({
-                content: '工具参数不合法',
-                tool_call_id: 'tool-error-1',
-                status: 'error',
-            }),
-        ])
-
-        const writtenChunks: Array<{ type: string; scope?: string }> = []
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request: createRequest(),
-            writeChunk: chunk => writtenChunks.push(chunk),
-        })
-
-        await orchestrator.run()
-
-        expect(runtimeMocks.writeToolValidationErrors).toHaveBeenCalledWith(
-            expect.any(Array),
-            expect.objectContaining({
-                stage: 'planning',
-            })
-        )
-        expect(runtimeMocks.executeToolCall).not.toHaveBeenCalled()
-        expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
-        expectSingleTerminalChunk(writtenChunks)
-    })
-
-    it.skip('tool-execution + final-answer 路径只收口一次 finish', async () => {
-        const toolCall = {
-            id: 'tool-call-1',
-            name: 'calculator',
-            args: { expression: '1+1' },
-            type: 'tool_call' as const,
-        }
-        const toolBoundModelStream = vi.fn().mockResolvedValueOnce({ name: 'planning' }).mockResolvedValueOnce({ name: 'final' })
-        const session = createSession({
-            toolBoundModel: {
-                stream: toolBoundModelStream,
-            },
-        })
-        runtimeMocks.createChatSession.mockReturnValue(session)
-
-        const response = new AIMessage({
-            content: '',
-            tool_calls: [toolCall],
-        })
-        runtimeMocks.streamPlanningResponse.mockResolvedValue(response)
-        runtimeMocks.normalizeAndValidateToolCalls.mockReturnValue({
-            planningMessage: response,
-            toolCalls: [toolCall],
-            toolErrors: [],
-        })
-        runtimeMocks.hasVisibleAssistantText.mockReturnValue(false)
-        runtimeMocks.executeToolCall.mockResolvedValue({
-            toolCall,
-            toolMessage: new ToolMessage({
-                content: '2',
-                tool_call_id: 'tool-call-1',
-                status: 'success',
-            }),
-            output: '2',
-            success: true,
-        })
-        runtimeMocks.streamAssistantParts.mockResolvedValueOnce('工具最终回答')
-
-        const writtenChunks: Array<{ type: string; scope?: string }> = []
-        const orchestrator = new ChatOrchestrator({
-            context: createExecutionContext(),
-            isClosed: () => false,
-            request: createRequest(),
-            writeChunk: chunk => writtenChunks.push(chunk),
-        })
-
-        await orchestrator.run()
-
-        expect(runtimeMocks.executeToolCall).toHaveBeenCalledWith(
-            toolCall,
-            expect.any(Object),
-            expect.any(Function),
-            expect.objectContaining({
-                errorStage: 'tool-execution',
-            })
-        )
-        expect(toolBoundModelStream).toHaveBeenCalledTimes(1)
-        expect(session.baseModel.stream).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.prepareChatContext).toHaveBeenCalledTimes(2)
-        expect(runtimeMocks.streamAssistantParts).toHaveBeenCalledTimes(1)
-        expect(runtimeMocks.appendCompletedTurn).toHaveBeenCalledWith(
-            'chat-conversation:test-session:test-conversation',
-            expect.objectContaining({
-                source: 'tool',
-            }),
-            expect.objectContaining({
-                onStatus: expect.any(Function),
-            })
-        )
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])
         expectSingleTerminalChunk(writtenChunks)
     })
@@ -1339,7 +903,6 @@ describe('runtime/chat-orchestrator', () => {
         )
         expect(runtimeMocks.startDeliveryChainRun).not.toHaveBeenCalled()
         expect(session.baseModel.stream).not.toHaveBeenCalled()
-        expect(runtimeMocks.streamAssistantParts).not.toHaveBeenCalled()
         expect(runtimeMocks.readThreadState).not.toHaveBeenCalled()
         expect(runtimeMocks.appendCompletedTurn).not.toHaveBeenCalled()
         expect(collectChunkTypes(writtenChunks)).toEqual(['start', 'finish'])

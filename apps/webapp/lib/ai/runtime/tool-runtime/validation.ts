@@ -1,9 +1,9 @@
-import { AIMessage, type ToolCall } from '@langchain/core/messages'
+import type { ToolCall } from '@langchain/core/messages'
 import { ZodError } from 'zod'
 
 import { createId } from '@/lib/ai/create-id'
 
-import type { ToolValidationResult } from '../types'
+import type { ToolValidationError } from '../types'
 import { formatToolInput, getResourceDisplayFields, getToolDisplayFields, type ToolDefinitionMap } from './display'
 
 export type SingleToolCallValidationResult =
@@ -13,7 +13,7 @@ export type SingleToolCallValidationResult =
       }
     | {
           success: false
-          toolError: ToolValidationResult['toolErrors'][number]
+          toolError: ToolValidationError
       }
 
 /**
@@ -88,49 +88,6 @@ export function normalizeAndValidateToolCall(rawToolCall: ToolCall, toolDefiniti
             ...toolCall,
             args: parsedArgs.data,
         },
-    }
-}
-
-/**
- * 对模型返回的 tool calls 做统一归一化与 schema 校验，拆分成：
- * 1. 可执行调用
- * 2. 可展示校验错误
- */
-export function normalizeAndValidateToolCalls(message: AIMessage, toolDefinitionMap: ToolDefinitionMap): ToolValidationResult {
-    const validatedToolCalls: ToolCall[] = []
-    const toolErrors: ToolValidationResult['toolErrors'] = []
-
-    for (const rawToolCall of message.tool_calls ?? []) {
-        const result = normalizeAndValidateToolCall(rawToolCall, toolDefinitionMap)
-
-        if (result.success === false) {
-            toolErrors.push(result.toolError)
-            continue
-        }
-
-        validatedToolCalls.push(result.toolCall)
-    }
-
-    if (validatedToolCalls.length === 0) {
-        return {
-            planningMessage: message,
-            toolCalls: validatedToolCalls,
-            toolErrors,
-        }
-    }
-
-    return {
-        planningMessage: new AIMessage({
-            id: message.id,
-            content: '',
-            additional_kwargs: message.additional_kwargs,
-            response_metadata: message.response_metadata,
-            usage_metadata: message.usage_metadata,
-            tool_calls: validatedToolCalls,
-            invalid_tool_calls: message.invalid_tool_calls,
-        }),
-        toolCalls: validatedToolCalls,
-        toolErrors,
     }
 }
 

@@ -1,10 +1,11 @@
 /** @vitest-environment jsdom */
 
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
     deliveryChainDemoSuggestion,
+    generalReActDemoSuggestion,
     imageGenerationDemoSuggestion,
     tasklistDemoSuggestion,
 } from '@/components/chat/message-list/suggestions/empty-state-suggestion-options'
@@ -33,20 +34,38 @@ describe('EmptyStateSuggestions', () => {
         vi.useRealTimers()
     })
 
-    it('renders the quick start section and four cases', () => {
+    it('renders the ReAct case first and keeps four cases without Memory', () => {
         render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
 
         expect(screen.getByRole('heading', { level: 2 })).toBeTruthy()
         expect(screen.getByRole('heading', { name: '试试这些能力' })).toBeTruthy()
         expect(screen.getByText('选择一个场景，查看执行过程、控制边界与最终产物。')).toBeTruthy()
-        expect(screen.getAllByRole('article')).toHaveLength(4)
+        const cases = screen.getAllByRole('article')
+
+        expect(cases).toHaveLength(4)
+        expect(within(cases[0]).getByRole('heading', { name: '搜索并解读 React 19 教程' })).toBeTruthy()
+        expect(screen.getByText('Web Search · 网页读取 · 来源追踪')).toBeTruthy()
         expect(screen.getByText('LangGraph · HITL Checkpoint · 最多两轮修订')).toBeTruthy()
         expect(screen.getByText('Agent-as-Tool · 3 个评审 subAgent · 结构化')).toBeTruthy()
         expect(screen.getByText('图像需求摘要 · 结构化输出 · 最多一次修订')).toBeTruthy()
-        expect(screen.getByText('UserMemory · PostgresStore · 向量检索')).toBeTruthy()
+        expect(screen.queryByRole('article', { name: '跨对话偏好记忆' })).toBeNull()
         expect(screen.queryByText('LangGraph · HITL Checkpoint · 最多两轮受控修订')).toBeNull()
         expect(screen.queryByText('Agent-as-Tool · 3 个评审子 Agent 并行 · 规则汇总')).toBeNull()
         expect(screen.queryByText('UserMemory · PostgresStore · Vector Search')).toBeNull()
+    })
+
+    it('runs the General ReAct suggestion once through the first card interaction', () => {
+        const onSelectSuggestion = vi.fn()
+        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
+
+        fireEvent.click(screen.getByRole('button', { name: '运行 ReAct 智能体示例' }))
+
+        expect(onSelectSuggestion).toHaveBeenCalledTimes(1)
+        expect(onSelectSuggestion).toHaveBeenCalledWith(generalReActDemoSuggestion)
+        expect(generalReActDemoSuggestion.composer).toBeUndefined()
+        expect(generalReActDemoSuggestion.text).toBe(
+            '帮我搜一下「React 19 服务端组件」怎么上手，选一篇掘金或知乎上的中文教程读一下，总结关键步骤。'
+        )
     })
 
     it('runs the original Tasklist suggestion once through the card interaction without a second footer button', () => {
@@ -91,60 +110,6 @@ describe('EmptyStateSuggestions', () => {
         expect(imageGenerationDemoSuggestion.composer?.command?.name).toBe('image')
         expect(imageGenerationDemoSuggestion.composer?.plainText).toBe('阳光正好，一只橘猫在沙滩上睡懒觉。')
         expect(imageGenerationDemoSuggestion.displaySegments).toBeDefined()
-    })
-
-    it('keeps Memory non-submitting and expands the shared steps on touch devices', () => {
-        const onSelectSuggestion = vi.fn()
-        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={onSelectSuggestion} />)
-
-        fireEvent.click(screen.getByRole('article', { name: '跨对话偏好记忆' }))
-        expect(onSelectSuggestion).not.toHaveBeenCalled()
-
-        const memoryButton = screen.getByRole('button', { name: '查看体验步骤' })
-        expect(memoryButton.getAttribute('aria-expanded')).toBe('false')
-        fireEvent.click(memoryButton)
-
-        expect(memoryButton.getAttribute('aria-expanded')).toBe('true')
-        expect(screen.getByText('发送“记住我喜欢吃桃子。”')).toBeTruthy()
-        expect(screen.getByText('新建或切换对话。')).toBeTruthy()
-        expect(screen.getByText('发送“给我推荐几种水果。”')).toBeTruthy()
-        expect(
-            memoryButton.compareDocumentPosition(screen.getByLabelText('跨对话偏好记忆体验步骤')) & Node.DOCUMENT_POSITION_FOLLOWING
-        ).toBeTruthy()
-        expect(onSelectSuggestion).not.toHaveBeenCalled()
-
-        fireEvent.click(memoryButton)
-        expect(memoryButton.getAttribute('aria-expanded')).toBe('false')
-        expect(screen.queryByText('发送“记住我喜欢吃桃子。”')).toBeNull()
-    })
-
-    it('uses a focusable Hover Card trigger with the same steps for fine pointers', () => {
-        vi.stubGlobal('matchMedia', mockMatchMedia(true))
-        vi.useFakeTimers()
-        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
-
-        expect(screen.queryByRole('button', { name: '查看体验步骤' })).toBeNull()
-        const hoverCardTrigger = screen.getByRole('button', { name: '查看跨对话偏好记忆体验步骤' })
-        expect(hoverCardTrigger).toBeTruthy()
-
-        fireEvent.pointerEnter(hoverCardTrigger)
-        act(() => vi.advanceTimersByTime(200))
-
-        expect(screen.getByRole('heading', { name: '体验跨对话偏好记忆' })).toBeTruthy()
-        expect(screen.getByText('发送“记住我喜欢吃桃子。”')).toBeTruthy()
-        expect(screen.getByText('新建或切换对话。')).toBeTruthy()
-        expect(screen.getByText('发送“给我推荐几种水果。”')).toBeTruthy()
-        expect(screen.getByText('请在同一浏览器不同会话内完成体验。')).toBeTruthy()
-    })
-
-    it('opens the fine-pointer Hover Card from a click', () => {
-        vi.stubGlobal('matchMedia', mockMatchMedia(true))
-        render(<EmptyStateSuggestions onSelectQuestion={vi.fn()} onSelectSuggestion={vi.fn()} />)
-
-        fireEvent.click(screen.getByRole('button', { name: '查看跨对话偏好记忆体验步骤' }))
-
-        expect(screen.getByRole('heading', { name: '体验跨对话偏好记忆' })).toBeTruthy()
-        expect(screen.getByText('请在同一浏览器不同会话内完成体验。')).toBeTruthy()
     })
 
     it('shows desktop recommendation questions only for desktop-sized layouts and reuses the shared follow-up interactions', () => {

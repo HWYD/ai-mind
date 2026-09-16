@@ -63,9 +63,9 @@
 - 增加浏览器、Shell、文件或写操作：授权、沙箱、确认、审计和回滚成本超出 MVP。
 - 每个 Skill 替换整个工具集：无 Skill 的普通聊天仍无通用能力，也会制造权限不一致。
 
-## Decision 5: Tavily HTTP Adapter First
+## Decision 5: Tavily HTTP Adapter First (Superseded by D037)
 
-**Decision**: 项目定义 provider-neutral Web provider interface，第一个 adapter 用原生 server-side `fetch` 对接 Tavily Search 与 Extract；不引入 Tavily SDK。Search 使用 basic 模式、最多 5 条，关闭 provider answer/raw content；Extract 单 URL、Markdown、内部结果最多 12,000 chars。Tavily Extract 属于 remote-provider fetch，interface 不承诺 redirect chain 或逐跳校验能力。
+**Decision**: 项目定义 provider-neutral Web provider interface，第一个 adapter 用原生 server-side `fetch` 对接 Tavily Search 与 Extract；不引入 Tavily SDK。Search 使用 basic 模式、最多 5 条，关闭 provider answer/raw content；Extract 单 URL、Markdown、内部结果最多 12,000 chars。Tavily Extract 属于 remote-provider fetch，interface 不承诺 redirect chain 或逐跳校验能力。D037 保留这些边界，但将“首个 adapter”扩展为部署级可选择 adapter。
 
 **Rationale**: Tavily 官方提供独立 Search/Extract endpoint，恰好映射 `web-search` 与 `read-url` 两个原子工具。原生 HTTP 降低依赖面，并为以后 Exa 或其他 provider 留出局部 adapter 边界。AI Mind 只直接连接固定 Tavily endpoint，无法观察 Tavily 对目标站点执行的每一跳 redirect；contract 只覆盖 initial requested URL 和 provider 明确返回且准备公开/授权的 URL。
 
@@ -75,6 +75,29 @@
 - 只提供 search snippet、不提供 read：复杂事实无法核对来源正文。
 - 引入 SDK：MVP 没有使用 SDK 高层能力的需求，增加 lockfile、升级与运行时表面积。
 - 改成本地网页 fetch 以控制 redirect：需要 DNS/IP、DNS rebinding、响应体和内容解析等完整 SSRF 工程，超出演示版 MVP；若未来成为硬要求应单独设计。
+
+## Follow-up Decision D037: Configurable Tavily Or Zhipu Web Provider
+
+**Decision**: 保留 Tavily adapter，同时新增智谱 HTTP adapter；部署通过 server-only `AI_MIND_WEB_PROVIDER=tavily|zhipu` 静态选择，未设置时默认 Tavily。选择智谱时 `AI_MIND_ZHIPU_SEARCH_ENGINE` 只允许 `search_std`，`web-search` 固定调用官方 Web Search 的 Search-Std，`read-url` 固定调用官方 Reader。每次 Tool invocation 和 D035 的 retry 都使用同一个已解析 adapter；配置错误、缺少所选 key 或 provider 故障均 fail-closed，绝不自动切换到另一家。
+
+**Evidence and comparison**:
+
+| Dimension                | Tavily                              | Zhipu Search-Std / Reader                      | v0.6.0 conclusion                                                  |
+| ------------------------ | ----------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------ |
+| Search contract          | Search 结果可映射 title/URL/snippet | `search_result` 可映射 title/link/content      | 两者都能满足现有最多 5 条来源 contract                             |
+| Page reading             | Extract 的单 URL Markdown           | Reader 的单 URL Markdown                       | 两者都能满足 12,000 字符、已授权 URL 的 read contract              |
+| Query limit              | 当前 Tool 允许的 provider payload   | 官方 Web Search query 最多 70 字符             | 统一 schema 收紧为 70，不进行静默截断                              |
+| Runtime control          | HTTP adapter，可传 AbortSignal      | HTTP adapter，可传 AbortSignal                 | 均继续由 Tool Runtime 管理 20 秒上限、retry permit 与 cancellation |
+| Security/public boundary | 已有 URL/secret policy              | 相同 policy 重用于输入与 provider-reported URL | 不公开 provider config、原始 payload、正文或凭据                   |
+| Operational difference   | 网络、计费、限流由 Tavily 决定      | 网络、计费、限流由智谱决定                     | 功能契约可替代，不承诺质量、时延、配额完全等同；需要真实 smoke     |
+
+**Rationale**: 两个 provider 分别提供搜索与网页阅读的原子 HTTP 能力，恰好落在既有 `WebProvider.search/read` 窄接口内，不需要污染 Tool catalog、Agent 权限或 stream DTO。静态单选使数据出站目标、计费与故障语义可预测；自动 failover 会在一次 Run 内改变 provider、凭据和外部数据处理方，也会使重试及审计含义不确定。
+
+**Official sources**:
+
+- 智谱 Web Search API: https://docs.bigmodel.cn/api-reference/%E5%B7%A5%E5%85%B7-api/%E7%BD%91%E7%BB%9C%E6%90%9C%E7%B4%A2
+- 智谱 Reader API: https://docs.bigmodel.cn/api-reference/%E5%B7%A5%E5%85%B7-api/%E7%BD%91%E9%A1%B5%E9%98%85%E8%AF%BB
+- 智谱 pricing and rate limits: https://docs.bigmodel.cn/cn/guide/start/pricing and https://docs.bigmodel.cn/cn/api/rate-limit
 
 ## Decision 6: `createAgent` v2 Uses Bounded Native Parallelism With Batch Admission
 
@@ -278,6 +301,18 @@ Web 搜索/读取数量由 Runtime 根据安全过滤和 canonical URL 去重后
 - 40ms/512 chars：时间路径通常可用，但无法像 256 一样限制高吞吐 provider 的成段视觉跳变，因此最终冻结为 40ms/256 chars。
 - 为每个 token 保留独立数据库行、只批量 transaction：能减少部分 transaction overhead，但仍放大 event rows、replay 和 reducer 开销；同 part 连续 text delta 应安全合并。
 - Redis stream/cache：可承担跨进程 buffer 或快速 replay，但本版已有 PostgreSQL durable event store，引入第二事实源会增加一致性、部署和恢复复杂度。
+
+## Follow-up Decision D038: Explicit Web Intent Needs A Prompt Decision Ladder
+
+**Decision**: 对用户明确要求“联网搜索、查公开资料、找文章/链接/教程、选一篇阅读并总结、核对外部材料”的情形，增强现有 server-owned Action Prompt 的决策顺序；不增加 Runtime 关键词识别或强制 Tool choice。用户提供合法 URL 时可读取；未提供 URL 但要求阅读、选文、摘录或总结网页时，Prompt 要求先搜索并只读取当前 Run 搜索结果。用户给出的站点、语言、主题或资料类型偏好是候选筛选条件，没有匹配结果时如实说明。Answer Prompt 不得在无成功 observation 时编造工具已执行、来源数量、读取授权失败、链接或网页结论。
+
+**Rationale**: 2026-09-16 的真实聊天诊断表明，模型在用户明确要求“搜索、选一篇掘金或知乎教程并总结”时可以直接结束 Action，随后 Answer 在没有 `tool-start`/`tool-end` observation 的情况下产生了“本轮工具返回”和“链接未获授权”的虚构叙述。现有 Tool schema、binding、Provider 与 Tool Runtime 均可用，因此问题位于模型指令的决策清晰度和 Answer 的事实边界。显式的任务类别和依赖顺序能提升模型遵从性，同时保留稳定概念解释、写作、用户已给内容总结等零 Tool 正常路径。
+
+**Alternatives considered**:
+
+- 仅增加“必须搜索”的孤立句子：不采纳；与“不需要工具时结束行动”并列时仍缺少网页阅读、偏好筛选和普通任务不联网的完整判断路径。
+- 基于“搜索”“教程”等关键词做 Runtime 强制 Tool choice：不采纳；会误伤搜索当前聊天、用户提供文本处理、稳定知识解释等场景，也超出本次仅优化 Prompt 的授权。
+- 增加完整 few-shot transcript：不采纳；上下文开销高，且少量样例易被模型表层模仿。D038 只采用六条短决策样板（近期公告/利率、PostgreSQL 教程选文、用户 URL 风险提炼、政府网站限制、订单锁解释、用户周报摘要）来辅助抽象规则；它们不复用产品推荐或 Tool 测试题，且不是关键词匹配或输出模板。
 
 ## Source Notes
 

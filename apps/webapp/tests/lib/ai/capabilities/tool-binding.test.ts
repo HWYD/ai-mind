@@ -16,6 +16,7 @@ vi.mock('@/lib/ai/mcp/client/mcp-client-manager', () => ({
 describe('capabilities/tool-binding', () => {
     afterEach(() => {
         vi.unstubAllEnvs()
+        vi.unstubAllGlobals()
     })
 
     beforeEach(() => {
@@ -61,6 +62,44 @@ describe('capabilities/tool-binding', () => {
         expect(binding.activeToolDefinitionMap.size).toBe(7)
         expect(binding.activeToolCapabilityIds['city-weather']).toBe('mcp:local:tool:weather-server:city-weather')
         expect(mcpClientManagerMock.listTools).not.toHaveBeenCalled()
+    })
+
+    it('uses the same fixed Web Tool set when Zhipu Search-Std is selected', async () => {
+        vi.stubEnv('AI_MIND_WEB_PROVIDER', 'zhipu')
+        vi.stubEnv('AI_MIND_ZHIPU_API_KEY', 'test-zhipu-key')
+        vi.stubEnv('AI_MIND_ZHIPU_SEARCH_ENGINE', 'search_std')
+
+        const binding = await resolveGeneralToolBinding()
+
+        expect(binding.activeToolNames.sort()).toEqual([
+            'calculator',
+            'city-weather',
+            'datetime',
+            'read-url',
+            'text-transform',
+            'unit-convert',
+            'web-search',
+        ])
+    })
+
+    it('在本轮 binding 后冻结 Web provider，不因环境变更而切换', async () => {
+        const fetch = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(
+            async () =>
+                new Response(JSON.stringify({ results: [{ content: 'snippet', title: 'Result', url: 'https://example.com/result' }] }), {
+                    headers: { 'Content-Type': 'application/json' },
+                })
+        )
+        vi.stubGlobal('fetch', fetch)
+        vi.stubEnv('TAVILY_API_KEY', 'test-tavily-key')
+
+        const binding = await resolveGeneralToolBinding()
+        vi.stubEnv('AI_MIND_WEB_PROVIDER', 'zhipu')
+        vi.stubEnv('AI_MIND_ZHIPU_API_KEY', 'test-zhipu-key')
+        vi.stubEnv('AI_MIND_ZHIPU_SEARCH_ENGINE', 'search_std')
+
+        await binding.activeToolDefinitionMap.get('web-search')!.tool.invoke({ query: 'current news' })
+
+        expect(fetch.mock.calls[0]?.[0]).toBe('https://api.tavily.com/search')
     })
 
     it('keeps generic binding free of dedicated agent tools', async () => {

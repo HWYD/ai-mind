@@ -35,31 +35,29 @@ describe('model-provider config', () => {
     it('支持通过 env 配置默认模型、allowed providers 和通用模型参数', () => {
         expect(
             getModelProviderConfig({
-                AI_MIND_ALLOWED_PROVIDERS: 'qwen,deepseek,qwen',
+                AI_MIND_ALLOWED_PROVIDERS: 'doubao,ollama,doubao',
                 AI_MIND_CHAT_MAX_OUTPUT_TOKENS: '2048',
-                AI_MIND_DEEPSEEK_API_KEY: 'deepseek-key',
-                AI_MIND_DEEPSEEK_BASE_URL: 'https://deepseek.example/v1',
-                AI_MIND_DEFAULT_MODEL_ID: 'qwen/qwen3.6-flash',
+                AI_MIND_DEFAULT_MODEL_ID: 'deepseek/deepseek-v4-flash',
+                AI_MIND_DOUBAO_API_KEY: 'doubao-key',
+                AI_MIND_DOUBAO_BASE_URL: 'https://doubao.example/v1',
                 AI_MIND_LLM_TEMPERATURE: '0.2',
                 AI_MIND_LLM_TIMEOUT_MS: '45000',
                 AI_MIND_MAX_INPUT_CHARS: '6000',
                 AI_MIND_OLLAMA_CONTEXT_TOKENS: '16384',
                 AI_MIND_OPERATIONAL_CONTEXT_CAP_TOKENS: '64000',
-                AI_MIND_QWEN_API_KEY: 'qwen-key',
-                AI_MIND_QWEN_BASE_URL: 'https://qwen.example/v1',
                 AI_MIND_TASKLIST_MAX_OUTPUT_TOKENS: '4096',
             })
         ).toEqual({
-            allowedProviders: ['qwen', 'deepseek'],
+            allowedProviders: ['doubao', 'ollama'],
             chatMaxOutputTokens: 2048,
             deepseek: {
-                apiKey: 'deepseek-key',
-                baseURL: 'https://deepseek.example/v1',
-            },
-            defaultModelId: 'qwen/qwen3.6-flash',
-            doubao: {
                 apiKey: undefined,
-                baseURL: 'https://ark.cn-beijing.volces.com/api/v3',
+                baseURL: 'https://api.deepseek.com',
+            },
+            defaultModelId: 'deepseek/deepseek-v4-flash',
+            doubao: {
+                apiKey: 'doubao-key',
+                baseURL: 'https://doubao.example/v1',
             },
             maxInputChars: 6000,
             ollamaContextTokens: 16384,
@@ -68,8 +66,8 @@ describe('model-provider config', () => {
                 baseURL: 'http://127.0.0.1:11434',
             },
             qwen: {
-                apiKey: 'qwen-key',
-                baseURL: 'https://qwen.example/v1',
+                apiKey: undefined,
+                baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
             },
             tasklistMaxOutputTokens: 4096,
             temperature: 0.2,
@@ -81,7 +79,7 @@ describe('model-provider config', () => {
         expect(() =>
             getModelProviderConfig({
                 AI_MIND_ALLOWED_PROVIDERS: 'qwen,unknown',
-                AI_MIND_DEFAULT_MODEL_ID: 'qwen/qwen3.6-flash',
+                AI_MIND_DEFAULT_MODEL_ID: 'deepseek/deepseek-v4-flash',
             })
         ).toThrow(ModelProviderConfigError)
     })
@@ -98,7 +96,7 @@ describe('model-provider config', () => {
         expect(() =>
             getModelProviderConfig({
                 AI_MIND_ALLOWED_PROVIDERS: 'ollama',
-                AI_MIND_DEFAULT_MODEL_ID: 'qwen/qwen3.6-flash',
+                AI_MIND_DEFAULT_MODEL_ID: 'deepseek/deepseek-v4-flash',
             })
         ).toThrow(ModelProviderConfigError)
     })

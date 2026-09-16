@@ -101,6 +101,5 @@ describe('DeepSeek Provider', () => {
         expect(handle.modelId).toBe('deepseek/deepseek-v4-flash')
         expect(handle.providerModel).toBe('deepseek-v4-flash')
         expect(handle.model).toBeDefined()
-        expect(typeof handle.bindTools).toBe('function')
     })
 })

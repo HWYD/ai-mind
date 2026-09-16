@@ -88,6 +88,17 @@ createAgent({
 
 ## Middleware Contract
 
+## Prompt Decision Contract
+
+- Action Prompt 是 Tool policy 的决策说明，不是新的 Runtime router。它必须明确区分：需要公开网络证据的任务、需要网页正文的任务，以及无需外部资料的稳定解释、写作或对用户已给内容的处理。
+- 用户明确要求搜索、查找公开文章/链接/教程、核对外部资料或从网页中选择材料时，Action Prompt 必须指示 `web-search` 优先于基于模型知识直接作答。
+- 用户给出当前消息中的合法 URL 且要求阅读、摘录或总结时，Action Prompt 可指示 `read-url`；未给 URL 的选文、阅读、摘录或总结网页任务必须指示先 `web-search`，再只读取本 Run 搜索结果已授权的 URL。
+- 用户要求的站点、语言、主题或材料类型是搜索结果筛选约束；没有符合条件的结果时，不得把不符合条件的页面伪装成满足请求的替代品。
+- Action Prompt 必须同时明确：稳定概念解释、写作/改写、用户已提供内容的总结或没有外部资料要求的建议，不应为了展示能力而联网。
+- Answer Prompt 只可根据当前 Run 的成功 observation 表述搜索、读取、来源数量、授权失败或网页结论。没有对应 observation 时不得虚构“已搜索”“工具返回”“未获授权”“找到若干来源”、链接、摘要或正文结论。
+- 上述规则不改变 effective Tool 集、Tool schema、Tool Runtime、Provider、URL authorization、retry、预算、stream、Memory 或 public DTO，也不把模型的概率性 Tool 选择表述为确定性 Runtime 保证。
+- Action Prompt 可使用下列不与产品推荐/Tool 测试题重合的短决策样板，作为语义边界而非关键词规则或模拟对话：近期公告/利率查询→搜索；未给 URL 的 PostgreSQL 慢查询教程选文→先搜索后读取一篇；用户提供公开链接并要求提炼风险→直接读取；限定政府网站办事材料→按来源筛选且无匹配不替代；订单扣库存中的乐观/悲观锁解释→不联网；用户粘贴周报并要求管理层摘要→不联网。
+
 ### GeneralReActRunPolicyMiddleware
 
 | Hook                            | Responsibility                                                                                                | Required state update                         |

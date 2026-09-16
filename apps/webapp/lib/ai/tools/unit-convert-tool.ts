@@ -212,6 +212,5 @@ export const unitConvertToolDefinition: ChatToolDefinition<z.infer<typeof unitCo
         action: 'convert',
         inputPreview: formatUnitConvertToolInput(args),
     }),
-    resultIsAuthoritative: true,
     runtimeScopes: ['skill-binding', 'general-react-agent'],
 }

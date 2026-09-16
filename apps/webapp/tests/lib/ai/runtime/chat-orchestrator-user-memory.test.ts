@@ -1,5 +1,5 @@
 ﻿import type { BaseMessage } from '@langchain/core/messages'
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
+import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
@@ -12,9 +12,6 @@ const runtimeMocks = vi.hoisted(() => ({
     createChatContextPreflight: vi.fn(),
     createChatSession: vi.fn(),
     executeComposerContextInvocation: vi.fn(),
-    executeToolCall: vi.fn(),
-    formatToolInput: vi.fn(),
-    normalizeAndValidateToolCalls: vi.fn(),
     processCompletedTurnForMemory: vi.fn(),
     prepareChatContext: vi.fn(),
     prepareComposerContextInvocation: vi.fn(),
@@ -23,15 +20,10 @@ const runtimeMocks = vi.hoisted(() => ({
     retrieveRelevantMemories: vi.fn(),
     createGeneralReActRunContext: vi.fn(),
     runGeneralReAct: vi.fn(),
-    hasVisibleAssistantText: vi.fn(),
-    streamAssistantParts: vi.fn(),
-    streamPlanningResponse: vi.fn(),
-    stripMessageText: vi.fn(),
     startDeliveryChainRun: vi.fn(),
     startVersionPlanTasklistAgentRun: vi.fn(),
     touchConversation: vi.fn(),
     writeStaticTextPart: vi.fn(),
-    writeToolValidationErrors: vi.fn(),
 }))
 
 const remoteMcpMocks = vi.hoisted(() => ({
@@ -102,13 +94,6 @@ vi.mock('@/lib/ai/runtime/composer-context', () => ({
 
 vi.mock('@/lib/ai/runtime/delivery-chain', () => ({
     startDeliveryChainRun: runtimeMocks.startDeliveryChainRun,
-}))
-
-vi.mock('@/lib/ai/runtime/tool-runtime', () => ({
-    executeToolCall: runtimeMocks.executeToolCall,
-    formatToolInput: runtimeMocks.formatToolInput,
-    normalizeAndValidateToolCalls: runtimeMocks.normalizeAndValidateToolCalls,
-    writeToolValidationErrors: runtimeMocks.writeToolValidationErrors,
 }))
 
 vi.mock('@/lib/ai/runtime/user-memory', () => ({
@@ -386,12 +371,6 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         runtimeMocks.buildUserMemoryContextMessages.mockReturnValue([])
         runtimeMocks.executeComposerContextInvocation.mockResolvedValue([])
         runtimeMocks.prepareComposerContextInvocation.mockResolvedValue({ messages: [], nonMessagePayloads: [] })
-        runtimeMocks.formatToolInput.mockReturnValue('1+1')
-        runtimeMocks.normalizeAndValidateToolCalls.mockReturnValue({
-            planningMessage: new AIMessage({ content: '', tool_calls: [] }),
-            toolCalls: [],
-            toolErrors: [],
-        })
         runtimeMocks.processCompletedTurnForMemory.mockResolvedValue({
             candidates: 0,
             rejected: 0,
@@ -429,7 +408,6 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
             toolRetryCount: 0,
         })
         runtimeMocks.touchConversation.mockResolvedValue(undefined)
-        runtimeMocks.writeToolValidationErrors.mockReturnValue([])
         runtimeMocks.prepareChatContext.mockImplementation(async (assemble: (memoryMessages: BaseMessage[]) => unknown[]) => ({
             messages: assemble(runtimeMocks.buildChatMemoryContextMessages()),
         }))

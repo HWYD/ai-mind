@@ -13,6 +13,7 @@ Accepted and implemented in v0.6.0.
 - 使用 LangChain v1 `createAgent({ version: 'v2' })` 作为 generic loop；AI Mind 只通过 typed state/context、policy middleware、Tool Runtime adapter 和 stream adapter 约束权限、预算、错误和可见性。
 - Generic Agent 的 state 只存在于当前 Run，不接 checkpointer、HITL、AgentRun 或新的持久化表。
 - `GeneralToolPolicy` 固定解析 `web-search`、`read-url`、`calculator`、`datetime`、`text-transform`、`unit-convert`、`city-weather`；Skill 只提供系统提示词/输出风格，不拥有 Tool/MCP 权限，也不触发隐式 context。remote MCP Tool 不 discovery，`agent-tool/delegated-agent` 明确排除在 generic effective tools 之外。
+- Web Tool 的 provider 是 server-only 部署配置：`AI_MIND_WEB_PROVIDER` 静态选择 Tavily 或智谱，智谱固定 Search-Std；模型、Skill、请求 DTO、stream、Trace 和 Memory 都不能选择或看到 provider。缺少所选 key 或配置非法时 Tool 不可用，不自动 failover；现有 Tool Runtime timeout/retry/budget/URL/secret 边界不变。
 - 每个 Node.js 进程最多 8 个 active generic Run；无 permit 时 fail-fast。单 Run 最多 6 个携带 Tool 的 Action rounds、9 logical Tool Calls、7 次 Action model calls 与固定预留的 1 次 Answer model call（总计 8）、145s Action cutoff、180s hard deadline、Answer 最多 30s、lifecycle reserve 5s、Tool concurrency 3 和 Run retry 4。
 - StreamEvent 使用 PostgreSQL-first persist-before-publish。首个 final text delta 立即 flush，后续按 40ms 或 256 chars microbatch；每 Run projection queue 为 64 items/256KiB 高水位、32 items/128KiB 低水位。
 - 浏览器最终文本默认使用 20ms timer + 最近 `requestAnimationFrame` 的 ref-backed buffer；仅已评估 token 粒度与 Markdown 渲染成本的 `ChatModel` 可通过受控 allowlist 覆盖 timer 窗口，且不能绕过 rAF、code-fence early flush 或 terminal flush。

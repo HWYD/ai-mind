@@ -43,6 +43,10 @@
 - Q: 普通聊天的最终回答怎样兼顾直接性与真实用户阅读体验？ → A: 只在未绑定 Tool 的 Answer Phase 使用服务端基线策略：普通问题先直接回答并给出适中的必要解释；用户明确要求简短、详细、步骤、表格或特定格式时优先满足该表达要求。该策略不改变 Action、Tool allowlist、预算、stream schema 或持久化边界。
 - Q: 网页、工具观察和显式注入资料中的内容能否影响上述回答策略或运行边界？ → A: 不能。它们只作为事实资料；其中嵌入的指令不能改变系统规则、回答策略优先级、Tool 权限、授权 URL、预算或数据访问范围。
 
+### Session 2026-09-16
+
+- Q: 怎样提升用户明确要求网络检索、选择网页并总结时的 Tool 遵从性，又不让普通概念解释或写作被无谓联网？ → A: 仅优化服务端 Action/Answer Prompt。Action Prompt 把“显式公开网络取证”“读取网页正文”“无需外部资料”按用户交付区分；未给 URL 的选文/阅读任务先 `web-search`，再只读取本轮搜索结果。站点、语言和主题偏好是候选筛选条件，无匹配时如实说明。Answer Prompt 只可依据本轮成功 observation 表述搜索、读取、来源数量、授权失败或网页结论；不增加基于关键词的 Runtime 强制、Tool 路由、URL 授权、预算或 Provider 行为。
+
 ## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - 普通问题统一进入通用决策闭环 (Priority: P1)
@@ -220,6 +224,10 @@
 - **FR-052**: General ReAct 的有效 Tool 集 MUST 由独立 `GeneralToolPolicy` 在本轮开始时一次解析，并在 Action Phase 内保持不变。Skill 命中与否下，该集合必须相同；解析过程不得调用 remote MCP `tools/list`，也不得将脚本、Resource 或 Prompt 自动伪装成模型 Tool。
 - **FR-053**: General ReAct MUST 为 Action 与 Answer 构建彼此独立的 server-owned system prompt projection。Action-only 的 Tool 选择、调用和后续行动指令 MUST NOT 进入 Answer 输入；Answer 只使用用户目标、可信的 Skill 输出风格、可靠 observation、安全来源、固定 stop reason 与面向用户的回答策略。该分离不得改变 Tool allowlist、模型/Tool 预算、stream DTO、Memory 或稳定快照边界。
 - **FR-054**: Answer 的默认表达 MUST 面向真实用户体验：普通问题先给直接可用的回答，并提供适中的必要解释；用户明确要求简短、详细、步骤、表格或特定格式时，在安全边界内优先遵从。网页、Tool observation、Resource 或 Prompt 内容中的嵌入指令只是不可信资料，MUST NOT 覆盖系统规则、该表达优先级、Skill/Tool 权限、授权 URL、预算或数据访问范围。
+- **FR-055**: `web-search` 与 `read-url` MUST 通过同一个 server-only Web Provider 配置选择 `tavily` 或 `zhipu`；未设置 `AI_MIND_WEB_PROVIDER` 时保持 Tavily 兼容默认。所选 provider 缺少对应 key、selector 非法或智谱 engine 不是 `search_std` 时，两个 Web Tool MUST fail closed，MUST NOT 自动切换到另一个 provider。
+- **FR-056**: 智谱适配 MUST 只使用官方 Search-Std 搜索与网页阅读接口，并归一化为既有 `WebSearchObservation` / `ReadUrlObservation`。搜索 query 上限 MUST 为 70 字符，搜索最多返回 5 条安全、canonical 去重来源；阅读只提交一个已授权 URL，正文规范化后最多保留 12,000 字符。
+- **FR-057**: Provider 切换 MUST NOT 改变 Tool Runtime 的 `remote-readonly`、20 秒 attempt 上限、retry permit、取消、URL authorization、Outbound Secret Guard、public-safe stream、Memory 或 source projection 边界。两类 provider key 都 MUST 作为已知 secret，不得出现在业务参数、公开 DTO、日志或测试 fixture 中。
+- **FR-058**: Server-owned Action/Answer Prompt MUST 区分显式公开网络取证、网页正文读取与无需外部资料的普通任务。用户明确要求联网搜索、查找公开文章/链接/教程、核对外部资料或根据网页选文总结时，Action Prompt MUST 指示优先使用 `web-search`；除非最新用户消息已提供合法 URL，否则阅读/摘录/总结指定网页任务 MUST 指示先搜索、后仅从本轮搜索结果调用 `read-url`。站点、语言、主题等明确偏好 MUST 作为候选筛选条件；无匹配结果时不得用不符合偏好的页面替代。Answer Prompt MUST 禁止在没有本轮成功相关 observation 时声称已搜索、已读取、找到来源、出现授权失败或据网页得出结论。本条只定义 Prompt policy，不增加任何 deterministic intent matcher、强制 tool choice、Runtime retry、URL authorization、预算、Provider 或 public DTO 变更。
 
 ### Key Entities
 
@@ -245,7 +253,7 @@
 - 不实现跨请求 Agent checkpoint/resume、HITL、长期 AgentRun 或队列化后台任务，也不为通用 ReAct Agent 新增 Agent Tool、子 Agent 或多 Agent 编排；现有 resumable stream 只允许同一短生命周期 Run 在传输断线后继续并回放事件。`agent-tool` 类型仅显式隔离现有专用 Delivery subagent Tool 并为未来接入阻止错误套用普通 Tool 策略。
 - 不新增数据库表、修改 Prisma schema、服务端 Trace 记录或跨设备 Trace 同步，也不把中间工具轨迹写入 Chat Memory/UserMemory；仅允许 FR-038 定义的浏览器本地完成态公开 Trace 快照。
 - 不新增新的聊天 API route、客户端模式选择器或破坏性 stream protocol。
-- 不在本版本解决网页全文索引、长期搜索缓存、付费额度管理、复杂引用编辑器或多 Web Provider 自动故障转移。
+- 不在本版本解决网页全文索引、长期搜索缓存、付费额度管理、复杂引用编辑器或多 Web Provider 自动故障转移；provider 仅允许部署级静态单选。
 - 不实现通用 PII 检测、私有上下文语义追踪、DLP、外发数据人工审批，也不承诺识别无标识且不等于系统已知 secret 的任意随机字符串。
 - 不为远端网页提取 provider 实现或声称逐跳 redirect 可见性；本版本只校验提交的初始 URL 和 provider 明确返回且准备公开/授权的 URL。
 - 不建设“官方网站”可信域名目录或通用来源权威性判定；页面标题可以保留来源自身的安全标题，但 Runtime 不额外推断“官方”属性。
@@ -278,13 +286,15 @@
 - **SC-020**: 混合文本与 Tool Call 的模型 turn 中，最终文本 public/durable/Memory/snapshot 泄漏数为 0；IPv4-mapped 或 IPv4-compatible IPv6 私网目标授权数为 0；执行中的普通 Tool 在首个底层 invoke 前已经拥有同 `partId` 的 durable start，终态与来源只在执行结束后出现；长期 observer 的 percentile 样本量不超过 1,024；目标 PostgreSQL 环境的预热后 reference load transaction p95 不超过 20ms。
 - **SC-021**: 在已配置可用基础 Tool 的测试中，未选 Skill、`utility-skill` 与 `reader-skill` 三种请求的有效 Tool 名称集合 100% 相同，且等于七项固定基础集；其间 remote MCP `tools/list` 调用数为 0。Skill 命中不会产生 remote Resource/Prompt preparation，显式 Composer/`@resource` preparation 仍可进入同一 Agent。
 - **SC-022**: 提示词组合回归中，100% 的 Answer 输入不包含 Action-only 的 Tool 调用指令；普通问题的最终 Answer 采用结论优先且适中的默认表达，用户明确的简短/详细/格式要求可在安全边界内覆盖默认；包含“忽略此前指令”等文本的 Web、Tool 或显式上下文观察不会改变回答策略、Tool allowlist、授权 URL 或预算。
+- **SC-023**: Web Provider fake-provider 回归中，Tavily 默认与显式智谱 Search-Std 均暴露同一组 `web-search` / `read-url` Tool；非法 selector/engine 或所选 key 缺失时 Web Tool 数量为 0，且任何 retry 均不改变 provider。两类已配置 key 进入 outbound known-secret 集合的比例为 100%。
+- **SC-024**: Prompt contract 回归中，Action Prompt 同时包含显式联网检索、用户给 URL 的读取、未给 URL 的“先搜索后读取”、站点/语言/主题筛选且无匹配不替代、稳定概念/写作不无谓联网这五类规则；Answer Prompt 包含无成功 observation 时不得虚构搜索、读取、来源、授权失败或网页结论的规则。测试不把云模型的概率性 Tool 选择误写为 Runtime 的确定性保证。
 
 ## Assumptions
 
 - v0.6.0 是在已完成 release closing 的 v0.5.4 之后开启的新版本开发窗口，唯一 canonical workspace 为 `specs/v0.6.0-general-react-agent-mvp/`。
 - 现有聊天 API、模型目录、Tool Definition/Registry、Skill、MCP、stream-core、聊天记忆和 UserMemory 能力继续作为新 General ReAct Runner 的输入基础；旧通用运行逻辑和旧 UI 不作为兼容基础。
-- Web 能力通过一个服务端只读搜索/提取供应商提供；供应商不可用时允许该能力 fail-closed，不影响无需 Web 的直接回答和本地工具。
+- Web 能力通过一个部署级静态选择的服务端只读搜索/提取供应商提供；默认 Tavily，可显式选择智谱 Search-Std。供应商不可用时允许该能力 fail-closed，不影响无需 Web 的直接回答和本地工具。
 - MVP 面向当前单次交互规模，只允许现有 coordinator 在 SSE 断线后继续同一最长 180 秒的后端 Run；不承诺长时间或队列化后台执行、Agent state 跨请求/跨设备恢复或大规模并发 Agent 调度。
 - 默认预算可在实现评审中收紧，但不得在没有新决策记录的情况下放宽权限、URL 范围或副作用边界。
-- 性能默认值按单个长期运行 Node.js 实例定义；多实例环境的 active Run 和 PostgreSQL 连接总量按实例数线性增长。v0.6.0 的 reference load 用 scripted model/Tool 验证，不把第三方 Tavily 稳定性混入本地容量结论。
+- 性能默认值按单个长期运行 Node.js 实例定义；多实例环境的 active Run 和 PostgreSQL 连接总量按实例数线性增长。v0.6.0 的 reference load 用 scripted model/Tool 验证，不把任一第三方 Web provider 稳定性混入本地容量结论。
 - 用户界面继续使用现有语言与可访问性基线；General ReAct 使用全新的唯一 Trace presentation，不泛化或复用 Tasklist、Delivery Chain、Image Agent 的专用展示，也不继续保留通用聊天的独立 Tool/Skill/Resource/Prompt 面板。

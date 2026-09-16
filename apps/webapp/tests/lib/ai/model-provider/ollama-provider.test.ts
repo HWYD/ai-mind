@@ -76,15 +76,6 @@ describe('Ollama Provider via createChatModel', () => {
         expect(handle.model).toBeDefined()
     })
 
-    it('bindTools 能力存在', () => {
-        const handle = createChatModel({
-            config: createTestConfig(),
-            resolvedModelSelection: createTestSelection(),
-        })
-
-        expect(typeof handle.bindTools).toBe('function')
-    })
-
     it('映射 temperature、max output tokens 和 reasoning 参数', () => {
         const handle = createChatModel({
             config: createTestConfig(),

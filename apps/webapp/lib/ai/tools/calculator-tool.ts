@@ -188,6 +188,5 @@ export const calculatorToolDefinition: ChatToolDefinition<z.infer<typeof calcula
         action: 'evaluate',
         inputPreview: formatCalculatorToolInput(args),
     }),
-    resultIsAuthoritative: true,
     runtimeScopes: ['skill-binding', 'general-react-agent'],
 }

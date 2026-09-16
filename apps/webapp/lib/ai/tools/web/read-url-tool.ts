@@ -2,8 +2,8 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 
 import type { ChatToolDefinition } from '@/lib/ai/tools/registry'
-import { createTavilyWebProvider } from '@/lib/ai/tools/web/tavily-web-provider'
 import type { WebProvider } from '@/lib/ai/tools/web/web-provider'
+import { createConfiguredWebProvider } from '@/lib/ai/tools/web/web-provider-factory'
 
 export const readUrlToolSchema = z
     .object({
@@ -23,7 +23,7 @@ export function createReadUrlToolDefinition(provider: WebProvider): ChatToolDefi
 
 const configuredReadUrlTool = tool(
     async ({ url }, config) => {
-        const provider = createTavilyWebProvider()
+        const provider = createConfiguredWebProvider()
         if (!provider) throw new Error('网页读取服务未配置。')
         return provider.read({ url, signal: config?.signal })
     },
@@ -36,7 +36,7 @@ const configuredReadUrlTool = tool(
 
 export const readUrlToolDefinition: ChatToolDefinition<z.infer<typeof readUrlToolSchema>> = {
     ...createDefinition(configuredReadUrlTool),
-    isAvailable: () => createTavilyWebProvider() !== null,
+    isAvailable: () => createConfiguredWebProvider() !== null,
 }
 
 function createDefinition(toolInstance: typeof configuredReadUrlTool): ChatToolDefinition<z.infer<typeof readUrlToolSchema>> {

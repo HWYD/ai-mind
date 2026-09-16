@@ -1,4 +1,7 @@
-import { type ChatToolDefinition, getActiveChatToolDefinitionsForScope, toolSupportsRuntimeScope } from '@/lib/ai/tools'
+import { type ChatToolDefinition, getChatToolDefinitionsForScope, toolSupportsRuntimeScope } from '@/lib/ai/tools'
+import { createReadUrlToolDefinition } from '@/lib/ai/tools/web/read-url-tool'
+import { createConfiguredWebProvider } from '@/lib/ai/tools/web/web-provider-factory'
+import { createWebSearchToolDefinition } from '@/lib/ai/tools/web/web-search-tool'
 
 import { toCapabilityDefinition } from './catalog'
 
@@ -36,8 +39,9 @@ export interface ResolvedToolBinding {
  */
 export async function resolveGeneralToolBinding(): Promise<ResolvedToolBinding> {
     const resolvedToolMap = new Map<string, ResolvedActiveToolDefinition>()
+    const webProvider = createConfiguredWebProvider()
 
-    for (const toolDefinition of getActiveChatToolDefinitionsForScope('general-react-agent')) {
+    for (const toolDefinition of getChatToolDefinitionsForScope('general-react-agent')) {
         if (!GENERAL_REACT_TOOL_NAMES.has(toolDefinition.name)) {
             continue
         }
@@ -46,15 +50,30 @@ export async function resolveGeneralToolBinding(): Promise<ResolvedToolBinding> 
             continue
         }
 
-        const capabilityDefinition = toCapabilityDefinition(toolDefinition)
+        const resolvedToolDefinition = resolveGeneralToolDefinition(toolDefinition, webProvider)
+        if (!resolvedToolDefinition) {
+            continue
+        }
+
+        const capabilityDefinition = toCapabilityDefinition(resolvedToolDefinition)
         resolvedToolMap.set(toolDefinition.name, {
             capabilityId: capabilityDefinition.capabilityId,
             modelToolName: toolDefinition.name,
-            toolDefinition,
+            toolDefinition: resolvedToolDefinition,
         })
     }
 
     return createResolvedToolBinding(resolvedToolMap)
+}
+
+function resolveGeneralToolDefinition(toolDefinition: ChatToolDefinition, webProvider: ReturnType<typeof createConfiguredWebProvider>) {
+    if (toolDefinition.name === 'web-search') {
+        return webProvider ? createWebSearchToolDefinition(webProvider) : null
+    }
+    if (toolDefinition.name === 'read-url') {
+        return webProvider ? createReadUrlToolDefinition(webProvider) : null
+    }
+    return toolDefinition.isAvailable?.() === false ? null : toolDefinition
 }
 
 function createResolvedToolBinding(resolvedToolMap: Map<string, ResolvedActiveToolDefinition>): ResolvedToolBinding {

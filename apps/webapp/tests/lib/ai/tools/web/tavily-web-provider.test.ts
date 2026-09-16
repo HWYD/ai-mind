@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { createTavilyWebProvider, TavilyWebProvider, WebProviderError } from '@/lib/ai/tools/web/tavily-web-provider'
+import { createTavilyWebProvider, TavilyWebProvider } from '@/lib/ai/tools/web/tavily-web-provider'
+import { WebProviderError } from '@/lib/ai/tools/web/web-provider'
 
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
     return new Response(JSON.stringify(body), {
@@ -97,7 +98,7 @@ describe('tavily-web-provider', () => {
         })
 
         await expect(provider.search({ query: 'current news' })).rejects.toMatchObject({
-            code: 'TAVILY_HTTP_ERROR',
+            code: 'WEB_HTTP_ERROR',
             retryAfterMs: 2000,
             status: 429,
         })
@@ -111,7 +112,7 @@ describe('tavily-web-provider', () => {
 
         await expect(provider.search({ query: 'current news' })).rejects.toBeInstanceOf(WebProviderError)
         await expect(provider.search({ query: 'current news' })).rejects.toMatchObject({
-            code: 'TAVILY_INVALID_RESPONSE',
+            code: 'WEB_INVALID_RESPONSE',
             retryable: false,
         })
     })

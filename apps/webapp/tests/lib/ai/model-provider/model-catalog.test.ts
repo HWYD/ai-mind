@@ -15,8 +15,6 @@ describe('model catalog', () => {
         expect(cloudModels).toEqual([
             { family: 'deepseek', id: 'deepseek/deepseek-v4-flash', providerModel: 'deepseek-v4-flash' },
             { family: 'deepseek', id: 'deepseek/deepseek-v4-pro', providerModel: 'deepseek-v4-pro' },
-            { family: 'qwen', id: 'qwen/qwen3.6-flash', providerModel: 'qwen3.6-flash' },
-            { family: 'qwen', id: 'qwen/qwen3.7-max', providerModel: 'qwen3.7-max' },
             { family: 'doubao', id: 'doubao/Doubao-Seed-2.0-Code', providerModel: 'Doubao-Seed-2.0-Code' },
             { family: 'doubao', id: 'doubao/doubao-seed-2.0-pro', providerModel: 'doubao-seed-2.0-pro' },
             { family: 'doubao', id: 'doubao/doubao-seed-2.0-mini', providerModel: 'doubao-seed-2.0-mini' },
@@ -39,13 +37,13 @@ describe('model catalog', () => {
 
     it('为每个模型保留仅服务端可见的物理上下文窗口', () => {
         expect(modelCatalog.every(item => Number.isSafeInteger(item.contextWindowTokens) && item.contextWindowTokens > 0)).toBe(true)
-        expect(modelCatalog).toContainEqual(expect.objectContaining({ contextWindowTokens: 1_000_000, id: 'qwen/qwen3.7-max' }))
+        expect(modelCatalog).toContainEqual(expect.objectContaining({ contextWindowTokens: 1_000_000, id: 'deepseek/deepseek-v4-pro' }))
         expect(modelCatalog).toContainEqual(expect.objectContaining({ contextWindowTokens: 40_000, id: 'ollama/qwen3-8b' }))
     })
 
     it('不向公开模型列表暴露物理上下文窗口', () => {
-        const publicModel = resolvePublicModelList({ AI_MIND_QWEN_API_KEY: 'qwen-key' }).models.find(
-            model => model.id === 'qwen/qwen3.6-flash'
+        const publicModel = resolvePublicModelList({ AI_MIND_DOUBAO_API_KEY: 'doubao-key' }).models.find(
+            model => model.id === 'deepseek/deepseek-v4-flash'
         )
 
         expect(publicModel).toBeDefined()

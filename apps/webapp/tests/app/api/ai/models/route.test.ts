@@ -73,22 +73,22 @@ describe('GET /api/ai/models', () => {
 
     it('production allowed providers 不包含 Ollama 时不会返回本地模型', async () => {
         vi.stubEnv('NODE_ENV', 'production')
-        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'qwen,deepseek')
-        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'qwen/qwen3.6-flash')
-        vi.stubEnv('AI_MIND_QWEN_API_KEY', 'qwen-key')
+        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'doubao')
+        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'doubao/doubao-seed-2.0-pro')
+        vi.stubEnv('AI_MIND_DOUBAO_API_KEY', 'doubao-key')
 
         const response = await GET()
         const body = await response.json()
 
         expect(response.status).toBe(200)
-        expect(body.defaultModelId).toBe('qwen/qwen3.6-flash')
+        expect(body.defaultModelId).toBe('doubao/doubao-seed-2.0-pro')
         expect(body.models.some((model: { provider: string }) => model.provider === 'ollama')).toBe(false)
         expect(body.models).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
-                    family: 'qwen',
-                    id: 'qwen/qwen3.6-flash',
-                    provider: 'qwen',
+                    family: 'doubao',
+                    id: 'doubao/doubao-seed-2.0-pro',
+                    provider: 'doubao',
                 }),
             ])
         )
@@ -131,25 +131,25 @@ describe('GET /api/ai/models', () => {
 
     it('响应不包含 API Key、baseURL 或具体 env 缺失字段', async () => {
         vi.stubEnv('NODE_ENV', 'production')
-        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'qwen')
-        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'qwen/qwen3.6-flash')
-        vi.stubEnv('AI_MIND_QWEN_API_KEY', 'qwen-secret')
-        vi.stubEnv('AI_MIND_QWEN_BASE_URL', 'https://qwen.example/v1')
+        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'doubao')
+        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'doubao/doubao-seed-2.0-pro')
+        vi.stubEnv('AI_MIND_DOUBAO_API_KEY', 'doubao-secret')
+        vi.stubEnv('AI_MIND_DOUBAO_BASE_URL', 'https://doubao.example/v1')
 
         const response = await GET()
         const rawBody = await response.text()
 
         expect(response.status).toBe(200)
-        expect(rawBody).not.toContain('qwen-secret')
-        expect(rawBody).not.toContain('https://qwen.example/v1')
-        expect(rawBody).not.toContain('AI_MIND_QWEN_API_KEY')
+        expect(rawBody).not.toContain('doubao-secret')
+        expect(rawBody).not.toContain('https://doubao.example/v1')
+        expect(rawBody).not.toContain('AI_MIND_DOUBAO_API_KEY')
         expect(rawBody).not.toContain('baseURL')
     })
 
     it('默认模型不可返回时 fail closed 并返回标准化配置错误', async () => {
         vi.stubEnv('NODE_ENV', 'production')
-        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'qwen')
-        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'qwen/qwen3.6-flash')
+        vi.stubEnv('AI_MIND_ALLOWED_PROVIDERS', 'doubao')
+        vi.stubEnv('AI_MIND_DEFAULT_MODEL_ID', 'doubao/doubao-seed-2.0-pro')
 
         const response = await GET()
         const body = await response.json()

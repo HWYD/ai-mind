@@ -101,6 +101,5 @@ describe('Qwen Provider', () => {
         expect(handle.modelId).toBe('qwen/qwen3.6-flash')
         expect(handle.providerModel).toBe('qwen3.6-flash')
         expect(handle.model).toBeDefined()
-        expect(typeof handle.bindTools).toBe('function')
     })
 })

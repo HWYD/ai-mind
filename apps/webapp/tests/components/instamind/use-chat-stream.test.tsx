@@ -1250,18 +1250,16 @@ describe('useChatStream', () => {
         expect(getChatFetchCalls(fetchMock)).toHaveLength(1)
     })
 
-    it('页面初始化不会恢复 pending HITL，并会清理旧的 pendingAgentRunId', async () => {
-        window.localStorage.setItem('ai-mind:pending-agent-run-id', 'run-restore')
-        const fetchMock = vi.fn()
+    it('页面初始化不会恢复 pending HITL', async () => {
+        const fetchMock = withThreadHydration(Response.json({}))
 
         vi.stubGlobal('fetch', fetchMock)
         const { result } = renderHook(() => useChatStream({ enableReasoning: false }))
 
         await waitFor(() => {
-            expect(window.localStorage.getItem('ai-mind:pending-agent-run-id')).toBeNull()
+            expect(fetchMock).toHaveBeenCalledWith(`/api/chat/thread?conversationId=${TEST_CONVERSATION_ID}`)
         })
 
-        expect(fetchMock).toHaveBeenCalledWith(`/api/chat/thread?conversationId=${TEST_CONVERSATION_ID}`)
         expect(result.current.pendingInterrupt).toBeNull()
         expect(result.current.messages).toHaveLength(0)
     })

@@ -227,6 +227,8 @@ AI Mind 的 Agent 演进遵循一个原则：
 
 Action 与 Answer 的 prompt 也按阶段隔离。Action 使用 Tool 决策、并行/依赖调用和不可信 observation 的约束；Answer 不继承这些 Action-only 指令，只使用服务端的用户体验基线、可信 Skill 输出风格、可靠资料与来源。普通问题默认结论优先并给出适中的必要解释；用户直接要求简短、深入、步骤、表格或特定格式时可在安全边界内覆盖默认。网页、Tool、Resource 或 Prompt 资料中的嵌入指令只当作资料，不能改变该优先级、Tool 权限、授权 URL、预算或数据范围。
 
+`web-search` 与 `read-url` 的外部 provider 也是 runtime 内部 adapter，不是模型或前端能力选择器。部署级 `AI_MIND_WEB_PROVIDER` 静态选择 Tavily 或智谱；智谱只允许 Search-Std，配置缺失/非法时两个 Tool fail-closed。一次 Tool 调用及其既有 D035 retry 始终使用同一 adapter，不能因为网络、429 或 5xx 自动切换 provider；URL/Secret Guard、20 秒 attempt、取消、来源投影与 public-safe 边界不变。
+
 Generic Run 是 request-local 的；每进程通过 execution gate 只接纳 8 个 active Run。第 9 个请求在 context/provider/tool 前返回固定忙碌错误。Delivery subagent 使用 `agent-tool/delegated-agent`，Tasklist validator 仍是专用 scope 的普通 Tool，三条专用 Agent 不申请 generic permit。
 
 过程展示由单一 `GeneralAgentTracePanel` 承担。General ReAct 通过 `agent-run-start/end` 生成 `AgentRunPart(type='agent-run')`；专用 LangGraph Agent 继续通过 `agent-graph-*` 生成 `AgentGraphPart(type='agent-graph')`，`agentName` 不承担 UI 路由。v0.6.0 不再读取或兼容 legacy `agent-step`。raw reasoning、provider error、内部 prompt 和原始 Tool 数据不进入 public stream、Memory 或稳定本地快照。完成态 Trace 与最终回答只复用现有 browser IndexedDB public-safe snapshot。

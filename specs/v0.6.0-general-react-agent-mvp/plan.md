@@ -14,7 +14,7 @@ v0.6.0 将所有 `routeType=chat` 请求统一交给一个 run-local、受预算
 
 首选 ReAct 内核改为 LangChain v1 `createAgent`。它继续运行在 LangGraph runtime 上，但由官方 Agent loop 负责 model → tools → model 的标准循环，AI Mind 只通过 typed state/context、middleware、Tool Runtime adapter 和 stream adapter 保留自身的权限、预算、错误、可见性与 Memory 边界。MVP 不再自建一套并行的 `decide/act` StateGraph，也不在 `ChatOrchestrator` 中维护手写 while-loop。
 
-MVP 的 `GeneralToolPolicy` 固定解析 `web-search`、`read-url`、`calculator`、`datetime`、`text-transform`、`unit-convert` 与 `city-weather`；Skill 只叠加可信系统提示词和输出风格，不再授予 Tool/MCP 权限或触发隐式上下文读取。所有七项 Tool 都在已有 availability、scope 与只读/确定性 execution policy 下解析；remote MCP Tool、`agent-tool` 和副作用能力默认不进入通用集合。Web Search 首个 adapter 使用 Tavily HTTP API，但由项目自有 provider interface 隔离，不引入 Tavily SDK。两个 Web Tool 共用一个窄范围 Outbound Secret Guard，只阻断可识别凭据和签名 URL；Tavily Extract 按远端托管抓取处理，不虚构逐跳 redirect 可见性。Tool Runtime 统一拥有普通 Tool 的 timeout/retry/budget，并以 Profile、Tool 自身限制和 Run 剩余预算中的最小值执行；同轮普通 Tool 使用 v2 原生并行，项目并发上限为 3，并在派发前预占 9 次上限内的 logical-call/observation 配额。retry 不预分配，只在实际 attempt 前竞争 Run 级原子 permit。委派完整 Agent 的 Tool 显式建模为 `agent-tool`，不套普通 Tool 短超时或整 Agent 自动重试，也不进入通用并行通道。运行态只存在于当前请求，不接 checkpointer、HITL 或 `AgentRun`。
+MVP 的 `GeneralToolPolicy` 固定解析 `web-search`、`read-url`、`calculator`、`datetime`、`text-transform`、`unit-convert` 与 `city-weather`；Skill 只叠加可信系统提示词和输出风格，不再授予 Tool/MCP 权限或触发隐式上下文读取。所有七项 Tool 都在已有 availability、scope 与只读/确定性 execution policy 下解析；remote MCP Tool、`agent-tool` 和副作用能力默认不进入通用集合。Web Search 通过项目自有 provider interface 在部署级静态选择 Tavily 或智谱 HTTP adapter，均不引入 SDK；智谱固定 Search-Std。两个 Web Tool 共用一个窄范围 Outbound Secret Guard，只阻断可识别凭据和签名 URL；远端 Reader/Extract 按托管抓取处理，不虚构逐跳 redirect 可见性。Tool Runtime 统一拥有普通 Tool 的 timeout/retry/budget，并以 Profile、Tool 自身限制和 Run 剩余预算中的最小值执行；同轮普通 Tool 使用 v2 原生并行，项目并发上限为 3，并在派发前预占 9 次上限内的 logical-call/observation 配额。retry 不预分配，只在实际 attempt 前竞争 Run 级原子 permit，且不切换 provider。委派完整 Agent 的 Tool 显式建模为 `agent-tool`，不套普通 Tool 短超时或整 Agent 自动重试，也不进入通用并行通道。运行态只存在于当前请求，不接 checkpointer、HITL 或 `AgentRun`。
 
 Action 与 Answer 的 system prompt 也必须按阶段投影：Action 保留 Tool 决策、并行/依赖调用与不可信 observation 边界；Answer 只保留面向用户的回答基线、可信 Skill 输出风格、可靠观察/来源和不可信资料边界，绝不重用 Action-only 的 Tool 调用指令。普通问题的最终 Answer 采用结论优先、适中解释的默认表达；用户直接要求的简短、详细、步骤或特定格式可在安全边界内覆盖默认。此策略不改变 Tool Policy、预算、stream 或持久化。
 
@@ -26,13 +26,13 @@ Action 与 Answer 的 system prompt 也必须按阶段投影：Action 保留 Too
 
 **Language/Version**: TypeScript 5.9.3；Node.js 22 server runtime；React 19.2.4
 
-**Primary Dependencies**: Next.js 16.1.6、LangChain v1 `createAgent`、`@langchain/core`、`@langchain/langgraph`、`@langchain/openai`、Zod 4.3.x、现有 `@ai-mind/stream-core`、现有 shadcn/ui primitives 与官方 `shimmer` utility；Tavily Search/Extract HTTP API（原生 server-side `fetch`，无新增 SDK）
+**Primary Dependencies**: Next.js 16.1.6、LangChain v1 `createAgent`、`@langchain/core`、`@langchain/langgraph`、`@langchain/openai`、Zod 4.3.x、现有 `@ai-mind/stream-core`、现有 shadcn/ui primitives 与官方 `shimmer` utility；Tavily Search/Extract 或智谱 Search-Std/Reader HTTP API（原生 server-side `fetch`，无新增 SDK）
 
 **Dependency Baseline**: 当前 webapp 为 `@langchain/core` 1.1.48、`@langchain/langgraph` 1.3.6、`@langchain/openai` 1.4.7，尚未直接依赖 `langchain`。实施时以 `langchain >= 1.5.9`、`@langchain/core >= 1.2.8` 的同一稳定兼容线为目标，原子升级 LangChain family 并避免 lockfile 中并存不必要的 core/langgraph 版本；最终精确版本以兼容性 Spike 和 lockfile 为准。
 
 **Storage**: 沿用现有 Chat Memory/UserMemory 最终轮次写入与 StreamRun/StreamEvent 可恢复流事件投影；StreamEvent 采用 PostgreSQL-first durable microbatch，开发/生产每进程复用一个 Prisma/PrismaPg client 与最多 10 个数据库连接；同时复用浏览器 IndexedDB `ai-mind-local-chat/conversation-snapshots` 保存已完成 assistant message 的 public-safe Trace Parts 与最终回答。General ReAct Agent state、原始消息轨迹和原始工具数据不持久化；不新增服务端数据库、IndexedDB object store 或 migration，不引入 Redis
 
-**Testing**: Vitest 4.1.x、Testing Library、LangChain fake model、provider fake、tool fake、stream reducer/component tests；外部 Tavily smoke 仅进入显式 external test 通道
+**Testing**: Vitest 4.1.x、Testing Library、LangChain fake model、provider fake、tool fake、stream reducer/component tests；外部 Web provider smoke 仅进入显式 external test 通道
 
 **Target Platform**: AI Mind Next.js webapp server runtime；现有浏览器聊天 UI 与 Electron 同源宿主保持兼容；`createAgent` 只在 server-side runtime 使用
 
@@ -100,7 +100,7 @@ apps/webapp/
 │   ├── model-provider/                           # unbound model、显式 retry/timeout、provider 连续性
 │   ├── tools/
 │   │   ├── registry.ts                           # scope、standard/agent execution policy 与 public/internal output
-│   │   └── web/                                  # Tavily provider、URL/Outbound Secret policy、search/read tools
+│   │   └── web/                                  # Tavily/Zhipu provider、URL/Outbound Secret policy、search/read tools
 │   ├── runtime/
 │       ├── chat-session.ts                       # 会话、effective tools 与统一 system prompt
 │       ├── chat-orchestrator.ts                  # 专用链路分流、context preparation、Agent 委派与 Memory
@@ -142,8 +142,8 @@ packages/stream-core/
 packages/database/
 └── src/client.ts                                 # dev/prod process singleton + PrismaPg pool max 10
 
-deploy/env/webapp.production.env.example          # 增加 Tavily server secret 占位
-apps/webapp/.env.example                          # 增加本地 Tavily 配置说明
+deploy/env/webapp.production.env.example          # 增加 Web Provider selector 与 server secret 占位
+apps/webapp/.env.example                          # 增加本地 Web Provider 配置说明
 docs/adr/                                         # 新增 createAgent 通用 ReAct Agent ADR
 docs/architecture/                                # 更新 runtime 与 production env 事实
 ```
@@ -250,17 +250,19 @@ MVP 使用 `createAgent(version='v2')` 的原生 Send task 调度，同轮最多
 
 通用基础集合固定为：
 
-| Tool             | Purpose                | Execution policy                                           | MVP boundary                                                                             |
-| ---------------- | ---------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `web-search`     | 查询当前公开网页信息   | `standard-tool/remote-readonly`，20s，retry-safe           | Tavily basic search，最多 5 条，仅 title/URL/snippet；关闭 provider answer/raw content。 |
-| `read-url`       | 读取明确授权网页       | `standard-tool/remote-readonly`，20s，retry-safe           | Tavily basic extract，单 URL，Markdown，内部最多 12,000 chars。                          |
-| `calculator`     | 确定性数学计算         | `standard-tool/local-deterministic`，Tool 自身 1s，0 retry | 复用现有工具并保持输入/计算复杂度有界。                                                  |
-| `datetime`       | 当前日期时间与时区换算 | `standard-tool/local-deterministic`，Tool 自身 1s，0 retry | 复用现有工具。                                                                           |
-| `text-transform` | 确定性文本格式转换     | `standard-tool/local-deterministic`                        | 复用现有工具；不由 Utility Skill 授权。                                                  |
-| `unit-convert`   | 确定性单位换算         | `standard-tool/local-deterministic`                        | 复用现有工具；不由 Utility Skill 授权。                                                  |
-| `city-weather`   | 指定城市天气查询       | `standard-tool/remote-readonly`                            | 复用受控 local MCP adapter；不由 Reader Skill 授权。                                     |
+| Tool             | Purpose                | Execution policy                                           | MVP boundary                                                                            |
+| ---------------- | ---------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `web-search`     | 查询当前公开网页信息   | `standard-tool/remote-readonly`，20s，retry-safe           | 部署级静态选择 Tavily basic search 或智谱 Search-Std；最多 5 条，仅 title/URL/snippet。 |
+| `read-url`       | 读取明确授权网页       | `standard-tool/remote-readonly`，20s，retry-safe           | 部署级静态选择 Tavily Extract 或智谱 Reader；单 URL，Markdown，内部最多 12,000 chars。  |
+| `calculator`     | 确定性数学计算         | `standard-tool/local-deterministic`，Tool 自身 1s，0 retry | 复用现有工具并保持输入/计算复杂度有界。                                                 |
+| `datetime`       | 当前日期时间与时区换算 | `standard-tool/local-deterministic`，Tool 自身 1s，0 retry | 复用现有工具。                                                                          |
+| `text-transform` | 确定性文本格式转换     | `standard-tool/local-deterministic`                        | 复用现有工具；不由 Utility Skill 授权。                                                 |
+| `unit-convert`   | 确定性单位换算         | `standard-tool/local-deterministic`                        | 复用现有工具；不由 Utility Skill 授权。                                                 |
+| `city-weather`   | 指定城市天气查询       | `standard-tool/remote-readonly`                            | 复用受控 local MCP adapter；不由 Reader Skill 授权。                                    |
 
 `GeneralToolPolicy` 只解析上表的已登记 Tool；它按 Tool 的 availability、`general-react-agent` scope 和 `standard-tool` execution policy 过滤后一次冻结本轮 allowlist。Skill overlay 只包含 `systemPrompt` 与 `outputPolicy`，不参与 Tool/MCP Resource/Prompt capability 选择。`validate_tasklist_structure` 仍仅属于 Tasklist Agent；remote MCP Tool 不做 `tools/list` discovery，也不被模型看见。
+
+Web Provider 由 `AI_MIND_WEB_PROVIDER=tavily|zhipu` 在部署时静态选择，未设置时默认 `tavily` 以保持兼容。选择智谱时必须同时提供 `AI_MIND_ZHIPU_API_KEY`，并且 `AI_MIND_ZHIPU_SEARCH_ENGINE` 只能为 `search_std`（缺省同样解析为 `search_std`）；适配层固定 Search-Std 的服务端 options 和 Reader 的 Markdown 输出。非法 selector、未配置所选 key 或不支持的 engine 均令 `web-search`/`read-url` 不可用，禁止自动 failover。Provider factory 是唯一选择点；`resolveGeneralToolBinding()` 在 Run 开始时解析一次并把同一 adapter 闭包绑定给两个 Web Tool，故同一逻辑调用的全部 retry 不会重新读取 selector。其余 stream、授权、timeout、budget 与 D035 retry 继续复用既有统一契约；两类 API key 都进入 Outbound Secret Guard 的 known-secret 集合。
 
 将现有 tool binding 重构为 general-chat 的固定 policy resolution；Tool Registry 是唯一 Tool contract/权限事实源。Resource/Prompt 只在 Composer 显式命令或 `@resource` 引用已要求的确定性 preparation 中读取，不伪装成动态 Tool，也不得由 Skill/自然语言自动触发。
 
@@ -300,11 +302,11 @@ type ToolExecutionPolicy =
 - 仅出现“token”“cookie”等普通词汇不构成拒绝，避免正常技术搜索误伤；无标识、非系统已知 secret 的任意随机字符串不在本版本保证范围；
 - 命中后返回唯一配对的 `denied` ToolObservation，不调用 provider、不 retry、不把原值写入 fingerprint、stream、UI、log 或 Memory。Agent 可以基于安全失败摘要重新提出不含凭据的新逻辑调用。
 
-Tavily adapter 自身使用的 `TAVILY_API_KEY` 是固定 server-side provider authentication，只能在 adapter 最内层加入请求，不进入模型参数、ToolObservation 或 public/log payload；它不受业务参数 Guard 阻断，但继续受 secret 管理和日志脱敏约束。
+已选 Web adapter 的 server-side key（Tavily 的 `TAVILY_API_KEY` 或智谱的 `AI_MIND_ZHIPU_API_KEY`）只能在 adapter 最内层加入请求，不进入模型参数、ToolObservation 或 public/log payload；它不受业务参数 Guard 阻断，但继续受 secret 管理和日志脱敏约束。
 
-#### 7.3 Tavily Extract Redirect Boundary
+#### 7.3 Hosted Reader/Extract Redirect Boundary
 
-`read-url` 首个 provider 是远端托管抓取：AI Mind 只向固定 Tavily HTTPS endpoint 提交一个已授权、已通过 URL/Secret policy 的初始 URL，目标网站请求和 redirect 由 Tavily 执行。Tavily adapter contract 不承诺提供 redirect chain，因此 v0.6.0 不实现或声称逐跳校验。
+`read-url` 的已选 provider 是远端托管抓取：AI Mind 只向固定 Tavily Extract 或智谱 Reader HTTPS endpoint 提交一个已授权、已通过 URL/Secret policy 的初始 URL，目标网站请求和 redirect 由 provider 执行。adapter contract 不承诺提供 redirect chain，因此 v0.6.0 不实现或声称逐跳校验。
 
 AI Mind 的可验证边界是：提交前校验 initial requested URL；把 provider 内容和 provider-reported URL 视为不可信输入；如果响应明确带回 URL，只有重新通过当前 URL/Secret policy 后才能进入 SourceRecord、public stream 或新的 URL grant。无法确认 final URL 时继续以已校验的 requested URL 作为来源 identity，不推断 redirect 过程。若未来要求逐跳控制，应另立 hardened local fetch 方案，不在本 MVP 暗中扩展。
 
@@ -353,13 +355,13 @@ General ReAct Trace 的 canonical 可编辑视觉原稿 MUST 使用 `design/penc
 
 1. **Process admission**：新增进程级 `GeneralReActExecutionGate`，同步 `tryAcquire()`，每进程最多 8 个 active General ReAct Run；无 permit 时在 context/provider/Tool 工作前复用 `STREAM_SERVICE_UNAVAILABLE`、`retryable=true` 和固定“服务繁忙，请稍后重试。”，不建立内存等待队列、不显示内部容量。gate 只保存计数，严禁保存 request/user/session data，三条专用 Agent 不进入该 gate。
 2. **Run lifecycle ownership**：包住 preparation → runner → terminal projection/drain 的单个 General ReAct execution scope 拥有 permit、hard-deadline controller、projection buffer、timer、Abort listener 和 waiter；terminal projection 与 drain 完成后在 `finally` 幂等清理。transport disconnect 只关闭 writer，不释放 permit 或取消后端 Run。
-3. **Async I/O event loop**：model、Tavily、MCP、Prisma 和 stream 投影全部使用 awaited async API 与 run-scoped `AbortSignal`。不使用同步 I/O、busy wait、阻塞 sleep、每 Run worker、child process；互不依赖的 I/O 只在已有权限/预算准入后并行。
+3. **Async I/O event loop**：model、Web provider、MCP、Prisma 和 stream 投影全部使用 awaited async API 与 run-scoped `AbortSignal`。不使用同步 I/O、busy wait、阻塞 sleep、每 Run worker、child process；互不依赖的 I/O 只在已有权限/预算准入后并行。
 4. **CPU Tool boundary**：calculator/datetime 继续运行于 Node.js 主事件循环，通过输入长度、允许语法和复杂度限制保证短同步任务，reference p95 ≤5ms；不能把 `Promise.race()` timeout 描述为 CPU 抢占。只有未来具体 CPU Tool 持续越过门槛时才单独设计共享有界 worker pool。
 5. **Database client/pool**：修正 `@ai-mind/database` client 生命周期，使开发和生产都只创建一个 process singleton Prisma/PrismaPg client；pool 默认 `max=10`、`connectionTimeoutMillis=5000`、`idleTimeoutMillis=30000`，请求结束不得 `$disconnect()`。多实例数据库连接预算按 `instanceCount × 10` 核算。
 6. **Batch persistence primitive**：为现有 `StreamEventStore` 增加 `appendEvents()`，在单 transaction 内 lock StreamRun 一次、为 public event 分配连续 sequence、批量 insert、更新 StreamRun 一次并至多 trim 一次。pool/transaction 等待分别取 `min(2s, Run remaining)` 与 `min(5s, Run remaining)`；terminal 只能是 batch 最后一项，transaction 失败不得把任何该批 event 投递给浏览器；不新增表或修改 Prisma schema。
 7. **Server text microbatch**：每个最终回答 part 的首个 `text-delta` 立即 durable flush；后续相同 `runId/messageId/partId/type` 的连续 delta 按 40ms 或累计 256 chars 任一先到合并。Tool/Trace/source/structure/error/finish/cancel/terminal 到达时先 flush 更早 text，再保留独立 envelope。单个 provider delta 超过 256 时整体立即 flush，不拆包、不做人工 pacing。
 8. **Bounded projection backpressure**：以 run-local `DurableStreamProjectionBuffer` 取代无界 Promise chain。高水位为 64 pending items/256KiB、低水位为 32/128KiB；General ReAct stream adapter await `publish/flush`，高水位时暂停拉取 Agent stream。禁止 drop/overwrite/reorder；projection failure 固定失败并阻止新 model/tool 工作。现有单 event `maxEventPayloadBytes=256KiB` 继续独立生效。
-9. **Browser cadence and observability**：现有 `useStreamTextBuffer` 继续用 ref 保存 transient map/timer/rAF，把默认 final text cadence 调整为 20ms + 最近 `requestAnimationFrame`，并保留 code-fence early rAF 与 terminal/abort/unmount flush。仅允许在显式 `ChatModel` allowlist 中为已评估 token 粒度与 Markdown 成本的模型覆盖 timer 窗口；未命中一律回落 20ms，所有模型仍通过同一 rAF 和终态 flush。记录不含用户内容的 active Run、capacity rejection、queue high-water、batch chars/events/wait、DB transaction duration、event-loop delay 和 cleanup 指标；用 8 个 scripted 并发 Run 做 reference load，而不是依赖 Tavily latency。
+9. **Browser cadence and observability**：现有 `useStreamTextBuffer` 继续用 ref 保存 transient map/timer/rAF，把默认 final text cadence 调整为 20ms + 最近 `requestAnimationFrame`，并保留 code-fence early rAF 与 terminal/abort/unmount flush。仅允许在显式 `ChatModel` allowlist 中为已评估 token 粒度与 Markdown 成本的模型覆盖 timer 窗口；未命中一律回落 20ms，所有模型仍通过同一 rAF 和终态 flush。记录不含用户内容的 active Run、capacity rejection、queue high-water、batch chars/events/wait、DB transaction duration、event-loop delay 和 cleanup 指标；用 8 个 scripted 并发 Run 做 reference load，而不是依赖外部 Web provider latency。
 
 写入与投递顺序固定为：
 
@@ -399,7 +401,7 @@ LangChain typed event
 | `tools/registry.ts`、各 Tool Definition                                                                                                        | 增加 `general-react-agent` scope、判别式 `standard-tool/agent-tool` execution policy 和 public/internal output boundary                                                                         | Tool Definition/Registry 继续拥有 tool contract；timeout 不进入模型 schema                                        |
 | `runtime/tool-runtime/*`                                                                                                                       | 拆出可取消的底层 attempt 与最终 transcript；统一解析 Profile/Tool/deadline 最小 timeout、普通 Tool retry/退避和 typed error                                                                     | Agent Tool 不套普通短超时/整 Agent retry；Tasklist/Delivery 行为不回归                                            |
 | `runtime/delivery-chain/manager/subagent-tools.ts`                                                                                             | 将现有 `*-subagent` Tool 显式标记为 `agent-tool/delegated-agent`                                                                                                                                | 专用 Delivery Runtime 继续拥有内部阶段、模型 timeout/retry 与 scope                                               |
-| `tools/web/*`                                                                                                                                  | 新增 Tavily adapter、search/read tools、初始/返回 URL policy 与共用 Outbound Secret Guard                                                                                                       | 不建设通用 DLP；不声称 Tavily redirect chain 可见                                                                 |
+| `tools/web/*`                                                                                                                                  | Tavily/Zhipu adapter、静态 provider factory、search/read tools、初始/返回 URL policy 与共用 Outbound Secret Guard                                                                               | 不建设通用 DLP；不声称 provider redirect chain 可见；禁止自动 failover                                            |
 | `runtime/assistant-stream.ts`                                                                                                                  | 解耦 preserve provider metadata 与 public reasoning；为 Agent stream adapter 复用安全转换                                                                                                       | raw reasoning 永不公开/持久化                                                                                     |
 | `chat-service.ts`、`stream-recovery/*`                                                                                                         | 用可 await 的 durable projection sink 替代无界 Promise chain；新增 40ms/256 chars text microbatch、64 items/256KiB 背压及 `appendEvents` 单事务批量投影；继续分离 transport close 与 run cancel | persist-before-publish、连续 sequence、terminal ordering 不变；不新增 checkpoint、第二 executor、route 或数据库表 |
 | `packages/database/src/client.ts`                                                                                                              | 开发/生产均复用 process singleton Prisma/PrismaPg client；pool 固定 max 10、连接超时 5s、idle 30s                                                                                               | 不按请求 disconnect；不新增 Redis 或修改 Prisma schema                                                            |
@@ -435,7 +437,7 @@ LangChain typed event
 1. Dependency Spike：单一 LangChain family、现有专用 Graph/provider/checkpointer 回归、`createAgent` server runtime import/build。
 2. Agent contract：零工具直答、单工具、多轮、同批最多并发 3、batch admission、乱序完成/message pairing、delta/union reducers、middleware order、recursion/abort。
 3. Retry/deadline：provider/transport hidden retries=0、model transient retry 最多一次、普通 Tool Profile/自身/deadline 取最小值、actual-use 原子 retry permit、remote retry 最多两次/Run 总计四次、取消感知退避、145 秒 Action cutoff、180 秒 hard deadline、固定 unbound Answer、仅空白 Answer fallback 与 partial/error fail-closed。
-4. Tool/Web：`standard-tool/agent-tool` 判别、normalize/schema/scope、一次逻辑调用一次 transcript、Agent Tool 不套普通短超时和整 Agent retry、Outbound Secret Guard、initial/provider-reported URL policy、Tavily 远端 redirect 边界、观察截断与 Web provider contract；被拒绝原值在 provider fake、stream、UI、log、Memory 中均为零。
+4. Tool/Web：`standard-tool/agent-tool` 判别、normalize/schema/scope、一次逻辑调用一次 transcript、Agent Tool 不套普通短超时和整 Agent retry、Outbound Secret Guard、initial/provider-reported URL policy、Tavily/Zhipu 远端 redirect 边界、观察截断与 Web provider contract；被拒绝原值在 provider fake、stream、UI、log、Memory 中均为零。
 5. Provider compatibility：DeepSeek `reasoning_content` 内部回放且 public stream 为零；OpenAI-compatible/豆包/Qwen/Ollama trajectory。
 6. Orchestrator/context/memory：所有 chat 入口汇入 Agent；三条专用链路排除；Composer/Capability 变为 context；source 依据实际执行。
 7. Stream/UI/local snapshot：验证 General ReAct 只发 `agent-run-start/end` 并投影为 `agent-run`，Tasklist 保留 `agent-graph-*`/`agent-graph`，旧 `agent-step` 和 legacy 面板源码不存在且 `agentName` 不参与路由；验证 `tool-end.sources` schema/writer/reducer、canonical URL union、搜索/读取数量不含被拒绝结果或 retry、仅列最多 5 项 `status='read'` 来源且不推断“官方”；验证 General ReAct 是通用聊天唯一过程容器，Tool/Skill/Resource/Prompt 外部旧面板数量为 0；验证整行 disclosure、标题邻接 chevron、无标题耗时、active 标题 shadcn Shimmer、active 手动收起后不被新事件重开、action-settled/final-pending 仍保持 active、首个 final `text-start` 原子完成并只自动收起一次、用户重开、“已停止思考”/失败终态不闪动、并行 ordinal 稳定槽位、retry 原行更新、Tool 类型图标/纯文字状态、安全来源链接、零 Tool 不出现双 loading、accepted follow-up 在 submitted/streaming 的 assistant slot 与 ready/error 的最终 assistant item 保留固定 `288px` response reserve 且无 viewport reply runway、保留 Composer-safe footer inset、既有最终回答渲染和三条专用 Agent UI 回归；验证完成态刷新后 Trace+答案恢复、删除/重新生成同步、取消/失败/部分回答不提交稳定快照、IndexedDB 失败时服务端问答兜底，并在序列化快照上扫描 raw reasoning、原始工具数据、网页正文与 secret；同时验证 SSE 断线不触发 run abort、断线后事件继续投影，显式 cancel/hard deadline 才终止执行，且网络投递不参与 180 秒计算。
@@ -454,16 +456,32 @@ LangChain typed event
 
 - 新 ADR：LangChain `createAgent` 作为私有 Action 内核、middleware/tool/stream ownership、run-local 与固定 Action/Answer 决策。
 - `docs/architecture/`：聊天 Runtime 主链、Tool/Skill/MCP 分层、Stream Trace、Memory 与 special Agent 隔离。
-- `docs/architecture/production-deployment.md`：`TAVILY_API_KEY` 生产 env contract。
+- `docs/architecture/production-deployment.md`：Web Provider selector 与两类 server key 的生产 env contract。
 - `apps/webapp/.env.example` 与 `deploy/env/webapp.production.env.example`。
 - 在实现和验收稳定后再评估根 `README.md`、`docs/versions/`、`docs/releases/` 与 package version；当前计划阶段不提前修改。
+
+## Prompt-Only Corrective Plan: Explicit Web Intent
+
+**Goal**: 只通过 server-owned Prompt 提升明确联网、选文和网页总结请求的 Tool 遵从性，并杜绝无 observation 的网页/工具叙述。
+
+**Files**:
+
+- Modify `apps/webapp/lib/ai/prompts/tool-calling.ts`: 补充 Action 的公开网络取证/网页读取/零 Tool 决策阶梯；补充 Answer 的 observation-only 网页事实边界。
+- Modify `apps/webapp/tests/lib/ai/prompts/tool-calling.test.ts`: 用 prompt contract 测试覆盖五类通用场景和无 observation 的禁止性断言。
+- Modify current canonical `spec.md`、`plan.md`、`research.md`、`decisions.md`、`contracts/general-react-runtime.md`、`tasks.md`、`acceptance.md`: 固定 D038、FR-058、SC-024 和验收证据。
+
+**Execution**:
+
+1. 先在 `tool-calling.test.ts` 加入 Action/Answer 的精确断言：明确联网的优先搜索、无 URL 的先搜索后读取、用户 URL 可读、站点/语言/主题筛选且无匹配不替代、稳定解释/写作不联网、无 observation 不得宣称 Tool 事实。单独运行该文件，预期在实现前因缺少新规则而 RED。
+2. 仅修改 `tool-calling.ts` 的 `TOOL_DESCRIPTIONS`、`getActionSystemPrompt()`、`getToolUseSystemPrompt()` 与 `getAnswerSystemPrompt()` 文案。Action 示例采用近期公告/利率查询、PostgreSQL 慢查询教程选文、用户提供 URL 的风险提炼、政府网站来源限制、订单扣库存锁解释和用户粘贴周报摘要；它们不复用产品推荐或 Tool 测试问题。保持现有函数签名、Tool schema、binding、Agent middleware 和 Answer 输入投影不变。
+3. 重跑该 Prompt suite，随后运行相关 `chat-session` / General ReAct runner suites、TypeScript、精确 ESLint 与 `git diff --check`。不把不确定的真实云模型 Tool 遵从率宣称为确定性测试结果。
 
 ## Deferred Beyond MVP
 
 - 跨请求 Agent checkpoint/resume、HITL、长期 `AgentRun` 和 Run History；现有 resumable stream 的事件回放不是 Agent state resume。
 - 有副作用 Tool 的并行、动态并发配置、逐 Tool `parallelSafe` 元数据、为通用 ReAct 新增 Agent Tool、多 Agent、子 Agent、长期或队列化后台/异步任务；现有最多 180 秒的 run-scoped 断线续跑和 Delivery `agent-tool` 不扩展这些能力。
 - 浏览器操作、网页写入、文件系统、Shell、桌面控制和其他高风险工具。
-- 多 Web Provider 自动 failover、搜索缓存、网页索引、额度管理 UI。
+- 多 Web Provider 自动 failover、搜索缓存、网页索引、额度管理 UI，或通过用户请求/模型参数动态切换 Web Provider。
 - provider hosted Web Search/MCP 的统一抽象和模型侧原生工具协商。
 - 依据大量 Tool catalog、用户权限或租户策略做动态 Tool Search/按需 Tool Policy；在该需求出现前不得让 Skill selector 重新承担 Tool 权限。
 - raw chain-of-thought 展示或持久化（明确不计划）。

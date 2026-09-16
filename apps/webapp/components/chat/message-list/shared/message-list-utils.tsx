@@ -1,4 +1,4 @@
-import type { MindMessage, MindMessagePart, PromptPart, ReasoningPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
+import type { MindMessage, MindMessagePart, ReasoningPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
 
 export type ChatListStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 export type AssistantFeedback = 'up' | 'down' | null
@@ -6,13 +6,6 @@ export type AssistantFeedback = 'up' | 'down' | null
 export interface RateLimitNoticeViewModel {
     title: string
     description: string
-}
-
-const promptInputLabelMap: Record<string, string> = {
-    filename: '文件名',
-    goal: '目标',
-    theme: '主题',
-    userGoal: '用户目标',
 }
 
 export function hasVisibleContent(part: MindMessagePart) {
@@ -57,43 +50,6 @@ export function buildCombinedReasoning(reasoningParts: ReasoningPart[]) {
         .join('\n\n')
 }
 
-export function getToolTitle(part: ToolPart) {
-    return part.title ?? part.toolName
-}
-
-export function getActionLabel(action?: string) {
-    if (!action) {
-        return null
-    }
-
-    const labelMap: Record<string, string> = {
-        add: '日期偏移',
-        convert: '单位换算',
-        current: '实时天气',
-        evaluate: '计算',
-        'extract-code-blocks': '提取代码块',
-        'extract-links': '提取链接',
-        'json-pretty': 'JSON 格式化',
-        'markdown-to-text': 'Markdown 转纯文本',
-        now: '当前时间',
-        read: '读取文件',
-        weekday: '星期判断',
-    }
-
-    return labelMap[action] ?? action
-}
-
-export function getToolStatusLabel(status: ToolPart['status']) {
-    switch (status) {
-        case 'completed':
-            return '已完成'
-        case 'failed':
-            return '失败'
-        default:
-            return '执行中'
-    }
-}
-
 export function getResourceStatusLabel(status: ResourcePart['status']) {
     switch (status) {
         case 'completed':
@@ -103,45 +59,6 @@ export function getResourceStatusLabel(status: ResourcePart['status']) {
         default:
             return '读取中'
     }
-}
-
-export function getPromptStatusLabel(status: PromptPart['status']) {
-    switch (status) {
-        case 'completed':
-            return '已完成'
-        case 'failed':
-            return '失败'
-        default:
-            return '处理中'
-    }
-}
-
-export function parsePromptInputRows(input: string) {
-    return input
-        .split('\n')
-        .map(line => line.trim())
-        .filter(Boolean)
-        .map(line => {
-            const separatorIndex = line.indexOf('=')
-
-            if (separatorIndex <= 0) {
-                return null
-            }
-
-            const key = line.slice(0, separatorIndex).trim()
-            const value = line.slice(separatorIndex + 1).trim()
-
-            if (!key || !value) {
-                return null
-            }
-
-            return {
-                key,
-                label: promptInputLabelMap[key] ?? key,
-                value,
-            }
-        })
-        .filter((row): row is { key: string; label: string; value: string } => row !== null)
 }
 
 export function getSourceLabel(source?: ToolPart['source']) {

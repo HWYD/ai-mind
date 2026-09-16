@@ -51,10 +51,6 @@ const STREAM_TEXT_FLUSH_INTERVAL_BY_MODEL: Partial<Record<ChatModel, number>> = 
 function resolveStreamTextFlushIntervalMs(modelId: ChatModel): number {
     return STREAM_TEXT_FLUSH_INTERVAL_BY_MODEL[modelId] ?? DEFAULT_STREAM_TEXT_FLUSH_INTERVAL_MS
 }
-// 兼容旧实现残留的本地 key。v0.3.0 明确不支持刷新后恢复 pending HITL；
-// 如果后续重新启用，必须同时恢复 assistant message、interrupt payload 和同消息续写上下文，而不是只拉起一张审核卡。
-const PENDING_AGENT_RUN_STORAGE_KEY = 'ai-mind:pending-agent-run-id'
-
 interface ThreadHydrationResponse {
     conversationId?: string
     messages?: MindMessage[]
@@ -409,14 +405,6 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
     useEffect(() => {
         syncMessageSnapshots(messages)
     }, [messages])
-
-    useEffect(() => {
-        if (typeof window === 'undefined') {
-            return
-        }
-
-        window.localStorage.removeItem(PENDING_AGENT_RUN_STORAGE_KEY)
-    }, [])
 
     useEffect(() => {
         return () => {

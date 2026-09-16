@@ -2,12 +2,17 @@ import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
 
 import type { ChatToolDefinition } from '@/lib/ai/tools/registry'
-import { createTavilyWebProvider } from '@/lib/ai/tools/web/tavily-web-provider'
 import type { WebProvider } from '@/lib/ai/tools/web/web-provider'
+import { createConfiguredWebProvider } from '@/lib/ai/tools/web/web-provider-factory'
 
 export const webSearchToolSchema = z
     .object({
-        query: z.string().trim().min(1).max(500).describe('要查询的公开网页问题，不得包含 Token、Cookie、API Key 或签名 URL。'),
+        query: z
+            .string()
+            .trim()
+            .min(1)
+            .max(70)
+            .describe('要查询的公开网页关键词或问题（最多 70 字符），不得包含 Token、Cookie、API Key 或签名 URL。'),
     })
     .strict()
 
@@ -37,7 +42,7 @@ export function createWebSearchToolDefinition(provider: WebProvider): ChatToolDe
 
 const configuredWebSearchTool = tool(
     async ({ query }, config) => {
-        const provider = createTavilyWebProvider()
+        const provider = createConfiguredWebProvider()
         if (!provider) throw new Error('网页搜索服务未配置。')
         return provider.search({ query, signal: config?.signal })
     },
@@ -54,7 +59,7 @@ export const webSearchToolDefinition: ChatToolDefinition<z.infer<typeof webSearc
     formatOutput: result => JSON.stringify(result),
     formatPublicOutput: result => `已搜索到 ${getSearchResultCount(result)} 个来源`,
     getDisplayConfig: () => ({ action: 'search', title: '网页搜索' }),
-    isAvailable: () => createTavilyWebProvider() !== null,
+    isAvailable: () => createConfiguredWebProvider() !== null,
     name: 'web-search',
     runtimeScopes: ['general-react-agent'],
     schema: webSearchToolSchema,

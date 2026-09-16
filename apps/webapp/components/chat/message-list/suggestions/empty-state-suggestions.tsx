@@ -1,27 +1,32 @@
 'use client'
 
-import { ArrowRight, ChevronDown, Database, ImagePlus, Network, Users } from 'lucide-react'
-import { type ReactNode, useId, useState, useSyncExternalStore } from 'react'
+import { ArrowRight, BrainCircuit, ImagePlus, Network, Users } from 'lucide-react'
+import { type ReactNode, useSyncExternalStore } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Separator } from '@/components/ui/separator'
 
 import {
     deliveryChainDemoSuggestion,
     type EmptyStateSuggestion,
+    generalReActDemoSuggestion,
     imageGenerationDemoSuggestion,
     tasklistDemoSuggestion,
 } from './empty-state-suggestion-options'
 import { FollowUpSuggestions } from './follow-up-suggestions'
 
-const memorySteps = ['发送“记住我喜欢吃桃子。”', '新建或切换对话。', '发送“给我推荐几种水果。”']
-const finePointerQuery = '(hover: hover) and (pointer: fine)'
 const desktopRecommendationQuery = '(min-width: 768px)'
 const desktopRecommendationSeed = `empty-state-desktop-${Math.random().toString(36).slice(2)}`
+
+/*
+Memory 卡片暂时隐藏，恢复时同步还原 ChevronDown、Database、useId、useState、
+Collapsible 与 HoverCard 相关 imports，并取消下面辅助逻辑、组件状态和 JSX 的注释。
+
+const memorySteps = ['发送“记住我喜欢吃桃子。”', '新建或切换对话。', '发送“给我推荐几种水果。”']
+const finePointerQuery = '(hover: hover) and (pointer: fine)'
+*/
 
 function subscribeToMediaQuery(mediaQueryText: string, onStoreChange: () => void) {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -46,13 +51,15 @@ function useMediaQueryPreference(mediaQueryText: string) {
     )
 }
 
-function useSupportsFinePointer() {
-    return useMediaQueryPreference(finePointerQuery)
-}
-
 function useSupportsDesktopRecommendations() {
     return useMediaQueryPreference(desktopRecommendationQuery)
 }
+
+/*
+function useSupportsFinePointer() {
+    return useMediaQueryPreference(finePointerQuery)
+}
+*/
 
 function CaseIcon({ children, tone = 'agent' }: { children: ReactNode; tone?: 'agent' | 'memory' }) {
     return (
@@ -68,6 +75,7 @@ function CaseIcon({ children, tone = 'agent' }: { children: ReactNode; tone?: 'a
     )
 }
 
+/*
 function MemoryExperienceSteps({ withTitle = false, withHint = false }: { withTitle?: boolean; withHint?: boolean }) {
     return (
         <div className="flex flex-col gap-3 rounded-xl border border-violet-200/80 bg-violet-50/55 p-3">
@@ -86,6 +94,7 @@ function MemoryExperienceSteps({ withTitle = false, withHint = false }: { withTi
         </div>
     )
 }
+*/
 
 function ExecutableCardOverlay({ ariaLabel, disabled, onClick }: { ariaLabel: string; disabled?: boolean; onClick: () => void }) {
     return (
@@ -109,10 +118,12 @@ export function EmptyStateSuggestions({
     onSelectQuestion: (question: string) => void
     onSelectSuggestion: (suggestion: EmptyStateSuggestion) => void
 }) {
+    /*
     const [memoryStepsOpen, setMemoryStepsOpen] = useState(false)
     const [memoryHoverCardOpen, setMemoryHoverCardOpen] = useState(false)
     const memoryStepsId = `memory-experience-steps-${useId().replace(/:/g, '')}`
     const supportsFinePointer = useSupportsFinePointer()
+    */
     const supportsDesktopRecommendations = useSupportsDesktopRecommendations()
 
     return (
@@ -125,10 +136,62 @@ export function EmptyStateSuggestions({
             </div>
 
             <div className="mt-7 grid w-full grid-cols-1 gap-4 text-left md:grid-cols-2">
-                <article aria-labelledby="tasklist-case-title" className="min-w-0">
+                <article aria-labelledby="general-react-case-title" className="min-w-0">
                     <Card
                         data-disabled={disabled || undefined}
                         className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-[var(--composer-focus-border)] bg-[var(--composer-focus-soft)]/45 py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
+                    >
+                        <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
+                            <div className="flex min-w-0 items-start gap-3">
+                                <CaseIcon>
+                                    <BrainCircuit className="size-6" strokeWidth={1.9} aria-hidden="true" />
+                                </CaseIcon>
+                                <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
+                                        <Badge
+                                            variant="outline"
+                                            className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
+                                        >
+                                            ReAct Agent
+                                        </Badge>
+                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
+                                            <h3 id="general-react-case-title">搜索并解读 React 19 教程</h3>
+                                        </CardTitle>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardHeader>
+
+                        <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
+                            <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
+                                先搜索掘金或知乎上的中文教程，再选择一篇读取正文，提炼关键上手步骤。
+                            </p>
+                        </CardContent>
+                        <Separator className="hidden bg-border/60 md:block" />
+                        <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                            <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
+                                Web Search · 网页读取 · 来源追踪
+                            </p>
+                            <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
+                                运行示例
+                                <ArrowRight
+                                    className="size-4 transition-transform group-hover/executable:translate-x-0.5"
+                                    aria-hidden="true"
+                                />
+                            </span>
+                        </CardFooter>
+                        <ExecutableCardOverlay
+                            ariaLabel="运行 ReAct 智能体示例"
+                            disabled={disabled}
+                            onClick={() => onSelectSuggestion(generalReActDemoSuggestion)}
+                        />
+                    </Card>
+                </article>
+
+                <article aria-labelledby="tasklist-case-title" className="min-w-0">
+                    <Card
+                        data-disabled={disabled || undefined}
+                        className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-border/70 bg-card py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus-border)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
                     >
                         <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
                             <div className="flex min-w-0 items-start gap-3">
@@ -276,6 +339,8 @@ export function EmptyStateSuggestions({
                         </Card>
                     </article>
 
+                    {/*
+                    暂时保留完整的 Memory 卡片 JSX，当前版本不在推荐能力中展示。
                     <article aria-labelledby="memory-case-title" className="min-w-0">
                         <Card className="group/memory cursor-pointer gap-0 rounded-2xl border border-border/70 bg-card py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-sm active:translate-y-0 md:min-h-[236px]">
                             <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
@@ -370,6 +435,7 @@ export function EmptyStateSuggestions({
                             </Collapsible>
                         </Card>
                     </article>
+                    */}
 
                     {supportsDesktopRecommendations ? (
                         <div role="group" aria-label="推荐问题" className="hidden min-w-0 md:col-span-2 md:block">

@@ -326,7 +326,6 @@ export function ComposerEditor({
     onChange,
     onComposerChange,
     onEditorChange,
-    onStop,
     placeholder = COMPOSER_PLACEHOLDER,
     onSubmit,
     status,
@@ -337,23 +336,20 @@ export function ComposerEditor({
     onChange: (value: string) => void
     onComposerChange?: (payload: ComposerPayload) => void
     onEditorChange?: (editor: Editor | null) => void
-    onStop: () => void
     placeholder?: string
     onSubmit: (value: string) => void | Promise<void>
     status: ChatStatus
     value: string
 }) {
-    const onStopRef = useRef(onStop)
     const onSubmitRef = useRef(onSubmit)
     const disabledRef = useRef(disabled)
     const statusRef = useRef(status)
 
     useEffect(() => {
         disabledRef.current = disabled
-        onStopRef.current = onStop
         onSubmitRef.current = onSubmit
         statusRef.current = status
-    }, [disabled, onStop, onSubmit, status])
+    }, [disabled, onSubmit, status])
 
     const editor = useEditor({
         extensions: [
@@ -402,8 +398,7 @@ export function ComposerEditor({
 
                 event.preventDefault()
 
-                if (statusRef.current === 'streaming') {
-                    onStopRef.current()
+                if (statusRef.current === 'submitted' || statusRef.current === 'streaming') {
                     return true
                 }
 

@@ -1,5 +1,3 @@
-import type { PublicSourceRecord } from '@ai-mind/stream-core/protocol'
-
 import { normalizeSafePublicHttpUrl } from '@/lib/ai/safe-public-url'
 import type { MindMessagePart, ToolPart } from '@/lib/ai/types/message'
 
@@ -193,8 +191,4 @@ export function buildGeneralAgentTraceView(parts: MindMessagePart[], status: Gen
         rows,
         status,
     }
-}
-
-export function getTraceSourceRecords(part: ToolPart): PublicSourceRecord[] {
-    return part.sources ?? []
 }

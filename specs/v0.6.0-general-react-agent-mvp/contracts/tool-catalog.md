@@ -20,7 +20,7 @@ effective tools = GeneralToolPolicy fixed base tools ∩ active Tool Definition 
 
 ```json
 {
-    "query": "string, trimmed, 1..500 chars"
+    "query": "string, trimmed, 1..70 chars"
 }
 ```
 
@@ -29,14 +29,14 @@ effective tools = GeneralToolPolicy fixed base tools ∩ active Tool Definition 
 ### Provider Request Policy
 
 ```text
-endpoint: Tavily Search
-search_depth: basic
-max_results: 5
-include_answer: false
-include_raw_content: false
+selection: server-only AI_MIND_WEB_PROVIDER=tavily|zhipu; default tavily
+Tavily: Search; search_depth=basic; max_results=5; include_answer=false; include_raw_content=false
+Zhipu: Web Search; search_engine=search_std; search_intent=false; count=5; content_size=medium
 ```
 
-只发送最小 query 和固定 provider options；不得把 history、Memory、prompt 或用户身份对象附加为 provider 参数。query 必须先通过下述 Outbound Secret Guard。
+模型不得选择 provider、search engine、depth、count 或 content mode。只发送最小 query 和固定 provider options；不得把 history、Memory、prompt 或用户身份对象附加为 provider 参数。query 必须先通过下述 Outbound Secret Guard。
+
+`resolveGeneralToolBinding()` 在 Run 开始时解析一次已选 provider，并把该 adapter 绑定给本 Run 的 `web-search` 与 `read-url` Definition；同一逻辑调用的 retry 复用该 closure，不能在重试中重新读取 selector 或切换 provider。
 
 ### Internal Result
 
@@ -66,9 +66,9 @@ Guard 只覆盖本版本会发送到第三方 Web provider 的业务参数：
 
 - `web-search.query`；
 - `read-url.url`；
-- Tavily Search 返回、准备进入 public result 或 `_authorizedUrls` 的 URL。
+- 已选 Web provider Search 返回、准备进入 public result 或 `_authorizedUrls` 的 URL。
 
-它不建设通用 PII/DLP、私有上下文语义追踪或用户审批流程。Tavily adapter 自身的 `TAVILY_API_KEY` 只能在 adapter 最内层作为 provider authentication 加入请求，不进入模型参数、ToolObservation、public stream 或日志，也不作为业务参数被 Guard 拒绝。
+它不建设通用 PII/DLP、私有上下文语义追踪或用户审批流程。Tavily 的 `TAVILY_API_KEY` 与智谱的 `AI_MIND_ZHIPU_API_KEY` 都只能在 adapter 最内层作为 provider authentication 加入请求，不进入模型参数、ToolObservation、public stream 或日志，也不作为业务参数被 Guard 拒绝。
 
 ### Deterministic Deny Rules
 
@@ -110,7 +110,7 @@ URL fragment 在进入 provider payload 前移除。仅出现普通技术词汇 
 1. parse + canonicalize URL；
 2. 移除 fragment，执行 scheme/credential/hostname/IP 与 Outbound Secret policy；
 3. 验证 canonical requested URL 存在于当前 `authorizedUrls`；
-4. 调用固定 Tavily provider endpoint；
+4. 调用当前部署静态选择的 provider Reader/Extract endpoint；
 5. 把 provider 内容和 provider-reported URL 视为不可信输入；provider-reported URL 只有重新通过步骤 1～2 后才能公开或授权；
 6. 无可靠 final URL 时保留 requested URL 作为 SourceRecord identity，不推断 redirect chain；
 7. 限制结果体积并生成 SourceRecord。
@@ -118,13 +118,12 @@ URL fragment 在进入 provider payload 前移除。仅出现普通技术词汇 
 ### Provider Request Policy
 
 ```text
-endpoint: Tavily Extract
-format: markdown
-extract_depth: basic
-urls: exactly one authorized URL
+selection: server-only AI_MIND_WEB_PROVIDER=tavily|zhipu; the model cannot choose it
+Tavily: Extract; format=markdown; extract_depth=basic; urls=exactly one authorized URL
+Zhipu: Reader; return_format=markdown; retain_images=false; keep_img_data_url=false; timeout=15; url=one authorized URL
 ```
 
-Tavily 在远端请求目标站点。AI Mind 不观察目标请求的 redirect chain，因而本 contract 不要求或声明逐跳 redirect 校验。
+所选 provider 在远端请求目标站点。AI Mind 不观察目标请求的 redirect chain，因而本 contract 不要求或声明逐跳 redirect 校验。
 
 ### Internal Result
 
@@ -243,7 +242,7 @@ Tool/provider adapter 只能在这个有效窗口内声明更短的 connect/requ
 ## Availability Contract
 
 - `calculator`、`datetime`: 始终按现有本地可用性判断。
-- `web-search`、`read-url`: `TAVILY_API_KEY` 缺失时不绑定/不可用；不得向模型声明一个必然失败的工具。
+- `web-search`、`read-url`: `AI_MIND_WEB_PROVIDER` 无效、所选 provider 的 key 缺失或智谱 engine 不是 `search_std` 时不绑定/不可用；未设置 selector 时默认 Tavily。不得向模型声明一个必然失败的工具，也不得自动切换到另一个 provider。
 - Web tools 不可用不影响零工具回答及本地 base tools，但模型 selection 仍必须支持 tool calling。
 - `agent-tool`: 即使自身可用，也不得进入 v0.6.0 `general-react-agent` resolution；仅由明确的专用 runtime scope 消费。
 - availability 状态只输出布尔/分类，不输出 key 或 provider config。

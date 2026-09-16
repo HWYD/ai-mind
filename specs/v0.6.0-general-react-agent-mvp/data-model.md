@@ -208,6 +208,10 @@ effectiveAttemptTimeoutMs = min(
 | `fingerprint`   | string or null      | 仅在 Outbound Secret Guard 通过后，基于 tool name + canonical validated args 生成。         |
 | `ordinal`       | positive integer    | 保留模型声明顺序；执行/完成可乱序，但模型投影和 UI 槽位以此稳定排序。                       |
 
+## Runtime-Only: Resolved Web Provider
+
+`resolveGeneralToolBinding()` 在每个 General ReAct Run 建立时，把当前 server-only Web Provider 配置解析为一个内部 adapter，并分别闭包绑定给本 Run 的 `web-search` 与 `read-url` Definition。它不是 GraphState、`ToolObservation`、`SourceRecord`、public DTO、Memory 或 snapshot 字段；同一逻辑 Tool 调用及其 retry 只使用这一个已解析 adapter。
+
 ## Entity: ToolObservation
 
 每个 ActionRequest 必须产生一个对应观察，即使未真正执行工具。
@@ -246,7 +250,7 @@ effectiveAttemptTimeoutMs = min(
 - URL fragment 在进入 provider payload 前移除；常见签名 URL 和包含可识别凭据值的 URL 不得授权；
 - hostname 不得是 localhost、本机别名、loopback、link-local、multicast 或 private network；IPv4-mapped/compatible IPv6 必须先恢复为 IPv4 后再作同一判断；
 - `read-url` 请求 URL 必须已存在于 `_authorizedUrls`；
-- Tavily Extract 只保证 initial requested URL 已校验，不声称可见 redirect chain；provider 明确返回的 URL 只有重新通过本规则后才能公开或授权；
+- 已选 Web provider 的 Reader/Extract 只保证 initial requested URL 已校验，不声称可见 redirect chain；provider 明确返回的 URL 只有重新通过本规则后才能公开或授权；
 - URL grant 不跨 Run、不写入 memory。
 
 ## Entity: SourceRecord

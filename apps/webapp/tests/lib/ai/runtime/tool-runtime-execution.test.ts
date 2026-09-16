@@ -379,7 +379,10 @@ describe('runtime/tool-runtime executeToolCall', () => {
     it.each([
         ['5xx', Object.assign(new Error('temporary provider failure'), { status: 503 })],
         ['4xx', Object.assign(new Error('bad gateway request'), { status: 400 })],
-        ['Tavily connection typed error', new WebProviderError('TAVILY_CONNECTION_ERROR', 'connection failed', { retryable: true })],
+        [
+            'Web provider connection typed error',
+            new WebProviderError('WEB_CONNECTION_ERROR', 'connection failed', { provider: 'tavily', retryable: true }),
+        ],
         ['unknown error', new Error('unexpected provider failure')],
     ] as const)('retry-safe 远端 Tool 对 %s 执行失败重试并保持一个逻辑 transcript', async (_label, firstError) => {
         vi.useFakeTimers()
@@ -469,9 +472,11 @@ describe('runtime/tool-runtime executeToolCall', () => {
         expect(resolveToolRetryDelayMs(normalizeToolExecutionError({ status: 503 }), 2, 0.5)).toBe(3000)
     })
 
-    it('保留 Tavily connection typed error 的 connection 分类', () => {
+    it('保留 Web provider connection typed error 的 connection 分类', () => {
         expect(
-            normalizeToolExecutionError(new WebProviderError('TAVILY_CONNECTION_ERROR', '网页服务连接失败。', { retryable: true }))
+            normalizeToolExecutionError(
+                new WebProviderError('WEB_CONNECTION_ERROR', '网页服务连接失败。', { provider: 'tavily', retryable: true })
+            )
         ).toMatchObject({ category: 'connection', retryable: true })
     })
 })
