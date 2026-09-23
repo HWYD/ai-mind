@@ -221,9 +221,9 @@ AI Mind 的 Agent 演进遵循一个原则：
 
 因此，当前 Agent Runtime 更强调工程边界，而不是一开始追求通用自动化。
 
-## v0.6.0 General ReAct Runtime
+## v0.6.0 General ReAct Runtime（historical, superseded）
 
-普通 `routeType=chat` 现在统一进入 `GeneralReActAgentRunner`。LangChain v1 `createAgent(version='v2')` 只驱动私有的 Action `model -> tools -> model` loop；Action 文本不是最终回答，绝不投影，也不得传给 Answer。除显式取消或 hard deadline 外，runner 随后以同一 resolved model selection 创建一个未绑定 Tool 的 Answer model，并只以用户问题、可靠观察、安全来源与 stop reason 重建其输入，直接把安全 token 流经既有 durable adapter 投影为最终 `text-*`。这仍是一个 runner，不是第二个 Agent/Graph。Runtime middleware 负责 Action/model/tool/observation/deadline budgets，Tool Runtime 负责 schema、scope、timeout 和 retry；Answer Tool Call、provider error 或部分 Answer 后异常均 fail-closed，不追加 fallback，且不得进入 Memory 或稳定快照。
+以下段落仅记录 v0.6.0 的历史基线，已被后续 v0.6.1 章节覆盖。当时普通 `routeType=chat` 统一进入 `GeneralReActAgentRunner`。LangChain v1 `createAgent(version='v2')` 只驱动私有的 Action `model -> tools -> model` loop；Action 文本不是最终回答，绝不投影，也不得传给 Answer。除显式取消或 hard deadline 外，runner 随后以同一 resolved model selection 创建一个未绑定 Tool 的 Answer model，并只以用户问题、可靠观察、安全来源与 stop reason 重建其输入，直接把安全 token 流经既有 durable adapter 投影为最终 `text-*`。这仍是一个 runner，不是第二个 Agent/Graph。Runtime middleware 负责 Action/model/tool/observation/deadline budgets，Tool Runtime 负责 schema、scope、timeout 和 retry；Answer Tool Call、provider error 或部分 Answer 后异常均 fail-closed，不追加 fallback，且不得进入 Memory 或稳定快照。
 
 Action 与 Answer 的 prompt 也按阶段隔离。Action 使用 Tool 决策、并行/依赖调用和不可信 observation 的约束；Answer 不继承这些 Action-only 指令，只使用服务端的用户体验基线、可信 Skill 输出风格、可靠资料与来源。普通问题默认结论优先并给出适中的必要解释；用户直接要求简短、深入、步骤、表格或特定格式时可在安全边界内覆盖默认。网页、Tool、Resource 或 Prompt 资料中的嵌入指令只当作资料，不能改变该优先级、Tool 权限、授权 URL、预算或数据范围。
 
@@ -236,3 +236,17 @@ Generic Run 是 request-local 的；每进程通过 execution gate 只接纳 8 �
 ### Timeout And Side-Effect Boundary
 
 phase、Tool attempt 和 MCP request 的 timeout 都是调用方可观察的终止边界：当前 attempt 会收到派生 `AbortSignal`，超时后不再等待、发布或写入迟到的 model/tool/MCP 结果；这不等价于远端操作已经回滚。无法确认取消或回滚的远端副作用不得加入通用 General ReAct Tool allowlist；当前 generic Tool 集合限定为确定性或只读能力。未来若引入副作用 Tool，必须先定义幂等键、重复提交语义、补偿或 durable handoff，并更新版本决策后再接入。
+
+## v0.6.1 General ReAct Streaming
+
+v0.6.1 supersedes the fixed Action + Answer projection documented in the preceding historical section. `createAgent(version='v2')` remains the only normal Tool loop, but a natural no-Tool model turn now resolves its own public text as the final answer; it does not schedule an extra Answer call.
+
+- General Agent text uses additive `agent-text-start/delta/end` chunks and `AgentTextPart`; ordinary `text-*` and dedicated Agent contracts remain unchanged.
+- Before `agent-text-end`, the client derives `pending`. A turn with Tool Calls resolves to run-level `commentary`; a complete, natural, no-Tool and non-empty turn resolves to `final_answer`.
+- All visible Agent text uses the same body Markdown without a process icon. When foldable detail exists, pending/commentary and Tool/Skill/Resource/Prompt rows remain in `message.parts` order inside one Trace; without detail, pending is body text below the non-interactive header. Each `web-search` row derives its displayed count from that Tool Part's own safe discovered sources, never the Trace aggregate or raw query/input. A safe read source list is the owning Tool's direct child and appears before later top-level parts, never as a Trace footer. Commentary is public action explanation, not raw chain-of-thought, and is never attached to one Tool or expanded as Tool detail.
+- A completed General Agent Run carries `finalizationMode=normal|constrained`. Only normal final answers may enter Chat Memory/UserMemory; constrained final answers remain usable in the same session but display “处理未完成”.
+- The normal loop budget is 9 Tool-bearing rounds, 14 logical Tool Calls and 10 loop model calls. One 30-second Tool-free constrained finalizer is reserved only for eligible abnormal or empty-natural closure; total hard deadline is 270 seconds (235 + 30 + 5 reserve).
+- A known ToolCall rejected before provider execution still becomes a failed, public-safe Tool row by emitting existing `tool-start` then same-part tool-scope `error`. This describes “模型请求未执行”; it is not a Tool completion or source, and carries no raw arguments, URLs/queries, secrets, fingerprints or internal errors.
+- `read-url` has no interactive authorization screen: safe URLs in the current user request are eligible automatically. A later same-conversation Run may receive at most eight revalidated URLs from server Chat Memory raw user turns; assistant/summary/pinned/UserMemory/Tool/client-history values never authorize access. This read catalog cannot prove a previous Run read the page and must not cause automatic rereads for a historical-execution question.
+
+The runtime still owns Tool admission, timeout, retry, cancellation, provenance and durable ordering. It must not be replaced by a hand-written Chain/Runnable Tool loop merely to change presentation behavior.

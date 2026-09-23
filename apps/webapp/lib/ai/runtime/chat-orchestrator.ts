@@ -20,10 +20,16 @@ import {
     isChatMemoryWriteEligibleRequest,
     type ThreadMemoryStatusEvent,
 } from './chat-memory'
-import { buildSystemMessages, createChatSession, withChatMemoryContextMessages } from './chat-session'
+import { buildSystemMessages, createChatSession, getTrustedUserUrlCatalogSystemPrompt, withChatMemoryContextMessages } from './chat-session'
 import { prepareComposerContextInvocation, resolveComposerContextInvocation } from './composer-context'
 import { startDeliveryChainRun } from './delivery-chain'
-import { createGeneralReActRunContext, GeneralReActAgentRunner, RetryPermitPool } from './general-react-agent'
+import {
+    collectSafePublicUserUrls,
+    createGeneralReActRunContext,
+    GeneralReActAgentRunner,
+    MAX_TRUSTED_USER_URLS,
+    RetryPermitPool,
+} from './general-react-agent'
 import { generalReActExecutionGate, type GeneralReActExecutionPermit } from './general-react-agent/execution-gate'
 import { logSkillRuntime, normalizeKnownRuntimeError, throwIfAborted } from './stream-errors'
 import type { ChatSession, PreparedGeneralChatContext, ResolvedChatExecutionContext, WriteChunk } from './types'
@@ -564,14 +570,48 @@ export class ChatOrchestrator {
         }
     }
 
+    private async resolveTrustedUserUrls(): Promise<string[]> {
+        const threadId = isChatMemoryContextEligibleRequest(this.request) ? this.resolveConversationThreadId() : null
+        if (!threadId) {
+            return []
+        }
+
+        try {
+            const { state } = await chatMemoryService.readThreadState(threadId, { signal: this.context.signal })
+            const urls = new Set<string>()
+
+            for (const message of [...state.messages].reverse()) {
+                if (message.role !== 'user') {
+                    continue
+                }
+
+                for (const url of collectSafePublicUserUrls(message.text)) {
+                    urls.add(url)
+                    if (urls.size >= MAX_TRUSTED_USER_URLS) {
+                        return [...urls]
+                    }
+                }
+            }
+
+            return [...urls]
+        } catch (error) {
+            if (isAbortError(error) || this.context.signal?.aborted) {
+                throw error
+            }
+
+            return []
+        }
+    }
+
     private async runGeneralReActEntryStage(
         session: ChatSession,
         preparedContext: PreparedGeneralChatContext = { messages: [], nonMessagePayloads: [] }
     ) {
-        const actionSystemMessages = buildSystemMessages(...session.actionSystemPrompts)
-        const answerSystemMessages = buildSystemMessages(...session.answerSystemPrompts)
+        const trustedUserUrls = await this.resolveTrustedUserUrls()
+        const loopSystemMessages = buildSystemMessages(...session.loopSystemPrompts, getTrustedUserUrlCatalogSystemPrompt(trustedUserUrls))
+        const finalizerSystemMessages = buildSystemMessages(...session.finalizerSystemPrompts)
         const preparedMessages = await this.prepareChatContextMessages(
-            [...actionSystemMessages, ...preparedContext.messages, ...session.langChainMessages],
+            [...loopSystemMessages, ...preparedContext.messages, ...session.langChainMessages],
             true,
             [...preparedContext.nonMessagePayloads, ...session.activeTools.map(toolDefinition => convertToOpenAITool(toolDefinition.tool))]
         )
@@ -593,11 +633,12 @@ export class ChatOrchestrator {
                       skillId: session.skillDefinition.skillId,
                   }
                 : undefined,
+            trustedUserUrls,
             toolDefinitionMap: session.activeToolDefinitionMap,
         })
 
         return new GeneralReActAgentRunner().run({
-            answerMessages: [...answerSystemMessages, ...preparedMessages.slice(actionSystemMessages.length)],
+            finalizerMessages: [...finalizerSystemMessages, ...preparedMessages.slice(loopSystemMessages.length)],
             context: runContext,
             messages: preparedMessages,
             runId: this.context.streamRecovery?.runId ?? this.assistantMessageId,

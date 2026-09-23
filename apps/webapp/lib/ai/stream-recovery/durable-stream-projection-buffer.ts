@@ -94,10 +94,10 @@ export class DurableStreamProjectionBuffer {
             }
             throw error
         }
-        const isTextDelta = projection.input.payload.type === 'text-delta'
+        const isTextDelta = isPublicTextDelta(projection.input)
         const textKey = isTextDelta ? getTextPartKey(projection.input) : undefined
         const isFirstTextDelta = Boolean(textKey && !this.seenTextParts.has(textKey))
-        const deltaChars = projection.input.payload.type === 'text-delta' ? projection.input.payload.delta.length : 0
+        const deltaChars = getTextDeltaChars(projection.input)
 
         if (textKey) {
             this.seenTextParts.add(textKey)
@@ -175,12 +175,12 @@ export class DurableStreamProjectionBuffer {
     }
 
     private getMergeTarget(input: AppendStreamEventInput): PendingProjection | undefined {
-        if (input.payload.type !== 'text-delta') {
+        if (!isPublicTextDelta(input)) {
             return undefined
         }
 
         const tail = this.pending.at(-1)
-        if (!tail || tail.input.payload.type !== 'text-delta') {
+        if (!tail || !isPublicTextDelta(tail.input)) {
             return undefined
         }
 
@@ -355,7 +355,7 @@ export class DurableStreamProjectionBuffer {
 
 function getTextPartKey(input: AppendStreamEventInput): string {
     const payload = input.payload
-    if (payload.type !== 'text-delta') {
+    if (payload.type !== 'text-delta' && payload.type !== 'agent-text-delta') {
         return ''
     }
 
@@ -363,7 +363,7 @@ function getTextPartKey(input: AppendStreamEventInput): string {
 }
 
 function mergeTextDelta(first: AppendStreamEventInput, second: AppendStreamEventInput): AppendStreamEventInput {
-    if (first.payload.type !== 'text-delta' || second.payload.type !== 'text-delta') {
+    if (!isPublicTextDelta(first) || !isPublicTextDelta(second) || first.payload.type !== second.payload.type) {
         return second
     }
 
@@ -381,5 +381,11 @@ function calculatePayloadBytes(input: AppendStreamEventInput): number {
 }
 
 function getTextDeltaChars(input: AppendStreamEventInput): number {
-    return input.payload.type === 'text-delta' ? input.payload.delta.length : 0
+    return isPublicTextDelta(input) ? input.payload.delta.length : 0
+}
+
+function isPublicTextDelta(
+    input: AppendStreamEventInput
+): input is AppendStreamEventInput & { payload: Extract<AppendStreamEventInput['payload'], { type: 'agent-text-delta' | 'text-delta' }> } {
+    return input.payload.type === 'text-delta' || input.payload.type === 'agent-text-delta'
 }

@@ -4,6 +4,7 @@ import { ToolMessage } from '@langchain/core/messages'
 import { Command } from '@langchain/langgraph'
 import { createMiddleware } from 'langchain'
 
+import { createId } from '@/lib/ai/create-id'
 import { type GeneralReActRunContext, generalReActRunContextSchema } from '@/lib/ai/runtime/general-react-agent/agent-context'
 import {
     type GeneralReActAgentState,
@@ -39,25 +40,29 @@ export async function executeGeneralReActToolCall(input: {
     toolCall: ToolCall
 }): Promise<Command<unknown, GeneralReActToolCommandUpdate>> {
     const callId = input.toolCall.id
+    const definition = input.context.toolDefinitionMap.get(input.toolCall.name)
     const admission = callId ? input.state._currentActionBatch?.admissions[callId] : undefined
     if (!callId || !admission?.admitted) {
-        return observationCommand({
+        return await rejectedObservationCommand({
             callId: callId ?? 'missing-tool-call-id',
             content: '本次工具调用已达到运行预算上限。',
+            definition,
+            context: input.context,
             status: 'budget_blocked',
             toolName: input.toolCall.name,
         })
     }
 
-    const definition = input.context.toolDefinitionMap.get(input.toolCall.name)
     if (
         !definition ||
         !toolSupportsRuntimeScope(definition, 'general-react-agent') ||
         definition.executionPolicy.kind !== 'standard-tool'
     ) {
-        return observationCommand({
+        return await rejectedObservationCommand({
             callId,
             content: '该工具不在当前运行允许的范围内。',
+            definition,
+            context: input.context,
             ordinal: admission.ordinal,
             status: 'denied',
             toolName: input.toolCall.name,
@@ -66,9 +71,11 @@ export async function executeGeneralReActToolCall(input: {
 
     const validation = normalizeAndValidateToolCall(input.toolCall, input.context.toolDefinitionMap as Map<string, typeof definition>)
     if (!validation.success) {
-        return observationCommand({
+        return await rejectedObservationCommand({
             callId,
             content: '工具参数无效。',
+            definition,
+            context: input.context,
             ordinal: admission.ordinal,
             status: 'validation_error',
             toolName: input.toolCall.name,
@@ -80,9 +87,11 @@ export async function executeGeneralReActToolCall(input: {
         validatedToolCall = enforceWebPoliciesBeforeFingerprint(validatedToolCall)
     } catch (error) {
         if (error instanceof OutboundSecretDeniedError || error instanceof WebAccessPolicyError) {
-            return observationCommand({
+            return await rejectedObservationCommand({
                 callId,
                 content: '请求包含禁止外发的凭据。',
+                definition,
+                context: input.context,
                 ordinal: admission.ordinal,
                 status: 'denied',
                 toolName: input.toolCall.name,
@@ -93,9 +102,11 @@ export async function executeGeneralReActToolCall(input: {
 
     const fingerprint = createGeneralReActToolFingerprint(validatedToolCall.name, validatedToolCall.args)
     if (input.state._callFingerprints.includes(fingerprint) || !input.context.toolFingerprintAdmission.tryAcquire(fingerprint)) {
-        return observationCommand({
+        return await rejectedObservationCommand({
             callId,
             content: '该工具调用与本轮已执行调用重复。',
+            definition,
+            context: input.context,
             ordinal: admission.ordinal,
             status: 'duplicate',
             toolName: input.toolCall.name,
@@ -105,9 +116,11 @@ export async function executeGeneralReActToolCall(input: {
     if (validatedToolCall.name === 'read-url') {
         const url = getStringArgument(validatedToolCall.args, 'url')
         if (!url || !input.state._authorizedUrls.some(grant => grant.canonicalUrl === url)) {
-            return observationCommand({
+            return await rejectedObservationCommand({
                 callId,
                 content: '该链接未在当前请求中获得读取授权。',
+                definition,
+                context: input.context,
                 fingerprint,
                 ordinal: admission.ordinal,
                 status: 'denied',
@@ -129,7 +142,7 @@ export async function executeGeneralReActToolCall(input: {
             await input.context.publishChunk(chunk)
         },
         {
-            actionDeadlineAtMs: input.state._actionDeadlineAtMs,
+            actionDeadlineAtMs: input.state._loopDeadlineAtMs,
             hardDeadlineAtMs: input.state._hardDeadlineAtMs,
             retryPermitPool: input.context.retryPermitPool,
             runtimeScope: 'general-react-agent',
@@ -147,7 +160,7 @@ export async function executeGeneralReActToolCall(input: {
             ? sources.map(source => ({
                   canonicalUrl: source.url,
                   grantCallId: callId,
-                  grantedAtRound: input.state._actionRoundCount,
+                  grantedAtRound: input.state._toolBearingRoundCount,
                   grantedBy: 'web-search' as const,
                   host: new URL(source.url).hostname,
               }))
@@ -265,6 +278,39 @@ function observationCommand(input: {
             ],
         },
     })
+}
+
+async function rejectedObservationCommand(
+    input: Parameters<typeof observationCommand>[0] & {
+        context: GeneralReActRunContext
+        definition?: ReturnType<GeneralReActRunContext['toolDefinitionMap']['get']>
+    }
+): Promise<Command<unknown, GeneralReActToolCommandUpdate>> {
+    const isPublicTool =
+        Boolean(input.definition) &&
+        toolSupportsRuntimeScope(input.definition!, 'general-react-agent') &&
+        input.definition!.executionPolicy.kind === 'standard-tool'
+    const partId = createId()
+
+    await input.context.publishChunk({
+        type: 'tool-start',
+        partId,
+        toolName: isPublicTool ? input.toolName : 'tool-request',
+        ...(isPublicTool ? {} : { title: '工具请求' }),
+        input: '',
+    })
+    await input.context.publishChunk({
+        type: 'error',
+        scope: 'tool',
+        errorCode: 'TOOL_EXECUTION_FAILED',
+        retryable: false,
+        message: '工具请求未执行。',
+        stage: 'tool-execution',
+        partId,
+        toolName: isPublicTool ? input.toolName : 'tool-request',
+    })
+
+    return observationCommand(input)
 }
 
 function toObservationStatus(

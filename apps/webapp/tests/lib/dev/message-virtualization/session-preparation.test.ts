@@ -24,7 +24,7 @@ function createSnapshot(options: {
             status: 'completed',
         })),
         revision: 4,
-        schemaVersion: 1,
+        schemaVersion: 2,
         snapshotAt: '2026-08-30T00:00:00.000Z',
         title: options.title,
     }
@@ -35,7 +35,7 @@ function createIndex(conversations: LocalConversationIndex['conversations']): Lo
         conversations,
         isDraft: false,
         revision: 7,
-        schemaVersion: 1,
+        schemaVersion: 2,
         selectedConversationId: 'fixture',
         updatedAt: '2026-08-30T00:00:00.000Z',
     }

@@ -68,9 +68,9 @@ Runtime 层负责“一个聊天请求到底怎么运行”。
 - `composer-context`：消费 Composer command 与 resource reference，生成本轮受控上下文。
 - `version-plan-tasklist-agent`：承接 `/tasklist + @demo://version-plans/*.md` 的受控单 Agent 路径。
 
-v0.6.0 的普通聊天路径在上述 runtime boundary 内增加 `general-react-agent` 子模块。`ChatOrchestrator` 只负责准备 context、创建 run-owned context 并调用 runner；不会在自身维护第二套 while-loop。runner 的 `createAgent` Action loop 只作私有 Tool 决策和观察回灌，随后在非取消、非 hard-deadline 情况下以同一 resolved model selection 执行一次未绑定 Tool 的 Answer stream；只有后者可以产生 public final text。action cutoff/hard deadline、execution gate、Tool Runtime policy 和 durable projection scope 都只服务当前请求，不进入 route 或前端。
+v0.6.1 的普通聊天路径在上述 runtime boundary 内使用 `general-react-agent` 子模块。`ChatOrchestrator` 只负责准备 context、创建 run-owned context 并调用 runner；不会在自身维护第二套 while-loop。runner 的 `createAgent(version='v2')` 是唯一普通 Tool loop：自然完成且无 Tool 的公开正文在同一模型轮次直接成为 `final_answer`，含 Tool 的公开行动说明在 dispatch 前收口为 `commentary`，不再固定执行未绑定 Tool 的 Answer stream。loop/hard deadline、execution gate、Tool Runtime policy 和 durable projection scope 都只服务当前请求，不进入 route 或前端。
 
-`chat-session` 为 Action 与 Answer 分别创建 server-owned prompt projection，而不是把同一组 system message 原样复用。Answer 只接收核心回答策略、可信 Skill 输出风格与安全上下文：普通问题结论优先且解释适中，用户直接的简短/详细/格式要求可在安全边界内覆盖默认。Action-only 的 Tool 选择或调用指令必须在进入 Answer 前剔除；网页、Tool observation、Resource/Prompt 中的文本均为资料而非指令，不能改写回答策略、权限、URL、预算或数据访问范围。
+`chat-session` 为 General ReAct 创建 server-owned 的模型上下文与安全资料投影。网页、Tool observation、Resource/Prompt 中的文本均为资料而非指令，不能改写回答策略、Tool 权限、授权 URL、预算或数据访问范围；raw reasoning、原始 Tool 数据和 provider 原始事件不进入 public stream、Memory 或快照。当前 user 明确提供且通过 public-web/secret policy 的 URL 自动成为 `read-url` 候选；同一已验证 conversation 最多补充八个 server Chat Memory 原始 user URL，并在本 Run 再次 canonicalize。summary、assistant、pinned、UserMemory、Tool output、客户端历史和被 compacted 的 raw turn 都不能授权，也不构成“此前已读取”的执行证据。
 
 ## Chat Thread Memory
 
@@ -81,7 +81,7 @@ v0.6.0 的普通聊天路径在上述 runtime boundary 内增加 `general-react-
 - 基于当前浏览器 session 派生 chat thread id。
 - 以 LangGraph checkpointer 保存普通 chat 的 bounded ThreadState。
 - 在刷新时通过 `GET /api/chat/thread` 返回安全 hydration DTO。
-- 在 eligible turn 完成后只追加“用户输入文本 + 最终用户可见文本”，来源可以是 ordinary chat、tool/resource final answer、Tasklist final answer summary 或 Delivery final report。对 General ReAct，这只能是成功 Answer 的文本或正常空白 Answer 的确定性 fallback；Action draft、Answer Tool contract/provider/partial-stream failure 都不是 eligible turn。
+- 在 eligible turn 完成后只追加“用户输入文本 + 最终用户可见文本”，来源可以是 ordinary chat、tool/resource final answer、Tasklist final answer summary 或 Delivery final report。对 General ReAct，这只能是 normal `final_answer`；pending、commentary、interrupted、constrained final 和失败/取消终态都不是长期 Memory eligible turn。
 - 在超阈值时做 summary compaction。
 - 在下一轮普通 text chat 中以后端 ThreadState 为历史事实源，注入 summary、pinned decisions 和 recent messages，并只从前端请求取本轮最新 user input。
 
@@ -103,7 +103,7 @@ v0.5.4 已把上面的“超阈值”从固定 recent turn/message count 改为�
 
 - Model Catalog 保存 server-only 物理 context window；普通云端聊天使用不超过 128K 的运行窗口，Ollama 使用不超过 32K 的运行窗口并显式配置 `numCtx`。
 - 统一 budget policy 预留 4096 输出 tokens 与 `max(8192, 10% effective window)` runtime headroom，再从 hard input budget 派生 70% compaction trigger 和 35% post-compaction target。
-- Chat Orchestrator 在 General ReAct Action/Answer 与 Composer Context 注入前执行完整输入 preflight；Skill 不会引入额外的 Capability Context 调用。
+- Chat Orchestrator 在 General ReAct 模型调用与 Composer Context 注入前执行完整输入 preflight；Skill 不会引入额外的 Capability Context 调用。
 - Chat Memory 按估算 token 触发持久化 compaction；候选只保留完整 user/assistant turns，并且只有在合法、位于目标内且严格缩小时才保存。
 - 持久化 compaction 失败不覆盖原 summary、pinned decisions 或 `lastCompactedAt`；当前请求使用不持久化的 ephemeral fit 继续。Candidate save 与回答完成后的 raw final-turn append 是两个独立写入阶段，第二次写入也失败时保留 last durable checkpoint 且不撤销回答。
 - 只有排除 chat memory 后，system/tool/capability/UserMemory/latest input 自身仍超出 hard input budget 时，才返回现有输入过长错误。
@@ -170,7 +170,7 @@ Skills 描述任务表面。
 
 它们不直接执行工具、不管理 MCP client，也不编排多阶段 runtime。
 
-Skill 是提示词组织层，不应该偷偷长成 Agent、Tool Policy 或 MCP 权限层。v0.6.0 的 General ReAct Tool binding 由 server-owned `GeneralToolPolicy -> Tool Registry -> Tool Runtime` 解析；Skill 命中不改变模型 Tool schema，也不触发 remote context。
+Skill 是提示词组织层，不应该偷偷长成 Agent、Tool Policy 或 MCP 权限层。v0.6.1 的 General ReAct Tool binding 由 server-owned `GeneralToolPolicy -> Tool Registry -> Tool Runtime` 解析；Skill 命中不改变模型 Tool schema，也不触发 remote context。
 
 ## Tools
 

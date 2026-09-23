@@ -18,6 +18,15 @@ function textDelta(delta: string, partId = 'answer'): AppendStreamEventInput {
     }
 }
 
+function agentTextDelta(delta: string, partId = 'agent-text:1'): AppendStreamEventInput {
+    return {
+        eventKind: 'chunk',
+        ownerSessionHash,
+        payload: { delta, partId, type: 'agent-text-delta' },
+        runId,
+    }
+}
+
 function structural(type: 'text-start' | 'text-end', partId = 'answer'): AppendStreamEventInput {
     return {
         eventKind: 'chunk',
@@ -84,6 +93,25 @@ describe('durable-stream-projection-buffer', () => {
         await vi.advanceTimersByTimeAsync(1)
         expect(appendEvents).toHaveBeenCalledTimes(2)
         expect(appendEvents.mock.calls[1]?.[0]).toMatchObject([{ payload: { delta: 'ab', type: 'text-delta' } }])
+    })
+
+    it('Agent text 的首个 delta 立即 flush，后续同 turn 合并且不与普通正文混合', async () => {
+        const { appendEvents, buffer } = createHarness()
+
+        await buffer.publish(agentTextDelta('先'))
+        await buffer.publish(agentTextDelta('说明'))
+        await buffer.publish(textDelta('普通正文'))
+        await buffer.publish(agentTextDelta('。'))
+        await vi.advanceTimersByTimeAsync(40)
+
+        expect(appendEvents.mock.calls.map(call => call[0])).toEqual([
+            [expect.objectContaining({ payload: { delta: '先', partId: 'agent-text:1', type: 'agent-text-delta' } })],
+            [
+                expect.objectContaining({ payload: { delta: '说明', partId: 'agent-text:1', type: 'agent-text-delta' } }),
+                expect.objectContaining({ payload: { delta: '普通正文', partId: 'answer', type: 'text-delta' } }),
+            ],
+            [expect.objectContaining({ payload: { delta: '。', partId: 'agent-text:1', type: 'agent-text-delta' } })],
+        ])
     })
 
     it('后续 delta 累计到 256 chars 时立即 flush，且不拆分大 delta', async () => {

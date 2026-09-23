@@ -323,6 +323,71 @@ describe('local chat persistence schema and projection', () => {
         expect(JSON.stringify(snapshot)).not.toContain('partial-')
     })
 
+    it('保留已完成的 Agent commentary/final 与 provenance，并排除 pending 或 interrupted Agent text', () => {
+        const conversation = createConversation('conv-agent-text-snapshot')
+        const snapshot = createLocalConversationSnapshot({
+            conversation,
+            messages: [
+                createTextMessage('user-agent-text', 'user', '请查询'),
+                {
+                    createdAt: conversation.createdAt,
+                    id: 'assistant-agent-text',
+                    parts: [
+                        {
+                            finalizationMode: 'constrained',
+                            id: 'agent-run:run-agent-text',
+                            runId: 'run-agent-text',
+                            status: 'completed',
+                            type: 'agent-run',
+                        },
+                        {
+                            format: 'markdown',
+                            id: 'agent-text:commentary',
+                            modelTurnId: 'run-agent-text:1',
+                            phase: 'commentary',
+                            runId: 'run-agent-text',
+                            status: 'completed',
+                            text: '我先查询资料。',
+                            type: 'agent-text',
+                        },
+                        {
+                            format: 'markdown',
+                            id: 'agent-text:final',
+                            modelTurnId: 'run-agent-text:2',
+                            phase: 'final_answer',
+                            runId: 'run-agent-text',
+                            status: 'completed',
+                            text: '基于已完成的资料，结论如下。',
+                            type: 'agent-text',
+                        },
+                        {
+                            format: 'markdown',
+                            id: 'agent-text:pending',
+                            modelTurnId: 'run-agent-text:3',
+                            phase: 'pending',
+                            runId: 'run-agent-text',
+                            status: 'streaming',
+                            text: '不应快照',
+                            type: 'agent-text',
+                        },
+                    ],
+                    role: 'assistant',
+                    status: 'completed',
+                },
+            ],
+        })
+
+        const assistant = snapshot?.messages.find(message => message.id === 'assistant-agent-text')
+
+        expect(assistant?.parts).toEqual([
+            expect.objectContaining({ finalizationMode: 'constrained', type: 'agent-run' }),
+            expect.objectContaining({ phase: 'commentary', text: '我先查询资料。', type: 'agent-text' }),
+            expect.objectContaining({ phase: 'final_answer', text: '基于已完成的资料，结论如下。', type: 'agent-text' }),
+        ])
+        expect(JSON.stringify(snapshot)).not.toContain('不应快照')
+        expect(localConversationSnapshotSchema.safeParse(snapshot).success).toBe(true)
+    })
+
     it('excludes cancelled, failed and streaming assistant text from the next request context', () => {
         const messages: MindMessage[] = [
             createTextMessage('user-before', 'user', '上一问'),
@@ -336,6 +401,57 @@ describe('local chat persistence schema and projection', () => {
         const requestMessages = buildRequestMessages(messages)
 
         expect(requestMessages.map(message => message.parts.map(part => part.text).join(''))).toEqual(['上一问', '稳定回答', '下一问'])
+    })
+
+    it('同会话 follow-up 只携带 completed Agent final，不携带 commentary 或 pending', () => {
+        const messages: MindMessage[] = [
+            createTextMessage('user-agent-followup', 'user', '先查询'),
+            {
+                createdAt: '2026-08-30T10:00:00.000Z',
+                id: 'assistant-agent-followup',
+                parts: [
+                    {
+                        format: 'markdown',
+                        id: 'commentary',
+                        modelTurnId: 'turn-1',
+                        phase: 'commentary',
+                        runId: 'run-followup',
+                        status: 'completed',
+                        text: '我先查资料。',
+                        type: 'agent-text',
+                    },
+                    {
+                        format: 'markdown',
+                        id: 'final',
+                        modelTurnId: 'turn-2',
+                        phase: 'final_answer',
+                        runId: 'run-followup',
+                        status: 'completed',
+                        text: '这是带限制说明的受限结果。',
+                        type: 'agent-text',
+                    },
+                    {
+                        format: 'markdown',
+                        id: 'pending',
+                        modelTurnId: 'turn-3',
+                        phase: 'pending',
+                        runId: 'run-followup',
+                        status: 'streaming',
+                        text: '不得进入下轮',
+                        type: 'agent-text',
+                    },
+                ],
+                role: 'assistant',
+                status: 'completed',
+            },
+            createTextMessage('user-agent-followup-next', 'user', '继续问'),
+        ]
+
+        expect(buildRequestMessages(messages).map(message => message.parts.map(part => part.text).join(''))).toEqual([
+            '先查询',
+            '这是带限制说明的受限结果。',
+            '继续问',
+        ])
     })
 
     it('projects completed generic Trace parts through the public allowlist', () => {
@@ -629,7 +745,7 @@ describe('local chat persistence schema and projection', () => {
         expect(snapshot).toMatchObject({
             conversationId: 'conv-a',
             revision: 5,
-            schemaVersion: 1,
+            schemaVersion: 2,
         })
         expect(localConversationSnapshotSchema.safeParse({ ...snapshot, rawGraphState: {} }).success).toBe(false)
         expect(

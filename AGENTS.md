@@ -203,6 +203,6 @@
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/v0.6.0-general-react-agent-mvp/plan.md
+at specs/v0.6.1-general-react-agent-streaming/plan.md
 
 <!-- SPECKIT END -->

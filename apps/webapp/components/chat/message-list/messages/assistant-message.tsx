@@ -6,6 +6,7 @@ import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type {
     AgentGraphPart,
     AgentRunPart,
+    AgentTextPart,
     ImageBriefPart,
     ImageResultPart,
     MindMessage,
@@ -106,14 +107,18 @@ export function AssistantMessage({
             ? createMessageDisclosureKey(disclosureScopeKey, message.id, `reasoning:${identities.join('|')}`)
             : undefined
     }, [disclosureScopeKey, message.id, message.parts])
-    const hasStartedFinalAnswer = message.parts.some(part => part.type === 'text')
+    const hasStartedFinalAnswer = message.parts.some(
+        part => part.type === 'text' || (part.type === 'agent-text' && part.phase === 'final_answer')
+    )
     const agentDetailParts = hasAgentGraph ? contentParts.filter(isAgentDetailPart) : []
     const artifacts = message.artifacts ?? []
     const isRateLimitNotice = isRateLimitNoticeMessage(message)
     const showMessageActions = hasTextContent && isAssistantReplyCompleted && !isRateLimitNotice
     const showBuiltInFollowUpSuggestions = showFollowUpSuggestions && !isRateLimitNotice
     const isDeliveryChainMessage = requestComposer?.command?.name === 'delivery-chain'
-    const generalTraceParts = agentRunPart ? contentParts.filter(isAgentDetailPart) : []
+    const generalTraceParts = agentRunPart
+        ? contentParts.filter(part => isAgentDetailPart(part) || (part.type === 'agent-text' && part.phase !== 'final_answer'))
+        : []
     const deliveryChainWorkflowProgressPart = useMemo(
         () =>
             isDeliveryChainMessage
@@ -183,9 +188,13 @@ export function AssistantMessage({
         [contentParts, deliveryChainEntryResources, deliveryChainInternalResources]
     )
     const displayParts = contentParts.filter(
-        (part): part is TextPart | WorkflowProgressPart | ImageBriefPart | ImageResultPart | ResourcePart => {
+        (part): part is AgentTextPart | TextPart | WorkflowProgressPart | ImageBriefPart | ImageResultPart | ResourcePart => {
             if (part.type === 'text' || part.type === 'image-brief' || part.type === 'image-result') {
                 return true
+            }
+
+            if (part.type === 'agent-text') {
+                return part.phase === 'final_answer'
             }
 
             if (part.type === 'workflow-progress') {
@@ -259,16 +268,20 @@ export function AssistantMessage({
                     const partIndex = partIndexes.get(part) ?? index
                     const partIdentity = getDisclosurePartIdentity(part, partIndex)
 
-                    if (part.type === 'text') {
+                    if (part.type === 'text' || part.type === 'agent-text') {
                         if (isDeliveryChainMessage && canRenderDeliveryChainReport(part.text)) {
                             return <DeliveryChainReportView key={`${message.id}:text:${part.id ?? index}`} markdown={part.text} />
                         }
 
                         return (
                             <TextPartView
-                                key={`${message.id}:text:${part.id ?? index}`}
+                                key={`${message.id}:${part.type}:${part.id ?? index}`}
                                 part={part}
-                                isStreaming={isLatestAssistantMessage && !isAssistantReplyCompleted}
+                                isStreaming={
+                                    isLatestAssistantMessage &&
+                                    !isAssistantReplyCompleted &&
+                                    (part.type === 'text' || part.status === 'streaming')
+                                }
                             />
                         )
                     }

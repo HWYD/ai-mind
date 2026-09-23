@@ -42,6 +42,8 @@ function createCounter(maximum: number = Number.MAX_SAFE_INTEGER) {
 type AuthorizedUrl = z.infer<typeof authorizedUrlSchema>
 type SourceRecord = z.infer<typeof sourceRecordSchema>
 
+export const MAX_TRUSTED_USER_URLS = 8
+
 function resolveAuthorizedUrl(left: AuthorizedUrl, right: AuthorizedUrl): AuthorizedUrl {
     if (left.grantedBy !== right.grantedBy) {
         return left.grantedBy === 'user' ? left : right
@@ -69,9 +71,9 @@ function resolveSourceRecord(left: SourceRecord, right: SourceRecord): SourceRec
 }
 
 export const generalReActAgentStateSchema = new StateSchema({
-    _actionDeadlineAtMs: nonNegativeInteger.default(0),
-    _actionModelCallCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls),
-    _actionRoundCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingActionRounds),
+    _loopDeadlineAtMs: nonNegativeInteger.default(0),
+    _loopModelCallCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls),
+    _toolBearingRoundCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingRounds),
     _authorizedUrls: new ReducedValue(
         z.array(authorizedUrlSchema).default(() => []),
         {
@@ -93,7 +95,7 @@ export const generalReActAgentStateSchema = new StateSchema({
     _modelRetryCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxModelRetries),
     _noProgressRounds: nonNegativeInteger.max(GENERAL_REACT_RUNTIME_DEFAULTS.maxNoProgressRounds).default(0),
     _observationChars: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxObservationChars),
-    _runPhase: z.enum(['preparing', 'acting', 'answering', 'completed', 'failed', 'cancelled']).default('preparing'),
+    _runPhase: z.enum(['preparing', 'looping', 'finalizing', 'completed', 'failed', 'cancelled']).default('preparing'),
     _sources: new ReducedValue(
         z.array(sourceRecordSchema).default(() => []),
         {
@@ -128,16 +130,20 @@ export const generalReActAgentStateSchema = new StateSchema({
 export type GeneralReActAgentState = typeof generalReActAgentStateSchema.State
 export type GeneralReActAgentStateUpdate = typeof generalReActAgentStateSchema.Update
 
-export function createGeneralReActInitialState(startedAtMs: number, messages: readonly BaseMessage[] = []): GeneralReActAgentState {
+export function createGeneralReActInitialState(
+    startedAtMs: number,
+    messages: readonly BaseMessage[] = [],
+    trustedUserUrls: readonly string[] = []
+): GeneralReActAgentState {
     if (!Number.isSafeInteger(startedAtMs) || startedAtMs < 0) {
         throw new TypeError('General ReAct startedAtMs must be a non-negative safe integer')
     }
 
     return {
-        _actionDeadlineAtMs: startedAtMs + GENERAL_REACT_RUNTIME_DEFAULTS.actionDeadlineMs,
-        _actionModelCallCount: 0,
-        _actionRoundCount: 0,
-        _authorizedUrls: collectUserAuthorizedUrls(messages),
+        _loopDeadlineAtMs: startedAtMs + GENERAL_REACT_RUNTIME_DEFAULTS.loopDeadlineMs,
+        _loopModelCallCount: 0,
+        _toolBearingRoundCount: 0,
+        _authorizedUrls: collectUserAuthorizedUrls(messages, trustedUserUrls),
         _callFingerprints: [],
         _currentActionBatch: null,
         _executedToolCallCount: 0,
@@ -156,21 +162,34 @@ export function createGeneralReActInitialState(startedAtMs: number, messages: re
     }
 }
 
-function collectUserAuthorizedUrls(messages: readonly BaseMessage[]): Array<z.infer<typeof authorizedUrlSchema>> {
-    const latestUserMessage = [...messages].reverse().find(message => HumanMessage.isInstance(message))
-    if (!latestUserMessage) {
-        return []
-    }
+export function collectSafePublicUserUrls(text: string): string[] {
+    const urls = new Set<string>()
 
-    const grants = new Map<string, z.infer<typeof authorizedUrlSchema>>()
-    for (const match of latestUserMessage.text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+    for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
         const rawUrl = match[0].replace(/[\],.;:!?，。！？；：、》」』）】]+$/u, '')
         if (!rawUrl) {
             continue
         }
 
         try {
-            const canonicalUrl = canonicalizePublicWebUrl(rawUrl, { knownSecrets: resolveOutboundKnownSecrets() })
+            urls.add(canonicalizePublicWebUrl(rawUrl, { knownSecrets: resolveOutboundKnownSecrets() }))
+        } catch {
+            // Invalid, private, or credential-bearing URLs are intentionally ignored.
+        }
+    }
+
+    return [...urls]
+}
+
+function collectUserAuthorizedUrls(
+    messages: readonly BaseMessage[],
+    trustedUserUrls: readonly string[]
+): Array<z.infer<typeof authorizedUrlSchema>> {
+    const latestUserMessage = [...messages].reverse().find(message => HumanMessage.isInstance(message))
+    const grants = new Map<string, z.infer<typeof authorizedUrlSchema>>()
+
+    const addGrants = (urls: readonly string[]) => {
+        for (const canonicalUrl of urls) {
             grants.set(canonicalUrl, {
                 canonicalUrl,
                 grantCallId: null,
@@ -178,10 +197,13 @@ function collectUserAuthorizedUrls(messages: readonly BaseMessage[]): Array<z.in
                 grantedBy: 'user',
                 host: new URL(canonicalUrl).hostname,
             })
-        } catch {
-            // Invalid, private, or credential-bearing URLs are intentionally ignored.
         }
     }
+
+    if (latestUserMessage) {
+        addGrants(collectSafePublicUserUrls(latestUserMessage.text))
+    }
+    addGrants(trustedUserUrls.slice(0, MAX_TRUSTED_USER_URLS).flatMap(url => collectSafePublicUserUrls(url)))
 
     return [...grants.values()]
 }

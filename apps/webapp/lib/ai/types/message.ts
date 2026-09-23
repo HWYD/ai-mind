@@ -178,6 +178,20 @@ export interface AgentRunPart extends BasePart {
     type: 'agent-run'
     runId: string
     status: AgentRunPartStatus
+    finalizationMode?: 'constrained' | 'normal'
+    /** 本地/服务端历史恢复后的展示态；不写入 snapshot。 */
+    restored?: boolean
+}
+
+export interface AgentTextPart extends BasePart {
+    id: string
+    type: 'agent-text'
+    runId: string
+    modelTurnId: string
+    phase: 'pending' | 'commentary' | 'final_answer'
+    status: 'streaming' | 'completed' | 'interrupted'
+    text: string
+    format: 'markdown'
 }
 
 export type AgentInterruptPartStatus = 'decided' | 'failed' | 'pending' | 'rejected' | 'submitting'
@@ -223,6 +237,7 @@ export type MindMessagePart =
     | ImageBriefPart
     | ImageResultPart
     | AgentRunPart
+    | AgentTextPart
     | AgentGraphPart
     | AgentInterruptPart
 

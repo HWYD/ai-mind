@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { agentGraphDebugSummarySchema } from '@/lib/ai/stream-chunk-schema'
 import type { MindMessage } from '@/lib/ai/types/message'
 
-export const LOCAL_CHAT_SCHEMA_VERSION = 1
+export const LOCAL_CHAT_SCHEMA_VERSION = 2
 export const LOCAL_CHAT_RECENT_LIMIT = 50
 export const LOCAL_CHAT_MAX_MESSAGES_PER_SNAPSHOT = 120
 export const LOCAL_MESSAGE_HEIGHT_HINT_MAX_ENTRIES = 2_000
@@ -25,7 +25,7 @@ export const localConversationIndexSchema = z
         conversations: z.array(localConversationMetadataSchema).max(LOCAL_CHAT_RECENT_LIMIT),
         isDraft: z.boolean(),
         revision: z.number().int().nonnegative(),
-        schemaVersion: z.literal(LOCAL_CHAT_SCHEMA_VERSION),
+        schemaVersion: z.union([z.literal(1), z.literal(LOCAL_CHAT_SCHEMA_VERSION)]),
         selectedConversationId: z.string().min(1).nullable(),
         updatedAt: z.string().datetime(),
     })
@@ -88,14 +88,29 @@ export const recoverableAgentGraphPartSchema = z
 export const recoverableAgentRunPartSchema = z
     .object({
         id: z.string().min(1).optional(),
+        finalizationMode: z.enum(['constrained', 'normal']).optional(),
         runId: z.string().min(1),
         status: z.literal('completed'),
         type: z.literal('agent-run'),
     })
     .strict()
 
+export const recoverableAgentTextPartSchema = z
+    .object({
+        format: z.literal('markdown'),
+        id: z.string().min(1),
+        modelTurnId: z.string().min(1),
+        phase: z.enum(['commentary', 'final_answer']),
+        runId: z.string().min(1),
+        status: z.literal('completed'),
+        text: z.string().min(1),
+        type: z.literal('agent-text'),
+    })
+    .strict()
+
 const recoverablePartSchema = z.discriminatedUnion('type', [
     recoverableAgentRunPartSchema,
+    recoverableAgentTextPartSchema,
     recoverableAgentGraphPartSchema,
     z
         .object({
@@ -255,7 +270,7 @@ export const localConversationSnapshotSchema = z
         lastActiveAt: z.string().datetime(),
         messages: z.array(recoverableMessageSchema),
         revision: z.number().int().nonnegative(),
-        schemaVersion: z.literal(LOCAL_CHAT_SCHEMA_VERSION),
+        schemaVersion: z.union([z.literal(1), z.literal(LOCAL_CHAT_SCHEMA_VERSION)]),
         snapshotAt: z.string().datetime(),
         title: z.string(),
     })

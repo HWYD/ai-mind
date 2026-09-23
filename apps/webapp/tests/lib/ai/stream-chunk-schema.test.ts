@@ -67,6 +67,72 @@ describe('chatStreamChunkSchema artifact chunks', () => {
     })
 })
 
+describe('chatStreamChunkSchema General Agent text chunks', () => {
+    it('accepts the strict Agent text lifecycle and completed provenance', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-text-start',
+                partId: 'agent-text-1',
+                runId: 'agent-run-1',
+                modelTurnId: 'turn-1',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-text-delta',
+                partId: 'agent-text-1',
+                delta: '我先查询一下。',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-text-end',
+                partId: 'agent-text-1',
+                outcome: 'commentary',
+                status: 'completed',
+            }).success
+        ).toBe(true)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-run-end',
+                partId: 'agent-run-1',
+                runId: 'agent-run-1',
+                status: 'completed',
+                finalizationMode: 'normal',
+            }).success
+        ).toBe(true)
+    })
+
+    it('rejects illegal Agent text terminal states, raw fields, and non-completed provenance', () => {
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-text-end',
+                partId: 'agent-text-1',
+                outcome: 'final_answer',
+                status: 'interrupted',
+            }).success
+        ).toBe(false)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-text-start',
+                partId: 'agent-text-1',
+                runId: 'agent-run-1',
+                modelTurnId: 'turn-1',
+                reasoning_content: 'private',
+            }).success
+        ).toBe(false)
+        expect(
+            chatStreamChunkSchema.safeParse({
+                type: 'agent-run-end',
+                partId: 'agent-run-1',
+                runId: 'agent-run-1',
+                status: 'failed',
+                finalizationMode: 'constrained',
+            }).success
+        ).toBe(false)
+    })
+})
+
 describe('chatStreamChunkSchema image generation chunks', () => {
     const summary = {
         aspectRatio: 'square',

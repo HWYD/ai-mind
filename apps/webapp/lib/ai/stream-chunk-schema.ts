@@ -292,6 +292,7 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         partId: z.string().min(1),
         runId: z.string().min(1),
         status: z.enum(['cancelled', 'completed', 'failed']),
+        finalizationMode: z.enum(['constrained', 'normal']).optional(),
     }),
     strictObject({
         type: z.literal('skill-selected'),
@@ -448,6 +449,23 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
         partId: z.string().min(1),
     }),
     strictObject({
+        type: z.literal('agent-text-start'),
+        partId: z.string().min(1),
+        runId: z.string().min(1),
+        modelTurnId: z.string().min(1),
+    }),
+    strictObject({
+        type: z.literal('agent-text-delta'),
+        partId: z.string().min(1),
+        delta: z.string(),
+    }),
+    strictObject({
+        type: z.literal('agent-text-end'),
+        partId: z.string().min(1),
+        outcome: z.enum(['commentary', 'final_answer']),
+        status: z.enum(['completed', 'interrupted']),
+    }),
+    strictObject({
         type: z.literal('artifact-start'),
         artifactId: z.string().min(1),
         artifactType: z.literal('text'),
@@ -568,7 +586,25 @@ const baseChatStreamChunkSchema = z.discriminatedUnion('type', [
     }),
 ])
 
-export const chatStreamChunkSchema = z.union([baseChatStreamChunkSchema, agentInterruptChunkSchema, agentResumeChunkSchema])
+export const chatStreamChunkSchema = z
+    .union([baseChatStreamChunkSchema, agentInterruptChunkSchema, agentResumeChunkSchema])
+    .superRefine((chunk, context) => {
+        if (chunk.type === 'agent-text-end' && chunk.outcome === 'final_answer' && chunk.status !== 'completed') {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Final Agent text must complete normally.',
+                path: ['status'],
+            })
+        }
+
+        if (chunk.type === 'agent-run-end' && chunk.status !== 'completed' && chunk.finalizationMode !== undefined) {
+            context.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: 'Agent run finalizationMode is only valid for completed runs.',
+                path: ['finalizationMode'],
+            })
+        }
+    })
 
 export const streamLifecyclePayloadSchema = z
     .object({

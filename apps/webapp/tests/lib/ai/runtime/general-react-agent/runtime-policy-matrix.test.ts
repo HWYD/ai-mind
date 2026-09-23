@@ -11,13 +11,13 @@ import { normalizeAndValidateToolCall } from '@/lib/ai/runtime/tool-runtime/vali
 import type { ChatToolDefinition } from '@/lib/ai/tools'
 
 describe('general-react-agent runtime policy matrix', () => {
-    it('keeps the total model budget equal to Action budget plus the reserved Answer call', () => {
+    it('keeps the total model budget equal to loop budget plus the reserved finalizer call', () => {
         expect(GENERAL_REACT_RUNTIME_DEFAULTS.maxModelCalls).toBe(
-            GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls + GENERAL_REACT_RUNTIME_DEFAULTS.reservedAnswerModelCalls
+            GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls + GENERAL_REACT_RUNTIME_DEFAULTS.reservedFinalizerModelCalls
         )
     })
 
-    it('rejects a runtime budget that would silently consume the reserved Answer call', () => {
+    it('rejects a runtime budget that would silently consume the reserved finalizer call', () => {
         expect(() =>
             createGeneralReActRuntimeConfig({
                 ...GENERAL_REACT_RUNTIME_DEFAULTS,
@@ -47,7 +47,7 @@ describe('general-react-agent runtime policy matrix', () => {
         })
     })
 
-    it('keeps duplicate calls invalid and admits only the first nine logical calls', () => {
+    it('keeps duplicate calls invalid and admits only the first fourteen logical calls', () => {
         const state = createGeneralReActInitialState(0)
         const duplicate = evaluateAfterModelPolicy({
             batchId: 'duplicate-batch',
@@ -64,16 +64,16 @@ describe('general-react-agent runtime policy matrix', () => {
 
         const admission = createActionBatchAdmission({
             actionRound: 1,
-            batchId: 'nine-calls',
-            callIds: Array.from({ length: 10 }, (_, index) => `call-${index + 1}`),
+            batchId: 'fourteen-calls',
+            callIds: Array.from({ length: 15 }, (_, index) => `call-${index + 1}`),
             observationCharsUsed: 0,
             toolCallsUsed: 0,
         })
         expect(admission.reservedToolCallCount).toBe(GENERAL_REACT_RUNTIME_DEFAULTS.maxLogicalToolCalls)
-        expect(admission.admissions['call-10']).toMatchObject({ admitted: false, blockedReason: 'tool_call_limit' })
+        expect(admission.admissions['call-15']).toMatchObject({ admitted: false, blockedReason: 'tool_call_limit' })
     })
 
-    it('stops at explicit Action/model/deadline budgets while reserving exactly one Answer call', () => {
+    it('stops at explicit loop/model/deadline budgets while reserving exactly one finalizer call', () => {
         const state = createGeneralReActInitialState(1_000)
         expect(
             evaluateBeforeModelPolicy({
@@ -81,14 +81,14 @@ describe('general-react-agent runtime policy matrix', () => {
                 runAborted: false,
                 state: {
                     ...state,
-                    _actionModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls - 1,
-                    _actionRoundCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingActionRounds,
+                    _loopModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls - 1,
+                    _toolBearingRoundCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingRounds,
                 },
             })
-        ).toMatchObject({ _runPhase: 'acting', _stopReason: null })
+        ).toMatchObject({ _runPhase: 'looping', _stopReason: null })
         expect(
             evaluateBeforeModelPolicy({
-                nowMs: 1_000 + GENERAL_REACT_RUNTIME_DEFAULTS.actionDeadlineMs,
+                nowMs: 1_000 + GENERAL_REACT_RUNTIME_DEFAULTS.loopDeadlineMs,
                 runAborted: false,
                 state,
             })
@@ -104,12 +104,12 @@ describe('general-react-agent runtime policy matrix', () => {
             evaluateBeforeModelPolicy({
                 nowMs: 2_000,
                 runAborted: false,
-                state: { ...state, _actionModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls },
+                state: { ...state, _loopModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls },
             })
-        ).toMatchObject({ _finalizationMode: 'constrained', _runPhase: 'answering', _stopReason: 'model_call_limit', jumpTo: 'end' })
+        ).toMatchObject({ _finalizationMode: 'constrained', _runPhase: 'finalizing', _stopReason: 'model_call_limit', jumpTo: 'end' })
     })
 
-    it('enters the constrained Answer Phase when observation budget is exhausted', () => {
+    it('enters the constrained finalizer phase when observation budget is exhausted', () => {
         const state = createGeneralReActInitialState(1_000)
         expect(
             evaluateBeforeModelPolicy({
@@ -120,12 +120,12 @@ describe('general-react-agent runtime policy matrix', () => {
         ).toMatchObject({
             _finalizationMode: 'constrained',
             _stopReason: 'observation_limit',
-            _runPhase: 'answering',
+            _runPhase: 'finalizing',
             jumpTo: 'end',
         })
     })
 
-    it('does not enter Answer Phase after cancellation or the hard deadline', () => {
+    it('does not enter the finalizer phase after cancellation or the hard deadline', () => {
         const state = createGeneralReActInitialState(1_000)
         expect(
             evaluateBeforeModelPolicy({

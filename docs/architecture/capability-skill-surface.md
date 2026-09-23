@@ -44,7 +44,7 @@ Capability Surface 不意味着所有能力都以同一种方式执行。Tool、
 
 ## Tool Capability
 
-Tool capability 表示可执行动作。v0.6.0 的 General ReAct 由独立 `GeneralToolPolicy` 从显式登记的 Tool Definition 解析本轮 active tools；Skill 选择不参与绑定。
+Tool capability 表示可执行动作。v0.6.1 的 General ReAct 由独立 `GeneralToolPolicy` 从显式登记的 Tool Definition 解析本轮 active tools；Skill 选择不参与绑定。
 
 示例：
 
@@ -107,7 +107,7 @@ Skill 没有 `capabilitySelectors`、Tool allowlist 或 MCP 权限字段。它�
 
 ## Tool Binding Boundary
 
-v0.6.0 General ReAct 的 Tool 绑定遵循下面的链路：
+v0.6.1 General ReAct 的 Tool 绑定遵循下面的链路：
 
 ```text
 GeneralToolPolicy fixed candidates
@@ -172,7 +172,7 @@ Capability Model 统一能力描述，不能把 Tool 权限回流给 Skill。
 
 它不会抹平 Tool、Resource、Prompt 的执行差异。这样可以让 Skill 消费能力更稳定，同时避免过早进入 Agent 或 workflow 架构。
 
-# v0.6.0 General Tool Policy
+# v0.6.1 General Tool Policy
 
 普通聊天的 effective tools 固定为 `calculator`、`datetime`、`text-transform`、`unit-convert`、`read-url`、`web-search` 与 `city-weather`。`GeneralToolPolicy` 在本轮开始时按 Tool Registry 的 availability、`general-react-agent` scope 与 `standard-tool` policy 冻结 allowlist；`agent-tool`、未登记 remote MCP Tool 与任何写入能力都 fail-closed。
 

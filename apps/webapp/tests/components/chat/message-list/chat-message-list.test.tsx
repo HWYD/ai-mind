@@ -12,7 +12,7 @@ import {
 } from '@/components/chat/message-list/message-height-hints'
 import { getMessageCopyText } from '@/components/chat/message-list/shared/message-list-utils'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
-import type { MindMessage } from '@/lib/ai/types/message'
+import type { MindMessage, ToolPart } from '@/lib/ai/types/message'
 import { createMessageVirtualizationFixture } from '@/lib/dev/message-virtualization/mixed-message-fixture'
 
 const assistantMessageRenderSpy = vi.hoisted(() => vi.fn())
@@ -774,10 +774,11 @@ describe('ChatMessageList', () => {
             />
         )
 
-        const traceTrigger = screen.getByRole('button', { name: '正在思考' })
-        expect(traceTrigger.className).toContain('h-[30px]')
-        expect(traceTrigger.className).toContain('text-[15px]')
-        expect(traceTrigger.querySelector('span.shimmer')?.textContent).toBe('正在思考')
+        const traceTitle = screen.getByText('正在思考')
+        expect(traceTitle.parentElement?.className).toContain('h-[30px]')
+        expect(traceTitle.parentElement?.className).toContain('text-[15px]')
+        expect(traceTitle.className).toContain('shimmer')
+        expect(screen.queryByRole('button', { name: '正在思考' })).toBeNull()
     })
 
     it.each(['tasklist', 'delivery-chain', 'image'] as const)(
@@ -838,10 +839,11 @@ describe('ChatMessageList', () => {
         expect(submittedRunway).toBe('')
         const submittedAssistantSlot = submittedUserItem.querySelector('[data-slot="assistant-loading-slot"]') as HTMLElement
         expect(submittedAssistantSlot.style.minHeight).toBe('288px')
-        const pendingTraceTrigger = screen.getByRole('button', { name: '正在思考' })
-        expect(pendingTraceTrigger.className).toContain('h-[30px]')
-        expect(pendingTraceTrigger.className).toContain('text-[15px]')
-        expect(pendingTraceTrigger.querySelector('span.shimmer')?.textContent).toBe('正在思考')
+        const pendingTraceTitle = screen.getByText('正在思考')
+        expect(pendingTraceTitle.parentElement?.className).toContain('h-[30px]')
+        expect(pendingTraceTitle.parentElement?.className).toContain('text-[15px]')
+        expect(pendingTraceTitle.className).toContain('shimmer')
+        expect(screen.queryByRole('button', { name: '正在思考' })).toBeNull()
         const submittedData = virtuosoHarness.props?.data as Array<{ itemKey?: string; message?: MindMessage }>
         const submittedKey = (
             virtuosoHarness.props?.computeItemKey as (index: number, item: { itemKey?: string; message?: MindMessage }) => string
@@ -1182,6 +1184,143 @@ describe('ChatMessageList', () => {
         expect((virtuosoHarness.props?.heightEstimates as number[])[0]).toBe(100)
     })
 
+    it('reserves Markdown height for an expanded General Trace commentary', () => {
+        const message: MindMessage = {
+            id: 'general-agent-commentary-height',
+            role: 'assistant',
+            createdAt: '2026-09-23T12:00:00.000Z',
+            parts: [
+                { id: 'run-commentary-height', runId: 'run-commentary-height', status: 'running', type: 'agent-run' },
+                {
+                    format: 'markdown',
+                    id: 'commentary-height',
+                    modelTurnId: 'turn-commentary-height',
+                    phase: 'commentary',
+                    runId: 'run-commentary-height',
+                    status: 'completed',
+                    text: Array.from({ length: 20 }, () => '这段公开说明以正文 Markdown 形式显示在 Trace 中。').join('\n'),
+                    type: 'agent-text',
+                },
+            ],
+        }
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[message]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="streaming"
+            />
+        )
+
+        expect((virtuosoHarness.props?.heightEstimates as number[])[0]).toBeGreaterThan(500)
+    })
+
+    it('does not reserve a body row for an empty pending AgentTextPart', () => {
+        const message: MindMessage = {
+            id: 'general-agent-empty-pending-height',
+            role: 'assistant',
+            createdAt: '2026-09-23T12:01:00.000Z',
+            parts: [
+                { id: 'run-empty-pending-height', runId: 'run-empty-pending-height', status: 'running', type: 'agent-run' },
+                {
+                    format: 'markdown',
+                    id: 'pending-height',
+                    modelTurnId: 'turn-empty-pending-height',
+                    phase: 'pending',
+                    runId: 'run-empty-pending-height',
+                    status: 'streaming',
+                    text: '',
+                    type: 'agent-text',
+                },
+            ],
+        }
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[message]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="streaming"
+            />
+        )
+
+        expect((virtuosoHarness.props?.heightEstimates as number[])[0]).toBe(64)
+    })
+
+    it('reserves a source header for each owning read Tool in an expanded Trace', () => {
+        const createReadTool = (id: string, sources: ToolPart['sources']): ToolPart => ({
+            id,
+            input: '{}',
+            sources,
+            status: 'completed' as const,
+            title: '读取页面',
+            toolName: 'read-url',
+            type: 'tool' as const,
+        })
+        const sourceA = {
+            originTool: 'read-url' as const,
+            sourceId: 'source-a',
+            status: 'read' as const,
+            title: 'A',
+            url: 'https://example.com/a',
+        }
+        const sourceB = {
+            originTool: 'read-url' as const,
+            sourceId: 'source-b',
+            status: 'read' as const,
+            title: 'B',
+            url: 'https://example.com/b',
+        }
+        const unsafeSource = {
+            originTool: 'read-url' as const,
+            sourceId: 'unsafe-source',
+            status: 'read' as const,
+            title: 'Unsafe',
+            url: 'https://user:password@example.com/private',
+        }
+        const createMessage = (id: string, tools: ToolPart[]): MindMessage => ({
+            id,
+            role: 'assistant' as const,
+            createdAt: '2026-09-23T12:02:00.000Z',
+            parts: [{ id: `${id}-run`, runId: `${id}-run`, status: 'running' as const, type: 'agent-run' as const }, ...tools],
+        })
+
+        render(
+            <ChatMessageList
+                enableReasoning={false}
+                messages={[
+                    createMessage('sources-under-two-tools', [createReadTool('read-a', [sourceA]), createReadTool('read-b', [sourceB])]),
+                    createMessage('sources-under-one-tool', [createReadTool('read-c', [sourceA, sourceB]), createReadTool('read-d', [])]),
+                    createMessage('unsafe-source-before-safe-owner', [
+                        createReadTool('read-unsafe', [unsafeSource]),
+                        createReadTool('read-safe', [sourceA]),
+                    ]),
+                    createMessage('empty-source-before-safe-owner', [
+                        createReadTool('read-empty', []),
+                        createReadTool('read-safe-control', [sourceA]),
+                    ]),
+                ]}
+                onDeleteUserTurn={vi.fn(() => true)}
+                onRegenerateLastTurn={vi.fn(() => true)}
+                onSelectFollowUpQuestion={vi.fn()}
+                onSelectSuggestion={vi.fn()}
+                status="streaming"
+            />
+        )
+
+        const heightEstimates = virtuosoHarness.props?.heightEstimates as number[]
+
+        expect(heightEstimates[0]).toBeGreaterThan(heightEstimates[1])
+        expect(heightEstimates[2]).toBe(heightEstimates[3])
+    })
+
     it('does not cap structural estimates for text messages above 8,000px', () => {
         const message: MindMessage = {
             id: 'uncapped-long-text',
@@ -1513,6 +1652,45 @@ describe('ChatMessageList', () => {
         }
 
         expect(getMessageCopyText(message)).toBe('/image 生成猫咪照片')
+    })
+
+    it('copies only the completed General Agent final answer', () => {
+        const message: MindMessage = {
+            id: 'general-agent-final-copy',
+            role: 'assistant',
+            createdAt: '2026-09-23T10:00:00.000Z',
+            parts: [
+                {
+                    id: 'run-general-final-copy',
+                    runId: 'run-general-final-copy',
+                    status: 'completed',
+                    finalizationMode: 'normal',
+                    type: 'agent-run',
+                },
+                {
+                    id: 'commentary-general-final-copy',
+                    format: 'markdown',
+                    modelTurnId: 'turn-1',
+                    phase: 'commentary',
+                    runId: 'run-general-final-copy',
+                    status: 'completed',
+                    text: '我先查询相关资料。',
+                    type: 'agent-text',
+                },
+                {
+                    id: 'final-general-final-copy',
+                    format: 'markdown',
+                    modelTurnId: 'turn-2',
+                    phase: 'final_answer',
+                    runId: 'run-general-final-copy',
+                    status: 'completed',
+                    text: '这里是用户可以复制的最终结论。',
+                    type: 'agent-text',
+                },
+            ],
+        }
+
+        expect(getMessageCopyText(message)).toBe('这里是用户可以复制的最终结论。')
     })
 
     it('隐藏深度思考时不展示 reasoning 面板', () => {

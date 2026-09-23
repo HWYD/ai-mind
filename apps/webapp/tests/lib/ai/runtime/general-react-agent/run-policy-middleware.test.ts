@@ -11,26 +11,65 @@ import {
 } from '@/lib/ai/runtime/general-react-agent/middleware/run-policy-middleware'
 
 describe('general-react-agent run policy', () => {
-    it('无 Tool 的 Action 文本只结束决策并进入 Answer Phase', () => {
+    it('无 Tool 的 loop 正文直接结束并标记为 normal', () => {
         const state = createGeneralReActInitialState(1_000)
 
         expect(
             evaluateAfterModelPolicy({
                 batchId: 'batch-1',
                 message: new AIMessage('直接回答'),
-                state: { ...state, _actionModelCallCount: 1 },
+                state: { ...state, _loopModelCallCount: 1 },
             })
         ).toMatchObject({
             _finalizationMode: 'normal',
-            _runPhase: 'answering',
+            _runPhase: 'finalizing',
             _stopReason: 'natural_completion',
             jumpTo: 'end',
         })
     })
 
-    it('按 assistant ordinal 为同批 Tool Call 预占最多九个 logical slots', () => {
+    it('明确 length 只能进入 constrained finalizer，content filter 则 fail closed', () => {
         const state = createGeneralReActInitialState(1_000)
-        const toolCalls = Array.from({ length: 10 }, (_, index) => ({
+        const lengthMessage = new AIMessage({ content: '被截断的正文', response_metadata: { finish_reason: 'length' } })
+        const contentFilterMessage = new AIMessage({
+            additional_kwargs: { finish_reason: 'content_filter' },
+            content: '不应作为 final 的正文',
+        })
+
+        expect(evaluateAfterModelPolicy({ batchId: 'length', message: lengthMessage, state })).toMatchObject({
+            _finalizationMode: 'constrained',
+            _stopReason: 'model_error',
+        })
+        expect(evaluateAfterModelPolicy({ batchId: 'filter', message: contentFilterMessage, state })).toMatchObject({
+            _finalizationMode: 'constrained',
+            _stopReason: 'agent_contract_violation',
+        })
+    })
+
+    it('normal final 决策后到达的 Tool Call 必须 fail closed，不能重新 admission', () => {
+        const state = createGeneralReActInitialState(1_000)
+        const lateToolMessage = new AIMessage({
+            content: '不应执行这个工具。',
+            tool_calls: [{ args: {}, id: 'late-tool', name: 'datetime', type: 'tool_call' }],
+        })
+
+        expect(
+            evaluateAfterModelPolicy({
+                batchId: 'late-tool',
+                message: lateToolMessage,
+                state: { ...state, _finalizationMode: 'normal', _runPhase: 'finalizing' },
+            })
+        ).toMatchObject({
+            _currentActionBatch: null,
+            _finalizationMode: 'constrained',
+            _stopReason: 'agent_contract_violation',
+            jumpTo: 'end',
+        })
+    })
+
+    it('按 assistant ordinal 为同批 Tool Call 预占最多十四个 logical slots', () => {
+        const state = createGeneralReActInitialState(1_000)
+        const toolCalls = Array.from({ length: 15 }, (_, index) => ({
             args: { value: index },
             id: `call-${index + 1}`,
             name: 'calculator',
@@ -40,18 +79,18 @@ describe('general-react-agent run policy', () => {
         const update = evaluateAfterModelPolicy({
             batchId: 'batch-1',
             message: new AIMessage({ content: '', tool_calls: toolCalls }),
-            state: { ...state, _actionModelCallCount: 1 },
+            state: { ...state, _loopModelCallCount: 1 },
         })
 
-        expect(update._actionRoundCount).toBe(1)
-        expect(update._toolRequestCount).toBe(10)
-        expect(update._toolCallCount).toBe(9)
+        expect(update._toolBearingRoundCount).toBe(1)
+        expect(update._toolRequestCount).toBe(15)
+        expect(update._toolCallCount).toBe(14)
         expect(update._currentActionBatch?.orderedCallIds).toEqual(toolCalls.map(call => call.id))
         expect(update._currentActionBatch?.admissions['call-1']).toMatchObject({ admitted: true, ordinal: 1 })
-        expect(update._currentActionBatch?.admissions['call-10']).toMatchObject({
+        expect(update._currentActionBatch?.admissions['call-15']).toMatchObject({
             admitted: false,
             blockedReason: 'tool_call_limit',
-            ordinal: 10,
+            ordinal: 15,
         })
     })
 
@@ -67,41 +106,41 @@ describe('general-react-agent run policy', () => {
 
         expect(evaluateAfterModelPolicy({ batchId: 'batch-1', message, state })).toMatchObject({
             _finalizationMode: 'constrained',
-            _runPhase: 'answering',
+            _runPhase: 'finalizing',
             _stopReason: 'agent_contract_violation',
             jumpTo: 'end',
         })
     })
 
-    it('六个携带 Tool 的 Action rounds 后仍允许第七次 Action 作无 Tool 收口决策', () => {
+    it('九个携带 Tool 的 loop rounds 后仍允许第十次 loop 作无 Tool 收口决策', () => {
         const state = createGeneralReActInitialState(1_000)
 
         expect(
             evaluateBeforeModelPolicy({
                 nowMs: 2_000,
                 runAborted: false,
-                state: { ...state, _actionModelCallCount: 6, _actionRoundCount: 6 },
+                state: { ...state, _loopModelCallCount: 9, _toolBearingRoundCount: 9 },
             })
-        ).toMatchObject({ _runPhase: 'acting', _stopReason: null })
+        ).toMatchObject({ _runPhase: 'looping', _stopReason: null })
     })
 
-    it('第七次 Action 仍请求 Tool 时不再 admission，并交给 constrained Answer 收口', () => {
+    it('第十次 loop 仍请求 Tool 时不再 admission，并交给 constrained finalizer 收口', () => {
         const state = createGeneralReActInitialState(1_000)
 
         expect(
             evaluateAfterModelPolicy({
-                batchId: 'batch-7',
+                batchId: 'batch-10',
                 message: new AIMessage({
                     content: '',
-                    tool_calls: [{ args: {}, id: 'call-7', name: 'datetime', type: 'tool_call' }],
+                    tool_calls: [{ args: {}, id: 'call-10', name: 'datetime', type: 'tool_call' }],
                 }),
                 nowMs: 2_000,
-                state: { ...state, _actionModelCallCount: 6, _actionRoundCount: 6 },
+                state: { ...state, _loopModelCallCount: 9, _toolBearingRoundCount: 9 },
             })
         ).toMatchObject({
             _currentActionBatch: null,
             _finalizationMode: 'constrained',
-            _runPhase: 'answering',
+            _runPhase: 'finalizing',
             jumpTo: 'end',
         })
     })
@@ -124,7 +163,7 @@ describe('general-react-agent run policy', () => {
                 state,
             })
         ).toMatchObject({
-            _runPhase: 'acting',
+            _runPhase: 'looping',
             _stopReason: null,
         })
     })

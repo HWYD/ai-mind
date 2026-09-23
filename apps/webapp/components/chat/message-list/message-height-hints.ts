@@ -4,7 +4,7 @@ import type { MindMessage, MindMessagePart } from '@/lib/ai/types/message'
 
 import { type LocalMessageHeightHintEntry, recoverableAgentGraphPartSchema } from '../../instamind/local-chat-persistence/schema'
 
-export const MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION = 2
+export const MESSAGE_HEIGHT_HINT_GEOMETRY_VERSION = 3
 
 export interface MessageHeightHintEstimateEntry {
     estimatedHeight: number
@@ -106,6 +106,10 @@ function isPersistedPart(part: MindMessagePart) {
         return part.status === 'completed'
     }
 
+    if (part.type === 'agent-text') {
+        return part.status === 'completed' && (part.phase === 'commentary' || part.phase === 'final_answer')
+    }
+
     if (
         part.type !== 'agent-graph' &&
         part.type !== 'image-brief' &&
@@ -196,6 +200,19 @@ function projectMessagePartForFingerprint(part: MindMessagePart) {
         }
     }
 
+    if (part.type === 'agent-text') {
+        return {
+            format: 'markdown',
+            id: part.id,
+            modelTurnId: part.modelTurnId,
+            phase: part.phase,
+            runId: part.runId,
+            status: part.status,
+            text: part.text,
+            type: 'agent-text',
+        }
+    }
+
     if (part.type === 'image-brief') {
         return {
             ...(part.id ? { id: part.id } : {}),
@@ -229,6 +246,7 @@ function projectMessagePartForFingerprint(part: MindMessagePart) {
 
     if (part.type === 'agent-run') {
         return {
+            ...(part.finalizationMode ? { finalizationMode: part.finalizationMode } : {}),
             ...(part.id ? { id: part.id } : {}),
             runId: part.runId,
             status: part.status,

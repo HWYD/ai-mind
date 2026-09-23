@@ -19,6 +19,7 @@ import {
     type LocalMessageHeightHintEntry,
 } from '@/components/instamind/local-chat-persistence/schema'
 import { readLocalMessageHeightHints, writeLocalMessageHeightHints } from '@/components/instamind/local-chat-persistence/store'
+import { normalizeSafePublicHttpUrl } from '@/lib/ai/safe-public-url'
 import type { ChatComposerPayload } from '@/lib/ai/types/chat'
 import type { MindMessage, ReasoningPart } from '@/lib/ai/types/message'
 import { copyTextToClipboard } from '@/lib/browser/copy-text-to-clipboard'
@@ -113,53 +114,78 @@ interface MessageHeightEstimateContext {
 }
 
 function isGeneralAgentTracePart(part: MindMessage['parts'][number]) {
-    return part.type === 'prompt' || part.type === 'resource' || part.type === 'skill' || part.type === 'tool'
+    return (
+        part.type === 'prompt' ||
+        part.type === 'resource' ||
+        part.type === 'skill' ||
+        part.type === 'tool' ||
+        (part.type === 'agent-text' && part.phase !== 'final_answer' && part.text.trim().length > 0)
+    )
 }
 
 function countGeneralAgentReadSources(parts: MindMessage['parts']) {
     const readUrls = new Set<string>()
+    let readSourceGroupCount = 0
+    let renderedReadSourceCount = 0
 
     for (const part of parts) {
         if (part.type !== 'tool') continue
 
+        let hasRenderedReadSource = false
+
         for (const source of part.sources ?? []) {
             if (source.originTool !== 'read-url' || source.status !== 'read') continue
 
-            try {
-                const url = new URL(source.url)
+            const normalizedUrl = normalizeSafePublicHttpUrl(source.url)
 
-                if (url.protocol === 'http:' || url.protocol === 'https:') {
-                    url.hash = ''
-                    readUrls.add(url.toString())
-                }
-            } catch {
-                // Invalid source URLs are not rendered in the trace source list.
+            if (!normalizedUrl || readUrls.has(normalizedUrl)) continue
+
+            readUrls.add(normalizedUrl)
+
+            if (renderedReadSourceCount < 5) {
+                hasRenderedReadSource = true
+                renderedReadSourceCount += 1
             }
+        }
+
+        if (hasRenderedReadSource) {
+            readSourceGroupCount += 1
         }
     }
 
-    return Math.min(5, readUrls.size)
+    return { readSourceGroupCount, renderedReadSourceCount }
 }
 
-function estimateGeneralAgentTraceHeight(parts: MindMessage['parts']) {
+function estimateGeneralAgentTraceHeight(parts: MindMessage['parts'], messageColumnWidth: number) {
     let height = GENERAL_AGENT_TRACE_HEADER_HEIGHT + GENERAL_AGENT_TRACE_MARGIN
     const rows = parts.filter(isGeneralAgentTracePart)
+    const hasFinalAnswer = parts.some(
+        part =>
+            (part.type === 'text' || part.type === 'agent-text') &&
+            part.text.trim().length > 0 &&
+            (part.type !== 'agent-text' || part.phase === 'final_answer')
+    )
+    const keepsTraceExpanded = parts.some(part => part.type === 'agent-run' && part.finalizationMode === 'constrained')
 
-    if (parts.some(part => part.type === 'text' && part.text.trim().length > 0)) {
+    if (hasFinalAnswer && !keepsTraceExpanded) {
         return height
     }
 
     if (rows.length > 0) {
-        height += GENERAL_AGENT_TRACE_CONTENT_TOP + rows.length * GENERAL_AGENT_TRACE_ROW_HEIGHT
+        height += GENERAL_AGENT_TRACE_CONTENT_TOP
+        height += rows.reduce(
+            (rowHeight, row) =>
+                rowHeight + (row.type === 'agent-text' ? estimateTextHeight(row.text, messageColumnWidth) : GENERAL_AGENT_TRACE_ROW_HEIGHT),
+            0
+        )
     }
 
-    const readSourceCount = countGeneralAgentReadSources(parts)
+    const { readSourceGroupCount, renderedReadSourceCount } = countGeneralAgentReadSources(parts)
 
-    if (readSourceCount > 0) {
+    if (renderedReadSourceCount > 0) {
         height +=
-            GENERAL_AGENT_TRACE_SOURCE_SEPARATOR_HEIGHT +
-            GENERAL_AGENT_TRACE_SOURCE_HEADER_HEIGHT +
-            readSourceCount * GENERAL_AGENT_TRACE_SOURCE_LINK_HEIGHT
+            readSourceGroupCount * (GENERAL_AGENT_TRACE_SOURCE_SEPARATOR_HEIGHT + GENERAL_AGENT_TRACE_SOURCE_HEADER_HEIGHT) +
+            renderedReadSourceCount * GENERAL_AGENT_TRACE_SOURCE_LINK_HEIGHT
     }
 
     return height
@@ -341,6 +367,11 @@ function estimateMessageHeight(message: MindMessage, messageColumnWidth: number,
             case 'text':
                 estimatedHeight += estimateTextHeight(part.text, messageColumnWidth)
                 break
+            case 'agent-text':
+                if (part.phase === 'final_answer') {
+                    estimatedHeight += estimateTextHeight(part.text, messageColumnWidth)
+                }
+                break
             case 'reasoning':
                 if (context.enableReasoning) {
                     estimatedHeight += part.visibility === 'expanded' ? 56 + estimateTextHeight(part.text, messageColumnWidth) : 56
@@ -374,7 +405,7 @@ function estimateMessageHeight(message: MindMessage, messageColumnWidth: number,
                 estimatedHeight += 198 + part.graph.nodes.length * 32
                 break
             case 'agent-run':
-                estimatedHeight += estimateGeneralAgentTraceHeight(message.parts)
+                estimatedHeight += estimateGeneralAgentTraceHeight(message.parts, messageColumnWidth)
                 break
             case 'agent-interrupt':
                 estimatedHeight += 160

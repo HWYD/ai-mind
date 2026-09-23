@@ -185,6 +185,7 @@ describe('general-react-agent tool runtime middleware', () => {
 
     it('schema 错误不进入 Secret Guard/fingerprint/provider，也不重试', async () => {
         const invoke = vi.fn()
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const schema = z.object({ query: z.string().max(5) }).strict()
         const definition: ChatToolDefinition = {
             executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
@@ -195,7 +196,7 @@ describe('general-react-agent tool runtime middleware', () => {
         }
 
         const command = await executeGeneralReActToolCall({
-            context: createContext([definition]),
+            context: createContext([definition], publishChunk),
             state: createState(),
             toolCall: {
                 args: { query: 'api_key=secret-that-must-not-be-read' },
@@ -206,13 +207,15 @@ describe('general-react-agent tool runtime middleware', () => {
         })
 
         expect(invoke).not.toHaveBeenCalled()
+        expect(publishChunk.mock.calls.map(([chunk]) => (chunk as { type: string }).type)).toEqual(['tool-start', 'error'])
+        expect(JSON.stringify(publishChunk.mock.calls)).not.toContain('secret-that-must-not-be-read')
         expect(getUpdate(command)._callFingerprints).toBeUndefined()
         expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'validation_error' })
     })
 
-    it('Secret Guard 拒绝不生成 fingerprint、公开 input 或 provider 调用', async () => {
+    it('Secret Guard 拒绝生成脱敏失败 Tool transcript，不生成 fingerprint、公开 input 或 provider 调用', async () => {
         const invoke = vi.fn()
-        const publishChunk = vi.fn(async () => undefined)
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const schema = z.object({ query: z.string() }).strict()
         const definition: ChatToolDefinition = {
             executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
@@ -229,7 +232,23 @@ describe('general-react-agent tool runtime middleware', () => {
         })
 
         expect(invoke).not.toHaveBeenCalled()
-        expect(publishChunk).not.toHaveBeenCalled()
+        const publishedChunks = publishChunk.mock.calls.map(([chunk]) => chunk as Record<string, unknown>)
+        expect(publishedChunks.map(chunk => chunk.type)).toEqual(['tool-start', 'error'])
+        expect(publishedChunks[0]).toMatchObject({
+            input: '',
+            partId: expect.any(String),
+            toolName: 'web-search',
+            type: 'tool-start',
+        })
+        expect(publishedChunks[1]).toMatchObject({
+            errorCode: 'TOOL_EXECUTION_FAILED',
+            message: '工具请求未执行。',
+            partId: publishedChunks[0]?.partId,
+            scope: 'tool',
+            toolName: 'web-search',
+            type: 'error',
+        })
+        expect(JSON.stringify(publishedChunks)).not.toContain('secret-token')
         expect(getUpdate(command)._callFingerprints).toBeUndefined()
         expect(getOnlyToolMessage(command)).toMatchObject({
             content: '请求包含禁止外发的凭据。',
@@ -238,9 +257,9 @@ describe('general-react-agent tool runtime middleware', () => {
         })
     })
 
-    it('拒绝在 web-search 查询中携带签名 URL 的请求，不进入指纹或 provider', async () => {
+    it('拒绝在 web-search 查询中携带签名 URL 的请求，公开为脱敏失败 Tool row，不进入指纹或 provider', async () => {
         const invoke = vi.fn()
-        const publishChunk = vi.fn(async () => undefined)
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const schema = z.object({ query: z.string() }).strict()
         const definition: ChatToolDefinition = {
             executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
@@ -262,7 +281,10 @@ describe('general-react-agent tool runtime middleware', () => {
         })
 
         expect(invoke).not.toHaveBeenCalled()
-        expect(publishChunk).not.toHaveBeenCalled()
+        const publishedChunks = publishChunk.mock.calls.map(([chunk]) => chunk as Record<string, unknown>)
+        expect(publishedChunks.map(chunk => chunk.type)).toEqual(['tool-start', 'error'])
+        expect(JSON.stringify(publishedChunks)).not.toContain('X-Amz-Signature')
+        expect(JSON.stringify(publishedChunks)).not.toContain('example.com/file')
         expect(getUpdate(command)._callFingerprints).toBeUndefined()
         expect(getOnlyToolMessage(command)).toMatchObject({
             content: '请求包含禁止外发的凭据。',
@@ -271,8 +293,9 @@ describe('general-react-agent tool runtime middleware', () => {
         })
     })
 
-    it('read-url 在 fingerprint 后执行当前 Run URL authorization，未授权时不调用 provider', async () => {
+    it('read-url 在 fingerprint 后执行当前 Run URL authorization，未授权时显示失败 Tool row且不调用 provider', async () => {
         const invoke = vi.fn()
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const schema = z.object({ url: z.string().url() }).strict()
         const definition: ChatToolDefinition = {
             executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
@@ -283,12 +306,23 @@ describe('general-react-agent tool runtime middleware', () => {
         }
 
         const command = await executeGeneralReActToolCall({
-            context: createContext([definition]),
+            context: createContext([definition], publishChunk),
             state: createState(),
             toolCall: { args: { url: 'https://example.com/docs' }, id: 'call-1', name: 'read-url', type: 'tool_call' },
         })
 
         expect(invoke).not.toHaveBeenCalled()
+        const publishedChunks = publishChunk.mock.calls.map(([chunk]) => chunk as Record<string, unknown>)
+        expect(publishedChunks.map(chunk => chunk.type)).toEqual(['tool-start', 'error'])
+        expect(publishedChunks[0]).toMatchObject({ input: '', toolName: 'read-url', type: 'tool-start' })
+        expect(publishedChunks[1]).toMatchObject({
+            message: '工具请求未执行。',
+            partId: publishedChunks[0]?.partId,
+            scope: 'tool',
+            toolName: 'read-url',
+            type: 'error',
+        })
+        expect(JSON.stringify(publishedChunks)).not.toContain('https://example.com/docs')
         expect(getUpdate(command)._callFingerprints).toHaveLength(1)
         expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'denied' })
     })
@@ -311,14 +345,50 @@ describe('general-react-agent tool runtime middleware', () => {
         })
         const fingerprint = getUpdate(firstCommand)._callFingerprints?.[0]
 
+        const duplicatePublishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const duplicate = await executeGeneralReActToolCall({
-            context: createContext([definition]),
+            context: createContext([definition], duplicatePublishChunk),
             state: createState('call-2', { _callFingerprints: [fingerprint] }),
             toolCall: { args: { value: 1 }, id: 'call-2', name: 'calculator', type: 'tool_call' },
         })
 
         expect(invoke).toHaveBeenCalledTimes(1)
+        expect(duplicatePublishChunk.mock.calls.map(([chunk]) => (chunk as { type: string }).type)).toEqual(['tool-start', 'error'])
         expect(getOnlyToolMessage(duplicate).metadata).toMatchObject({ observationStatus: 'duplicate' })
+    })
+
+    it('非 General ReAct scope 的 Tool 请求显示通用失败 row，且不泄露受限工具名或调用 provider', async () => {
+        const invoke = vi.fn()
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
+        const schema = z.object({ value: z.number() }).strict()
+        const definition: ChatToolDefinition = {
+            executionPolicy: { kind: 'standard-tool', profile: 'local-deterministic', retrySafe: true },
+            name: 'restricted-calculator',
+            schema,
+            tool: tool(invoke, { description: 'calculate', name: 'restricted-calculator', schema }),
+            runtimeScopes: ['version-plan-tasklist-agent'],
+        }
+
+        const command = await executeGeneralReActToolCall({
+            context: createContext([definition], publishChunk),
+            state: createState(),
+            toolCall: { args: { value: 1 }, id: 'call-1', name: 'restricted-calculator', type: 'tool_call' },
+        })
+
+        const publishedChunks = publishChunk.mock.calls.map(([chunk]) => chunk as Record<string, unknown>)
+        expect(invoke).not.toHaveBeenCalled()
+        expect(publishedChunks.map(chunk => chunk.type)).toEqual(['tool-start', 'error'])
+        expect(publishedChunks).toEqual([
+            expect.objectContaining({ input: '', title: '工具请求', toolName: 'tool-request', type: 'tool-start' }),
+            expect.objectContaining({
+                message: '工具请求未执行。',
+                scope: 'tool',
+                toolName: 'tool-request',
+                type: 'error',
+            }),
+        ])
+        expect(JSON.stringify(publishedChunks)).not.toContain('restricted-calculator')
+        expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'denied' })
     })
 
     it('同一四宽 Action batch 的相同 fingerprint 只执行一次，并为其余调用返回 paired duplicate', async () => {
@@ -363,6 +433,7 @@ describe('general-react-agent tool runtime middleware', () => {
 
     it('未获 admission 的 logical call 返回 budget_blocked 且 provider 调用为零', async () => {
         const invoke = vi.fn()
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const schema = z.object({ value: z.number() }).strict()
         const definition: ChatToolDefinition = {
             executionPolicy: { kind: 'standard-tool', profile: 'local-deterministic', retrySafe: true },
@@ -377,16 +448,17 @@ describe('general-react-agent tool runtime middleware', () => {
             batchId: 'batch-1',
             callIds: ['call-1'],
             observationCharsUsed: 0,
-            toolCallsUsed: 9,
+            toolCallsUsed: 14,
         })
 
         const command = await executeGeneralReActToolCall({
-            context: createContext([definition]),
+            context: createContext([definition], publishChunk),
             state,
             toolCall: { args: { value: 1 }, id: 'call-1', name: 'calculator', type: 'tool_call' },
         })
 
         expect(invoke).not.toHaveBeenCalled()
+        expect(publishChunk.mock.calls.map(([chunk]) => (chunk as { type: string }).type)).toEqual(['tool-start', 'error'])
         expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'budget_blocked' })
     })
 })

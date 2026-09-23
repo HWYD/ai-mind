@@ -9,6 +9,7 @@ import { calculatorToolDefinition } from '@/lib/ai/tools/calculator-tool'
 const runtimeMocks = vi.hoisted(() => {
     return {
         buildSystemMessages: vi.fn(),
+        getTrustedUserUrlCatalogSystemPrompt: vi.fn(),
         appendCompletedTurn: vi.fn(),
         createChatContextPreflight: vi.fn(),
         prepareChatContext: vi.fn(),
@@ -33,6 +34,7 @@ const runtimeMocks = vi.hoisted(() => {
 vi.mock('@/lib/ai/runtime/chat-session', () => ({
     buildSystemMessages: runtimeMocks.buildSystemMessages,
     createChatSession: runtimeMocks.createChatSession,
+    getTrustedUserUrlCatalogSystemPrompt: runtimeMocks.getTrustedUserUrlCatalogSystemPrompt,
     withChatMemoryContextMessages: (messages: BaseMessage[], memoryContextMessages: BaseMessage[]) => {
         if (memoryContextMessages.length === 0) {
             return messages
@@ -285,8 +287,8 @@ function createSession(overrides: Record<string, unknown> = {}) {
         skillDefinition: undefined,
         skillSystemPrompt: undefined,
         skillOutputPolicyPrompt: undefined,
-        actionSystemPrompts: [],
-        answerSystemPrompts: [],
+        finalizerSystemPrompts: [],
+        loopSystemPrompts: [],
         activeTools: [],
         activeToolNames: [],
         langChainMessages: [],
@@ -341,6 +343,7 @@ describe('runtime/chat-orchestrator', () => {
         vi.clearAllMocks()
 
         runtimeMocks.buildSystemMessages.mockReturnValue([])
+        runtimeMocks.getTrustedUserUrlCatalogSystemPrompt.mockReturnValue(undefined)
         runtimeMocks.buildChatMemoryContextMessages.mockReturnValue([])
         runtimeMocks.buildUserMemoryContextMessages.mockReturnValue([])
         runtimeMocks.touchConversation.mockResolvedValue(undefined)
@@ -378,7 +381,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.runGeneralReAct.mockResolvedValue({
             assistantText: '通用 Agent 回答',
             executedToolCallCount: 0,
-            finalizationMode: 'natural',
+            finalizationMode: 'normal',
             modelCallCount: 1,
             modelRetryCount: 0,
             source: 'chat',
@@ -429,7 +432,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.runGeneralReAct.mockResolvedValueOnce({
             assistantText: '2',
             executedToolCallCount: 1,
-            finalizationMode: 'natural',
+            finalizationMode: 'normal',
             modelCallCount: 2,
             modelRetryCount: 0,
             source: 'tool',
@@ -461,6 +464,64 @@ describe('runtime/chat-orchestrator', () => {
             expect.objectContaining({ path: 'tool_assisted_ordinary_chat' })
         )
         expect(generalReActExecutionGate.activeCount()).toBe(0)
+    })
+
+    it('只把已验证同会话的服务端原始 user URL 交给 General ReAct，不接受 assistant 或摘要链接', async () => {
+        runtimeMocks.createChatSession.mockReturnValue(createSession())
+        runtimeMocks.readThreadState.mockResolvedValueOnce({
+            restored: true,
+            state: {
+                messages: [
+                    {
+                        id: 'user-old',
+                        role: 'user',
+                        text: '请记住 https://docs.example.com/old#chapter',
+                        createdAt: '2026-09-23T00:00:00.000Z',
+                    },
+                    {
+                        id: 'assistant-old',
+                        role: 'assistant',
+                        text: '也许可以读取 https://assistant.example.com/hidden',
+                        createdAt: '2026-09-23T00:00:01.000Z',
+                    },
+                ],
+                pinnedDecisions: ['https://pinned.example.com/not-a-grant'],
+                summary: 'https://summary.example.com/not-a-grant',
+            },
+        })
+
+        await new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: vi.fn(),
+        }).run()
+
+        expect(runtimeMocks.createGeneralReActRunContext).toHaveBeenCalledWith(
+            expect.objectContaining({ trustedUserUrls: ['https://docs.example.com/old'] })
+        )
+        expect(runtimeMocks.readThreadState).toHaveBeenCalledWith('chat-conversation:test-session:test-conversation', expect.any(Object))
+    })
+
+    it('不把压缩后只存在于摘要中的 URL 作为 read-url grant', async () => {
+        runtimeMocks.createChatSession.mockReturnValue(createSession())
+        runtimeMocks.readThreadState.mockResolvedValueOnce({
+            restored: true,
+            state: {
+                messages: [],
+                pinnedDecisions: [],
+                summary: '旧摘要曾提到 https://summary.example.com/not-a-grant',
+            },
+        })
+
+        await new ChatOrchestrator({
+            context: createExecutionContext(),
+            isClosed: () => false,
+            request: createRequest(),
+            writeChunk: vi.fn(),
+        }).run()
+
+        expect(runtimeMocks.createGeneralReActRunContext).toHaveBeenCalledWith(expect.objectContaining({ trustedUserUrls: [] }))
     })
 
     it('非完整成功的 General ReAct 结果不会写入 Chat Memory', async () => {
@@ -668,7 +729,7 @@ describe('runtime/chat-orchestrator', () => {
         runtimeMocks.runGeneralReAct.mockResolvedValueOnce({
             assistantText: '基于文档的 Agent 回答',
             executedToolCallCount: 0,
-            finalizationMode: 'natural',
+            finalizationMode: 'normal',
             modelCallCount: 1,
             modelRetryCount: 0,
             source: 'chat',

@@ -8,6 +8,7 @@ const runtimeMocks = vi.hoisted(() => ({
     appendCompletedTurn: vi.fn(),
     buildChatMemoryContextMessages: vi.fn(),
     buildSystemMessages: vi.fn(),
+    getTrustedUserUrlCatalogSystemPrompt: vi.fn(),
     buildUserMemoryContextMessages: vi.fn(),
     createChatContextPreflight: vi.fn(),
     createChatSession: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/ai/mcp/client/mcp-client-manager', () => ({
 vi.mock('@/lib/ai/runtime/chat-session', () => ({
     buildSystemMessages: runtimeMocks.buildSystemMessages,
     createChatSession: runtimeMocks.createChatSession,
+    getTrustedUserUrlCatalogSystemPrompt: runtimeMocks.getTrustedUserUrlCatalogSystemPrompt,
     withChatMemoryContextMessages: (messages: BaseMessage[], memoryContextMessages: BaseMessage[]) => {
         if (memoryContextMessages.length === 0) {
             return messages
@@ -322,8 +324,8 @@ function createSession(overrides: Record<string, unknown> = {}) {
         activeToolCapabilityIds: {},
         activeToolNames: [],
         activeTools: [],
-        actionSystemPrompts: [],
-        answerSystemPrompts: [],
+        finalizerSystemPrompts: [],
+        loopSystemPrompts: [],
         baseModel: {
             stream: baseModelStream,
         },
@@ -349,7 +351,7 @@ function mockGeneralAnswer(assistantText: string, source: 'chat' | 'tool' = 'cha
     runtimeMocks.runGeneralReAct.mockResolvedValueOnce({
         assistantText,
         executedToolCallCount: source === 'tool' ? 1 : 0,
-        finalizationMode: 'natural',
+        finalizationMode: 'normal',
         modelCallCount: source === 'tool' ? 2 : 1,
         modelRetryCount: 0,
         source,
@@ -397,7 +399,7 @@ describe('runtime/chat-orchestrator user-memory integration', () => {
         runtimeMocks.runGeneralReAct.mockResolvedValue({
             assistantText: '好的，推荐桃子。',
             executedToolCallCount: 0,
-            finalizationMode: 'natural',
+            finalizationMode: 'normal',
             modelCallCount: 1,
             modelRetryCount: 0,
             source: 'chat',

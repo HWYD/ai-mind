@@ -11,12 +11,22 @@ export interface AgentRunStartChunk {
     runId: string
 }
 
-export interface AgentRunEndChunk {
-    type: 'agent-run-end'
-    partId: string
-    runId: string
-    status: AgentRunTerminalStatus
-}
+export type AgentRunFinalizationMode = 'constrained' | 'normal'
+
+export type AgentRunEndChunk =
+    | {
+          type: 'agent-run-end'
+          partId: string
+          runId: string
+          status: 'completed'
+          finalizationMode?: AgentRunFinalizationMode
+      }
+    | {
+          type: 'agent-run-end'
+          partId: string
+          runId: string
+          status: Exclude<AgentRunTerminalStatus, 'completed'>
+      }
 
 export interface SkillSelectedChunk {
     type: 'skill-selected'
@@ -263,6 +273,35 @@ export interface TextEndChunk {
     partId: string
 }
 
+export type AgentTextResolution = 'commentary' | 'final_answer'
+
+export interface AgentTextStartChunk {
+    type: 'agent-text-start'
+    partId: string
+    runId: string
+    modelTurnId: string
+}
+
+export interface AgentTextDeltaChunk {
+    type: 'agent-text-delta'
+    partId: string
+    delta: string
+}
+
+export type AgentTextEndChunk =
+    | {
+          type: 'agent-text-end'
+          partId: string
+          outcome: 'commentary'
+          status: 'completed' | 'interrupted'
+      }
+    | {
+          type: 'agent-text-end'
+          partId: string
+          outcome: 'final_answer'
+          status: 'completed'
+      }
+
 export const agentArtifactKinds = ['tasklist', 'plan', 'copywriting', 'audit_report', 'release_note', 'generic_markdown'] as const
 export type AgentArtifactKind = (typeof agentArtifactKinds)[number]
 
@@ -491,6 +530,9 @@ export type ChatStreamChunk =
     | TextStartChunk
     | TextDeltaChunk
     | TextEndChunk
+    | AgentTextStartChunk
+    | AgentTextDeltaChunk
+    | AgentTextEndChunk
     | AgentArtifactStartChunk
     | AgentArtifactDeltaChunk
     | AgentArtifactEndChunk

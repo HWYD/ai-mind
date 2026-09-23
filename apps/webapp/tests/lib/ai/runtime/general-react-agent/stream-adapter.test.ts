@@ -3,6 +3,33 @@ import { describe, expect, it } from 'vitest'
 import { GeneralReActStreamAdapter } from '@/lib/ai/runtime/general-react-agent/stream-adapter'
 
 describe('general-react-agent stream adapter', () => {
+    it('immediately projects public model text as pending Agent text, then resolves the same part at the model-turn boundary', () => {
+        const adapter = new GeneralReActStreamAdapter({
+            answerPartId: 'answer-1',
+            runId: 'run-1',
+            threadId: 'thread-1',
+            tracePartId: 'trace-1',
+        })
+
+        expect(adapter.projectModelText('我先查询')).toEqual([
+            { type: 'agent-text-start', partId: 'agent-text:run-1:1', runId: 'run-1', modelTurnId: 'run-1:1' },
+            { type: 'agent-text-delta', partId: 'agent-text:run-1:1', delta: '我先查询' },
+        ])
+        expect(adapter.endModelText({ outcome: 'commentary', status: 'completed' })).toEqual({
+            type: 'agent-text-end',
+            partId: 'agent-text:run-1:1',
+            outcome: 'commentary',
+            status: 'completed',
+        })
+        expect(adapter.endTrace('completed', 'normal')).toEqual({
+            type: 'agent-run-end',
+            partId: 'trace-1',
+            runId: 'run-1',
+            status: 'completed',
+            finalizationMode: 'normal',
+        })
+    })
+
     it('用简洁的 agent-run lifecycle 表达通用 Agent，不伪造 agent-graph chunk', () => {
         const adapter = new GeneralReActStreamAdapter({
             answerPartId: 'answer-1',

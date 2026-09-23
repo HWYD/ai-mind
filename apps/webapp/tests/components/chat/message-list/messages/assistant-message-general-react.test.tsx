@@ -74,7 +74,8 @@ describe('AssistantMessage generic General ReAct presentation', () => {
             />
         )
 
-        expect(screen.getAllByRole('button', { name: '正在思考' })).toHaveLength(1)
+        expect(screen.getByText('正在思考')).toBeTruthy()
+        expect(screen.queryByRole('button', { name: '正在思考' })).toBeNull()
     })
 
     it('never renders raw reasoning outside the General ReAct Trace', () => {
@@ -119,7 +120,8 @@ describe('AssistantMessage generic General ReAct presentation', () => {
             />
         )
 
-        expect(screen.getByRole('button', { name: '正在思考' })).toBeTruthy()
+        expect(screen.getByText('正在思考')).toBeTruthy()
+        expect(screen.queryByRole('button', { name: '正在思考' })).toBeNull()
         expect(screen.queryByText('这段原始推理绝不能显示给用户')).toBeNull()
     })
 
@@ -176,6 +178,52 @@ describe('AssistantMessage generic General ReAct presentation', () => {
         expect(screen.queryByText('Prompt 注入：research')).toBeNull()
     })
 
+    it('keeps the resolved General Agent final answer outside the Trace', () => {
+        renderGenericMessage([
+            {
+                id: 'run-part-1',
+                runId: 'run-1',
+                status: 'completed',
+                type: 'agent-run',
+            },
+            {
+                format: 'markdown',
+                id: 'commentary-1',
+                modelTurnId: 'turn-1',
+                phase: 'commentary',
+                runId: 'run-1',
+                status: 'completed',
+                text: '我先查询相关资料。',
+                type: 'agent-text',
+            },
+            {
+                id: 'tool-1',
+                input: '{}',
+                status: 'completed',
+                title: '搜索网页',
+                toolName: 'web-search',
+                type: 'tool',
+            },
+            {
+                format: 'markdown',
+                id: 'final-1',
+                modelTurnId: 'turn-2',
+                phase: 'final_answer',
+                runId: 'run-1',
+                status: 'completed',
+                text: '这是留在 Trace 外的最终回答。',
+                type: 'agent-text',
+            },
+        ])
+
+        const trace = screen.getByRole('button', { name: '已完成思考' }).closest('[data-slot="collapsible"]')
+        const finalAnswer = screen.getByText('这是留在 Trace 外的最终回答。')
+
+        expect(trace).toBeTruthy()
+        expect(trace?.contains(finalAnswer)).toBe(false)
+        expect(trace?.compareDocumentPosition(finalAnswer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+    })
+
     it('renders only the first General Trace when a malformed duplicate agent-run reaches the renderer', () => {
         renderGenericMessage([
             {
@@ -198,7 +246,8 @@ describe('AssistantMessage generic General ReAct presentation', () => {
             },
         ])
 
-        expect(screen.getAllByRole('button', { name: '已完成思考' })).toHaveLength(1)
+        expect(screen.getByText('已完成思考')).toBeTruthy()
+        expect(screen.queryByRole('button', { name: '已完成思考' })).toBeNull()
         expect(screen.getByText('最终回答')).toBeTruthy()
     })
 
@@ -218,7 +267,8 @@ describe('AssistantMessage generic General ReAct presentation', () => {
             },
         ])
 
-        expect(screen.getByRole('button', { name: '已完成思考' })).toBeTruthy()
+        expect(screen.getByText('已完成思考')).toBeTruthy()
+        expect(screen.queryByRole('button', { name: '已完成思考' })).toBeNull()
         cleanup()
 
         renderGenericMessage([

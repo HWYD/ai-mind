@@ -223,7 +223,7 @@ describe('createChatService', () => {
         const contexts = runtimeMocks.chatOrchestratorOptions.map(
             options => (options as { context: ResolvedChatExecutionContext & { runDeadlineAtMs?: number } }).context
         )
-        expect(contexts.map(context => context.runDeadlineAtMs)).toEqual([190_000, 190_000, undefined])
+        expect(contexts.map(context => context.runDeadlineAtMs)).toEqual([280_000, 280_000, undefined])
     })
 
     it('把 General ReAct absolute deadline 传给 durable batch projection', async () => {
@@ -255,10 +255,10 @@ describe('createChatService', () => {
         }).streamChat({ conversationId: 'deadline', messages: [] }, withStreamRecovery(createResolvedChatContext(), 'run-deadline'))
         await readAllChunks(response)
 
-        expect(projectChunks).toHaveBeenCalledWith(expect.any(Array), { deadlineAtMs: 190_000 })
+        expect(projectChunks).toHaveBeenCalledWith(expect.any(Array), { deadlineAtMs: 280_000 })
     })
 
-    it('在 180 秒硬截止前预留 5 秒完成失败终态投影', async () => {
+    it('在 270 秒硬截止前预留 5 秒完成失败终态投影', async () => {
         vi.setSystemTime(0)
         runtimeMocks.run.mockImplementation(
             (options: unknown) =>
@@ -300,11 +300,11 @@ describe('createChatService', () => {
         }).streamChat({ conversationId: 'run-deadline', messages: [] }, withStreamRecovery(createResolvedChatContext(), 'run-deadline'))
         const ndjsonPromise = readAllChunks(response)
 
-        await vi.advanceTimersByTimeAsync(180_000)
+        await vi.advanceTimersByTimeAsync(270_000)
         const ndjson = await ndjsonPromise
 
-        expect(terminalProjectionTimes).toEqual([175_000])
-        expect(terminalProjectionOptions).toEqual([{ deadlineAtMs: 180_000 }])
+        expect(terminalProjectionTimes).toEqual([265_000])
+        expect(terminalProjectionOptions).toEqual([{ deadlineAtMs: 270_000 }])
         expect(ndjson).toContain('"terminalState":"failed"')
     })
 

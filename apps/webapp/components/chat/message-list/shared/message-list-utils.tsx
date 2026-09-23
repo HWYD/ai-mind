@@ -1,4 +1,4 @@
-import type { MindMessage, MindMessagePart, ReasoningPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
+import type { AgentTextPart, MindMessage, MindMessagePart, ReasoningPart, ResourcePart, ToolPart } from '@/lib/ai/types/message'
 
 export type ChatListStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 export type AssistantFeedback = 'up' | 'down' | null
@@ -12,6 +12,8 @@ export function hasVisibleContent(part: MindMessagePart) {
     switch (part.type) {
         case 'text':
         case 'reasoning':
+            return part.text.trim().length > 0
+        case 'agent-text':
             return part.text.trim().length > 0
         case 'tool':
         case 'resource':
@@ -70,6 +72,15 @@ export function getLocationLabel(location?: ToolPart['location']) {
 }
 
 export function getMessageTextContent(message: MindMessage) {
+    const agentTextParts = message.parts.filter((part): part is AgentTextPart => part.type === 'agent-text')
+    if (agentTextParts.length > 0) {
+        const finalParts = agentTextParts.filter(
+            part => part.phase === 'final_answer' && part.status === 'completed' && part.text.trim().length > 0
+        )
+
+        return finalParts.length === 1 ? finalParts[0].text : ''
+    }
+
     return message.parts
         .filter((part): part is Extract<MindMessagePart, { type: 'text' }> => part.type === 'text' && part.text.trim().length > 0)
         .map(part => part.text)

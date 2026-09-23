@@ -167,4 +167,6 @@ Generic chat 和现有可恢复 stream 共用 `StreamEventStore`。`StreamEventP
 
 General ReAct 的可回放生命周期事件是 `agent-run-start/end`，前端投影为 `agent-run`；Tasklist 等专用 LangGraph 事件继续使用 `agent-graph-*` 并投影为 `agent-graph`。两者共享 StreamRun/StreamEvent envelope、cursor 和 terminal 语义，但不共享 UI 类型或 Graph metadata。
 
-General ReAct 的 Action `createAgent` stream 只用于内部 Tool trajectory，绝不写入 `text-*` 或 `StreamEvent`。非取消、非 hard-deadline 的 Action outcome 固定进入一次同模型未绑定 Tool 的 Answer stream；其首个安全 delta 才可 durable-project 为最终文本。正常空白 Answer 可在剩余收口时间内使用确定性 fallback；Answer provider error、Tool contract violation 或部分文本后的异常必须以 failed terminal 收口，不拼接 fallback，且不会形成可持久化的 completed turn。
+v0.6.1 replaces the fixed General ReAct Action + Answer projection. `agent-text-*` events are public-safe durable events: the first Agent text delta flushes immediately; subsequent deltas retain the existing 40ms/256-char batching; an `agent-text-end(commentary)` is committed before the following Tool start. Replay keeps the stable `partId`, `modelTurnId`, end outcome and completed `agent-run-end.finalizationMode`.
+
+Only completed public-safe commentary and one completed final Agent text can enter a completed local snapshot. Pending/interrupted Agent text, cancelled/failed runs, raw provider metadata, reasoning and raw Tool payloads remain excluded. Historical snapshots without Agent text remain compatible; a v0.6.1 Agent text Run missing completion provenance fails closed instead of guessing the header or Memory eligibility.

@@ -8,6 +8,7 @@ import type {
     AgentInterruptPart,
     AgentRunPart,
     AgentTextArtifactViewModel,
+    AgentTextPart,
     ImageBriefPart,
     ImageResultPart,
     MindMessage,
@@ -151,6 +152,19 @@ export function createAgentRunPart(runId: string, status: AgentRunPart['status']
         runId,
         status,
         type: 'agent-run',
+    }
+}
+
+export function createAgentTextPart(partId: string, runId: string, modelTurnId: string): AgentTextPart {
+    return {
+        id: partId,
+        type: 'agent-text',
+        runId,
+        modelTurnId,
+        phase: 'pending',
+        status: 'streaming',
+        text: '',
+        format: 'markdown',
     }
 }
 

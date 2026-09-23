@@ -23,7 +23,7 @@ export function createGeneralReActAgent(input: { context: GeneralReActRunContext
         maxRetries: 1,
         onFailure: 'error',
         retryOn: error => {
-            if (modelRetryCount >= 1 || !input.context.normalizeModelError(error).retryable) {
+            if (input.context.hasPublishedPublicText?.() || modelRetryCount >= 1 || !input.context.normalizeModelError(error).retryable) {
                 return false
             }
             modelRetryCount += 1
