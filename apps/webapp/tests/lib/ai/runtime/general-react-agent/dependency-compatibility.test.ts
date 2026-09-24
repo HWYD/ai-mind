@@ -7,6 +7,8 @@ import { createAgent, createMiddleware } from 'langchain'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
+import { createCompletedAgentRunEndFixture, createModelTurnStreamFixture } from './model-turn-stream-fixtures'
+
 type GenerateResponse = (options: BaseChatModel['ParsedCallOptions']) => Promise<AIMessage> | AIMessage
 
 class ScriptedChatModel extends BaseChatModel {
@@ -58,6 +60,136 @@ function createV2Agent(model: BaseChatModel, middleware: ReturnType<typeof creat
 }
 
 describe('LangChain createAgent dependency compatibility', () => {
+    it('keeps completed normal and constrained agent-run-end finalization modes explicit in the spike fixtures', () => {
+        expect([createCompletedAgentRunEndFixture('normal'), createCompletedAgentRunEndFixture('constrained')]).toEqual([
+            { finalizationMode: 'normal', status: 'completed', type: 'agent-run-end' },
+            { finalizationMode: 'constrained', status: 'completed', type: 'agent-run-end' },
+        ])
+    })
+
+    it('exposes text deltas, a complete AIMessage, Tool calls, normal closure, and terminal metadata for one logical model turn', async () => {
+        const fixture = createModelTurnStreamFixture({
+            content: '我先查询天气。',
+            modelTurnId: 'weather-turn-1',
+            publicTextDeltas: ['我先', '查询天气。'],
+            toolCalls: [
+                {
+                    args: { city: '上海' },
+                    id: 'weather-call-1',
+                    name: 'lookup_weather',
+                    type: 'tool_call',
+                },
+            ],
+        })
+        const streamMetadata: Record<string, unknown>[] = []
+        const observedTurn: {
+            completeMessage?: AIMessage
+            modelTurnId?: string
+            ordinal?: number
+            publicTextDeltas: string[]
+        } = { publicTextDeltas: [] }
+        const lookupWeather = tool(async () => '晴', {
+            description: 'Look up weather for a city.',
+            name: 'lookup_weather',
+            schema: z.object({ city: z.string() }),
+        })
+        const afterModel = createMiddleware({
+            afterModel: {
+                canJumpTo: ['end'],
+                hook: state => {
+                    const message = state.messages.at(-1)
+                    if (AIMessage.isInstance(message)) {
+                        observedTurn.completeMessage = message
+                        const modelTurnId = (message.response_metadata as { model_turn_id?: unknown }).model_turn_id
+                        if (typeof modelTurnId === 'string') {
+                            observedTurn.modelTurnId = modelTurnId
+                        }
+                    }
+
+                    return { jumpTo: 'end' } as never
+                },
+            },
+            name: 'dependency-compatibility-model-turn-capture',
+        })
+        const agent = createV2Agent(fixture.model, [afterModel], [lookupWeather])
+
+        for await (const streamEvent of await agent.stream(
+            { messages: [new HumanMessage('上海天气如何？')] },
+            { streamMode: ['messages', 'updates'] }
+        )) {
+            if (!Array.isArray(streamEvent) || streamEvent[0] !== 'messages' || !Array.isArray(streamEvent[1])) {
+                continue
+            }
+
+            const [message, metadata] = streamEvent[1]
+            if (typeof message === 'object' && message !== null && 'content' in message && typeof message.content === 'string') {
+                observedTurn.publicTextDeltas.push(message.content)
+            }
+            if (typeof metadata === 'object' && metadata !== null) {
+                streamMetadata.push(metadata as Record<string, unknown>)
+                if (typeof metadata.langgraph_step === 'number') {
+                    observedTurn.ordinal = metadata.langgraph_step
+                }
+            }
+        }
+
+        expect(observedTurn).toMatchObject({
+            modelTurnId: fixture.expected.modelTurnId,
+            ordinal: expect.any(Number),
+            publicTextDeltas: fixture.expected.publicTextDeltas,
+        })
+        expect(observedTurn.completeMessage).toMatchObject({
+            content: observedTurn.publicTextDeltas.join(''),
+            response_metadata: { model_turn_id: observedTurn.modelTurnId },
+            tool_calls: fixture.expected.toolCalls,
+        })
+        expect(observedTurn.completeMessage?.content).toBe(observedTurn.publicTextDeltas.join(''))
+        expect(streamMetadata).toContainEqual(expect.objectContaining({ langgraph_node: 'model_request' }))
+        expect(streamMetadata.some(metadata => typeof metadata.langgraph_step === 'number')).toBe(true)
+    })
+
+    it('preserves explicit non-natural provider metadata after the stream closes', async () => {
+        const fixture = createModelTurnStreamFixture({
+            content: '输出因长度限制而中断',
+            finishReason: 'length',
+            reasoningContent: 'private reasoning must not become a public text delta',
+        })
+        let completedMessage: AIMessage | undefined
+        const publicTextDeltas: string[] = []
+        const agent = createV2Agent(fixture.model, [
+            createMiddleware({
+                afterModel: state => {
+                    const message = state.messages.at(-1)
+                    if (AIMessage.isInstance(message)) {
+                        completedMessage = message
+                    }
+                },
+                name: 'dependency-compatibility-finish-metadata-capture',
+            }),
+        ])
+
+        for await (const streamEvent of await agent.stream(
+            { messages: [new HumanMessage('请给出受限回答')] },
+            { streamMode: ['messages', 'updates'] }
+        )) {
+            if (!Array.isArray(streamEvent) || streamEvent[0] !== 'messages' || !Array.isArray(streamEvent[1])) {
+                continue
+            }
+
+            const [message] = streamEvent[1]
+            if (typeof message === 'object' && message !== null && 'content' in message && typeof message.content === 'string') {
+                publicTextDeltas.push(message.content)
+            }
+        }
+
+        expect(publicTextDeltas).toEqual(fixture.expected.publicTextDeltas)
+        expect(publicTextDeltas).not.toContain('private reasoning must not become a public text delta')
+        expect(completedMessage).toMatchObject({
+            content: '输出因长度限制而中断',
+            response_metadata: { finish_reason: fixture.expected.finishReason },
+        })
+    })
+
     it('imports and streams safely in the Node.js server runtime', async () => {
         expect(typeof createAgent).toBe('function')
 

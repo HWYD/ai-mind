@@ -1,9 +1,9 @@
 export interface GeneralReActRuntimeConfig {
-    actionDeadlineMs: number
     hardDeadlineMs: number
-    maxActionModelCalls: number
-    maxAnswerPhaseMs: number
+    loopDeadlineMs: number
+    maxFinalizerMs: number
     maxLogicalToolCalls: number
+    maxLoopModelCalls: number
     maxModelCalls: number
     maxModelRetries: number
     maxNoProgressRounds: number
@@ -11,44 +11,44 @@ export interface GeneralReActRuntimeConfig {
     maxObservationCharsPerCall: number
     maxToolConcurrency: number
     maxToolRetries: number
-    maxToolBearingActionRounds: number
+    maxToolBearingRounds: number
     recursionLimit: number
-    reservedAnswerModelCalls: number
+    reservedFinalizerModelCalls: number
     terminalReserveMs: number
 }
 
 export function createGeneralReActRuntimeConfig<T extends GeneralReActRuntimeConfig>(config: T): Readonly<T> {
-    if (config.reservedAnswerModelCalls !== 1) {
-        throw new RangeError('General ReAct requires exactly one reservedAnswerModelCalls for Answer.')
+    if (config.reservedFinalizerModelCalls !== 1) {
+        throw new RangeError('General ReAct requires exactly one reservedFinalizerModelCalls.')
     }
-    if (config.maxModelCalls !== config.maxActionModelCalls + config.reservedAnswerModelCalls) {
-        throw new RangeError('maxModelCalls must equal maxActionModelCalls plus reservedAnswerModelCalls.')
+    if (config.maxModelCalls !== config.maxLoopModelCalls + config.reservedFinalizerModelCalls) {
+        throw new RangeError('maxModelCalls must equal maxLoopModelCalls plus reservedFinalizerModelCalls.')
     }
-    if (config.maxActionModelCalls !== config.maxToolBearingActionRounds + 1) {
-        throw new RangeError('maxActionModelCalls must reserve the final no-Tool Action decision.')
+    if (config.maxLoopModelCalls !== config.maxToolBearingRounds + 1) {
+        throw new RangeError('maxLoopModelCalls must reserve the final no-Tool loop decision.')
     }
-    if (config.actionDeadlineMs + config.maxAnswerPhaseMs + config.terminalReserveMs > config.hardDeadlineMs) {
-        throw new RangeError('Action, Answer, and terminal reserve must fit within hardDeadlineMs.')
+    if (config.loopDeadlineMs + config.maxFinalizerMs + config.terminalReserveMs !== config.hardDeadlineMs) {
+        throw new RangeError('Loop, finalizer, and terminal reserve must equal hardDeadlineMs.')
     }
 
     return Object.freeze(config)
 }
 
 export const GENERAL_REACT_RUNTIME_DEFAULTS = createGeneralReActRuntimeConfig({
-    actionDeadlineMs: 145_000,
-    hardDeadlineMs: 180_000,
-    maxActionModelCalls: 7,
-    maxAnswerPhaseMs: 30_000,
-    maxLogicalToolCalls: 9,
-    maxModelCalls: 8,
+    hardDeadlineMs: 270_000,
+    loopDeadlineMs: 235_000,
+    maxFinalizerMs: 30_000,
+    maxLogicalToolCalls: 14,
+    maxLoopModelCalls: 10,
+    maxModelCalls: 11,
     maxModelRetries: 1,
     maxNoProgressRounds: 2,
-    maxObservationChars: 32_000,
+    maxObservationChars: 48_000,
     maxObservationCharsPerCall: 12_000,
     maxToolConcurrency: 3,
     maxToolRetries: 4,
-    maxToolBearingActionRounds: 6,
-    recursionLimit: 16,
-    reservedAnswerModelCalls: 1,
+    maxToolBearingRounds: 9,
+    recursionLimit: 24,
+    reservedFinalizerModelCalls: 1,
     terminalReserveMs: 5_000,
 } as const)

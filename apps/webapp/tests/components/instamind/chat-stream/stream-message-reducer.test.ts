@@ -13,11 +13,240 @@ function reduceChunks(chunks: ChatStreamChunk[]) {
     return chunks.reduce((state, chunk) => reduceStreamChunk(state, chunk).state, createStreamMessageState())
 }
 
+function reduceDurableChunk(state: StreamMessageState, chunk: ChatStreamChunk, sequence: number) {
+    return Reflect.apply(reduceStreamChunk, null, [state, chunk, undefined, { sequence }])
+}
+
 function getAssistantMessage(state: StreamMessageState) {
     return state.messages.find(message => message.role === 'assistant')
 }
 
 describe('stream-message-reducer', () => {
+    it('keeps an Agent text part identity stable while resolving pending text to a final answer', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-agent-text' },
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+            { type: 'agent-text-delta', partId: 'agent-text-1', delta: '最终' },
+            { type: 'agent-text-delta', partId: 'agent-text-1', delta: '回答' },
+            { type: 'agent-text-end', partId: 'agent-text-1', outcome: 'final_answer', status: 'completed' },
+        ])
+
+        expect(getAssistantMessage(state)?.parts).toContainEqual({
+            id: 'agent-text-1',
+            type: 'agent-text',
+            runId: 'run-1',
+            modelTurnId: 'turn-1',
+            phase: 'final_answer',
+            status: 'completed',
+            text: '最终回答',
+            format: 'markdown',
+        })
+    })
+
+    it('resolves interrupted Agent text to commentary and preserves normal or constrained run completion provenance', () => {
+        const constrained = reduceChunks([
+            { type: 'start', messageId: 'assistant-constrained-run' },
+            { type: 'agent-run-start', partId: 'agent-run-1', runId: 'run-1' },
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+            { type: 'agent-text-delta', partId: 'agent-text-1', delta: '部分结果' },
+            { type: 'agent-text-end', partId: 'agent-text-1', outcome: 'commentary', status: 'interrupted' },
+            { type: 'agent-run-end', partId: 'agent-run-1', runId: 'run-1', status: 'completed', finalizationMode: 'constrained' },
+        ])
+        const normal = reduceChunks([
+            { type: 'start', messageId: 'assistant-normal-run' },
+            { type: 'agent-run-start', partId: 'agent-run-2', runId: 'run-2' },
+            { type: 'agent-text-start', partId: 'agent-text-2', runId: 'run-2', modelTurnId: 'turn-2' },
+            { type: 'agent-text-end', partId: 'agent-text-2', outcome: 'final_answer', status: 'completed' },
+            { type: 'agent-run-end', partId: 'agent-run-2', runId: 'run-2', status: 'completed', finalizationMode: 'normal' },
+        ])
+
+        expect(getAssistantMessage(constrained)?.parts).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: 'agent-text-1', phase: 'commentary', status: 'interrupted' }),
+                expect.objectContaining({ type: 'agent-run', runId: 'run-1', status: 'completed', finalizationMode: 'constrained' }),
+            ])
+        )
+        expect(getAssistantMessage(normal)?.parts).toContainEqual(
+            expect.objectContaining({ type: 'agent-run', runId: 'run-2', status: 'completed', finalizationMode: 'normal' })
+        )
+    })
+
+    it('does not duplicate an Agent text part when durable replay repeats its start event', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-replay' },
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+        ])
+
+        expect(getAssistantMessage(state)?.parts.filter(part => part.type === 'agent-text')).toHaveLength(1)
+    })
+
+    it('does not append a matching duplicate Tool start and lets its end update the original part', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-tool-replay' },
+            { type: 'tool-start', partId: 'tool-1', toolName: 'web-search', input: '公开网页' },
+            { type: 'tool-start', partId: 'tool-1', toolName: 'web-search', input: '公开网页' },
+            {
+                type: 'tool-end',
+                partId: 'tool-1',
+                toolName: 'web-search',
+                input: '公开网页',
+                output: '已搜索到 1 个来源',
+                sources: [
+                    {
+                        originTool: 'web-search',
+                        sourceId: 'source-1',
+                        status: 'discovered',
+                        title: 'Source',
+                        url: 'https://example.com/source',
+                    },
+                ],
+            },
+        ])
+
+        expect(getAssistantMessage(state)?.parts.filter(part => part.type === 'tool')).toEqual([
+            expect.objectContaining({ id: 'tool-1', status: 'completed', toolName: 'web-search' }),
+        ])
+    })
+
+    it('renders a pre-execution rejected ToolCall as one failed Tool part instead of a completed Tool', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-rejected-tool' },
+            { type: 'tool-start', partId: 'tool-rejected', toolName: 'read-url', input: '' },
+            {
+                type: 'error',
+                errorCode: 'TOOL_EXECUTION_FAILED',
+                message: '工具请求未执行。',
+                partId: 'tool-rejected',
+                retryable: false,
+                scope: 'tool',
+                stage: 'tool-execution',
+                toolName: 'read-url',
+            },
+        ])
+
+        expect(getAssistantMessage(state)?.parts).toContainEqual(
+            expect.objectContaining({
+                error: '工具请求未执行。',
+                id: 'tool-rejected',
+                input: '',
+                status: 'failed',
+                toolName: 'read-url',
+                type: 'tool',
+            })
+        )
+    })
+
+    it('fails closed when a repeated Tool start conflicts with its original identity', () => {
+        const started = reduceChunks([
+            { type: 'start', messageId: 'assistant-tool-conflict' },
+            { type: 'tool-start', partId: 'tool-1', toolName: 'web-search', input: '公开网页' },
+        ])
+
+        const result = reduceStreamChunk(started, {
+            type: 'tool-start',
+            partId: 'tool-1',
+            toolName: 'calculator',
+            input: '{"expression":"1 + 1"}',
+        })
+
+        expect(result.fatalError).toMatch(/conflicting tool start/i)
+    })
+
+    it('fails closed when a repeated Tool start keeps its name but changes public input', () => {
+        const started = reduceChunks([
+            { type: 'start', messageId: 'assistant-tool-input-conflict' },
+            { type: 'tool-start', partId: 'tool-1', toolName: 'web-search', input: '公开网页' },
+        ])
+
+        const result = reduceStreamChunk(started, {
+            type: 'tool-start',
+            partId: 'tool-1',
+            toolName: 'web-search',
+            input: '另一条公开网页查询',
+        })
+
+        expect(result.fatalError).toMatch(/conflicting tool start/i)
+    })
+
+    it('fails closed for unknown Agent text parts, duplicate model turn identities, missing completion provenance, and late tools', () => {
+        const unknownDelta = reduceStreamChunk(
+            reduceStreamChunk(createStreamMessageState(), { type: 'start', messageId: 'assistant-violations' }).state,
+            { type: 'agent-text-delta', partId: 'unknown-agent-text', delta: '不应写入' }
+        )
+        const duplicateTurn = reduceStreamChunk(
+            reduceStreamChunk(
+                reduceStreamChunk(createStreamMessageState(), { type: 'start', messageId: 'assistant-duplicate-turn' }).state,
+                { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' }
+            ).state,
+            { type: 'agent-text-start', partId: 'agent-text-2', runId: 'run-1', modelTurnId: 'turn-1' }
+        )
+        const missingProvenance = reduceStreamChunk(
+            reduceStreamChunk(
+                reduceStreamChunk(createStreamMessageState(), { type: 'start', messageId: 'assistant-missing-provenance' }).state,
+                { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' }
+            ).state,
+            { type: 'agent-run-end', partId: 'agent-run-1', runId: 'run-1', status: 'completed' }
+        )
+        const lateTool = reduceStreamChunk(
+            reduceChunks([
+                { type: 'start', messageId: 'assistant-late-tool' },
+                { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+                { type: 'agent-text-end', partId: 'agent-text-1', outcome: 'final_answer', status: 'completed' },
+            ]),
+            { type: 'tool-start', partId: 'late-tool', toolName: 'search', input: '{}' }
+        )
+
+        expect(unknownDelta.fatalError).toMatch(/agent text/i)
+        expect(duplicateTurn.fatalError).toMatch(/model turn/i)
+        expect(missingProvenance.fatalError).toMatch(/provenance/i)
+        expect(lateTool.fatalError).toMatch(/final answer/i)
+    })
+
+    it('does not append a replayed Agent text delta with an already applied durable sequence', () => {
+        const started = reduceDurableChunk(createStreamMessageState(), { type: 'start', messageId: 'assistant-replay-delta' }, 1).state
+        const partStarted = reduceDurableChunk(
+            started,
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+            2
+        ).state
+        const firstDelta = reduceDurableChunk(partStarted, { type: 'agent-text-delta', partId: 'agent-text-1', delta: '一次' }, 3).state
+        const replayedDelta = reduceDurableChunk(firstDelta, { type: 'agent-text-delta', partId: 'agent-text-1', delta: '一次' }, 3).state
+
+        expect(getAssistantMessage(replayedDelta)?.parts.find(part => part.type === 'agent-text')).toMatchObject({ text: '一次' })
+    })
+
+    it('ignores a replayed Agent text end but fails closed for a later terminal delta', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-terminal-agent-text' },
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+            { type: 'agent-text-end', partId: 'agent-text-1', outcome: 'commentary', status: 'completed' },
+        ])
+        const replayedEnd = reduceDurableChunk(
+            state,
+            { type: 'agent-text-end', partId: 'agent-text-1', outcome: 'commentary', status: 'completed' },
+            3
+        )
+        const terminalDelta = reduceDurableChunk(
+            replayedEnd.state,
+            { type: 'agent-text-delta', partId: 'agent-text-1', delta: '不应追加' },
+            4
+        )
+
+        expect(replayedEnd.fatalError).toBeUndefined()
+        expect(terminalDelta.fatalError).toMatch(/no active part/i)
+    })
+
+    it('fails closed when finish arrives while an Agent text part is still pending and streaming', () => {
+        const state = reduceChunks([
+            { type: 'start', messageId: 'assistant-open-agent-text' },
+            { type: 'agent-text-start', partId: 'agent-text-1', runId: 'run-1', modelTurnId: 'turn-1' },
+            { type: 'agent-text-delta', partId: 'agent-text-1', delta: '尚未收口' },
+        ])
+
+        expect(reduceStreamChunk(state, { type: 'finish' }).fatalError).toMatch(/unresolved agent text/i)
+    })
+
     it('preserves cancelled terminal state instead of mapping finish to completed', () => {
         const state = reduceStreamChunk(
             reduceStreamChunk(reduceStreamChunk(createStreamMessageState(), { messageId: 'assistant-cancelled', type: 'start' }).state, {
@@ -148,7 +377,10 @@ describe('stream-message-reducer', () => {
         expect(trace.rows.map(row => row.ordinal)).toEqual([1, 2])
         expect(trace.searchCount).toBe(1)
         expect(trace.readCount).toBe(1)
-        expect(trace.readSources).toEqual([
+        const readTool = trace.rows.find(row => row.id === 'tool-read')
+
+        expect(readTool?.kind).toBe('tool')
+        expect(readTool && readTool.kind === 'tool' ? readTool.readSources : undefined).toEqual([
             {
                 hostname: 'example.com',
                 title: 'React',

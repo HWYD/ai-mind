@@ -467,9 +467,13 @@ export function useChatStream(options: UseChatStreamOptions = {}) {
                 if (localSnapshot.status === 'valid') {
                     hasLocalSnapshot = true
                     localSnapshotRevisionRef.current = localSnapshot.data.revision
-                    syncMessageSnapshots(localSnapshot.data.messages)
-                    streamMessageStateRef.current = createStreamMessageState(localSnapshot.data.messages)
-                    setMessages(localSnapshot.data.messages)
+                    const restoredMessages = localSnapshot.data.messages.map(message => ({
+                        ...message,
+                        parts: message.parts.map(part => (part.type === 'agent-run' ? { ...part, restored: true } : part)),
+                    }))
+                    syncMessageSnapshots(restoredMessages)
+                    streamMessageStateRef.current = createStreamMessageState(restoredMessages)
+                    setMessages(restoredMessages)
                     setHydrationError(null)
                     setHydrationStatus('ready')
                     publishHistoryEntryReady(conversationId)

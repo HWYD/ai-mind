@@ -15,6 +15,13 @@ describe('general-react-agent observer', () => {
         observer.recordDatabaseTransaction(20)
         observer.recordEventLoopDelay(4)
         observer.recordStopReason('action_deadline')
+        observer.recordRuntimeUsage({
+            finalizerCalls: 1,
+            logicalToolCalls: 4,
+            loopModelCalls: 3,
+            observationChars: 1_200,
+            toolBearingRounds: 2,
+        })
         observer.recordCleanup({ failed: false })
         observer.recordRunReleased()
 
@@ -25,12 +32,18 @@ describe('general-react-agent observer', () => {
             cleanupCount: 1,
             databaseTransactionMs: { count: 3, max: 20, p50: 12, p95: 20, total: 40 },
             eventLoopDelayMs: { count: 1, max: 4, p50: 4, p95: 4, total: 4 },
+            finalizerCalls: 1,
+            logicalToolCalls: 4,
+            loopModelCalls: 3,
+            observationChars: 1_200,
             projectionBatchChars: 320,
             projectionBatchCount: 1,
             projectionBatchItems: 2,
             projectionBatchWaitMs: { count: 1, max: 7, p50: 7, p95: 7, total: 7 },
             queueHighWaterBytes: 260_000,
             queueHighWaterItems: 65,
+            toolBearingRounds: 2,
+            budgetStops: { action_deadline: 1 },
             stopReasons: { action_deadline: 1 },
         })
     })

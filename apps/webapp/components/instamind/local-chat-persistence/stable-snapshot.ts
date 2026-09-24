@@ -2,6 +2,7 @@ import { normalizeSafePublicHttpUrl, normalizeSafeResourceUri } from '@/lib/ai/s
 import type {
     AgentGraphPart,
     AgentRunPart,
+    AgentTextPart,
     ImageBriefPart,
     ImageResultPart,
     MindMessage,
@@ -19,11 +20,13 @@ import {
     type LocalConversationSnapshot,
     recoverableAgentGraphPartSchema,
     recoverableAgentRunPartSchema,
+    recoverableAgentTextPartSchema,
 } from './schema'
 
 const RECOVERABLE_PART_TYPES = new Set([
     'agent-graph',
     'agent-run',
+    'agent-text',
     'image-brief',
     'image-result',
     'prompt',
@@ -165,8 +168,14 @@ function projectRecoverablePart(part: MindMessagePart): MindMessagePart | null {
     }
 
     if (part.type === 'agent-run') {
-        const parsed = recoverableAgentRunPartSchema.safeParse(part)
+        const { restored: _restored, ...recoverablePart } = part
+        const parsed = recoverableAgentRunPartSchema.safeParse(recoverablePart)
         return parsed.success ? (parsed.data as AgentRunPart) : null
+    }
+
+    if (part.type === 'agent-text') {
+        const parsed = recoverableAgentTextPartSchema.safeParse(part)
+        return parsed.success ? (parsed.data as AgentTextPart) : null
     }
 
     if (part.type === 'agent-graph') {
@@ -253,7 +262,21 @@ export function projectRecoverableMessages(messages: MindMessage[]): MindMessage
                 return true
             }
 
-            return agentRun.status === 'completed' && message.parts.some(part => part.type === 'text' && part.text.trim().length > 0)
+            if (agentRun.status !== 'completed') {
+                return false
+            }
+
+            const agentTextParts = message.parts.filter((part): part is AgentTextPart => part.type === 'agent-text')
+            if (agentTextParts.length === 0) {
+                // v0.6.0 已完成 Run 没有 AgentText provenance，保留旧 text 快照兼容。
+                return message.parts.some(part => part.type === 'text' && part.text.trim().length > 0)
+            }
+
+            return (
+                (agentRun.finalizationMode === 'normal' || agentRun.finalizationMode === 'constrained') &&
+                agentTextParts.filter(part => part.runId === agentRun.runId && part.phase === 'final_answer' && part.status === 'completed')
+                    .length === 1
+            )
         })
         .map(message => {
             const parts = message.parts.flatMap(part => {

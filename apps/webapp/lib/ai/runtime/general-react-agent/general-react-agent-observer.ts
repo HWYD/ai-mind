@@ -1,10 +1,15 @@
 export type GeneralReActObserverSnapshot = {
     activeRuns: number
+    budgetStops: Record<string, number>
     capacityRejections: number
     cleanupFailures: number
     cleanupCount: number
     databaseTransactionMs: TimingMetricSnapshot
     eventLoopDelayMs: TimingMetricSnapshot
+    finalizerCalls: number
+    logicalToolCalls: number
+    loopModelCalls: number
+    observationChars: number
     projectionBatchChars: number
     projectionBatchCount: number
     projectionBatchItems: number
@@ -12,15 +17,31 @@ export type GeneralReActObserverSnapshot = {
     queueHighWaterBytes: number
     queueHighWaterItems: number
     stopReasons: Record<string, number>
+    toolBearingRounds: number
 }
+
+const budgetStopReasons = new Set([
+    'action_deadline',
+    'action_round_limit',
+    'model_call_limit',
+    'no_progress',
+    'observation_limit',
+    'run_deadline',
+    'tool_call_limit',
+])
 
 export class GeneralReActObserver {
     private activeRuns = 0
+    private readonly budgetStops: Record<string, number> = {}
     private capacityRejections = 0
     private cleanupFailures = 0
     private cleanupCount = 0
     private readonly databaseTransactionMs = createTimingMetric()
     private readonly eventLoopDelayMs = createTimingMetric()
+    private finalizerCalls = 0
+    private logicalToolCalls = 0
+    private loopModelCalls = 0
+    private observationChars = 0
     private projectionBatchChars = 0
     private projectionBatchCount = 0
     private projectionBatchItems = 0
@@ -28,6 +49,7 @@ export class GeneralReActObserver {
     private queueHighWaterBytes = 0
     private queueHighWaterItems = 0
     private readonly stopReasons: Record<string, number> = {}
+    private toolBearingRounds = 0
 
     recordRunStarted(): void {
         this.activeRuns += 1
@@ -61,8 +83,25 @@ export class GeneralReActObserver {
         addTimingMetric(this.eventLoopDelayMs, durationMs)
     }
 
+    recordRuntimeUsage(input: {
+        finalizerCalls: number
+        logicalToolCalls: number
+        loopModelCalls: number
+        observationChars: number
+        toolBearingRounds: number
+    }): void {
+        this.finalizerCalls += normalizeCounter(input.finalizerCalls)
+        this.logicalToolCalls += normalizeCounter(input.logicalToolCalls)
+        this.loopModelCalls += normalizeCounter(input.loopModelCalls)
+        this.observationChars += normalizeCounter(input.observationChars)
+        this.toolBearingRounds += normalizeCounter(input.toolBearingRounds)
+    }
+
     recordStopReason(reason: string): void {
         this.stopReasons[reason] = (this.stopReasons[reason] ?? 0) + 1
+        if (budgetStopReasons.has(reason)) {
+            this.budgetStops[reason] = (this.budgetStops[reason] ?? 0) + 1
+        }
     }
 
     recordCleanup(input: { failed: boolean }): void {
@@ -75,11 +114,16 @@ export class GeneralReActObserver {
     snapshot(): GeneralReActObserverSnapshot {
         return {
             activeRuns: this.activeRuns,
+            budgetStops: { ...this.budgetStops },
             capacityRejections: this.capacityRejections,
             cleanupFailures: this.cleanupFailures,
             cleanupCount: this.cleanupCount,
             databaseTransactionMs: snapshotTimingMetric(this.databaseTransactionMs),
             eventLoopDelayMs: snapshotTimingMetric(this.eventLoopDelayMs),
+            finalizerCalls: this.finalizerCalls,
+            logicalToolCalls: this.logicalToolCalls,
+            loopModelCalls: this.loopModelCalls,
+            observationChars: this.observationChars,
             projectionBatchChars: this.projectionBatchChars,
             projectionBatchCount: this.projectionBatchCount,
             projectionBatchItems: this.projectionBatchItems,
@@ -87,6 +131,7 @@ export class GeneralReActObserver {
             queueHighWaterBytes: this.queueHighWaterBytes,
             queueHighWaterItems: this.queueHighWaterItems,
             stopReasons: { ...this.stopReasons },
+            toolBearingRounds: this.toolBearingRounds,
         }
     }
 }
@@ -114,6 +159,10 @@ function addTimingMetric(metric: TimingMetric, durationMs: number): void {
     }
     metric.nextSampleIndex = (metric.nextSampleIndex + 1) % timingSampleWindowSize
     metric.total += normalized
+}
+
+function normalizeCounter(value: number): number {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
 }
 
 function snapshotTimingMetric(metric: TimingMetric): TimingMetricSnapshot {

@@ -33,9 +33,9 @@ function createHint(overrides: Partial<LocalMessageHeightHintEntry> = {}): Local
 
 describe('message height hints', () => {
     it('builds a layout key from geometry, exact message column width, reasoning and default presentation only', () => {
-        expect(createMessageHeightHintLayoutKey({ enableReasoning: true, messageColumnWidth: 856 })).toBe('g2|w856|r1|history-default')
-        expect(createMessageHeightHintLayoutKey({ enableReasoning: false, messageColumnWidth: 856 })).toBe('g2|w856|r0|history-default')
-        expect(createMessageHeightHintLayoutKey({ enableReasoning: true, messageColumnWidth: 720 })).toBe('g2|w720|r1|history-default')
+        expect(createMessageHeightHintLayoutKey({ enableReasoning: true, messageColumnWidth: 856 })).toBe('g3|w856|r1|history-default')
+        expect(createMessageHeightHintLayoutKey({ enableReasoning: false, messageColumnWidth: 856 })).toBe('g3|w856|r0|history-default')
+        expect(createMessageHeightHintLayoutKey({ enableReasoning: true, messageColumnWidth: 720 })).toBe('g3|w720|r1|history-default')
     })
 
     it('creates an opaque render fingerprint that changes when visible content or request presentation changes', () => {
@@ -51,6 +51,40 @@ describe('message height hints', () => {
                 plainText: '',
             })
         )
+    })
+
+    it('distinguishes completed General Agent final text, commentary, and run provenance', () => {
+        const finalMessage: MindMessage = {
+            ...createMessage(),
+            parts: [
+                { finalizationMode: 'normal', id: 'run-1', runId: 'run-1', status: 'completed', type: 'agent-run' },
+                {
+                    format: 'markdown',
+                    id: 'agent-text-1',
+                    modelTurnId: 'turn-1',
+                    phase: 'final_answer',
+                    runId: 'run-1',
+                    status: 'completed',
+                    text: '这是最终回答。',
+                    type: 'agent-text',
+                },
+            ],
+        }
+        const commentaryMessage: MindMessage = {
+            ...finalMessage,
+            parts: finalMessage.parts.map(part => (part.type === 'agent-text' ? { ...part, phase: 'commentary' as const } : part)),
+        }
+        const constrainedMessage: MindMessage = {
+            ...finalMessage,
+            parts: finalMessage.parts.map(part =>
+                part.type === 'agent-run' ? { ...part, finalizationMode: 'constrained' as const } : part
+            ),
+        }
+
+        const finalFingerprint = createMessageRenderFingerprint(finalMessage)
+
+        expect(finalFingerprint).not.toBe(createMessageRenderFingerprint(commentaryMessage))
+        expect(finalFingerprint).not.toBe(createMessageRenderFingerprint(constrainedMessage))
     })
 
     it('keeps the same fingerprint when runtime-only raw fields are removed by the stable snapshot projection', () => {

@@ -21,30 +21,30 @@ describe('General ReAct action batch admission', () => {
 
         expect(admission.orderedCallIds).toEqual(['call-1', 'call-2', 'call-3', 'call-4'])
         expect(admission.reservedToolCallCount).toBe(4)
-        expect(admission.reservedObservationChars).toBe(32_000)
+        expect(admission.reservedObservationChars).toBe(48_000)
         expect(admission.admissions).toEqual({
             'call-1': {
                 admitted: true,
                 blockedReason: null,
-                observationCharAllowance: 8_000,
+                observationCharAllowance: 12_000,
                 ordinal: 1,
             },
             'call-2': {
                 admitted: true,
                 blockedReason: null,
-                observationCharAllowance: 8_000,
+                observationCharAllowance: 12_000,
                 ordinal: 2,
             },
             'call-3': {
                 admitted: true,
                 blockedReason: null,
-                observationCharAllowance: 8_000,
+                observationCharAllowance: 12_000,
                 ordinal: 3,
             },
             'call-4': {
                 admitted: true,
                 blockedReason: null,
-                observationCharAllowance: 8_000,
+                observationCharAllowance: 12_000,
                 ordinal: 4,
             },
         })
@@ -59,21 +59,21 @@ describe('General ReAct action batch admission', () => {
             batchId: 'batch-last-slot',
             callIds: ['call-9', 'call-10', 'call-11'],
             observationCharsUsed: 30_000,
-            toolCallsUsed: 8,
+            toolCallsUsed: 12,
         })
 
-        expect(admission.reservedToolCallCount).toBe(1)
-        expect(admission.reservedObservationChars).toBe(2_000)
+        expect(admission.reservedToolCallCount).toBe(2)
+        expect(admission.reservedObservationChars).toBe(18_000)
         expect(admission.admissions['call-9']).toMatchObject({
             admitted: true,
             blockedReason: null,
-            observationCharAllowance: 2_000,
+            observationCharAllowance: 9_000,
             ordinal: 1,
         })
         expect(admission.admissions['call-10']).toMatchObject({
-            admitted: false,
-            blockedReason: 'tool_call_limit',
-            observationCharAllowance: 0,
+            admitted: true,
+            blockedReason: null,
+            observationCharAllowance: 9_000,
             ordinal: 2,
         })
         expect(admission.admissions['call-11']).toMatchObject({
@@ -89,7 +89,7 @@ describe('General ReAct action batch admission', () => {
             actionRound: 2,
             batchId: 'batch-observation-limit',
             callIds: ['call-a', 'call-b'],
-            observationCharsUsed: 31_999,
+            observationCharsUsed: 47_999,
             toolCallsUsed: 0,
         })
 

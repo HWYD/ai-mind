@@ -9,6 +9,7 @@ import {
     generalReActAgentStateSchema,
     type GeneralReActAgentStateUpdate,
 } from '@/lib/ai/runtime/general-react-agent/agent-state'
+import { normalizeModelTurnFinish } from '@/lib/ai/runtime/general-react-agent/model-turn-finish-normalizer'
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from '@/lib/ai/runtime/general-react-agent/runtime-config'
 
 export type GeneralReActStopReason = NonNullable<GeneralReActAgentState['_stopReason']>
@@ -124,8 +125,8 @@ export function evaluateBeforeModelPolicy(input: {
         : input.state._noProgressRounds
     const admissions = effectiveState._currentActionBatch?.admissions ?? {}
     const stopReason = selectGeneralReActStopReason({
-        actionDeadline: input.nowMs >= effectiveState._actionDeadlineAtMs,
-        modelCallLimit: effectiveState._actionModelCallCount >= GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls,
+        actionDeadline: input.nowMs >= effectiveState._loopDeadlineAtMs,
+        modelCallLimit: effectiveState._loopModelCallCount >= GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls,
         noProgress: noProgressRounds >= GENERAL_REACT_RUNTIME_DEFAULTS.maxNoProgressRounds,
         observationLimit:
             effectiveState._observationChars >= GENERAL_REACT_RUNTIME_DEFAULTS.maxObservationChars ||
@@ -142,7 +143,7 @@ export function evaluateBeforeModelPolicy(input: {
     return {
         _currentActionBatch: null,
         _noProgressRounds: noProgressRounds,
-        _runPhase: 'acting',
+        _runPhase: 'looping',
         _stopReason: null,
     }
 }
@@ -155,12 +156,23 @@ export function evaluateAfterModelPolicy(input: {
     state: GeneralReActAgentState
 }): GeneralReActPolicyUpdate {
     const toolCalls = input.message.tool_calls ?? []
+    if (input.state._finalizationMode === 'normal' && toolCalls.length > 0) {
+        return stopUpdate('agent_contract_violation')
+    }
+
     if (toolCalls.length === 0) {
+        const finish = normalizeModelTurnFinish(input.message)
+        if (finish.disposition === 'blocked') {
+            return stopUpdate('agent_contract_violation')
+        }
+        if (finish.disposition === 'constrained') {
+            return stopUpdate('model_error')
+        }
         const deadlineStopReason =
             input.nowMs === undefined
                 ? null
                 : selectGeneralReActStopReason({
-                      actionDeadline: input.nowMs >= input.state._actionDeadlineAtMs,
+                      actionDeadline: input.nowMs >= input.state._loopDeadlineAtMs,
                       runDeadline: input.nowMs >= input.state._hardDeadlineAtMs,
                   })
         if (deadlineStopReason) {
@@ -170,7 +182,7 @@ export function evaluateAfterModelPolicy(input: {
         if (hasVisibleText(input.message)) {
             return {
                 _finalizationMode: 'normal',
-                _runPhase: 'answering',
+                _runPhase: 'finalizing',
                 _stopReason: 'natural_completion',
                 jumpTo: 'end',
             }
@@ -186,8 +198,8 @@ export function evaluateAfterModelPolicy(input: {
 
     const nowMs = input.nowMs
     const previousUsage = {
-        actionRoundCount: input.state._actionRoundCount,
-        actionModelCallCount: input.state._actionModelCallCount,
+        actionRoundCount: input.state._toolBearingRoundCount,
+        actionModelCallCount: input.state._loopModelCallCount,
         observationChars: input.state._observationChars,
         toolCallCount: input.state._toolCallCount,
     }
@@ -195,8 +207,8 @@ export function evaluateAfterModelPolicy(input: {
         nowMs === undefined
             ? null
             : selectGeneralReActStopReason({
-                  actionDeadline: nowMs >= input.state._actionDeadlineAtMs,
-                  modelCallLimit: previousUsage.actionModelCallCount + 1 >= GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls,
+                  actionDeadline: nowMs >= input.state._loopDeadlineAtMs,
+                  modelCallLimit: previousUsage.actionModelCallCount + 1 >= GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls,
                   runDeadline: nowMs >= input.state._hardDeadlineAtMs,
               })
     if (stopReason) {
@@ -204,7 +216,7 @@ export function evaluateAfterModelPolicy(input: {
     }
 
     const actionRound = previousUsage.actionRoundCount + 1
-    if (actionRound > GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingActionRounds) {
+    if (actionRound > GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingRounds) {
         return stopUpdate('action_round_limit')
     }
     const admission = createActionBatchAdmission({
@@ -216,9 +228,13 @@ export function evaluateAfterModelPolicy(input: {
     })
 
     return {
-        _actionRoundCount: boundedCounterDelta(input.state._actionRoundCount, GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingActionRounds, 1),
+        _toolBearingRoundCount: boundedCounterDelta(
+            input.state._toolBearingRoundCount,
+            GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingRounds,
+            1
+        ),
         _currentActionBatch: admission,
-        _runPhase: 'acting',
+        _runPhase: 'looping',
         _toolCallCount: boundedCounterDelta(
             input.state._toolCallCount,
             GENERAL_REACT_RUNTIME_DEFAULTS.maxLogicalToolCalls,
@@ -241,7 +257,7 @@ export function createGeneralReActRunPolicyMiddleware(
             if (state._startedAtMs > 0) {
                 return
             }
-            return createGeneralReActInitialState(runtime.context.clock.now(), state.messages)
+            return createGeneralReActInitialState(runtime.context.clock.now(), state.messages, runtime.context.trustedUserUrls)
         },
         beforeModel: {
             canJumpTo: ['end'],
@@ -262,16 +278,16 @@ export function createGeneralReActRunPolicyMiddleware(
                 }
 
                 const update = evaluateAfterModelPolicy({
-                    batchId: `action-${state._actionRoundCount + 1}`,
+                    batchId: `loop-${state._toolBearingRoundCount + 1}`,
                     message,
                     nowMs: runtime.context.clock.now(),
                     state,
                 })
                 return {
                     ...update,
-                    _actionModelCallCount: boundedCounterDelta(
-                        state._actionModelCallCount,
-                        GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls,
+                    _loopModelCallCount: boundedCounterDelta(
+                        state._loopModelCallCount,
+                        GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls,
                         1
                     ),
                 }
@@ -288,7 +304,7 @@ function stopUpdate(stopReason: GeneralReActStopReason): GeneralReActPolicyUpdat
         return {
             _currentActionBatch: null,
             _finalizationMode: 'constrained',
-            _runPhase: 'answering',
+            _runPhase: 'finalizing',
             _stopReason: stopReason,
             jumpTo: 'end',
         }

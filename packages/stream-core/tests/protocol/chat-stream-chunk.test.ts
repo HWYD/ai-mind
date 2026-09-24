@@ -1,6 +1,101 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
 
-import type { ChatStreamChunk, PublicSourceRecord } from '../../src/protocol'
+import type { AgentRunEndChunk, AgentTextEndChunk, ChatStreamChunk, PublicSourceRecord } from '../../src/protocol'
+
+describe('chat stream agent text chunks', () => {
+    it('accepts additive agent text lifecycle chunks without changing legacy text or AgentRun chunks', () => {
+        const chunks = [
+            {
+                modelTurnId: 'turn-1',
+                partId: 'agent-text-1',
+                runId: 'run-1',
+                type: 'agent-text-start',
+            },
+            {
+                delta: '我先查询一下。',
+                partId: 'agent-text-1',
+                type: 'agent-text-delta',
+            },
+            {
+                outcome: 'commentary',
+                partId: 'agent-text-1',
+                status: 'completed',
+                type: 'agent-text-end',
+            },
+            {
+                finalizationMode: 'normal',
+                partId: 'agent-run-1',
+                runId: 'run-1',
+                status: 'completed',
+                type: 'agent-run-end',
+            },
+            {
+                partId: 'legacy-agent-run-1',
+                runId: 'legacy-run-1',
+                status: 'completed',
+                type: 'agent-run-end',
+            },
+            {
+                partId: 'legacy-text-1',
+                type: 'text-start',
+            },
+            {
+                delta: '最终答案',
+                partId: 'legacy-text-1',
+                type: 'text-delta',
+            },
+            {
+                partId: 'legacy-text-1',
+                type: 'text-end',
+            },
+        ] satisfies ChatStreamChunk[]
+
+        expect(chunks.map(chunk => chunk.type)).toEqual([
+            'agent-text-start',
+            'agent-text-delta',
+            'agent-text-end',
+            'agent-run-end',
+            'agent-run-end',
+            'text-start',
+            'text-delta',
+            'text-end',
+        ])
+    })
+
+    it('allows only completed final answers to close an agent text part', () => {
+        const end = {
+            outcome: 'final_answer',
+            partId: 'agent-text-1',
+            status: 'completed',
+            type: 'agent-text-end',
+        } satisfies AgentTextEndChunk
+
+        expect(end).toMatchObject({ outcome: 'final_answer', status: 'completed' })
+        expectTypeOf<{
+            outcome: 'final_answer'
+            partId: string
+            status: 'interrupted'
+            type: 'agent-text-end'
+        }>().not.toMatchTypeOf<AgentTextEndChunk>()
+    })
+
+    it('allows finalization provenance only for completed Agent runs', () => {
+        expectTypeOf<{
+            finalizationMode: 'constrained'
+            partId: string
+            runId: string
+            status: 'completed'
+            type: 'agent-run-end'
+        }>().toMatchTypeOf<AgentRunEndChunk>()
+        expectTypeOf<{
+            finalizationMode: 'normal'
+            partId: string
+            runId: string
+            status: 'failed'
+            type: 'agent-run-end'
+        }>().not.toMatchTypeOf<AgentRunEndChunk>()
+    })
+})
 
 describe('chat stream tool source projection', () => {
     it('keeps legacy tool-end valid and accepts an optional public source projection', () => {

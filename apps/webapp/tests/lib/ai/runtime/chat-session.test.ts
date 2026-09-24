@@ -119,10 +119,10 @@ describe('runtime/chat-session', () => {
         )
     })
 
-    it('Action 与 Answer 是仅有的 Agent model phase', () => {
+    it('loop 与仅异常触发的 finalizer 是仅有的 Agent model phase', () => {
         type Phase = Parameters<ChatSession['createPhaseModel']>[0]['phase']
 
-        expectTypeOf<Phase>().toEqualTypeOf<'action' | 'answer'>()
+        expectTypeOf<Phase>().toEqualTypeOf<'finalizer' | 'loop'>()
     })
 
     it('Skill 选择只影响 prompt，不参与 General Tool policy', async () => {
@@ -139,7 +139,7 @@ describe('runtime/chat-session', () => {
         expect(capabilityMocks.resolveGeneralToolBinding).toHaveBeenCalledTimes(1)
     })
 
-    it('为 Action 与 Answer 构建独立的服务端提示词投影', async () => {
+    it('为 loop 与受限 finalizer 构建独立的服务端提示词投影', async () => {
         capabilityMocks.resolveGeneralToolBinding.mockResolvedValueOnce({
             activeToolCapabilityIds: [],
             activeToolDefinitionMap: new Map(),
@@ -155,19 +155,21 @@ describe('runtime/chat-session', () => {
         })
 
         const session = await createChatSession(createRequest(), resolvedModelSelection)
-        const actionPrompt = session.actionSystemPrompts.join('\n')
-        const answerPrompt = session.answerSystemPrompts.join('\n')
+        const loopPrompt = session.loopSystemPrompts.join('\n')
+        const finalizerPrompt = session.finalizerSystemPrompts.join('\n')
 
-        expect(actionPrompt).toContain('直接发起合法的 tool call')
-        expect(actionPrompt).toContain('内部行动阶段')
-        expect(answerPrompt).toContain('适中的必要解释')
-        expect(answerPrompt).toContain('用户明确要求简短、详细、步骤、表格或特定格式时')
-        expect(answerPrompt).not.toContain('直接发起合法的 tool call')
-        expect(answerPrompt).not.toContain('当前这一轮真正可用的工具只有')
-        expect(answerPrompt).not.toContain('ACTION_SKILL: 命中时必须调用工具。')
+        expect(loopPrompt).toContain('直接发起合法的 tool call')
+        expect(loopPrompt).toContain('直接成为面向用户的最终回答')
+        expect(loopPrompt).toContain('当前 Run 的真实 observation')
+        expect(finalizerPrompt).toContain('适中的必要解释')
+        expect(finalizerPrompt).toContain('当前 Run 的真实 observation')
+        expect(finalizerPrompt).toContain('用户明确要求简短、详细、步骤、表格或特定格式时')
+        expect(finalizerPrompt).not.toContain('直接发起合法的 tool call')
+        expect(finalizerPrompt).not.toContain('当前这一轮真正可用的工具只有')
+        expect(finalizerPrompt).not.toContain('ACTION_SKILL: 命中时必须调用工具。')
     })
 
-    it('Action 与 Answer 使用同一已解析模型和请求配置创建真实模型', async () => {
+    it('loop 与受限 finalizer 使用同一已解析模型和请求配置创建真实模型', async () => {
         const actionModel = { stream: vi.fn() }
         const answerModel = { stream: vi.fn() }
         modelProviderMocks.createChatModel
@@ -181,7 +183,7 @@ describe('runtime/chat-session', () => {
         expect(
             session.createPhaseModel({
                 maxRetries: 0,
-                phase: 'action',
+                phase: 'loop',
                 signal,
                 timeoutMs: 321,
             })
@@ -189,7 +191,7 @@ describe('runtime/chat-session', () => {
         expect(
             session.createPhaseModel({
                 maxRetries: 0,
-                phase: 'answer',
+                phase: 'finalizer',
                 signal,
                 timeoutMs: 654,
             })

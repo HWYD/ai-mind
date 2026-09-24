@@ -9,7 +9,11 @@ import type { ChatToolDefinition } from '@/lib/ai/tools'
 import type { RetryPermitPoolContract } from './retry-permit-pool'
 import { ToolFingerprintAdmission, type ToolFingerprintAdmissionContract } from './tool-fingerprint-admission'
 
-export type GeneralReActModelPhase = 'action' | 'answer'
+/**
+ * loop 是唯一的常规 ReAct 模型链路。finalizer 只用于 loop 无法自然收口时，
+ * 并且不再承担每次正常回答都必须经过的固定第二跳。
+ */
+export type GeneralReActModelPhase = 'finalizer' | 'loop'
 
 export interface GeneralReActSelectedSkill {
     description?: string
@@ -32,18 +36,21 @@ export interface GeneralReActRunContext {
     readonly clock: GeneralReActClock
     readonly createPhaseModel: (options: GeneralReActPhaseModelOptions) => BaseChatModel
     readonly executionContext: ResolvedChatExecutionContext
+    readonly hasPublishedPublicText?: () => boolean
     readonly isTransportClosed: () => boolean
     readonly normalizeModelError: (error: unknown) => NormalizedProviderError
     readonly publishChunk: (chunk: ChatStreamChunk) => Promise<void>
     readonly retryPermitPool: RetryPermitPoolContract
     readonly runSignal: AbortSignal
     readonly selectedSkill?: GeneralReActSelectedSkill
+    readonly trustedUserUrls: string[]
     readonly toolFingerprintAdmission: ToolFingerprintAdmissionContract
     readonly toolDefinitionMap: ReadonlyMap<string, ChatToolDefinition>
 }
 
-export type GeneralReActRunContextInput = Omit<GeneralReActRunContext, 'toolFingerprintAdmission'> & {
+export type GeneralReActRunContextInput = Omit<GeneralReActRunContext, 'toolFingerprintAdmission' | 'trustedUserUrls'> & {
     toolFingerprintAdmission?: ToolFingerprintAdmissionContract
+    trustedUserUrls?: readonly string[]
 }
 
 function functionSchema<T extends (...args: never[]) => unknown>() {
@@ -59,6 +66,7 @@ export const generalReActRunContextSchema = z
             .strict(),
         createPhaseModel: functionSchema<GeneralReActRunContext['createPhaseModel']>(),
         executionContext: z.custom<ResolvedChatExecutionContext>(value => typeof value === 'object' && value !== null),
+        hasPublishedPublicText: functionSchema<NonNullable<GeneralReActRunContext['hasPublishedPublicText']>>().optional(),
         isTransportClosed: functionSchema<GeneralReActRunContext['isTransportClosed']>(),
         normalizeModelError: functionSchema<GeneralReActRunContext['normalizeModelError']>(),
         publishChunk: functionSchema<GeneralReActRunContext['publishChunk']>(),
@@ -84,6 +92,7 @@ export const generalReActRunContextSchema = z
             })
             .strict()
             .optional(),
+        trustedUserUrls: z.array(z.string().url()).max(8),
         toolFingerprintAdmission: z.custom<ToolFingerprintAdmissionContract>(
             value =>
                 typeof value === 'object' &&
@@ -103,7 +112,9 @@ export function createGeneralReActRunContext(input: GeneralReActRunContextInput)
     return Object.freeze(
         generalReActRunContextSchema.parse({
             ...input,
+            hasPublishedPublicText: input.hasPublishedPublicText ?? (() => false),
             toolFingerprintAdmission: input.toolFingerprintAdmission ?? new ToolFingerprintAdmission(),
+            trustedUserUrls: input.trustedUserUrls ?? [],
         })
     ) as GeneralReActRunContext
 }

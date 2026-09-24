@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted and implemented in v0.6.0.
+Accepted in v0.6.0; the fixed Action + Answer projection is superseded by v0.6.1.
 
 ## Context
 
@@ -28,6 +28,21 @@ Accepted and implemented in v0.6.0.
 
 Generic chat 获得一致的上下文、工具和错误语义，重连可从 durable StreamEvent 回放，慢数据库通过 awaitable backpressure 保持事件顺序。运行时不会跨请求恢复 Agent state，也不会在多进程间协调 8-run capacity；需要这些能力时必须另行决策。
 
+## v0.6.1 Supersession
+
+The v0.6.0 bullets that require a fixed, Tool-free Answer model call and ordinary `text-*` final stream no longer apply to General ReAct. v0.6.1 keeps the `createAgent` middleware control plane and all existing Tool safety boundaries, while changing text authority as follows:
+
+- A natural no-Tool, non-empty loop turn becomes `AgentTextPart(final_answer)` in the same model call.
+- A Tool-bearing turn’s public text becomes `AgentTextPart(commentary)` before Tool dispatch; no nested Tool detail is introduced.
+- `pending` is client-derived from start/end, not a server authority.
+- Visible pending/commentary/final text shares the body Markdown renderer without a process icon; existing Trace detail keeps pending/commentary and Tool rows in source order, a safe read source list remains the owning Tool's direct child, and final text remains outside Trace.
+- A constrained Tool-free finalizer is abnormal-only, limited to one call, and its completed Run explicitly carries `finalizationMode=constrained`.
+- `normal` provenance is required for long-term Memory; constrained output remains final-only same-session context and local safe snapshot content.
+- A model-declared, known ToolCall that is rejected before provider execution is still public-auditable: Runtime emits the existing `tool-start` followed by same-part tool-scope `error`, both with fixed safe fields. It means the request was not executed, never a completed Tool or read source; raw arguments, URL/query, secret, fingerprint and internal error stay private.
+- URL provenance is an automatic server safety scope, not a user click prompt. Current user URLs and at most eight re-canonicalized URLs from same-conversation server raw user turns are read candidates. Summary, assistant text, Tool result, UserMemory and client history are never grant sources. The catalog cannot prove a prior Run executed or read a page, so historical-read questions fail closed rather than triggering automatic rereads.
+
+The fixed budgets are 9 Tool-bearing rounds, 14 logical Tool Calls, 10 loop calls, one constrained finalizer, 11 total calls and a 270-second hard limit. Existing Tool concurrency, Tool retry and per-profile timeout rules remain unchanged.
+
 ## Verification
 
-T068-T085 的 runtime、projection、capacity、calculator、专用 Agent 和 UI regression tests 已通过；Phase 14 另以 Action/Answer phase、同模型 provenance、public stream 与失败收口回归覆盖 D032。T090-T094 记录最终仓库 gate。
+v0.6.1 已以 canonical workspace 的 contract、runtime、projection、durable replay、Memory、Trace/UI 和 regression tests 记录自动化证据。2026-09-23 的本地 release closing 因 pre-execution Tool transcript truth gap 已重新打开；真实 provider/browser/Pencil 矩阵、完整 regression 与新的 release gate 以 `specs/v0.6.1-general-react-agent-streaming/acceptance.md` 为准，不得将历史 task/phase 编号当作当前验收事实。

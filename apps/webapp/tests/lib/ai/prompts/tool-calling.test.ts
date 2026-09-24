@@ -55,10 +55,11 @@ describe('tool calling prompt policy', () => {
         expect(answerPrompt).toContain('简单问题默认 1-3 句')
     })
 
-    it('Action 明确先判断证据需求，缺少关键参数时不猜测', () => {
+    it('loop 明确先判断证据需求、无 Tool 正文直接面向用户，且缺少关键参数时不猜测', () => {
         const actionPrompt = getActionSystemPrompt()
 
-        expect(actionPrompt).toContain('内部行动阶段')
+        expect(actionPrompt).toContain('没有发起 ToolCall')
+        expect(actionPrompt).toContain('直接成为面向用户的最终回答')
         expect(actionPrompt).toContain('缺少工具必需参数')
         expect(actionPrompt).toContain('不要猜测')
         expect(actionPrompt).toContain('不需要工具时结束行动')
@@ -78,8 +79,9 @@ describe('tool calling prompt policy', () => {
         expect(toolPrompt).toContain('没有符合偏好的结果')
         expect(toolPrompt).toContain('订单扣库存')
         expect(toolPrompt).toContain('用户已提供周报')
-        expect(answerPrompt).toContain('没有本轮成功 observation')
-        expect(answerPrompt).toContain('不得声称已搜索、已读取、找到来源、出现授权失败或据网页得出结论')
+        expect(actionPrompt).toContain('当前 Run 的真实 observation')
+        expect(answerPrompt).toContain('当前 Run 的真实 observation')
+        expect(answerPrompt).toContain('真实 denied observation')
     })
 
     it('工具结果只提供事实资料，不把网页中的操作指令当作任务', () => {

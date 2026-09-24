@@ -8,6 +8,7 @@ import type {
     AgentInterruptPart,
     AgentRunPart,
     AgentTextArtifactViewModel,
+    AgentTextPart,
     ImageBriefPart,
     ImageResultPart,
     MindMessage,
@@ -24,6 +25,7 @@ import type {
 import {
     createAgentGraphStepPart,
     createAgentRunPart,
+    createAgentTextPart,
     createReasoningPart,
     createTextPart,
     createWorkflowProgressStep,
@@ -87,7 +89,8 @@ export function upsertAgentRunPart(
     messageId: string,
     runId: string,
     status: AgentRunPart['status'],
-    partId = `agent-run:${runId}`
+    partId = `agent-run:${runId}`,
+    finalizationMode?: AgentRunPart['finalizationMode']
 ): MindMessage[] {
     return messages.map(message => {
         if (message.id !== messageId) {
@@ -95,13 +98,77 @@ export function upsertAgentRunPart(
         }
 
         const existing = message.parts.find((part): part is AgentRunPart => part.type === 'agent-run' && part.runId === runId)
-        const nextPart = existing ? { ...existing, id: partId, status } : createAgentRunPart(runId, status, partId)
+        const nextPart = existing
+            ? { ...existing, id: partId, status, ...(finalizationMode ? { finalizationMode } : {}) }
+            : { ...createAgentRunPart(runId, status, partId), ...(finalizationMode ? { finalizationMode } : {}) }
 
         return {
             ...message,
             parts: existing ? message.parts.map(part => (part === existing ? nextPart : part)) : [...message.parts, nextPart],
         }
     })
+}
+
+export function upsertAgentTextPart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    runId: string,
+    modelTurnId: string
+): MindMessage[] | null {
+    let valid = true
+    const nextMessages = messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const existing = message.parts.find((part): part is AgentTextPart => part.type === 'agent-text' && part.id === partId)
+        if (existing) {
+            valid = existing.runId === runId && existing.modelTurnId === modelTurnId
+            return message
+        }
+
+        if (message.parts.some(part => part.type === 'agent-text' && part.runId === runId && part.modelTurnId === modelTurnId)) {
+            valid = false
+            return message
+        }
+
+        return { ...message, parts: [...message.parts, createAgentTextPart(partId, runId, modelTurnId)] }
+    })
+
+    return valid ? nextMessages : null
+}
+
+export function updateAgentTextPart(
+    messages: MindMessage[],
+    messageId: string,
+    partId: string,
+    updater: (part: AgentTextPart) => AgentTextPart | null
+): MindMessage[] | null {
+    let valid = false
+    const nextMessages = messages.map(message => {
+        if (message.id !== messageId) {
+            return message
+        }
+
+        const nextParts = message.parts.map(part => {
+            if (part.type !== 'agent-text' || part.id !== partId) {
+                return part
+            }
+
+            const nextPart = updater(part)
+            if (!nextPart) {
+                return part
+            }
+
+            valid = true
+            return nextPart
+        })
+
+        return { ...message, parts: nextParts }
+    })
+
+    return valid ? nextMessages : null
 }
 
 export function appendAgentTextArtifact(messages: MindMessage[], messageId: string, artifact: AgentTextArtifactViewModel): MindMessage[] {
@@ -215,6 +282,20 @@ export function getMessageTextContent(message: MindMessage): string {
         .filter((part): part is TextPart => part.type === 'text' && part.text.trim().length > 0)
         .map(part => part.text)
         .join('\n\n')
+}
+
+export function getFinalAnswerTextContent(message: MindMessage): string {
+    const agentTextParts = message.parts.filter((part): part is AgentTextPart => part.type === 'agent-text')
+
+    if (agentTextParts.length > 0) {
+        const finalAnswerParts = agentTextParts.filter(
+            part => part.phase === 'final_answer' && part.status === 'completed' && part.text.trim().length > 0
+        )
+
+        return finalAnswerParts.length === 1 ? finalAnswerParts[0].text : ''
+    }
+
+    return getMessageTextContent(message)
 }
 
 export function appendPart(messages: MindMessage[], messageId: string, part: MindMessagePart): MindMessage[] {

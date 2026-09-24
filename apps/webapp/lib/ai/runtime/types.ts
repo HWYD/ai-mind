@@ -45,8 +45,8 @@ export interface ChatSession {
     activeToolDefinitionMap: Map<string, ChatToolDefinition>
     activeTools: ChatToolDefinition[]
     activeToolNames: string[]
-    actionSystemPrompts: string[]
-    answerSystemPrompts: string[]
+    finalizerSystemPrompts: string[]
+    loopSystemPrompts: string[]
     langChainMessages: BaseMessage[]
     toolUseSystemPrompt?: string
     toolResultSystemPrompt?: string

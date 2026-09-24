@@ -1,18 +1,29 @@
 import { normalizeSafePublicHttpUrl } from '@/lib/ai/safe-public-url'
-import type { MindMessagePart, ToolPart } from '@/lib/ai/types/message'
+import type { AgentTextPart, MindMessagePart, ToolPart } from '@/lib/ai/types/message'
 
 export type GeneralAgentTraceStatus = 'cancelled' | 'completed' | 'failed' | 'running'
-export type GeneralAgentTraceRowKind = 'prompt' | 'resource' | 'skill' | 'tool'
+export type GeneralAgentTraceDetailRowKind = 'prompt' | 'resource' | 'skill' | 'tool'
 export type GeneralAgentTraceRowStatus = 'completed' | 'failed' | 'running' | 'stopped'
 
-export interface GeneralAgentTraceRow {
+export interface GeneralAgentTraceTextRow {
     id: string
-    kind: GeneralAgentTraceRowKind
+    kind: 'agent-text'
+    ordinal: number
+    part: AgentTextPart
+    status: GeneralAgentTraceRowStatus
+}
+
+export interface GeneralAgentTraceDetailRow {
+    id: string
+    kind: GeneralAgentTraceDetailRowKind
     label: string
     ordinal: number
+    readSources?: GeneralAgentTraceSource[]
     status: GeneralAgentTraceRowStatus
     toolName?: string
 }
+
+export type GeneralAgentTraceRow = GeneralAgentTraceDetailRow | GeneralAgentTraceTextRow
 
 export interface GeneralAgentTraceSource {
     hostname: string
@@ -21,8 +32,8 @@ export interface GeneralAgentTraceSource {
 }
 
 export interface GeneralAgentTraceView {
+    hasFoldableDetails: boolean
     readCount: number
-    readSources: GeneralAgentTraceSource[]
     rows: GeneralAgentTraceRow[]
     searchCount: number
     status: GeneralAgentTraceStatus
@@ -44,6 +55,8 @@ function getRowStatus(part: MindMessagePart, status: GeneralAgentTraceStatus): G
         partStatus = part.status === 'loading' ? 'running' : part.status
     } else if (part.type === 'prompt') {
         partStatus = part.status === 'called' ? 'running' : part.status
+    } else if (part.type === 'agent-text') {
+        partStatus = part.status === 'streaming' ? 'running' : part.status === 'interrupted' ? 'stopped' : 'completed'
     } else {
         partStatus = 'completed'
     }
@@ -103,8 +116,11 @@ function getToolRowLabel(part: ToolPart, status: GeneralAgentTraceRowStatus, sea
     }
 }
 
+type GeneralAgentTraceDetailPart = Extract<MindMessagePart, { type: GeneralAgentTraceDetailRowKind }>
+type GeneralAgentTracePart = AgentTextPart | GeneralAgentTraceDetailPart
+
 function getRowLabel(
-    part: MindMessagePart,
+    part: GeneralAgentTraceDetailPart,
     status: GeneralAgentTraceRowStatus,
     counts: Pick<GeneralAgentTraceView, 'readCount' | 'searchCount'>
 ) {
@@ -128,22 +144,30 @@ function getRowLabel(
     }
 }
 
-function getTraceParts(parts: MindMessagePart[]) {
-    return parts.filter(
-        (part): part is Extract<MindMessagePart, { type: GeneralAgentTraceRowKind }> =>
-            part.type === 'prompt' || part.type === 'resource' || part.type === 'skill' || part.type === 'tool'
+function isTracePart(part: MindMessagePart): part is GeneralAgentTracePart {
+    return (
+        part.type === 'prompt' ||
+        part.type === 'resource' ||
+        part.type === 'skill' ||
+        part.type === 'tool' ||
+        (part.type === 'agent-text' && part.phase !== 'final_answer' && part.text.trim().length > 0)
     )
 }
 
-function collectSafeSources(parts: MindMessagePart[]) {
+function collectSafeSources(traceParts: Array<{ index: number; part: GeneralAgentTracePart }>) {
     const searchUrls = new Set<string>()
+    const searchCountsByToolId = new Map<string, number>()
     const readUrls = new Set<string>()
-    const readSources: GeneralAgentTraceSource[] = []
+    const readSourcesByToolId = new Map<string, GeneralAgentTraceSource[]>()
+    let renderedReadSourceCount = 0
 
-    for (const part of parts) {
+    for (const { index, part } of traceParts) {
         if (part.type !== 'tool') {
             continue
         }
+
+        const toolPartId = getPartId(part, index)
+        const toolSearchUrls = new Set<string>()
 
         for (const source of part.sources ?? []) {
             const url = toCanonicalHttpUrl(source.url)
@@ -152,35 +176,65 @@ function collectSafeSources(parts: MindMessagePart[]) {
                 continue
             }
 
-            if (source.originTool === 'web-search' && source.status !== 'unavailable') {
+            if (source.originTool === 'web-search' && source.status === 'discovered') {
                 searchUrls.add(url)
+                toolSearchUrls.add(url)
             }
 
             if (source.originTool === 'read-url' && source.status === 'read' && !readUrls.has(url)) {
                 readUrls.add(url)
-                readSources.push({ hostname: new URL(url).hostname, title: source.title, url })
+
+                if (renderedReadSourceCount < 5) {
+                    const toolReadSources = readSourcesByToolId.get(toolPartId) ?? []
+
+                    toolReadSources.push({ hostname: new URL(url).hostname, title: source.title, url })
+                    readSourcesByToolId.set(toolPartId, toolReadSources)
+                    renderedReadSourceCount += 1
+                }
             }
+        }
+
+        if (part.toolName === 'web-search') {
+            searchCountsByToolId.set(toolPartId, toolSearchUrls.size)
         }
     }
 
     return {
         readCount: readUrls.size,
-        readSources: readSources.slice(0, 5),
+        readSourcesByToolId,
         searchCount: searchUrls.size,
+        searchCountsByToolId,
     }
 }
 
 export function buildGeneralAgentTraceView(parts: MindMessagePart[], status: GeneralAgentTraceStatus): GeneralAgentTraceView {
-    const traceParts = getTraceParts(parts)
+    const traceParts = parts.flatMap((part, index) => (isTracePart(part) ? [{ index, part }] : []))
     const sources = collectSafeSources(traceParts)
-    const rows = traceParts.map((part, index) => {
+    const rows = traceParts.map(({ index, part }) => {
         const rowStatus = getRowStatus(part, status)
 
+        if (part.type === 'agent-text') {
+            return {
+                id: getPartId(part, index),
+                kind: 'agent-text' as const,
+                ordinal: index + 1,
+                part,
+                status: rowStatus,
+            }
+        }
+
+        const id = getPartId(part, index)
+        const counts =
+            part.type === 'tool' && part.toolName === 'web-search'
+                ? { ...sources, searchCount: sources.searchCountsByToolId.get(id) ?? 0 }
+                : sources
+
         return {
-            id: getPartId(part, index),
+            id,
             kind: part.type,
-            label: getRowLabel(part, rowStatus, sources),
+            label: getRowLabel(part, rowStatus, counts),
             ordinal: index + 1,
+            readSources: part.type === 'tool' ? sources.readSourcesByToolId.get(id) : undefined,
             status: rowStatus,
             toolName: part.type === 'tool' ? part.toolName : undefined,
         }
@@ -188,6 +242,7 @@ export function buildGeneralAgentTraceView(parts: MindMessagePart[], status: Gen
 
     return {
         ...sources,
+        hasFoldableDetails: traceParts.some(({ part }) => part.type !== 'agent-text' || part.phase === 'commentary'),
         rows,
         status,
     }

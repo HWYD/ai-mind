@@ -24,6 +24,18 @@ export function buildSystemMessages(...prompts: Array<string | undefined>): Base
         .map(prompt => new SystemMessage(prompt))
 }
 
+export function getTrustedUserUrlCatalogSystemPrompt(urls: readonly string[]) {
+    if (urls.length === 0) {
+        return undefined
+    }
+
+    return [
+        '以下是同一会话中用户先前明确提供、且本 Run 已再次通过安全校验的公开 URL 候选：',
+        ...urls.map(url => `- ${url}`),
+        '它们仅允许在当前用户明确要求重新读取、且目标唯一可识别时调用 read-url；它们不是网页内容、不是来源，也不证明任何先前 Tool 已执行或读取成功。用户只问历史是否读取时，如实说明当前 Run 无法核验旧执行，不要自动读取。',
+    ].join('\n')
+}
+
 export function withChatMemoryContextMessages(messages: BaseMessage[], memoryContextMessages: BaseMessage[]): BaseMessage[] {
     if (memoryContextMessages.length === 0) {
         return messages
@@ -82,7 +94,7 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
     const { activeToolCapabilityIds, activeToolDefinitionMap, activeToolNames, activeTools } = toolBinding
     const toolUseSystemPrompt = getToolUseSystemPrompt(activeToolNames)
     const toolResultSystemPrompt = getToolResultSystemPrompt(activeToolNames)
-    const actionSystemPrompts = [
+    const loopSystemPrompts = [
         getCoreResponseSystemPrompt(),
         getActionSystemPrompt(),
         skillSystemPrompt,
@@ -90,7 +102,7 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
         toolUseSystemPrompt,
         toolResultSystemPrompt,
     ].filter((prompt): prompt is string => Boolean(prompt))
-    const answerSystemPrompts = [getCoreResponseSystemPrompt(), skillOutputPolicyPrompt, getAnswerSystemPrompt()].filter(
+    const finalizerSystemPrompts = [getCoreResponseSystemPrompt(), skillOutputPolicyPrompt, getAnswerSystemPrompt()].filter(
         (prompt): prompt is string => Boolean(prompt)
     )
     const langChainMessages = toLangChainMessages(getLatestUserMessageOnly(request))
@@ -117,8 +129,8 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
         activeToolCapabilityIds,
         activeToolDefinitionMap,
         activeToolNames,
-        actionSystemPrompts,
-        answerSystemPrompts,
+        finalizerSystemPrompts,
+        loopSystemPrompts,
         langChainMessages,
         toolUseSystemPrompt,
         toolResultSystemPrompt,

@@ -10,9 +10,15 @@ function toMessageInput(message: MindMessage): MindMessageInput | null {
         return null
     }
 
-    const parts = message.parts.filter(
-        (part): part is MindMessageInput['parts'][number] => part.type === 'text' && part.text.trim().length > 0
-    )
+    const agentTextParts = message.parts.filter(part => part.type === 'agent-text')
+    const parts =
+        agentTextParts.length > 0
+            ? agentTextParts
+                  .filter(part => part.phase === 'final_answer' && part.status === 'completed' && part.text.trim().length > 0)
+                  .map(part => ({ format: part.format, text: part.text, type: 'text' as const }))
+            : message.parts
+                  .filter((part): part is MindMessageInput['parts'][number] => part.type === 'text' && part.text.trim().length > 0)
+                  .map(part => ({ format: part.format, text: part.text, type: part.type }))
 
     if (parts.length === 0) {
         return null
@@ -21,11 +27,7 @@ function toMessageInput(message: MindMessage): MindMessageInput | null {
     return {
         ...(message.id ? { id: message.id } : {}),
         role: message.role,
-        parts: parts.map(part => ({
-            type: part.type,
-            text: part.text,
-            format: part.format,
-        })),
+        parts,
     }
 }
 

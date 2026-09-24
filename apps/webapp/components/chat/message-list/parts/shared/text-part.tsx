@@ -4,7 +4,7 @@ import { Info } from 'lucide-react'
 import { memo } from 'react'
 import { Streamdown } from 'streamdown'
 
-import type { TextPart } from '@/lib/ai/types/message'
+import type { AgentTextPart, TextPart } from '@/lib/ai/types/message'
 
 import { getRateLimitNoticeViewModel } from '../../shared/message-list-utils'
 
@@ -17,7 +17,13 @@ const streamAnimation = {
 } as const
 const streamdownMode = 'streaming' as const
 
-export const TextPartView = memo(function TextPartView({ part, isStreaming = false }: { part: TextPart; isStreaming?: boolean }) {
+export const TextPartView = memo(function TextPartView({
+    part,
+    isStreaming = false,
+}: {
+    part: AgentTextPart | TextPart
+    isStreaming?: boolean
+}) {
     const rateLimitNotice = getRateLimitNoticeViewModel(part.text)
 
     if (rateLimitNotice) {

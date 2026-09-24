@@ -18,6 +18,7 @@ import {
     deriveGeneralReActMessageUsage,
     type GeneralReActStopReason,
 } from '@/lib/ai/runtime/general-react-agent/middleware/run-policy-middleware'
+import { normalizeModelTurnFinish } from '@/lib/ai/runtime/general-react-agent/model-turn-finish-normalizer'
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from '@/lib/ai/runtime/general-react-agent/runtime-config'
 import { GeneralReActStreamAdapter } from '@/lib/ai/runtime/general-react-agent/stream-adapter'
 
@@ -49,8 +50,8 @@ export class GeneralReActAgentRunError extends Error {
 }
 
 export type GeneralReActRunnerInput = {
-    answerMessages: BaseMessage[]
     context: GeneralReActRunContext
+    finalizerMessages: BaseMessage[]
     messages: BaseMessage[]
     runId: string
     threadId: string
@@ -101,60 +102,144 @@ export class GeneralReActAgentRunner {
 
         let runFailed = false
         try {
-            let actionTimedOut = false
-            let actionModelAttempted = false
+            let hasPublishedPublicModelText = false
+            let loopTimedOut = false
+            let loopModelAttempted = false
             let getModelRetryCount = () => 0
             let state: GeneralReActAgentState & { messages: BaseMessage[] }
+            let resolvedLoopModelMessageCount = 0
+            let normalFinalText = ''
+            let pendingCompletedModelEcho = ''
+            let toolCommentaryClosedBeforeState: string | undefined
 
-            if (runContext.clock.now() >= initialState._actionDeadlineAtMs) {
+            const publishModelText = async (delta: string) => {
+                for (const chunk of adapter.projectModelText(delta)) {
+                    await runContext.publishChunk(chunk)
+                    if (chunk.type === 'agent-text-delta') {
+                        hasPublishedPublicModelText = true
+                    }
+                }
+            }
+            const resolveCompletedLoopModelTurns = async (candidateState: GeneralReActAgentState & { messages: BaseMessage[] }) => {
+                const currentRunModelMessages = candidateState.messages
+                    .slice(input.messages.length)
+                    .filter((message): message is AIMessage => AIMessage.isInstance(message))
+
+                while (resolvedLoopModelMessageCount < currentRunModelMessages.length) {
+                    const message = currentRunModelMessages[resolvedLoopModelMessageCount]
+                    const hasToolCalls = (message.tool_calls?.length ?? 0) > 0
+
+                    // values 会先暴露“模型已写入 messages、但 afterModel policy 还未完成”的瞬态。
+                    // 这时不能结束 pending 文本，否则同一 turn 的后续 callback 会被误建成新行。
+                    if (
+                        (!hasToolCalls &&
+                            candidateState._finalizationMode !== 'normal' &&
+                            candidateState._finalizationMode !== 'constrained') ||
+                        (hasToolCalls && !candidateState._currentActionBatch && candidateState._finalizationMode !== 'constrained')
+                    ) {
+                        return
+                    }
+
+                    resolvedLoopModelMessageCount += 1
+                    const fullText = getSafeAnswerText(message)
+                    const streamedText = adapter.getActiveModelText()
+                    const wasClosedBeforeToolState = hasToolCalls && toolCommentaryClosedBeforeState === fullText
+
+                    // LangGraph 的 messages mode 在完整 values state 后仍可能补发同一 turn 的
+                    // 聚合 AIMessageChunk。callback delta 已经公开时，只忽略这一个完成态回声。
+                    pendingCompletedModelEcho = fullText
+
+                    if (wasClosedBeforeToolState) {
+                        toolCommentaryClosedBeforeState = undefined
+                        continue
+                    }
+
+                    if (fullText && !streamedText) {
+                        await publishModelText(fullText)
+                    } else if (fullText.startsWith(streamedText)) {
+                        await publishModelText(fullText.slice(streamedText.length))
+                    }
+
+                    if (hasToolCalls) {
+                        const textEnd = adapter.endModelText({ outcome: 'commentary', status: 'completed' })
+                        if (textEnd) await runContext.publishChunk(textEnd)
+                        continue
+                    }
+
+                    if (
+                        candidateState._finalizationMode === 'normal' &&
+                        normalizeModelTurnFinish(message).disposition === 'natural' &&
+                        fullText.trim()
+                    ) {
+                        normalFinalText = fullText
+                        const textEnd = adapter.endModelText({ outcome: 'final_answer', status: 'completed' })
+                        if (textEnd) await runContext.publishChunk(textEnd)
+                        continue
+                    }
+
+                    const textEnd = adapter.endModelText({ outcome: 'commentary', status: 'interrupted' })
+                    if (textEnd) await runContext.publishChunk(textEnd)
+                }
+            }
+
+            if (runContext.clock.now() >= initialState._loopDeadlineAtMs) {
                 state = {
                     ...createGeneralReActInitialState(startedAtMs),
                     _finalizationMode: 'constrained',
-                    _runPhase: 'answering',
+                    _runPhase: 'finalizing',
                     _stopReason: 'action_deadline',
                     messages: input.messages,
                 }
             } else {
-                const actionTimeoutMs = initialState._actionDeadlineAtMs - runContext.clock.now()
-                const actionPhaseScope = createPhaseSignalScope(runContext.runSignal, actionTimeoutMs)
+                const loopTimeoutMs = initialState._loopDeadlineAtMs - runContext.clock.now()
+                const loopPhaseScope = createPhaseSignalScope(runContext.runSignal, loopTimeoutMs)
                 const model = runContext.createPhaseModel({
                     maxRetries: 0,
-                    phase: 'action',
-                    signal: actionPhaseScope.signal,
-                    timeoutMs: actionTimeoutMs,
+                    phase: 'loop',
+                    signal: loopPhaseScope.signal,
+                    timeoutMs: loopTimeoutMs,
                 })
-                const actionContext = createGeneralReActRunContext({
+                const loopContext = createGeneralReActRunContext({
                     ...runContext,
+                    hasPublishedPublicText: () => hasPublishedPublicModelText,
                     publishChunk: async chunk => {
-                        if (actionPhaseScope.signal.aborted) {
+                        if (loopPhaseScope.signal.aborted) {
                             return
                         }
 
+                        if (chunk.type === 'tool-start') {
+                            const activeText = adapter.getActiveModelText()
+                            if (activeText) {
+                                toolCommentaryClosedBeforeState = activeText
+                                const textEnd = adapter.endModelText({ outcome: 'commentary', status: 'completed' })
+                                if (textEnd) await runContext.publishChunk(textEnd)
+                            }
+                        }
                         await runContext.publishChunk(chunk)
                     },
-                    runSignal: actionPhaseScope.signal,
+                    runSignal: loopPhaseScope.signal,
                 })
-                const actionAgent = createGeneralReActAgent({ context: actionContext, model })
-                getModelRetryCount = actionAgent.getModelRetryCount
+                const loopAgent = createGeneralReActAgent({ context: loopContext, model })
+                getModelRetryCount = loopAgent.getModelRetryCount
                 let streamedMessages: BaseMessage[] | undefined
                 let lastCompleteStreamState: (GeneralReActAgentState & { messages: BaseMessage[] }) | undefined
                 let agentIterator: AsyncIterator<unknown> | undefined
                 const consumeAgentStream = (async () => {
                     try {
-                        actionModelAttempted = true
-                        const agentStream = await actionAgent.agent.stream(
+                        loopModelAttempted = true
+                        const agentStream = await loopAgent.agent.stream(
                             // LangChain 1.5 的 InvokeStateParameter 无法正确推导“仅私有扩展 state + messages”。
                             { messages: input.messages } as never,
                             {
-                                context: actionContext,
+                                context: loopContext,
                                 maxConcurrency: GENERAL_REACT_RUNTIME_DEFAULTS.maxToolConcurrency,
                                 recursionLimit: GENERAL_REACT_RUNTIME_DEFAULTS.recursionLimit,
-                                signal: actionPhaseScope.signal,
+                                signal: loopPhaseScope.signal,
                                 streamMode: ['values', 'messages'],
                             }
                         )
                         agentIterator = agentStream[Symbol.asyncIterator]()
-                        if (actionPhaseScope.signal.aborted) {
+                        if (loopPhaseScope.signal.aborted) {
                             await agentIterator.return?.()
                             return
                         }
@@ -166,22 +251,29 @@ export class GeneralReActAgentRunner {
                             }
 
                             const candidate = next.value
-                            if (actionPhaseScope.signal.aborted) {
+                            if (loopPhaseScope.signal.aborted) {
                                 await agentIterator.return?.()
                                 return
                             }
 
                             const candidateState = await readStreamState(candidate)
-                            if (candidateState && !actionPhaseScope.signal.aborted) {
+                            if (candidateState && !loopPhaseScope.signal.aborted) {
                                 lastCompleteStreamState = candidateState
                                 streamedMessages = candidateState.messages
+                                await resolveCompletedLoopModelTurns(candidateState)
+                            }
+                            const streamedDelta = getStreamedModelTextDelta(candidate)
+                            if (streamedDelta && streamedDelta === pendingCompletedModelEcho) {
+                                pendingCompletedModelEcho = ''
+                            } else if (streamedDelta && !loopPhaseScope.signal.aborted) {
+                                await publishModelText(streamedDelta)
                             }
                             if (runContext.clock.now() >= initialState._hardDeadlineAtMs) {
                                 this.assertRunCanFinalize(runContext, initialState._hardDeadlineAtMs, signalScope.deadlineSignal)
                             }
                             const publicChunk = adapter.projectPublicRuntimeChunk(candidate)
                             if (publicChunk) {
-                                await actionContext.publishChunk(publicChunk)
+                                await loopContext.publishChunk(publicChunk)
                             }
                         }
                     } finally {
@@ -189,12 +281,12 @@ export class GeneralReActAgentRunner {
                     }
                 })()
 
-                let actionFailure: unknown
+                let loopFailure: unknown
                 try {
-                    await Promise.race([consumeAgentStream, actionPhaseScope.timeoutPromise])
+                    await Promise.race([consumeAgentStream, loopPhaseScope.timeoutPromise])
                 } catch (error) {
                     if (error instanceof GeneralReActPhaseTimeoutError) {
-                        actionTimedOut = true
+                        loopTimedOut = true
                         const settled = await stopPhaseExecution({
                             execution: consumeAgentStream,
                             iterator: agentIterator,
@@ -206,18 +298,18 @@ export class GeneralReActAgentRunner {
                             )
                         }
                     } else {
-                        actionFailure = error
+                        loopFailure = error
                     }
                 } finally {
-                    actionPhaseScope.cleanup()
+                    loopPhaseScope.cleanup()
                     // 即使底层 provider 忽略 abort，也要吸收异步任务的迟到 rejection。
                     void consumeAgentStream.catch(() => undefined)
                 }
 
                 // LangChain 的 beforeModel `jumpTo: 'end'` 会绕过 afterAgent；只要流正常关闭，
                 // 最后一个完整 values state 仍然是可继续收口的合法 Agent 状态。
-                const finalState = actionAgent.getFinalState() ?? lastCompleteStreamState
-                if (!finalState && !actionTimedOut && !actionFailure) {
+                const finalState = loopAgent.getFinalState() ?? lastCompleteStreamState
+                if (!finalState && !loopTimedOut && !loopFailure) {
                     throw new GeneralReActAgentRunError('AGENT_CONTRACT_VIOLATION', 'Agent 未产生内部终态。')
                 }
                 state = finalState
@@ -228,63 +320,82 @@ export class GeneralReActAgentRunner {
                     : {
                           ...createGeneralReActInitialState(startedAtMs),
                           _finalizationMode: 'constrained',
-                          _runPhase: 'answering',
-                          _stopReason: actionTimedOut ? 'action_deadline' : 'model_error',
+                          _runPhase: 'finalizing',
+                          _stopReason: loopTimedOut ? 'action_deadline' : 'model_error',
                           messages: lastCompleteStreamState?.messages ?? streamedMessages ?? input.messages,
                       }
             }
 
             this.assertRunCanFinalize(runContext, initialState._hardDeadlineAtMs, signalScope.deadlineSignal)
             const usage = deriveGeneralReActMessageUsage(state.messages.slice(input.messages.length))
-            const answerMode: Exclude<GeneralReActRunResult['finalizationMode'], 'deterministic_fallback'> =
-                state._finalizationMode === 'normal' ? 'normal' : 'constrained'
-            const stopReason = actionTimedOut ? 'action_deadline' : (state._stopReason ?? 'model_error')
-            const answer = await this.runAnswerPhase({
-                adapter,
-                context: runContext,
-                deadlineSignal: signalScope.deadlineSignal,
-                hardDeadlineAtMs: initialState._hardDeadlineAtMs,
-                messages: getAnswerPhaseMessages(
-                    state.messages.slice(input.messages.length),
-                    input.answerMessages,
-                    answerMode === 'constrained' ? getConstrainedAnswerContext(stopReason) : undefined
-                ),
-                mode: answerMode,
-            })
-            const assistantText = answer.text
-            const finalizationMode = answer.mode
+            const terminalModelMessage = getLatestCurrentRunModelMessage(state.messages, input.messages.length)
+            const terminalFinish = terminalModelMessage ? normalizeModelTurnFinish(terminalModelMessage) : undefined
+            if (terminalFinish?.disposition === 'blocked') {
+                throw new GeneralReActAgentRunError('AGENT_CONTRACT_VIOLATION', '模型明确报告了不能作为最终回答的终止状态。')
+            }
+            const finalizationMode: Exclude<GeneralReActRunResult['finalizationMode'], 'deterministic_fallback'> =
+                state._finalizationMode === 'normal' && terminalFinish?.disposition !== 'constrained' ? 'normal' : 'constrained'
+            const stopReason = loopTimedOut
+                ? 'action_deadline'
+                : terminalFinish?.disposition === 'constrained'
+                  ? 'model_error'
+                  : (state._stopReason ?? 'model_error')
+            let assistantText = normalFinalText
+
+            if (finalizationMode === 'normal') {
+                const terminalText = getSafeAnswerText(terminalModelMessage)
+                if (!assistantText) {
+                    const streamedText = adapter.getActiveModelText()
+                    if (!streamedText && terminalText) {
+                        await publishModelText(terminalText)
+                    } else if (terminalText.startsWith(streamedText)) {
+                        await publishModelText(terminalText.slice(streamedText.length))
+                    }
+                    assistantText = terminalText
+                    const textEnd = adapter.endModelText({ outcome: 'final_answer', status: 'completed' })
+                    if (textEnd) await runContext.publishChunk(textEnd)
+                }
+            } else {
+                assistantText = await this.runConstrainedFinalizer({
+                    adapter,
+                    context: runContext,
+                    deadlineSignal: signalScope.deadlineSignal,
+                    hardDeadlineAtMs: initialState._hardDeadlineAtMs,
+                    messages: getFinalizerMessages(
+                        state.messages.slice(input.messages.length),
+                        input.finalizerMessages,
+                        getConstrainedFinalizerContext(stopReason)
+                    ),
+                })
+                const textEnd = adapter.endModelText({ outcome: 'final_answer', status: 'completed' })
+                if (textEnd) await runContext.publishChunk(textEnd)
+            }
 
             if (!assistantText.trim()) {
                 throw new GeneralReActAgentRunError('RUN_FAILED', '未能生成可用回答。')
             }
 
-            const traceEnd = adapter.endTrace('completed')
+            const traceEnd = adapter.endTrace('completed', finalizationMode)
             if (traceEnd) {
                 await runContext.publishChunk(traceEnd)
             }
-            const textEnd = adapter.endFinalText()
-            if (textEnd) await runContext.publishChunk(textEnd)
+            const loopModelCallCount = Math.max(state._loopModelCallCount, loopModelAttempted ? 1 : 0)
+            const finalizerCallCount = finalizationMode === 'constrained' ? GENERAL_REACT_RUNTIME_DEFAULTS.reservedFinalizerModelCalls : 0
+            generalReActObserver.recordRuntimeUsage({
+                finalizerCalls: finalizerCallCount,
+                logicalToolCalls: state._toolCallCount,
+                loopModelCalls: loopModelCallCount,
+                observationChars: state._observationChars,
+                toolBearingRounds: state._toolBearingRoundCount,
+            })
             generalReActObserver.recordStopReason(stopReason)
 
             return {
                 assistantText,
                 executedToolCallCount: usage.executedToolCallCount,
                 finalizationMode,
-                memoryWriteEligible:
-                    finalizationMode !== 'deterministic_fallback' &&
-                    !actionTimedOut &&
-                    ![
-                        'action_deadline',
-                        'agent_contract_violation',
-                        'model_error',
-                        'request_cancelled',
-                        'run_deadline',
-                        'tool_failure',
-                    ].includes(stopReason) &&
-                    Boolean(assistantText.trim()),
-                modelCallCount:
-                    Math.max(state._actionModelCallCount, actionModelAttempted ? 1 : 0) +
-                    GENERAL_REACT_RUNTIME_DEFAULTS.reservedAnswerModelCalls,
+                memoryWriteEligible: finalizationMode === 'normal' && Boolean(assistantText.trim()),
+                modelCallCount: loopModelCallCount + finalizerCallCount,
                 modelRetryCount: getModelRetryCount(),
                 source: usage.executedToolCallCount > 0 ? 'tool' : 'chat',
                 sources: (state._sources ?? []).map(source => ({
@@ -304,6 +415,10 @@ export class GeneralReActAgentRunner {
             runFailed = true
             const runError = this.normalizeRunError(error, runContext, signalScope.deadlineSignal)
             generalReActObserver.recordStopReason(stopReasonForRunError(runError))
+            const textEnd = adapter.endModelText({ outcome: 'commentary', status: 'interrupted' })
+            if (textEnd) {
+                await runContext.publishChunk(textEnd)
+            }
             const traceEnd = adapter.endTrace(runError.code === 'REQUEST_CANCELLED' ? 'cancelled' : 'failed')
             if (traceEnd) {
                 await runContext.publishChunk(traceEnd)
@@ -316,100 +431,87 @@ export class GeneralReActAgentRunner {
         }
     }
 
-    private async runAnswerPhase(input: {
+    private async runConstrainedFinalizer(input: {
         adapter: GeneralReActStreamAdapter
         context: GeneralReActRunContext
         deadlineSignal: AbortSignal
         hardDeadlineAtMs: number
         messages: BaseMessage[]
-        mode: 'constrained' | 'normal'
-    }): Promise<{ mode: GeneralReActRunResult['finalizationMode']; text: string }> {
+    }): Promise<string> {
         this.assertRunCanFinalize(input.context, input.hardDeadlineAtMs, input.deadlineSignal)
         const availableMs = Math.min(
-            GENERAL_REACT_RUNTIME_DEFAULTS.maxAnswerPhaseMs,
+            GENERAL_REACT_RUNTIME_DEFAULTS.maxFinalizerMs,
             input.hardDeadlineAtMs - input.context.clock.now() - GENERAL_REACT_RUNTIME_DEFAULTS.terminalReserveMs
         )
         if (availableMs <= 0) {
             throw new GeneralReActAgentRunError('RUN_DEADLINE', 'Agent 运行时间已到。')
         }
 
-        const answerPhaseScope = createPhaseSignalScope(input.context.runSignal, Math.floor(availableMs))
+        const finalizerPhaseScope = createPhaseSignalScope(input.context.runSignal, Math.floor(availableMs))
         let text = ''
 
         try {
             const model = input.context.createPhaseModel({
                 maxRetries: 0,
-                phase: 'answer',
-                signal: answerPhaseScope.signal,
+                phase: 'finalizer',
+                signal: finalizerPhaseScope.signal,
                 timeoutMs: Math.floor(availableMs),
             })
-            let answerIterator: AsyncIterator<unknown> | undefined
-            const consumeAnswerStream = (async () => {
-                const answerStream = await model.stream(input.messages, { signal: answerPhaseScope.signal })
-                answerIterator = answerStream[Symbol.asyncIterator]()
+            let finalizerIterator: AsyncIterator<unknown> | undefined
+            const consumeFinalizerStream = (async () => {
+                const finalizerStream = await model.stream(input.messages, { signal: finalizerPhaseScope.signal })
+                finalizerIterator = finalizerStream[Symbol.asyncIterator]()
                 for (;;) {
-                    const next = await answerIterator.next()
+                    const next = await finalizerIterator.next()
                     if (next.done) return
                     this.assertRunCanFinalize(input.context, input.hardDeadlineAtMs, input.deadlineSignal)
                     if (hasToolCallData(next.value)) {
-                        throw new GeneralReActAgentRunError('AGENT_CONTRACT_VIOLATION', 'Answer 模型返回了不允许的工具调用。')
+                        throw new GeneralReActAgentRunError('AGENT_CONTRACT_VIOLATION', '受限收口模型返回了不允许的工具调用。')
                     }
 
                     const delta = getSafeAnswerText(next.value)
                     if (!delta) continue
                     text += delta
-                    for (const chunk of input.adapter.projectFinalText({ delta, type: 'model-text-delta' })) {
+                    for (const chunk of input.adapter.projectModelText(delta)) {
                         await input.context.publishChunk(chunk)
                     }
                 }
             })()
             try {
-                await Promise.race([consumeAnswerStream, answerPhaseScope.timeoutPromise])
+                await Promise.race([consumeFinalizerStream, finalizerPhaseScope.timeoutPromise])
             } catch (error) {
                 if (error instanceof GeneralReActPhaseTimeoutError) {
-                    const settled = await stopPhaseExecution({ execution: consumeAnswerStream, iterator: answerIterator })
+                    const settled = await stopPhaseExecution({ execution: consumeFinalizerStream, iterator: finalizerIterator })
                     if (!settled) {
                         throw new GeneralReActAgentRunError(
                             'RUN_EXECUTION_UNKNOWN',
-                            'Answer 阶段已超时，底层操作状态未知；未使用迟到结果。'
+                            '受限收口阶段已超时，底层操作状态未知；未使用迟到结果。'
                         )
                     }
                     if (text.trim()) {
-                        throw new GeneralReActAgentRunError('RUN_FAILED', 'Answer 阶段在输出不完整回答后超时。')
+                        throw new GeneralReActAgentRunError('RUN_FAILED', '受限收口阶段在输出不完整回答后超时。')
                     }
-                    return this.publishAnswerFallback(input.adapter, input.context, text)
+                    throw new GeneralReActAgentRunError('RUN_FAILED', '受限收口阶段在未生成完整回答前超时。')
                 }
                 throw error
             } finally {
-                void consumeAnswerStream.catch(() => undefined)
+                void consumeFinalizerStream.catch(() => undefined)
             }
-            if (text.trim()) return { mode: input.mode, text }
+            if (text.trim()) return text
         } catch (error) {
             if (input.context.runSignal.aborted || error instanceof GeneralReActAgentRunError) {
                 throw error
             }
             throw new GeneralReActAgentRunError(
                 'RUN_FAILED',
-                text.trim() ? 'Answer 阶段在输出不完整回答后失败。' : 'Answer 阶段在首个文本前失败。',
+                text.trim() ? '受限收口阶段在输出不完整回答后失败。' : '受限收口阶段在首个文本前失败。',
                 { cause: error }
             )
         } finally {
-            answerPhaseScope.cleanup()
+            finalizerPhaseScope.cleanup()
         }
 
-        return this.publishAnswerFallback(input.adapter, input.context, text)
-    }
-
-    private async publishAnswerFallback(
-        adapter: GeneralReActStreamAdapter,
-        context: GeneralReActRunContext,
-        priorText: string
-    ): Promise<{ mode: 'deterministic_fallback'; text: string }> {
-        const fallback = '抱歉，我暂时无法在当前信息和运行限制内完成可靠回答，请稍后重试或缩小问题范围。'
-        for (const chunk of adapter.projectFinalText({ delta: fallback, type: 'model-text-delta' })) {
-            await context.publishChunk(chunk)
-        }
-        return { mode: 'deterministic_fallback', text: priorText + fallback }
+        throw new GeneralReActAgentRunError('RUN_FAILED', '受限收口阶段未生成可用回答。')
     }
 
     private assertRunCanFinalize(context: GeneralReActRunContext, hardDeadlineAtMs: number, deadlineSignal?: AbortSignal): void {
@@ -594,6 +696,29 @@ function getSafeAnswerText(value: unknown): string {
         .join('')
 }
 
+function getStreamedModelTextDelta(candidate: unknown): string {
+    if (!Array.isArray(candidate) || candidate[0] !== 'messages' || !Array.isArray(candidate[1])) {
+        return ''
+    }
+
+    const message = candidate[1][0]
+    return isModelMessageChunk(message) ? getSafeAnswerText(message) : ''
+}
+
+function isModelMessageChunk(value: unknown): value is { content: unknown } {
+    if (!value || typeof value !== 'object') {
+        return false
+    }
+
+    const message = value as { constructor?: { name?: unknown }; tool_call_chunks?: unknown }
+    // streamMode=messages 中只有模型输出块才有这些特征；ToolMessage 不能作为公开 Agent 说明文本。
+    return message.constructor?.name === 'AIMessageChunk' || Array.isArray(message.tool_call_chunks)
+}
+
+function getLatestCurrentRunModelMessage(messages: BaseMessage[], initialMessageCount: number): AIMessage | undefined {
+    return messages.slice(initialMessageCount).findLast((message): message is AIMessage => AIMessage.isInstance(message))
+}
+
 function getMessagesFromState(value: unknown): BaseMessage[] | undefined {
     if (!value || typeof value !== 'object' || !Array.isArray((value as { messages?: unknown }).messages)) {
         return undefined
@@ -602,23 +727,21 @@ function getMessagesFromState(value: unknown): BaseMessage[] | undefined {
     return (value as { messages: BaseMessage[] }).messages
 }
 
-function getAnswerPhaseMessages(
-    actionMessages: BaseMessage[],
-    answerMessages: BaseMessage[],
-    constrainedAnswerContext?: string
+function getFinalizerMessages(
+    loopMessages: BaseMessage[],
+    finalizerMessages: BaseMessage[],
+    constrainedFinalizerContext?: string
 ): BaseMessage[] {
-    const terminalMessage = actionMessages.at(-1)
+    const terminalMessage = loopMessages.at(-1)
 
     // Action 的无 Tool 终局文本是待丢弃的候选，只提取其余消息中的可靠 Tool 观察。
-    const reliableActionMessages =
-        AIMessage.isInstance(terminalMessage) && (terminalMessage.tool_calls?.length ?? 0) === 0
-            ? actionMessages.slice(0, -1)
-            : actionMessages
+    const reliableLoopMessages =
+        AIMessage.isInstance(terminalMessage) && (terminalMessage.tool_calls?.length ?? 0) === 0 ? loopMessages.slice(0, -1) : loopMessages
 
     // Answer 没有绑定 Tool；把 role=tool / assistant tool_calls 原样传给 OpenAI-compatible
     // Provider 会让部分模型（DeepSeek）把 Answer 误判为下一轮工具决策并再次返回 tool call。
     // 将观察压成一个受控的人类消息，既保留工具结果，又让 Answer 明确进入文本生成阶段。
-    const toolObservations = reliableActionMessages.filter(message => ToolMessage.isInstance(message))
+    const toolObservations = reliableLoopMessages.filter(message => ToolMessage.isInstance(message))
     const observationContext = toolObservations
         .map((message, index) => {
             const toolName = typeof message.metadata?.toolName === 'string' ? message.metadata.toolName : 'tool'
@@ -628,8 +751,8 @@ function getAnswerPhaseMessages(
         .join('\n\n')
 
     return [
-        ...answerMessages,
-        ...(constrainedAnswerContext ? [new SystemMessage(constrainedAnswerContext)] : []),
+        ...finalizerMessages,
+        ...(constrainedFinalizerContext ? [new SystemMessage(constrainedFinalizerContext)] : []),
         ...(observationContext
             ? [
                   new HumanMessage(
@@ -644,7 +767,7 @@ function getAnswerPhaseMessages(
     ]
 }
 
-function getConstrainedAnswerContext(stopReason: GeneralReActStopReason): string {
+function getConstrainedFinalizerContext(stopReason: GeneralReActStopReason): string {
     switch (stopReason) {
         case 'action_deadline':
             return '本轮行动阶段因时间限制提前结束。只使用已经完成且可靠的信息；不要把未完成、未执行或失败的观察写成完整事实。'

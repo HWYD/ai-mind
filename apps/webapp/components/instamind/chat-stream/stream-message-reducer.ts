@@ -29,6 +29,7 @@ import {
     pruneTransientMessages,
     updateAgentInterruptPartStatus,
     updateAgentTextArtifact,
+    updateAgentTextPart,
     updateMessageStatus,
     updatePromptPart,
     updateResourcePart,
@@ -38,6 +39,7 @@ import {
     upsertAgentGraphNodePart,
     upsertAgentInterruptPart,
     upsertAgentRunPart,
+    upsertAgentTextPart,
     upsertImageBriefPart,
     upsertImageResultPart,
     upsertThreadMemoryStatusPart,
@@ -57,6 +59,7 @@ export interface StreamActiveState {
  */
 export interface StreamMessageState {
     activeStream: StreamActiveState
+    lastAppliedDurableSequence: number
     messages: MindMessage[]
     terminalState: 'cancelled' | 'completed' | 'failed' | 'rejected' | 'version_mismatch' | null
 }
@@ -89,6 +92,7 @@ export function createInitialActiveStreamState(): StreamActiveState {
 export function createStreamMessageState(messages: MindMessage[] = []): StreamMessageState {
     return {
         activeStream: createInitialActiveStreamState(),
+        lastAppliedDurableSequence: 0,
         messages,
         terminalState: null,
     }
@@ -99,7 +103,6 @@ function applyMessages(state: StreamMessageState, messages: MindMessage[]): Stre
         state: {
             ...state,
             messages,
-            terminalState: state.terminalState,
         },
     }
 }
@@ -111,9 +114,9 @@ function applyMessagesAndActiveStream(
 ): StreamMessageReducerResult {
     return {
         state: {
+            ...state,
             activeStream,
             messages,
-            terminalState: state.terminalState,
         },
     }
 }
@@ -155,6 +158,26 @@ function getThreadMemoryTargetMessageId(state: StreamMessageState) {
     }
 
     return null
+}
+
+function getActiveMessage(state: StreamMessageState) {
+    return findMessage(state.messages, state.activeStream.messageId)
+}
+
+function hasAgentTextForRun(state: StreamMessageState, runId: string) {
+    return getActiveMessage(state)?.parts.some(part => part.type === 'agent-text' && part.runId === runId) ?? false
+}
+
+function hasCompletedAgentFinalAnswer(state: StreamMessageState) {
+    return (
+        getActiveMessage(state)?.parts.some(
+            part => part.type === 'agent-text' && part.phase === 'final_answer' && part.status === 'completed'
+        ) ?? false
+    )
+}
+
+function failClosed(state: StreamMessageState, message: string): StreamMessageReducerResult {
+    return { fatalError: message, state }
 }
 
 /** 局部 part 错误只更新卡片；顶层错误返回 fatalError 交给 hook 收口。 */
@@ -248,7 +271,32 @@ export function reduceStreamTextDeltas(state: StreamMessageState, deltas: Pendin
 export function reduceStreamChunk(
     state: StreamMessageState,
     chunk: ChatStreamChunk,
-    terminalState: StreamMessageState['terminalState'] = chunk.type === 'finish' ? 'completed' : state.terminalState
+    terminalState: StreamMessageState['terminalState'] = chunk.type === 'finish' ? 'completed' : state.terminalState,
+    durableEvent?: { sequence: number }
+): StreamMessageReducerResult {
+    if (durableEvent && durableEvent.sequence <= state.lastAppliedDurableSequence) {
+        return { state }
+    }
+
+    const result = reduceStreamChunkInternal(state, chunk, terminalState)
+
+    if (result.fatalError || !durableEvent) {
+        return result
+    }
+
+    return {
+        ...result,
+        state: {
+            ...result.state,
+            lastAppliedDurableSequence: durableEvent.sequence,
+        },
+    }
+}
+
+function reduceStreamChunkInternal(
+    state: StreamMessageState,
+    chunk: ChatStreamChunk,
+    terminalState: StreamMessageState['terminalState']
 ): StreamMessageReducerResult {
     switch (chunk.type) {
         case 'start':
@@ -261,10 +309,50 @@ export function reduceStreamChunk(
             return updateActiveMessage(state, (messages, messageId) =>
                 upsertAgentRunPart(messages, messageId, chunk.runId, 'running', chunk.partId)
             )
-        case 'agent-run-end':
+        case 'agent-run-end': {
+            const finalizationMode = chunk.status === 'completed' ? chunk.finalizationMode : undefined
+            if (chunk.status === 'completed' && hasAgentTextForRun(state, chunk.runId) && !finalizationMode) {
+                return failClosed(state, 'Agent text completion provenance is required.')
+            }
             return updateActiveMessage(state, (messages, messageId) =>
-                upsertAgentRunPart(messages, messageId, chunk.runId, chunk.status, chunk.partId)
+                upsertAgentRunPart(messages, messageId, chunk.runId, chunk.status, chunk.partId, finalizationMode)
             )
+        }
+        case 'agent-text-start': {
+            const messageId = state.activeStream.messageId
+            if (!messageId) {
+                return failClosed(state, 'Agent text start requires an active assistant message.')
+            }
+
+            const messages = upsertAgentTextPart(state.messages, messageId, chunk.partId, chunk.runId, chunk.modelTurnId)
+            return messages ? applyMessages(state, messages) : failClosed(state, 'Agent text model turn identity is invalid.')
+        }
+        case 'agent-text-delta': {
+            const messageId = state.activeStream.messageId
+            if (!messageId) {
+                return failClosed(state, 'Agent text delta requires an active assistant message.')
+            }
+
+            const messages = updateAgentTextPart(state.messages, messageId, chunk.partId, part =>
+                part.status === 'streaming' ? { ...part, text: part.text + chunk.delta } : null
+            )
+            return messages ? applyMessages(state, messages) : failClosed(state, 'Agent text delta has no active part.')
+        }
+        case 'agent-text-end': {
+            const messageId = state.activeStream.messageId
+            if (!messageId) {
+                return failClosed(state, 'Agent text end requires an active assistant message.')
+            }
+
+            const messages = updateAgentTextPart(state.messages, messageId, chunk.partId, part =>
+                part.status === 'streaming' && part.phase === 'pending'
+                    ? { ...part, phase: chunk.outcome, status: chunk.status }
+                    : part.phase === chunk.outcome && part.status === chunk.status
+                      ? part
+                      : null
+            )
+            return messages ? applyMessages(state, messages) : failClosed(state, 'Agent text end has an illegal transition.')
+        }
         case 'agent-interrupt':
             return applyMessagesAndActiveStream(
                 state,
@@ -436,6 +524,22 @@ export function reduceStreamChunk(
         case 'reasoning-end':
             return { state }
         case 'tool-start':
+            if (hasCompletedAgentFinalAnswer(state)) {
+                return failClosed(state, 'Tool event received after a completed Agent final answer.')
+            }
+            {
+                const existingTool = getActiveMessage(state)?.parts.find(
+                    (part): part is Extract<MindMessagePart, { type: 'tool' }> => part.type === 'tool' && part.id === chunk.partId
+                )
+
+                if (existingTool) {
+                    if (existingTool.toolName !== chunk.toolName || existingTool.input !== chunk.input) {
+                        return failClosed(state, 'Conflicting Tool start received for an existing part.')
+                    }
+
+                    return { state }
+                }
+            }
             return appendActivePart(
                 state,
                 createToolPart(
@@ -509,6 +613,9 @@ export function reduceStreamChunk(
             )
         case 'finish': {
             const activeMessage = findMessage(state.messages, state.activeStream.messageId)
+            if (activeMessage?.parts.some(part => part.type === 'agent-text' && part.status === 'streaming')) {
+                return failClosed(state, 'Cannot finish with unresolved Agent text.')
+            }
             const messageStatus = terminalState === 'cancelled' ? 'cancelled' : terminalState === 'completed' ? 'completed' : 'failed'
             const messages =
                 activeMessage?.status === 'paused' || !state.activeStream.messageId || !terminalState
@@ -517,6 +624,7 @@ export function reduceStreamChunk(
 
             return {
                 state: {
+                    ...state,
                     activeStream: createInitialActiveStreamState(),
                     messages: pruneTransientMessages(messages),
                     terminalState,

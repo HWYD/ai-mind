@@ -23,6 +23,8 @@ const allowedRuntimeChunkTypes = new Set([
 ])
 
 export class GeneralReActStreamAdapter {
+    private activeAgentText: { partId: string; modelTurnId: string; text: string } | undefined
+    private modelTurnOrdinal = 1
     private textStarted = false
     private textEnded = false
 
@@ -36,12 +38,71 @@ export class GeneralReActStreamAdapter {
         }
     }
 
-    endTrace(state: GeneralReActTraceTerminalState, _internalError?: unknown): ChatStreamChunk {
+    endTrace(state: GeneralReActTraceTerminalState, finalizationMode?: 'constrained' | 'normal' | unknown): ChatStreamChunk {
         return {
             partId: this.options.tracePartId,
             runId: this.options.runId,
             status: state,
             type: 'agent-run-end',
+            ...(state === 'completed' && (finalizationMode === 'constrained' || finalizationMode === 'normal') ? { finalizationMode } : {}),
+        }
+    }
+
+    projectModelText(delta: string): ChatStreamChunk[] {
+        if (!delta) {
+            return []
+        }
+
+        const chunks: ChatStreamChunk[] = []
+        if (!this.activeAgentText) {
+            const partId = `agent-text:${this.options.runId}:${this.modelTurnOrdinal}`
+            const modelTurnId = `${this.options.runId}:${this.modelTurnOrdinal}`
+            this.activeAgentText = { modelTurnId, partId, text: '' }
+            chunks.push({ modelTurnId, partId, runId: this.options.runId, type: 'agent-text-start' })
+        }
+
+        this.activeAgentText.text += delta
+        chunks.push({ delta, partId: this.activeAgentText.partId, type: 'agent-text-delta' })
+        return chunks
+    }
+
+    getActiveModelText(): string {
+        return this.activeAgentText?.text ?? ''
+    }
+
+    endModelText(input: { outcome: 'commentary' | 'final_answer'; status: 'completed' | 'interrupted' }): ChatStreamChunk | null {
+        const active = this.activeAgentText
+        this.activeAgentText = undefined
+        this.modelTurnOrdinal += 1
+
+        if (!active) {
+            return null
+        }
+
+        if (input.outcome === 'final_answer' && input.status !== 'completed') {
+            throw new TypeError('Final Agent text must complete normally.')
+        }
+
+        if (input.outcome === 'final_answer') {
+            return {
+                outcome: 'final_answer',
+                partId: active.partId,
+                status: 'completed',
+                type: 'agent-text-end',
+            }
+        }
+
+        return {
+            outcome: 'commentary',
+            partId: active.partId,
+            status: input.status,
+            type: 'agent-text-end',
+        }
+    }
+
+    advanceModelTurn(): void {
+        if (!this.activeAgentText) {
+            this.modelTurnOrdinal += 1
         }
     }
 

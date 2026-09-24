@@ -27,7 +27,7 @@ export function createDevMessageVirtualizationFixtureSnapshot(options: {
             status: 'completed',
         })),
         revision: options.revision + 1,
-        schemaVersion: 1,
+        schemaVersion: 2,
         snapshotAt,
         title: DEV_MESSAGE_VIRTUALIZATION_TEST_TITLE,
     }

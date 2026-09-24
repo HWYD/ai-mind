@@ -14,7 +14,7 @@ function createSnapshot(conversationId: string, messages: MindMessage[]): LocalC
         lastActiveAt: fixtureNow,
         messages,
         revision: 1,
-        schemaVersion: 1 as const,
+        schemaVersion: 2 as const,
         snapshotAt: fixtureNow,
         title: conversationId,
     }

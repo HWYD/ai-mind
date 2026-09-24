@@ -8,23 +8,39 @@ import { createGeneralReActInitialState, generalReActAgentStateSchema } from '@/
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from '@/lib/ai/runtime/general-react-agent/runtime-config'
 
 describe('General ReAct state and runtime defaults', () => {
-    it('freezes the fixed v0.6.0 server-owned budgets', () => {
+    it('freezes the v0.6.1 loop and finalizer budgets', () => {
+        expect(GENERAL_REACT_RUNTIME_DEFAULTS).toMatchObject({
+            hardDeadlineMs: 270_000,
+            loopDeadlineMs: 235_000,
+            maxFinalizerMs: 30_000,
+            maxLogicalToolCalls: 14,
+            maxLoopModelCalls: 10,
+            maxModelCalls: 11,
+            maxObservationChars: 48_000,
+            maxToolBearingRounds: 9,
+            recursionLimit: 24,
+            reservedFinalizerModelCalls: 1,
+            terminalReserveMs: 5_000,
+        })
+    })
+
+    it('freezes the fixed v0.6.1 server-owned budgets', () => {
         expect(GENERAL_REACT_RUNTIME_DEFAULTS).toEqual({
-            actionDeadlineMs: 145_000,
-            hardDeadlineMs: 180_000,
-            maxActionModelCalls: 7,
-            maxAnswerPhaseMs: 30_000,
-            maxLogicalToolCalls: 9,
-            maxModelCalls: 8,
+            hardDeadlineMs: 270_000,
+            loopDeadlineMs: 235_000,
+            maxFinalizerMs: 30_000,
+            maxLogicalToolCalls: 14,
+            maxLoopModelCalls: 10,
+            maxModelCalls: 11,
             maxModelRetries: 1,
             maxNoProgressRounds: 2,
-            maxObservationChars: 32_000,
+            maxObservationChars: 48_000,
             maxObservationCharsPerCall: 12_000,
             maxToolConcurrency: 3,
             maxToolRetries: 4,
-            maxToolBearingActionRounds: 6,
-            recursionLimit: 16,
-            reservedAnswerModelCalls: 1,
+            maxToolBearingRounds: 9,
+            recursionLimit: 24,
+            reservedFinalizerModelCalls: 1,
             terminalReserveMs: 5_000,
         })
         expect(Object.isFrozen(GENERAL_REACT_RUNTIME_DEFAULTS)).toBe(true)
@@ -34,15 +50,15 @@ describe('General ReAct state and runtime defaults', () => {
         const state = createGeneralReActInitialState(10_000)
 
         expect(state).toMatchObject({
-            _actionDeadlineAtMs: 155_000,
-            _actionModelCallCount: 0,
-            _actionRoundCount: 0,
+            _loopDeadlineAtMs: 245_000,
+            _loopModelCallCount: 0,
+            _toolBearingRoundCount: 0,
             _authorizedUrls: [],
             _callFingerprints: [],
             _currentActionBatch: null,
             _executedToolCallCount: 0,
             _finalizationMode: null,
-            _hardDeadlineAtMs: 190_000,
+            _hardDeadlineAtMs: 280_000,
             _modelRetryCount: 0,
             _noProgressRounds: 0,
             _observationChars: 0,
@@ -57,30 +73,29 @@ describe('General ReAct state and runtime defaults', () => {
         await expect(generalReActAgentStateSchema.validateInput(state)).resolves.toEqual(state)
     })
 
-    it('accepts the non-terminal Answer Phase after the seventh Action decision', async () => {
+    it('accepts the finalizer phase after the tenth loop decision', async () => {
         const state = {
             ...createGeneralReActInitialState(10_000),
-            _actionRoundCount: 6,
-            _actionModelCallCount: 7,
-            _runPhase: 'answering',
+            _loopModelCallCount: 10,
+            _runPhase: 'finalizing',
         }
 
         await expect(generalReActAgentStateSchema.validateInput(state)).resolves.toEqual(state)
     })
 
-    it('accepts seven Action model calls but rejects an eighth before Answer capacity is consumed', async () => {
+    it('accepts ten loop model calls but rejects an eleventh before finalizer capacity is consumed', async () => {
         const state = createGeneralReActInitialState(10_000)
 
         await expect(
             generalReActAgentStateSchema.validateInput({
                 ...state,
-                _actionModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls,
+                _loopModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls,
             })
-        ).resolves.toMatchObject({ _actionModelCallCount: 7 })
+        ).resolves.toMatchObject({ _loopModelCallCount: 10 })
         await expect(
             generalReActAgentStateSchema.validateInput({
                 ...state,
-                _actionModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxActionModelCalls + 1,
+                _loopModelCallCount: GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls + 1,
             })
         ).rejects.toThrow()
     })
@@ -111,6 +126,34 @@ describe('General ReAct state and runtime defaults', () => {
                 host: 'docs.example.com',
             },
         ])
+    })
+
+    it('merges revalidated server-trusted same-thread user URLs without accepting unsafe URLs', () => {
+        const state = createGeneralReActInitialState(
+            10_000,
+            [new HumanMessage('这轮请继续处理，但没有重复链接。')],
+            ['https://docs.example.com/previous#section', 'http://127.0.0.1/internal', 'https://user:password@example.com/private']
+        )
+
+        expect(state._authorizedUrls).toEqual([
+            {
+                canonicalUrl: 'https://docs.example.com/previous',
+                grantCallId: null,
+                grantedAtRound: 0,
+                grantedBy: 'user',
+                host: 'docs.example.com',
+            },
+        ])
+    })
+
+    it('re-canonicalizes server-trusted URLs and caps reuse at eight entries', () => {
+        const trustedUrls = Array.from({ length: 9 }, (_, index) => `https://docs.example.com/page-${index}#fragment`)
+        const state = createGeneralReActInitialState(10_000, [], trustedUrls)
+
+        expect(state._authorizedUrls).toHaveLength(8)
+        expect(state._authorizedUrls.map(grant => grant.canonicalUrl)).toEqual(
+            Array.from({ length: 8 }, (_, index) => `https://docs.example.com/page-${index}`)
+        )
     })
 
     it('uses LangGraph reducers for merge-safe counter deltas', () => {

@@ -127,6 +127,17 @@ v0.4.12 在既有 `ChatStreamChunk` 中增加 `image-brief` 和 `image-result-re
 
 图片工作流复用 `workflow-progress-start/step/end`，可携带开始时间、结束时间和安全耗时。`stream-core` 只定义这些可复用的表达能力；图片规划、Provider 调用、临时 URL、Blob 和安全策略仍属于 webapp runtime。内部 Prompt、检查细节、Provider URL、Base64、图片字节、密钥和原始错误不得进入 chunk。
 
+## General Agent Text Chunks
+
+v0.6.1 adds an additive public contract for General ReAct model text:
+
+- `agent-text-start`: stable `partId`, `runId` and `modelTurnId`;
+- `agent-text-delta`: public text only;
+- `agent-text-end`: an authoritative `commentary` or `final_answer` outcome;
+- completed `agent-run-end.finalizationMode`: `normal` or `constrained` provenance.
+
+The protocol intentionally does not carry `pending`: it is a client staging state between start and end. It also excludes provider reasoning, raw model events, raw Tool input/output and Tool-owned detail. The chunks are additive so ordinary `text-*`, artifacts and dedicated Agent streams retain their prior meanings.
+
 ## Design Principle
 
 只有当某个 stream primitive 足够稳定、可复用、并且弱耦合于 app runtime 决策时，才适合进入 `stream-core`。
