@@ -22,6 +22,7 @@ Accepted in v0.6.0; the fixed Action + Answer projection is superseded by v0.6.1
 - `createAgent` 只拥有私有的 Action Tool loop：其所有文本、reasoning 与 metadata 均不得公开或持久化，也不得作为 Answer 输入。除显式取消或 hard deadline 外，Action outcome 固定进入一次使用同一 resolved model selection 的未绑定 Tool Answer；Answer 仅接收用户问题、可靠 observation、安全来源和 stop reason，只有其安全 delta 可以作为最终 `text-*` 流。Answer 的 Tool Call 必须 fail-closed；正常空白 Answer 可 fallback，provider/tool-contract/partial-stream error 必须 failed 收口而不追加 fallback。
 - Action 与 Answer 的 system prompt 采用独立投影。Action-only 的 Tool 选择、调用、重试和后续行动指令不得进入 Answer；Answer 使用 server-owned 的真实用户回答基线与可信 Skill 输出风格，普通问题结论优先且解释适中，用户直接的长度/格式请求可在安全边界内覆盖默认。Web、Tool observation、Resource/Prompt 内容中的嵌入指令均是不可信资料，不能改变回答策略、Tool 权限、授权 URL、预算或数据访问范围。
 - Run-local budget 与 Memory provenance：Chat Memory/history 仅是模型上下文，不得参与本次 Run 预算；Runner 只扫描本 Run 新增消息，并返回明确的 `memoryWriteEligible`。取消、hard deadline、Answer Tool contract/provider/partial-stream failure 与执行状态未知均不得写入成功 Memory；只有成功完成的 Answer 或正常空白 Answer 的非空 deterministic fallback 才可能符合既有写入条件。
+- `finalizationMode=constrained` 仍表示受限收口且不可写入 Memory，但不表示 Run 失败。公开 Trace 标题只由 terminal `AgentRun.status` 决定：completed 显示“已完成思考”，failed 显示“处理未完成”。
 - StreamRun 终态在 append 与 replay 两侧都 fail-closed：terminal 必须是最后 sequence，`terminalSequence === lastSequence`，终态 status、envelope metadata 与 payload 类型必须一致。
 
 ## Consequences
@@ -41,7 +42,7 @@ The v0.6.0 bullets that require a fixed, Tool-free Answer model call and ordinar
 - A model-declared, known ToolCall that is rejected before provider execution is still public-auditable: Runtime emits the existing `tool-start` followed by same-part tool-scope `error`, both with fixed safe fields. It means the request was not executed, never a completed Tool or read source; raw arguments, URL/query, secret, fingerprint and internal error stay private.
 - URL provenance is an automatic server safety scope, not a user click prompt. Current user URLs and at most eight re-canonicalized URLs from same-conversation server raw user turns are read candidates. Summary, assistant text, Tool result, UserMemory and client history are never grant sources. The catalog cannot prove a prior Run executed or read a page, so historical-read questions fail closed rather than triggering automatic rereads.
 
-The fixed budgets are 9 Tool-bearing rounds, 14 logical Tool Calls, 10 loop calls, one constrained finalizer, 11 total calls and a 270-second hard limit. Existing Tool concurrency, Tool retry and per-profile timeout rules remain unchanged.
+The fixed budgets are 9 Tool-bearing rounds, 21 cumulative logical Tool Calls, 10 loop calls, one constrained finalizer, 11 total calls and a 270-second hard limit. The logical-call cap is shared by all Action rounds; it is not a per-round multiplier. Existing Tool concurrency, Tool retry and per-profile timeout rules remain unchanged.
 
 ## Verification
 

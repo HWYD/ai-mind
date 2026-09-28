@@ -157,6 +157,50 @@ function resolveHostErrorCode(error: unknown, fallback: MCPHostErrorCode): MCPHo
     return fallback
 }
 
+function isAmapMapsServer(serverDefinition: MCPServerDefinition) {
+    return serverDefinition.serverId === 'amap-maps'
+}
+
+function getSafeMCPErrorMetadata(error: unknown) {
+    const status =
+        error instanceof MCPHostError
+            ? error.status
+            : error instanceof StreamableHTTPError && Number.isInteger(error.code) && error.code >= 100 && error.code <= 599
+              ? error.code
+              : undefined
+    const retryAfterMs = error instanceof MCPHostError ? error.retryAfterMs : undefined
+
+    return {
+        ...(status !== undefined ? { status } : {}),
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+    }
+}
+
+/**
+ * 高德 transport 的异常可能包含带 Key 的请求 URL。Host 边界只保留稳定错误类别，
+ * 不让原始错误进入可读取的错误消息或 cause。
+ */
+function createMCPHostError(serverDefinition: MCPServerDefinition, fallback: MCPHostErrorCode, operation: string, error: unknown) {
+    const code = resolveHostErrorCode(error, fallback)
+    const metadata = getSafeMCPErrorMetadata(error)
+    if (isAmapMapsServer(serverDefinition)) {
+        return new MCPHostError(code, `高德地图 MCP ${operation}失败。`, metadata)
+    }
+
+    return new MCPHostError(code, `${serverDefinition.displayName} ${operation}失败：${toErrorMessage(error)}`, {
+        cause: error,
+        ...metadata,
+    })
+}
+
+function toLastError(serverDefinition: MCPServerDefinition, error: unknown) {
+    if (isAmapMapsServer(serverDefinition)) {
+        return new Error('高德地图 MCP 请求失败。')
+    }
+
+    return error instanceof Error ? error : new Error(toErrorMessage(error))
+}
+
 /**
  * `MCPClient` 只封装单个 MCP Server 的连接、状态与请求生命周期。
  * 它不处理 Skill、Tool Adapter 或业务语义，只负责：
@@ -201,7 +245,7 @@ export class MCPClient {
         })
 
         client.onerror = error => {
-            this.lastError = error
+            this.lastError = toLastError(this.serverDefinition, error)
             this.state = 'error'
         }
 
@@ -232,7 +276,7 @@ export class MCPClient {
      */
     private bindTransportHandlers() {
         this.transport.onerror = error => {
-            this.lastError = error
+            this.lastError = toLastError(this.serverDefinition, error)
             this.state = 'error'
         }
 
@@ -315,7 +359,8 @@ export class MCPClient {
      * 如果当前连接还没完成初始化，会先执行 `connect()`。
      */
     async callTool(params: CallToolRequest['params'], options?: MCPCallToolOptions): Promise<MCPCallToolResponse> {
-        const { allowSessionRecovery = true, ...requestOptions } = options ?? {}
+        const { allowSessionRecovery: configuredSessionRecovery, ...requestOptions } = options ?? {}
+        const allowSessionRecovery = configuredSessionRecovery ?? !isAmapMapsServer(this.serverDefinition)
 
         if (requestOptions.signal?.aborted) {
             throw requestOptions.signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
@@ -341,13 +386,7 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'EXECUTION_FAILED'),
-                `${this.serverDefinition.displayName} Tool 调用失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'EXECUTION_FAILED', 'Tool 调用', error)
         }
     }
 
@@ -371,13 +410,7 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'LIST_FAILED'),
-                `${this.serverDefinition.displayName} Prompt 列表获取失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'LIST_FAILED', 'Prompt 列表获取', error)
         }
     }
 
@@ -388,13 +421,7 @@ export class MCPClient {
         try {
             await withTimeout(() => this.transport.close(), MCP_CLIENT_TIMEOUTS.closeMs, `${this.serverDefinition.serverId} close`)
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'REQUEST_FAILED'),
-                `${this.serverDefinition.displayName} 关闭失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'REQUEST_FAILED', '关闭', error)
         } finally {
             this.connectPromise = null
             this.state = 'closed'
@@ -440,17 +467,11 @@ export class MCPClient {
             this.getTimeoutMs('initialize'),
             `${this.serverDefinition.serverId} initialize`
         ).catch(error => {
-            this.lastError = error instanceof Error ? error : new Error(toErrorMessage(error))
+            this.lastError = toLastError(this.serverDefinition, error)
             this.state = 'error'
             this.connectPromise = null
 
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'CONNECT_FAILED'),
-                `${this.serverDefinition.displayName} 初始化失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'CONNECT_FAILED', '初始化', error)
         })
 
         return this.connectPromise
@@ -490,13 +511,7 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'LIST_FAILED'),
-                `${this.serverDefinition.displayName} 资源列表获取失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'LIST_FAILED', '资源列表获取', error)
         }
     }
 
@@ -520,13 +535,7 @@ export class MCPClient {
                 tools: result.tools,
             }
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'LIST_FAILED'),
-                `${this.serverDefinition.displayName} 工具列表获取失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'LIST_FAILED', '工具列表获取', error)
         }
     }
 
@@ -551,13 +560,7 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'REQUEST_FAILED'),
-                `${this.serverDefinition.displayName} Prompt 获取失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'REQUEST_FAILED', 'Prompt 获取', error)
         }
     }
 
@@ -583,13 +586,7 @@ export class MCPClient {
                 serverDefinition: this.serverDefinition,
             }
         } catch (error) {
-            throw new MCPHostError(
-                resolveHostErrorCode(error, 'REQUEST_FAILED'),
-                `${this.serverDefinition.displayName} 资源读取失败：${toErrorMessage(error)}`,
-                {
-                    cause: error,
-                }
-            )
+            throw createMCPHostError(this.serverDefinition, 'REQUEST_FAILED', '资源读取', error)
         }
     }
 }

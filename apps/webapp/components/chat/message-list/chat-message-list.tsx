@@ -1294,7 +1294,7 @@ export function ChatMessageList({
 
     if (messageEntries.length === 0) {
         return (
-            <div className="flex min-h-0 flex-col py-2" style={{ paddingBottom: `${bottomInset}px` }}>
+            <div className="flex flex-1 min-h-0 flex-col py-2" style={{ paddingBottom: `${bottomInset}px` }}>
                 {header}
                 {showEmptyStateSuggestions ? (
                     <EmptyStateSuggestions

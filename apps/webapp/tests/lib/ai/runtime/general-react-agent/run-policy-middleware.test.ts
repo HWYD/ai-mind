@@ -67,9 +67,9 @@ describe('general-react-agent run policy', () => {
         })
     })
 
-    it('按 assistant ordinal 为同批 Tool Call 预占最多十四个 logical slots', () => {
+    it('按 assistant ordinal 为同批 Tool Call 预占最多二十一个 logical slots', () => {
         const state = createGeneralReActInitialState(1_000)
-        const toolCalls = Array.from({ length: 15 }, (_, index) => ({
+        const toolCalls = Array.from({ length: 22 }, (_, index) => ({
             args: { value: index },
             id: `call-${index + 1}`,
             name: 'calculator',
@@ -83,14 +83,48 @@ describe('general-react-agent run policy', () => {
         })
 
         expect(update._toolBearingRoundCount).toBe(1)
-        expect(update._toolRequestCount).toBe(15)
-        expect(update._toolCallCount).toBe(14)
+        expect(update._toolRequestCount).toBe(22)
+        expect(update._toolCallCount).toBe(21)
         expect(update._currentActionBatch?.orderedCallIds).toEqual(toolCalls.map(call => call.id))
         expect(update._currentActionBatch?.admissions['call-1']).toMatchObject({ admitted: true, ordinal: 1 })
-        expect(update._currentActionBatch?.admissions['call-15']).toMatchObject({
+        expect(update._currentActionBatch?.admissions['call-22']).toMatchObject({
             admitted: false,
             blockedReason: 'tool_call_limit',
-            ordinal: 15,
+            ordinal: 22,
+        })
+    })
+
+    it('九个携带 Tool 的 Action rounds 共享二十一个累计 slots，不按轮次相乘', () => {
+        const state = {
+            ...createGeneralReActInitialState(1_000),
+            _loopModelCallCount: 9,
+            _toolBearingRoundCount: 8,
+            _toolCallCount: 19,
+        }
+        const update = evaluateAfterModelPolicy({
+            batchId: 'batch-nine',
+            message: new AIMessage({
+                content: '',
+                tool_calls: Array.from({ length: 3 }, (_, index) => ({
+                    args: { value: index },
+                    id: `call-${index + 20}`,
+                    name: 'calculator',
+                    type: 'tool_call' as const,
+                })),
+            }),
+            state,
+        })
+
+        expect(state._toolBearingRoundCount).toBe(8)
+        expect(state._toolCallCount).toBe(19)
+        expect(update._toolBearingRoundCount).toBe(1)
+        expect(update._toolCallCount).toBe(2)
+        expect(update._currentActionBatch?.admissions['call-20']).toMatchObject({ admitted: true, ordinal: 1 })
+        expect(update._currentActionBatch?.admissions['call-21']).toMatchObject({ admitted: true, ordinal: 2 })
+        expect(update._currentActionBatch?.admissions['call-22']).toMatchObject({
+            admitted: false,
+            blockedReason: 'tool_call_limit',
+            ordinal: 3,
         })
     })
 

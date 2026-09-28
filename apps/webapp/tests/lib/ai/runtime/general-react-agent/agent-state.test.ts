@@ -1,4 +1,3 @@
-import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import { FakeChatModel } from '@langchain/core/utils/testing'
 import { ReducedValue, StateSchema } from '@langchain/langgraph'
 import { describe, expect, it, vi } from 'vitest'
@@ -8,12 +7,12 @@ import { createGeneralReActInitialState, generalReActAgentStateSchema } from '@/
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from '@/lib/ai/runtime/general-react-agent/runtime-config'
 
 describe('General ReAct state and runtime defaults', () => {
-    it('freezes the v0.6.1 loop and finalizer budgets', () => {
+    it('freezes the v0.6.2 loop and finalizer budgets', () => {
         expect(GENERAL_REACT_RUNTIME_DEFAULTS).toMatchObject({
             hardDeadlineMs: 270_000,
             loopDeadlineMs: 235_000,
             maxFinalizerMs: 30_000,
-            maxLogicalToolCalls: 14,
+            maxLogicalToolCalls: 21,
             maxLoopModelCalls: 10,
             maxModelCalls: 11,
             maxObservationChars: 48_000,
@@ -24,12 +23,12 @@ describe('General ReAct state and runtime defaults', () => {
         })
     })
 
-    it('freezes the fixed v0.6.1 server-owned budgets', () => {
+    it('freezes the fixed v0.6.2 server-owned budgets', () => {
         expect(GENERAL_REACT_RUNTIME_DEFAULTS).toEqual({
             hardDeadlineMs: 270_000,
             loopDeadlineMs: 235_000,
             maxFinalizerMs: 30_000,
-            maxLogicalToolCalls: 14,
+            maxLogicalToolCalls: 21,
             maxLoopModelCalls: 10,
             maxModelCalls: 11,
             maxModelRetries: 1,
@@ -53,7 +52,6 @@ describe('General ReAct state and runtime defaults', () => {
             _loopDeadlineAtMs: 245_000,
             _loopModelCallCount: 0,
             _toolBearingRoundCount: 0,
-            _authorizedUrls: [],
             _callFingerprints: [],
             _currentActionBatch: null,
             _executedToolCallCount: 0,
@@ -109,51 +107,13 @@ describe('General ReAct state and runtime defaults', () => {
         await expect(generalReActAgentStateSchema.validateInput({ ...state, _finalizationMode: 'natural' })).rejects.toThrow()
     })
 
-    it('grants only safe URLs explicitly present in the current user message', () => {
-        const state = createGeneralReActInitialState(10_000, [
-            new SystemMessage('https://system.example/private-context'),
-            new HumanMessage(
-                '请读取 https://docs.example.com/guide#section 和 http://127.0.0.1/admin。重复 https://docs.example.com/guide。'
-            ),
-        ])
+    it('不在 Run state 保存 URL、地图坐标或 POI 来源门禁', () => {
+        const state = createGeneralReActInitialState(10_000)
 
-        expect(state._authorizedUrls).toEqual([
-            {
-                canonicalUrl: 'https://docs.example.com/guide',
-                grantCallId: null,
-                grantedAtRound: 0,
-                grantedBy: 'user',
-                host: 'docs.example.com',
-            },
-        ])
-    })
-
-    it('merges revalidated server-trusted same-thread user URLs without accepting unsafe URLs', () => {
-        const state = createGeneralReActInitialState(
-            10_000,
-            [new HumanMessage('这轮请继续处理，但没有重复链接。')],
-            ['https://docs.example.com/previous#section', 'http://127.0.0.1/internal', 'https://user:password@example.com/private']
-        )
-
-        expect(state._authorizedUrls).toEqual([
-            {
-                canonicalUrl: 'https://docs.example.com/previous',
-                grantCallId: null,
-                grantedAtRound: 0,
-                grantedBy: 'user',
-                host: 'docs.example.com',
-            },
-        ])
-    })
-
-    it('re-canonicalizes server-trusted URLs and caps reuse at eight entries', () => {
-        const trustedUrls = Array.from({ length: 9 }, (_, index) => `https://docs.example.com/page-${index}#fragment`)
-        const state = createGeneralReActInitialState(10_000, [], trustedUrls)
-
-        expect(state._authorizedUrls).toHaveLength(8)
-        expect(state._authorizedUrls.map(grant => grant.canonicalUrl)).toEqual(
-            Array.from({ length: 8 }, (_, index) => `https://docs.example.com/page-${index}`)
-        )
+        expect(state).not.toHaveProperty('_authorizedUrls')
+        expect(state).not.toHaveProperty('_amapCities')
+        expect(state).not.toHaveProperty('_amapCoordinates')
+        expect(state).not.toHaveProperty('_amapPoiIds')
     })
 
     it('uses LangGraph reducers for merge-safe counter deltas', () => {

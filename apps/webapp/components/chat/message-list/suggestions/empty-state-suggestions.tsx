@@ -1,448 +1,121 @@
 'use client'
 
-import { ArrowRight, BrainCircuit, ImagePlus, Network, Users } from 'lucide-react'
-import { type ReactNode, useSyncExternalStore } from 'react'
+import { ArrowRight } from 'lucide-react'
+import type { ReactNode } from 'react'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
 
-import {
-    deliveryChainDemoSuggestion,
-    type EmptyStateSuggestion,
-    generalReActDemoSuggestion,
-    imageGenerationDemoSuggestion,
-    tasklistDemoSuggestion,
-} from './empty-state-suggestion-options'
-import { FollowUpSuggestions } from './follow-up-suggestions'
+import { capabilityTags, type EmptyStateSuggestion, featuredQuestions } from './empty-state-suggestion-options'
 
-const desktopRecommendationQuery = '(min-width: 768px)'
-const desktopRecommendationSeed = `empty-state-desktop-${Math.random().toString(36).slice(2)}`
-
-/*
-Memory 卡片暂时隐藏，恢复时同步还原 ChevronDown、Database、useId、useState、
-Collapsible 与 HoverCard 相关 imports，并取消下面辅助逻辑、组件状态和 JSX 的注释。
-
-const memorySteps = ['发送“记住我喜欢吃桃子。”', '新建或切换对话。', '发送“给我推荐几种水果。”']
-const finePointerQuery = '(hover: hover) and (pointer: fine)'
-*/
-
-function subscribeToMediaQuery(mediaQueryText: string, onStoreChange: () => void) {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-        return () => undefined
-    }
-
-    const mediaQuery = window.matchMedia(mediaQueryText)
-    mediaQuery.addEventListener('change', onStoreChange)
-
-    return () => mediaQuery.removeEventListener('change', onStoreChange)
-}
-
-function getMediaQueryPreference(mediaQueryText: string) {
-    return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(mediaQueryText).matches
-}
-
-function useMediaQueryPreference(mediaQueryText: string) {
-    return useSyncExternalStore(
-        onStoreChange => subscribeToMediaQuery(mediaQueryText, onStoreChange),
-        () => getMediaQueryPreference(mediaQueryText),
-        () => false
-    )
-}
-
-function useSupportsDesktopRecommendations() {
-    return useMediaQueryPreference(desktopRecommendationQuery)
-}
-
-/*
-function useSupportsFinePointer() {
-    return useMediaQueryPreference(finePointerQuery)
-}
-*/
-
-function CaseIcon({ children, tone = 'agent' }: { children: ReactNode; tone?: 'agent' | 'memory' }) {
-    return (
-        <span
-            className={
-                tone === 'memory'
-                    ? 'hidden size-12 shrink-0 items-center justify-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-violet-200/80 md:inline-flex'
-                    : 'hidden size-12 shrink-0 items-center justify-center rounded-full bg-[var(--composer-focus-soft)] text-[var(--composer-focus)] ring-1 ring-[var(--composer-focus-border)] md:inline-flex'
-            }
-        >
-            {children}
-        </span>
-    )
-}
-
-/*
-function MemoryExperienceSteps({ withTitle = false, withHint = false }: { withTitle?: boolean; withHint?: boolean }) {
-    return (
-        <div className="flex flex-col gap-3 rounded-xl border border-violet-200/80 bg-violet-50/55 p-3">
-            {withTitle ? <h4 className="text-sm font-medium text-foreground">体验跨对话偏好记忆</h4> : null}
-            <ol className="flex flex-col gap-2 text-sm leading-5 text-foreground">
-                {memorySteps.map((step, index) => (
-                    <li key={step} className="flex min-w-0 items-start gap-2">
-                        <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-violet-100 text-xs font-medium text-violet-700">
-                            {index + 1}
-                        </span>
-                        <span className="min-w-0 break-words">{step}</span>
-                    </li>
-                ))}
-            </ol>
-            {withHint ? <p className="text-xs leading-5 text-muted-foreground">请在同一浏览器不同会话内完成体验。</p> : null}
-        </div>
-    )
-}
-*/
-
-function ExecutableCardOverlay({ ariaLabel, disabled, onClick }: { ariaLabel: string; disabled?: boolean; onClick: () => void }) {
+/**
+ * 精选问题卡片——空状态首屏的核心视觉元素。
+ * 左侧大图标 + 问题文字 + 右侧箭头，整卡可点击。
+ */
+function FeaturedQuestionCard({
+    icon: Icon,
+    text,
+    disabled,
+    onClick,
+}: {
+    icon: (props: { className?: string; strokeWidth?: number; 'aria-hidden'?: boolean }) => ReactNode
+    text: string
+    disabled?: boolean
+    onClick: () => void
+}) {
     return (
         <Button
             type="button"
             variant="ghost"
             disabled={disabled}
-            aria-label={ariaLabel}
             onClick={onClick}
-            className="absolute inset-0 h-auto w-auto cursor-pointer rounded-2xl border-0 bg-transparent p-0 hover:bg-transparent active:translate-y-0"
-        />
+            aria-label={text}
+            className="group/card relative h-auto w-full cursor-pointer items-center gap-4 rounded-2xl border border-border/40 bg-muted/30 p-4 text-left text-foreground shadow-none transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus-border)] hover:bg-[var(--composer-focus-soft)]/40 hover:shadow-sm active:translate-y-0 sm:p-5"
+        >
+            {/* 左侧图标块 */}
+            <span
+                className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[var(--composer-focus-soft)] text-[var(--composer-focus)] ring-1 ring-[var(--composer-focus-border)] sm:size-12"
+                aria-hidden="true"
+            >
+                <Icon className="size-5 sm:size-6" strokeWidth={1.9} />
+            </span>
+
+            {/* 中间问题文字 */}
+            <span className="flex-1 min-w-0">
+                <span className="block truncate text-sm font-medium leading-snug sm:text-base">{text}</span>
+            </span>
+
+            {/* 右侧箭头 */}
+            <ArrowRight
+                className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 group-hover/card:translate-x-0.5 group-hover/card:text-[var(--composer-focus)] sm:size-5"
+                strokeWidth={2}
+                aria-hidden="true"
+            />
+        </Button>
+    )
+}
+
+/**
+ * 能力标签胶囊——标题下方展示 Agent 具备的核心能力。
+ */
+function CapabilityPill({
+    icon: Icon,
+    label,
+}: {
+    icon: (props: { className?: string; strokeWidth?: number; 'aria-hidden'?: boolean }) => ReactNode
+    label: string
+}) {
+    return (
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-3 py-1.5 text-xs font-medium text-foreground/80 sm:text-sm">
+            <Icon className="size-3.5 text-[var(--composer-focus)] sm:size-4" strokeWidth={2} aria-hidden={true} />
+            {label}
+        </span>
     )
 }
 
 export function EmptyStateSuggestions({
     disabled,
     onSelectQuestion,
-    onSelectSuggestion,
+    onSelectSuggestion: _onSelectSuggestion,
 }: {
     disabled?: boolean
     onSelectQuestion: (question: string) => void
-    onSelectSuggestion: (suggestion: EmptyStateSuggestion) => void
+    onSelectSuggestion?: (suggestion: EmptyStateSuggestion) => void
 }) {
-    /*
-    const [memoryStepsOpen, setMemoryStepsOpen] = useState(false)
-    const [memoryHoverCardOpen, setMemoryHoverCardOpen] = useState(false)
-    const memoryStepsId = `memory-experience-steps-${useId().replace(/:/g, '')}`
-    const supportsFinePointer = useSupportsFinePointer()
-    */
-    const supportsDesktopRecommendations = useSupportsDesktopRecommendations()
-
     return (
-        <section className="mx-auto flex w-full max-w-[var(--chat-content-column-width)] flex-col items-center text-center md:pt-8">
-            <div className="max-w-3xl">
-                <h2 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">试试这些能力</h2>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground sm:text-base">
-                    选择一个场景，查看执行过程、控制边界与最终产物。
+        <section className="flex flex-1 min-h-[60vh] w-full flex-col items-center justify-center text-center" aria-label="推荐问题">
+            {/* 标题区 */}
+            <div className="max-w-2xl">
+                <h2 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl md:text-4xl">你可以这样开始</h2>
+                <p className="mt-3 md:mt-5 text-sm leading-6 text-muted-foreground sm:text-base">
+                    选择一个问题，体验 Agent 如何搜索资料、读取网页并调用工具完成任务。
                 </p>
             </div>
 
-            <div className="mt-7 grid w-full grid-cols-1 gap-4 text-left md:grid-cols-2">
-                <article aria-labelledby="general-react-case-title" className="min-w-0">
-                    <Card
-                        data-disabled={disabled || undefined}
-                        className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-[var(--composer-focus-border)] bg-[var(--composer-focus-soft)]/45 py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
-                    >
-                        <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
-                            <div className="flex min-w-0 items-start gap-3">
-                                <CaseIcon>
-                                    <BrainCircuit className="size-6" strokeWidth={1.9} aria-hidden="true" />
-                                </CaseIcon>
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
-                                        <Badge
-                                            variant="outline"
-                                            className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
-                                        >
-                                            ReAct Agent
-                                        </Badge>
-                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="general-react-case-title">搜索并解读 React 19 教程</h3>
-                                        </CardTitle>
-                                    </div>
-                                </div>
-                            </div>
-                        </CardHeader>
-
-                        <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
-                            <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                先搜索掘金或知乎上的中文教程，再选择一篇读取正文，提炼关键上手步骤。
-                            </p>
-                        </CardContent>
-                        <Separator className="hidden bg-border/60 md:block" />
-                        <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                            <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                Web Search · 网页读取 · 来源追踪
-                            </p>
-                            <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
-                                运行示例
-                                <ArrowRight
-                                    className="size-4 transition-transform group-hover/executable:translate-x-0.5"
-                                    aria-hidden="true"
-                                />
+            {/* 能力标签行 */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-3 gap-y-2" role="list" aria-label="Agent 能力标签">
+                {capabilityTags.map((tag, index) => (
+                    <div key={tag.label} className="flex items-center gap-3" role="listitem">
+                        <CapabilityPill icon={tag.icon} label={tag.label} />
+                        {index < capabilityTags.length - 1 ? (
+                            <span className="hidden text-muted-foreground/40 sm:inline" aria-hidden="true">
+                                ·
                             </span>
-                        </CardFooter>
-                        <ExecutableCardOverlay
-                            ariaLabel="运行 ReAct 智能体示例"
-                            disabled={disabled}
-                            onClick={() => onSelectSuggestion(generalReActDemoSuggestion)}
-                        />
-                    </Card>
-                </article>
+                        ) : null}
+                    </div>
+                ))}
+            </div>
 
-                <article aria-labelledby="tasklist-case-title" className="min-w-0">
-                    <Card
-                        data-disabled={disabled || undefined}
-                        className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-border/70 bg-card py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus-border)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
-                    >
-                        <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
-                            <div className="flex min-w-0 items-start gap-3">
-                                <CaseIcon>
-                                    <Network className="size-6" strokeWidth={1.9} aria-hidden="true" />
-                                </CaseIcon>
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
-                                        <Badge
-                                            variant="outline"
-                                            className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
-                                        >
-                                            Agent
-                                        </Badge>
-                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="tasklist-case-title">受控任务规划</h3>
-                                        </CardTitle>
-                                    </div>
-                                </div>
-                            </div>
-                        </CardHeader>
-
-                        <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
-                            <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                读取显式引用的版本方案，人工确认策略后生成 Tasklist 草稿，并完成结构校验。
-                            </p>
-                        </CardContent>
-                        <Separator className="hidden bg-border/60 md:block" />
-                        <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                            <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                LangGraph · HITL Checkpoint · 最多两轮修订
-                            </p>
-                            <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
-                                运行示例
-                                <ArrowRight
-                                    className="size-4 transition-transform group-hover/executable:translate-x-0.5"
-                                    aria-hidden="true"
-                                />
-                            </span>
-                        </CardFooter>
-                        <ExecutableCardOverlay
-                            ariaLabel="运行受控任务规划示例"
-                            disabled={disabled}
-                            onClick={() => onSelectSuggestion(tasklistDemoSuggestion)}
-                        />
-                    </Card>
-                </article>
-
-                <div className="contents">
-                    <article aria-labelledby="delivery-case-title" className="min-w-0">
-                        <Card
-                            data-disabled={disabled || undefined}
-                            className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-border/70 bg-card py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus-border)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
-                        >
-                            <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
-                                <CaseIcon>
-                                    <Users className="size-6" strokeWidth={1.9} aria-hidden="true" />
-                                </CaseIcon>
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
-                                        <Badge
-                                            variant="outline"
-                                            className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
-                                        >
-                                            多 Agent
-                                        </Badge>
-                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="delivery-case-title">设计注册登录系统交付计划</h3>
-                                        </CardTitle>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
-                                <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                    从用户流程到接口、安全和测试，生成注册登录系统的实施方案与任务拆解。
-                                </p>
-                            </CardContent>
-                            <Separator className="hidden bg-border/60 md:block" />
-                            <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                                <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                    Agent-as-Tool · 3 个评审 subAgent · 结构化
-                                </p>
-                                <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
-                                    运行示例
-                                    <ArrowRight
-                                        className="size-4 transition-transform group-hover/executable:translate-x-0.5"
-                                        aria-hidden="true"
-                                    />
-                                </span>
-                            </CardFooter>
-                            <ExecutableCardOverlay
-                                ariaLabel="运行注册登录系统示例"
-                                disabled={disabled}
-                                onClick={() => onSelectSuggestion(deliveryChainDemoSuggestion)}
-                            />
-                        </Card>
-                    </article>
-
-                    <article aria-labelledby="image-generation-case-title" className="min-w-0">
-                        <Card
-                            data-disabled={disabled || undefined}
-                            className="group/executable relative cursor-pointer gap-0 rounded-2xl border border-[var(--composer-focus-border)] bg-[var(--composer-focus-soft)]/45 py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-[var(--composer-focus)] hover:shadow-sm active:translate-y-0 has-[button:focus-visible]:border-[var(--composer-focus)] has-[button:focus-visible]:ring-3 has-[button:focus-visible]:ring-ring/50 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50 data-[disabled]:hover:translate-y-0 data-[disabled]:hover:shadow-xs md:min-h-[236px]"
-                        >
-                            <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
-                                <CaseIcon>
-                                    <ImagePlus className="size-6" strokeWidth={1.9} aria-hidden="true" />
-                                </CaseIcon>
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
-                                        <Badge
-                                            variant="outline"
-                                            className="rounded-full border-[var(--composer-chip-border)] bg-[var(--composer-chip-bg)] text-[color-mix(in_oklch,var(--composer-focus)_68%,black)]"
-                                        >
-                                            Image Agent
-                                        </Badge>
-                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="image-generation-case-title">AI 图像生成</h3>
-                                        </CardTitle>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
-                                <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                    通过 /image 显式入口整理画面需求，自动优化生图描述后生成一张临时图片。
-                                </p>
-                            </CardContent>
-                            <Separator className="hidden bg-border/60 md:block" />
-                            <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                                <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                    图像需求摘要 · 结构化输出 · 最多一次修订
-                                </p>
-                                <span className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-[var(--composer-focus)]">
-                                    运行示例
-                                    <ArrowRight
-                                        className="size-4 transition-transform group-hover/executable:translate-x-0.5"
-                                        aria-hidden="true"
-                                    />
-                                </span>
-                            </CardFooter>
-                            <ExecutableCardOverlay
-                                ariaLabel="运行 AI 图像生成示例"
-                                disabled={disabled}
-                                onClick={() => onSelectSuggestion(imageGenerationDemoSuggestion)}
-                            />
-                        </Card>
-                    </article>
-
-                    {/*
-                    暂时保留完整的 Memory 卡片 JSX，当前版本不在推荐能力中展示。
-                    <article aria-labelledby="memory-case-title" className="min-w-0">
-                        <Card className="group/memory cursor-pointer gap-0 rounded-2xl border border-border/70 bg-card py-0 shadow-xs ring-0 transition-all duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-sm active:translate-y-0 md:min-h-[236px]">
-                            <CardHeader className="flex min-w-0 flex-row items-start gap-3 p-4 sm:p-5">
-                                <CaseIcon tone="memory">
-                                    <Database className="size-6" strokeWidth={1.9} aria-hidden="true" />
-                                </CaseIcon>
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2 md:flex-col md:items-start md:gap-0">
-                                        <Badge variant="outline" className="rounded-full border-violet-200 bg-violet-50 text-violet-700">
-                                            Memory
-                                        </Badge>
-                                        <CardTitle className="text-sm font-semibold leading-tight md:mt-2 md:text-base">
-                                            <h3 id="memory-case-title">跨对话偏好记忆</h3>
-                                        </CardTitle>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <Collapsible open={memoryStepsOpen} onOpenChange={setMemoryStepsOpen} className="flex flex-1 flex-col">
-                                <CardContent className="flex flex-1 flex-col gap-3 p-4 pt-0 sm:p-5 sm:pt-0">
-                                    <p className="break-words text-xs leading-5 text-muted-foreground md:text-[13px]">
-                                        在同一浏览器会话保存稳定偏好；切换对话后，用不同措辞验证向量语义召回。
-                                    </p>
-                                </CardContent>
-                                <Separator className="hidden bg-border/60 md:block" />
-                                <CardFooter className="flex w-full flex-col items-start gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                                    <p className="hidden min-w-0 break-words text-xs leading-5 text-muted-foreground md:block md:text-[13px] md:text-foreground/80">
-                                        UserMemory · PostgresStore · 向量检索
-                                    </p>
-                                    {supportsFinePointer ? (
-                                        <HoverCard
-                                            open={memoryHoverCardOpen}
-                                            onOpenChange={setMemoryHoverCardOpen}
-                                            openDelay={200}
-                                            closeDelay={200}
-                                        >
-                                            <HoverCardTrigger asChild>
-                                                <Button
-                                                    type="button"
-                                                    variant="ghost"
-                                                    size="sm"
-                                                    disabled={disabled}
-                                                    aria-label="查看跨对话偏好记忆体验步骤"
-                                                    onClick={() => setMemoryHoverCardOpen(current => !current)}
-                                                    className="w-fit shrink-0 justify-start text-[var(--composer-focus)] hover:bg-[var(--composer-focus-soft)] hover:text-[var(--composer-focus)]"
-                                                >
-                                                    查看步骤
-                                                    <ArrowRight
-                                                        data-icon="inline-end"
-                                                        aria-hidden="true"
-                                                        className="transition-transform group-hover/memory:translate-x-0.5"
-                                                    />
-                                                </Button>
-                                            </HoverCardTrigger>
-                                            <HoverCardContent
-                                                side="top"
-                                                align="end"
-                                                sideOffset={8}
-                                                className="w-[min(21rem,calc(100vw-2rem))] border border-border p-3"
-                                            >
-                                                <MemoryExperienceSteps withTitle withHint />
-                                            </HoverCardContent>
-                                        </HoverCard>
-                                    ) : (
-                                        <CollapsibleTrigger asChild>
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="sm"
-                                                disabled={disabled}
-                                                aria-controls={memoryStepsId}
-                                                className="w-fit shrink-0 justify-start text-[var(--composer-focus)] hover:bg-[var(--composer-focus-soft)] hover:text-[var(--composer-focus)]"
-                                            >
-                                                查看体验步骤
-                                                <ChevronDown
-                                                    data-icon="inline-end"
-                                                    aria-hidden="true"
-                                                    className={memoryStepsOpen ? 'rotate-180 transition-transform' : 'transition-transform'}
-                                                />
-                                            </Button>
-                                        </CollapsibleTrigger>
-                                    )}
-                                </CardFooter>
-                                {!supportsFinePointer ? (
-                                    <CollapsibleContent
-                                        id={memoryStepsId}
-                                        aria-label="跨对话偏好记忆体验步骤"
-                                        className="px-4 pb-4 sm:px-5 sm:pb-5"
-                                    >
-                                        <MemoryExperienceSteps />
-                                    </CollapsibleContent>
-                                ) : null}
-                            </Collapsible>
-                        </Card>
-                    </article>
-                    */}
-
-                    {supportsDesktopRecommendations ? (
-                        <div role="group" aria-label="推荐问题" className="hidden min-w-0 md:col-span-2 md:block">
-                            <FollowUpSuggestions seed={desktopRecommendationSeed} className="mt-0" onSelectQuestion={onSelectQuestion} />
-                        </div>
-                    ) : null}
-                </div>
+            {/* 精选问题卡片列表 */}
+            <div className="mt-8 flex w-full flex-col gap-3 text-left sm:gap-4">
+                {featuredQuestions.map(question => (
+                    <FeaturedQuestionCard
+                        key={question.text}
+                        icon={question.icon}
+                        text={question.text}
+                        disabled={disabled}
+                        onClick={() => onSelectQuestion(question.text)}
+                    />
+                ))}
             </div>
         </section>
     )

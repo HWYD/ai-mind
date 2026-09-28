@@ -82,15 +82,14 @@ describe('GeneralAgentTracePanel', () => {
         expect(trigger.className).not.toContain('border')
     })
 
-    it('keeps the active shimmer while actions have completed but final text has not started', () => {
+    it('uses the completed title as soon as the Run reaches its terminal state', () => {
         render(<GeneralAgentTracePanel finalAnswerStarted={false} parts={[createToolPart()]} run={completedRun} />)
 
-        const trigger = screen.getByRole('button', { name: '正在思考' })
+        const trigger = screen.getByRole('button', { name: '已完成思考' })
 
-        expect(trigger.querySelector('span.shimmer')?.textContent).toBe('正在思考')
-        expect(trigger.querySelector('[data-slot="shimmer"]')).toBeNull()
+        expect(trigger.querySelector('span.shimmer')).toBeNull()
         expect(trigger.getAttribute('aria-expanded')).toBe('true')
-        expect(screen.queryByRole('button', { name: '已完成思考' })).toBeNull()
+        expect(screen.queryByRole('button', { name: '正在思考' })).toBeNull()
     })
 
     it('shows read sources only after a successful read and caps canonical URLs', () => {
@@ -400,7 +399,7 @@ describe('GeneralAgentTracePanel', () => {
         expect(secondTool.compareDocumentPosition(pending!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
     })
 
-    it('constrained finalizer 完成时显示处理未完成并保持 live Trace 展开', () => {
+    it('constrained finalizer 完成时显示已完成思考并保持 live Trace 展开', () => {
         render(
             <GeneralAgentTracePanel
                 finalAnswerStarted
@@ -409,7 +408,7 @@ describe('GeneralAgentTracePanel', () => {
             />
         )
 
-        const trigger = screen.getByRole('button', { name: '处理未完成' })
+        const trigger = screen.getByRole('button', { name: '已完成思考' })
 
         expect(trigger.getAttribute('aria-expanded')).toBe('true')
         expect(screen.getByText('已搜索到 0 个来源')).toBeTruthy()
@@ -424,7 +423,7 @@ describe('GeneralAgentTracePanel', () => {
             />
         )
 
-        const trigger = screen.getByRole('button', { name: '处理未完成' })
+        const trigger = screen.getByRole('button', { name: '已完成思考' })
 
         expect(trigger.getAttribute('aria-expanded')).toBe('false')
         fireEvent.click(trigger)

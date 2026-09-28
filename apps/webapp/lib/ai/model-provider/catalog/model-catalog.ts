@@ -117,6 +117,7 @@ export const modelCatalog = [
             chat: true,
             embedding: false,
             jsonOutput: true,
+            reasoning: true,
             streaming: true,
             tasklist: true,
             toolCalling: true,

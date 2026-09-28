@@ -2,6 +2,7 @@ export type WebProviderEnv = Record<string, string | undefined> &
     Partial<
         Record<
             | 'AI_MIND_AGENT_RUN_SESSION_SECRET'
+            | 'AI_MIND_AMAP_MCP_KEY'
             | 'AI_MIND_DEEPSEEK_API_KEY'
             | 'AI_MIND_DOUBAO_API_KEY'
             | 'AI_MIND_QWEN_API_KEY'
@@ -32,6 +33,7 @@ export type ZhipuWebProviderConfig = {
 export function resolveOutboundKnownSecrets(env: WebProviderEnv = process.env): string[] {
     return [
         env.AI_MIND_AGENT_RUN_SESSION_SECRET,
+        env.AI_MIND_AMAP_MCP_KEY,
         env.AI_MIND_DEEPSEEK_API_KEY,
         env.AI_MIND_DOUBAO_API_KEY,
         env.AI_MIND_QWEN_API_KEY,

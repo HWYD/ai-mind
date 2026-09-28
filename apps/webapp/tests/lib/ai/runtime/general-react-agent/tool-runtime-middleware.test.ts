@@ -143,7 +143,7 @@ describe('general-react-agent tool runtime middleware', () => {
         })
     })
 
-    it('按 allowlist→normalize→strict schema→security→fingerprint→authorization→execution 处理成功调用', async () => {
+    it('按 allowlist→normalize→strict schema→security→fingerprint→execution 处理成功调用', async () => {
         const order: string[] = []
         const schema = z
             .object({ query: z.string() })
@@ -210,6 +210,10 @@ describe('general-react-agent tool runtime middleware', () => {
         expect(publishChunk.mock.calls.map(([chunk]) => (chunk as { type: string }).type)).toEqual(['tool-start', 'error'])
         expect(JSON.stringify(publishChunk.mock.calls)).not.toContain('secret-that-must-not-be-read')
         expect(getUpdate(command)._callFingerprints).toBeUndefined()
+        expect(getOnlyToolMessage(command)).toMatchObject({
+            content: expect.stringContaining('query'),
+            metadata: { observationStatus: 'validation_error' },
+        })
         expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'validation_error' })
     })
 
@@ -257,6 +261,37 @@ describe('general-react-agent tool runtime middleware', () => {
         })
     })
 
+    it('所有 remote-readonly Tool 复用出站密钥防护，不向天气等非网页 Tool 外发地图 Key', async () => {
+        vi.stubEnv('AI_MIND_AMAP_MCP_KEY', 'amap-test-secret')
+        try {
+            const invoke = vi.fn()
+            const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
+            const schema = z.object({ city: z.string() }).strict()
+            const definition: ChatToolDefinition = {
+                executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+                name: 'city-weather',
+                schema,
+                tool: tool(invoke, { description: 'weather', name: 'city-weather', schema }),
+                runtimeScopes: ['general-react-agent'],
+            }
+
+            const command = await executeGeneralReActToolCall({
+                context: createContext([definition], publishChunk),
+                state: createState(),
+                toolCall: { args: { city: 'amap-test-secret' }, id: 'call-1', name: 'city-weather', type: 'tool_call' },
+            })
+
+            expect(invoke).not.toHaveBeenCalled()
+            expect(JSON.stringify(publishChunk.mock.calls)).not.toContain('amap-test-secret')
+            expect(getOnlyToolMessage(command)).toMatchObject({
+                content: '请求包含禁止外发的凭据。',
+                metadata: { observationStatus: 'denied' },
+            })
+        } finally {
+            vi.unstubAllEnvs()
+        }
+    })
+
     it('拒绝在 web-search 查询中携带签名 URL 的请求，公开为脱敏失败 Tool row，不进入指纹或 provider', async () => {
         const invoke = vi.fn()
         const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
@@ -287,18 +322,19 @@ describe('general-react-agent tool runtime middleware', () => {
         expect(JSON.stringify(publishedChunks)).not.toContain('example.com/file')
         expect(getUpdate(command)._callFingerprints).toBeUndefined()
         expect(getOnlyToolMessage(command)).toMatchObject({
-            content: '请求包含禁止外发的凭据。',
+            content: '请求不符合安全访问规则。',
             metadata: { observationStatus: 'denied' },
             tool_call_id: 'call-1',
         })
     })
 
-    it('read-url 在 fingerprint 后执行当前 Run URL authorization，未授权时显示失败 Tool row且不调用 provider', async () => {
-        const invoke = vi.fn()
+    it('read-url 允许模型生成合法公共 URL，并在调用前完成规范化', async () => {
+        const invoke = vi.fn(async (_input: unknown) => ({ content: '已读取' }))
         const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
         const schema = z.object({ url: z.string().url() }).strict()
         const definition: ChatToolDefinition = {
             executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+            formatInput: () => '读取页面',
             name: 'read-url',
             schema,
             tool: tool(invoke, { description: 'read', name: 'read-url', schema }),
@@ -311,20 +347,14 @@ describe('general-react-agent tool runtime middleware', () => {
             toolCall: { args: { url: 'https://example.com/docs' }, id: 'call-1', name: 'read-url', type: 'tool_call' },
         })
 
-        expect(invoke).not.toHaveBeenCalled()
+        expect(invoke).toHaveBeenCalledTimes(1)
+        expect(invoke.mock.calls[0]?.[0]).toMatchObject({ url: 'https://example.com/docs' })
         const publishedChunks = publishChunk.mock.calls.map(([chunk]) => chunk as Record<string, unknown>)
-        expect(publishedChunks.map(chunk => chunk.type)).toEqual(['tool-start', 'error'])
-        expect(publishedChunks[0]).toMatchObject({ input: '', toolName: 'read-url', type: 'tool-start' })
-        expect(publishedChunks[1]).toMatchObject({
-            message: '工具请求未执行。',
-            partId: publishedChunks[0]?.partId,
-            scope: 'tool',
-            toolName: 'read-url',
-            type: 'error',
-        })
+        expect(publishedChunks.map(chunk => chunk.type)).toEqual(['tool-start', 'tool-end'])
+        expect(publishedChunks[0]).toMatchObject({ input: '读取页面', toolName: 'read-url', type: 'tool-start' })
         expect(JSON.stringify(publishedChunks)).not.toContain('https://example.com/docs')
         expect(getUpdate(command)._callFingerprints).toHaveLength(1)
-        expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'denied' })
+        expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'success' })
     })
 
     it('同 fingerprint 重复调用不执行 Tool，并只返回一个 paired ToolMessage', async () => {
@@ -448,7 +478,7 @@ describe('general-react-agent tool runtime middleware', () => {
             batchId: 'batch-1',
             callIds: ['call-1'],
             observationCharsUsed: 0,
-            toolCallsUsed: 14,
+            toolCallsUsed: 21,
         })
 
         const command = await executeGeneralReActToolCall({
@@ -460,5 +490,90 @@ describe('general-react-agent tool runtime middleware', () => {
         expect(invoke).not.toHaveBeenCalled()
         expect(publishChunk.mock.calls.map(([chunk]) => (chunk as { type: string }).type)).toEqual(['tool-start', 'error'])
         expect(getOnlyToolMessage(command).metadata).toMatchObject({ observationStatus: 'budget_blocked' })
+    })
+
+    it('地图 Tool 允许模型生成坐标候选，但公开 Trace 不包含坐标', async () => {
+        const invoke = vi.fn(async (_input: unknown) => ({ cities: [], coordinates: [], facts: [], kind: 'reverse-geocode', poiIds: [] }))
+        const publishChunk = vi.fn(async (_chunk: unknown) => undefined)
+        const schema = z.object({ location: z.string() }).strict()
+        const definition: ChatToolDefinition = {
+            executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+            formatInput: () => '地图查询请求',
+            formatPublicOutput: () => '地图查询已完成。',
+            getDisplayConfig: () => ({ action: 'geocode', title: '坐标转地址' }),
+            name: 'amap-reverse-geocode',
+            schema,
+            serverId: 'amap-maps',
+            source: 'mcp',
+            tool: tool(invoke, { description: 'map', name: 'amap-reverse-geocode', schema }),
+            runtimeScopes: ['general-react-agent'],
+        }
+        const command = await executeGeneralReActToolCall({
+            context: createContext([definition], publishChunk),
+            state: createState(),
+            toolCall: { args: { location: '116.397123,39.908456' }, id: 'call-1', name: 'amap-reverse-geocode', type: 'tool_call' },
+        })
+
+        expect(invoke).toHaveBeenCalledTimes(1)
+        expect(invoke.mock.calls[0]?.[0]).toMatchObject({ location: '116.397123,39.908456' })
+        expect(getOnlyToolMessage(command)).toMatchObject({ status: 'success' })
+        expect(JSON.stringify(publishChunk.mock.calls)).not.toContain('116.397123,39.908456')
+    })
+
+    it('地图 Tool 允许模型生成地址候选，并保持 strict schema 约束', async () => {
+        const invoke = vi.fn(async (_input: unknown) => ({ cities: [], coordinates: [], facts: [], kind: 'geocode', poiIds: [] }))
+        const schema = z.object({ address: z.string() }).strict()
+        const definition: ChatToolDefinition = {
+            executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+            getDisplayConfig: () => ({ action: 'geocode', title: '地址转坐标' }),
+            name: 'amap-geocode',
+            schema,
+            serverId: 'amap-maps',
+            source: 'mcp',
+            tool: tool(invoke, { description: 'map', name: 'amap-geocode', schema }),
+            runtimeScopes: ['general-react-agent'],
+        }
+
+        const command = await executeGeneralReActToolCall({
+            context: createContext([definition]),
+            state: createState('call-city'),
+            toolCall: { args: { address: '北京市东城区景山前街4号' }, id: 'call-city', name: 'amap-geocode', type: 'tool_call' },
+        })
+
+        expect(invoke).toHaveBeenCalledTimes(1)
+        expect(invoke.mock.calls[0]?.[0]).toMatchObject({ address: '北京市东城区景山前街4号' })
+        expect(getOnlyToolMessage(command)).toMatchObject({ status: 'success' })
+    })
+
+    it('地图 Tool 允许模型生成 POI ID 候选，结果仍只以真实 observation 为准', async () => {
+        const invoke = vi.fn(async (_input: unknown) => ({
+            cities: [],
+            coordinates: [],
+            facts: [],
+            kind: 'poi-detail',
+            poiIds: ['poi-model-candidate'],
+        }))
+        const schema = z.object({ id: z.string().min(1).max(128) }).strict()
+        const definition: ChatToolDefinition = {
+            executionPolicy: { kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+            formatInput: () => '地图查询请求',
+            formatPublicOutput: () => '地点查询已完成。',
+            getDisplayConfig: () => ({ action: 'query', title: '地点详情查询' }),
+            name: 'amap-poi-detail',
+            schema,
+            serverId: 'amap-maps',
+            source: 'mcp',
+            tool: tool(invoke, { description: 'map', name: 'amap-poi-detail', schema }),
+            runtimeScopes: ['general-react-agent'],
+        }
+
+        const command = await executeGeneralReActToolCall({
+            context: createContext([definition]),
+            state: createState('call-poi'),
+            toolCall: { args: { id: 'poi-model-candidate' }, id: 'call-poi', name: 'amap-poi-detail', type: 'tool_call' },
+        })
+
+        expect(invoke).toHaveBeenCalledWith({ id: 'poi-model-candidate' }, expect.anything())
+        expect(getOnlyToolMessage(command)).toMatchObject({ status: 'success' })
     })
 })

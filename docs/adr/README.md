@@ -42,3 +42,4 @@ ADR 不是 tasklist。它解释为什么做出这个决定、带来什么取舍�
 - [0013: Tool & Agent Final Turn Memory](./0013-tool-agent-final-turn-memory.md)
 - [0018: Token-aware Chat Context Budget and Compaction](./0018-token-aware-chat-context-budget-and-compaction.md)（v0.5.4 已实现）
 - [0019: General ReAct Agent Runtime Boundary](./0019-general-react-agent-runtime.md)（v0.6.1 已实现）
+- [0020: Controlled AMap MCP Tool Boundary](./0020-amap-mcp-tool-boundary.md)（v0.6.2 设计中，尚未实现）

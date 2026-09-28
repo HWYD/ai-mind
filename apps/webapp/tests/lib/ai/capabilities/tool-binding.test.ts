@@ -116,6 +116,36 @@ describe('capabilities/tool-binding', () => {
         expect(mcpClientManagerMock.listTools).not.toHaveBeenCalled()
     })
 
+    it('only exposes the verified static AMap allowlist when the server Key is available', async () => {
+        vi.stubEnv('AI_MIND_AMAP_MCP_KEY', 'server-only-test-key')
+
+        const binding = await resolveGeneralToolBinding()
+
+        expect(binding.activeToolNames).toEqual(
+            expect.arrayContaining([
+                'amap-geocode',
+                'amap-poi-detail',
+                'amap-poi-nearby',
+                'amap-poi-search',
+                'amap-reverse-geocode',
+                'amap-route-bicycling',
+                'amap-route-driving',
+                'amap-route-transit',
+                'amap-route-walking',
+            ])
+        )
+        expect(binding.activeToolDefinitionMap.get('amap-poi-search')?.serverId).toBe('amap-maps')
+        expect(mcpClientManagerMock.listTools).not.toHaveBeenCalled()
+    })
+
+    it('removes the whole AMap allowlist when the server Key is missing', async () => {
+        vi.stubEnv('AI_MIND_AMAP_MCP_KEY', '')
+
+        const binding = await resolveGeneralToolBinding()
+
+        expect(binding.activeToolNames.filter(name => name.startsWith('amap-'))).toEqual([])
+    })
+
     it('keeps ChatToolDefinition capability type as tool even when rendered as resource', () => {
         const resourceRenderedToolDefinition = {
             name: 'resource-rendered-tool',

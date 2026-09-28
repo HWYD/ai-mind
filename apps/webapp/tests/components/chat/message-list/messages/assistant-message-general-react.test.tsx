@@ -178,6 +178,49 @@ describe('AssistantMessage generic General ReAct presentation', () => {
         expect(screen.queryByText('Prompt 注入：research')).toBeNull()
     })
 
+    it('renders the AMap Tool as a generic safe Trace row without map request details', () => {
+        renderGenericMessage([
+            {
+                id: 'run-part-1',
+                runId: 'run-1',
+                status: 'completed',
+                type: 'agent-run',
+            },
+            {
+                action: 'query',
+                id: 'amap-tool-1',
+                input: '地图查询请求',
+                location: 'remote',
+                output: '地点查询已完成（1 项）。',
+                serverId: 'amap-maps',
+                source: 'mcp',
+                status: 'completed',
+                title: '地点搜索',
+                toolName: 'amap-poi-search',
+                type: 'tool',
+            },
+            {
+                format: 'markdown',
+                id: 'final-1',
+                modelTurnId: 'turn-1',
+                phase: 'final_answer',
+                runId: 'run-1',
+                status: 'completed',
+                text: '已完成地点查询。',
+                type: 'agent-text',
+            },
+        ])
+
+        fireEvent.click(screen.getByRole('button', { name: '已完成思考' }))
+
+        expect(screen.getByText('已完成地点搜索')).toBeTruthy()
+        expect(screen.queryByText(/高德/)).toBeNull()
+        expect(screen.getByText('已完成地点查询。')).toBeTruthy()
+        expect(screen.queryByText('原始完整地址')).toBeNull()
+        expect(screen.queryByText('116.397128,39.916527')).toBeNull()
+        expect(screen.queryByText('poi-current-run')).toBeNull()
+    })
+
     it('keeps the resolved General Agent final answer outside the Trace', () => {
         renderGenericMessage([
             {

@@ -13,6 +13,15 @@ function createProjectAssistantServiceMcpBaseUrl() {
     return process.env.PROJECT_ASSISTANT_SERVICE_MCP_BASE_URL?.trim() || 'http://127.0.0.1:8788/mcp'
 }
 
+export const AMAP_MAPS_MCP_KEY_ENV = 'AI_MIND_AMAP_MCP_KEY'
+
+/**
+ * 地图能力的开关只依赖服务端进程环境，模型与浏览器都不会收到 Key。
+ */
+export function isAmapMapsMcpAvailable(env: Record<string, string | undefined> = process.env) {
+    return Boolean(env[AMAP_MAPS_MCP_KEY_ENV]?.trim())
+}
+
 /**
  * `project-docs-server` 只暴露 docs/ 项目知识区相关的 Resource 与 Prompt 能力。
  */
@@ -86,6 +95,34 @@ const projectAssistantServiceDefinition: MCPServerDefinition = {
 }
 
 /**
+ * 高德托管 MCP 只通过固定官方端点接入；查询 Key 由 transport 在内存中补入。
+ */
+const amapMapsServerDefinition: MCPServerDefinition = {
+    transport: 'streamable-http',
+    baseUrl: 'https://mcp.amap.com/mcp',
+    timeoutMs: 20_000,
+    capabilities: {
+        prompts: false,
+        resources: false,
+        tools: true,
+    },
+    displayName: '高德地图 MCP',
+    providerKind: 'mcp',
+    location: 'remote',
+    serverId: 'amap-maps',
+    toolCallBatchPolicy: {
+        cooldownMs: 800,
+        maxBatchSize: 3,
+    },
+    auth: {
+        type: 'query-key',
+        keyEnv: AMAP_MAPS_MCP_KEY_ENV,
+        queryParamName: 'key',
+        requireExplicitKeyInProduction: true,
+    },
+}
+
+/**
  * 所有静态 MCP Server 定义的单一导出入口。
  * 当前版本先固定为数组，后续如果要接配置文件或动态开关，再从这里往外扩。
  */
@@ -93,6 +130,7 @@ export const MCP_SERVER_DEFINITIONS: MCPServerDefinition[] = [
     weatherServerDefinition,
     projectDocsServerDefinition,
     projectAssistantServiceDefinition,
+    amapMapsServerDefinition,
 ]
 
 const serverDefinitionMap = new Map(MCP_SERVER_DEFINITIONS.map(definition => [definition.serverId, definition]))

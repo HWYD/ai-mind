@@ -14,7 +14,7 @@ import {
 import { createGeneralReActToolFingerprint } from '@/lib/ai/runtime/general-react-agent/middleware/run-policy-middleware'
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from '@/lib/ai/runtime/general-react-agent/runtime-config'
 import { executeToolCall, normalizeAndValidateToolCall } from '@/lib/ai/runtime/tool-runtime'
-import { toolSupportsRuntimeScope } from '@/lib/ai/tools'
+import { type ChatToolDefinition, toolSupportsRuntimeScope } from '@/lib/ai/tools'
 import { assertOutboundDataAllowed, OutboundSecretDeniedError } from '@/lib/ai/tools/web/outbound-secret-guard'
 import { assertNoForbiddenWebUrlInText, canonicalizePublicWebUrl, WebAccessPolicyError } from '@/lib/ai/tools/web/web-access-policy'
 import { resolveOutboundKnownSecrets } from '@/lib/ai/tools/web/web-provider-config'
@@ -70,10 +70,10 @@ export async function executeGeneralReActToolCall(input: {
     }
 
     const validation = normalizeAndValidateToolCall(input.toolCall, input.context.toolDefinitionMap as Map<string, typeof definition>)
-    if (!validation.success) {
+    if (validation.success === false) {
         return await rejectedObservationCommand({
             callId,
-            content: '工具参数无效。',
+            content: validation.toolError.message,
             definition,
             context: input.context,
             ordinal: admission.ordinal,
@@ -84,12 +84,12 @@ export async function executeGeneralReActToolCall(input: {
 
     let validatedToolCall = validation.toolCall
     try {
-        validatedToolCall = enforceWebPoliciesBeforeFingerprint(validatedToolCall)
+        validatedToolCall = enforceToolInputPoliciesBeforeFingerprint(validatedToolCall, definition)
     } catch (error) {
         if (error instanceof OutboundSecretDeniedError || error instanceof WebAccessPolicyError) {
             return await rejectedObservationCommand({
                 callId,
-                content: '请求包含禁止外发的凭据。',
+                content: error instanceof OutboundSecretDeniedError ? '请求包含禁止外发的凭据。' : '请求不符合安全访问规则。',
                 definition,
                 context: input.context,
                 ordinal: admission.ordinal,
@@ -111,22 +111,6 @@ export async function executeGeneralReActToolCall(input: {
             status: 'duplicate',
             toolName: input.toolCall.name,
         })
-    }
-
-    if (validatedToolCall.name === 'read-url') {
-        const url = getStringArgument(validatedToolCall.args, 'url')
-        if (!url || !input.state._authorizedUrls.some(grant => grant.canonicalUrl === url)) {
-            return await rejectedObservationCommand({
-                callId,
-                content: '该链接未在当前请求中获得读取授权。',
-                definition,
-                context: input.context,
-                fingerprint,
-                ordinal: admission.ordinal,
-                status: 'denied',
-                toolName: input.toolCall.name,
-            })
-        }
     }
 
     let terminalChunk: Parameters<GeneralReActRunContext['publishChunk']>[0] | undefined
@@ -155,17 +139,6 @@ export async function executeGeneralReActToolCall(input: {
     const modelContent = result.output.slice(0, admission.observationCharAllowance)
     const truncated = modelContent.length < result.output.length
     const sources = result.success ? createSourceRecords(validatedToolCall.name, result.rawResult) : []
-    const authorizedUrls =
-        result.success && validatedToolCall.name === 'web-search'
-            ? sources.map(source => ({
-                  canonicalUrl: source.url,
-                  grantCallId: callId,
-                  grantedAtRound: input.state._toolBearingRoundCount,
-                  grantedBy: 'web-search' as const,
-                  host: new URL(source.url).hostname,
-              }))
-            : []
-
     if (terminalChunk) {
         const publicChunk = terminalChunk.type === 'tool-end' && sources.length > 0 ? { ...terminalChunk, sources } : terminalChunk
         await input.context.publishChunk(publicChunk)
@@ -189,7 +162,6 @@ export async function executeGeneralReActToolCall(input: {
 
     return new Command({
         update: {
-            _authorizedUrls: authorizedUrls,
             _callFingerprints: [fingerprint],
             _executedToolCallCount: boundedCounterDelta(
                 input.state._executedToolCallCount,
@@ -226,8 +198,12 @@ export function createGeneralReActToolRuntimeMiddleware() {
     })
 }
 
-function enforceWebPoliciesBeforeFingerprint(toolCall: ToolCall): ToolCall {
+function enforceToolInputPoliciesBeforeFingerprint(toolCall: ToolCall, definition: ChatToolDefinition): ToolCall {
     const knownSecrets = resolveOutboundKnownSecrets()
+    if (definition.executionPolicy.kind === 'standard-tool' && definition.executionPolicy.profile === 'remote-readonly') {
+        assertOutboundDataAllowed(JSON.stringify(toolCall.args ?? {}), { knownSecrets })
+    }
+
     if (toolCall.name === 'web-search') {
         const query = getStringArgument(toolCall.args, 'query')
         if (query) {
@@ -290,13 +266,27 @@ async function rejectedObservationCommand(
         Boolean(input.definition) &&
         toolSupportsRuntimeScope(input.definition!, 'general-react-agent') &&
         input.definition!.executionPolicy.kind === 'standard-tool'
+    let displayConfig: { action?: string; title?: string } | undefined
+    if (isPublicTool) {
+        try {
+            // 拒绝路径不能使用未校验参数，避免展示配置泄露被拒绝的请求内容。
+            displayConfig = input.definition?.getDisplayConfig?.({})
+        } catch {
+            // 展示配置失败只省略标题，不能影响安全拒绝。
+        }
+    }
     const partId = createId()
 
     await input.context.publishChunk({
         type: 'tool-start',
         partId,
         toolName: isPublicTool ? input.toolName : 'tool-request',
-        ...(isPublicTool ? {} : { title: '工具请求' }),
+        ...(isPublicTool
+            ? {
+                  ...(displayConfig?.action ? { action: displayConfig.action } : {}),
+                  ...(displayConfig?.title ? { title: displayConfig.title } : {}),
+              }
+            : { title: '工具请求' }),
         input: '',
     })
     await input.context.publishChunk({

@@ -35,6 +35,16 @@ describe('model catalog', () => {
         )
     })
 
+    it('仅为已核验的 deepseek-v4-pro 声明显式推理开关', () => {
+        expect(modelCatalog).toContainEqual(
+            expect.objectContaining({
+                capabilities: expect.objectContaining({ reasoning: true }),
+                id: 'deepseek/deepseek-v4-pro',
+            })
+        )
+        expect(modelCatalog.find(item => item.id === 'deepseek/deepseek-v4-flash')?.capabilities.reasoning).toBeUndefined()
+    })
+
     it('为每个模型保留仅服务端可见的物理上下文窗口', () => {
         expect(modelCatalog.every(item => Number.isSafeInteger(item.contextWindowTokens) && item.contextWindowTokens > 0)).toBe(true)
         expect(modelCatalog).toContainEqual(expect.objectContaining({ contextWindowTokens: 1_000_000, id: 'deepseek/deepseek-v4-pro' }))

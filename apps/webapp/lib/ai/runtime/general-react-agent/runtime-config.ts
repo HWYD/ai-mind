@@ -38,7 +38,7 @@ export const GENERAL_REACT_RUNTIME_DEFAULTS = createGeneralReActRuntimeConfig({
     hardDeadlineMs: 270_000,
     loopDeadlineMs: 235_000,
     maxFinalizerMs: 30_000,
-    maxLogicalToolCalls: 14,
+    maxLogicalToolCalls: 21,
     maxLoopModelCalls: 10,
     maxModelCalls: 11,
     maxModelRetries: 1,

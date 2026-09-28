@@ -143,7 +143,7 @@ describe('runtime/chat-session', () => {
         capabilityMocks.resolveGeneralToolBinding.mockResolvedValueOnce({
             activeToolCapabilityIds: [],
             activeToolDefinitionMap: new Map(),
-            activeToolNames: ['web-search', 'read-url', 'calculator'],
+            activeToolNames: ['web-search', 'read-url', 'calculator', 'amap-route-walking'],
             activeTools: [],
         })
         skillRouterMocks.resolveSkillDefinitionForRequest.mockReturnValue({
@@ -163,6 +163,7 @@ describe('runtime/chat-session', () => {
         expect(loopPrompt).toContain('当前 Run 的真实 observation')
         expect(finalizerPrompt).toContain('适中的必要解释')
         expect(finalizerPrompt).toContain('当前 Run 的真实 observation')
+        expect(finalizerPrompt).toContain('地图问题包含多个目标时')
         expect(finalizerPrompt).toContain('用户明确要求简短、详细、步骤、表格或特定格式时')
         expect(finalizerPrompt).not.toContain('直接发起合法的 tool call')
         expect(finalizerPrompt).not.toContain('当前这一轮真正可用的工具只有')

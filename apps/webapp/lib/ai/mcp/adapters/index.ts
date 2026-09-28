@@ -1,3 +1,4 @@
+export { AMAP_MCP_TOOL_MAPPING, callAmapMcpTool, getAmapMcpToolMapping } from './amap-mcp-tool-adapter'
 export { localFileSummaryPromptAdapter } from './local-file-summary-prompt-adapter'
 export { projectDocsResourceAdapter } from './project-docs-resource-adapter'
 export { getRemoteMcpToolDefinition, getRemoteMcpToolDefinitions } from './remote-mcp-tool-adapter'

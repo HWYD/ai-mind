@@ -52,11 +52,13 @@ D:\secrets\ai-mind\production
 
 GitHub Actions 不持有模型 API Key、MCP Token、数据库密码或 SSL 私钥。
 
-## v0.6.1 Webapp Runtime Budget
+## v0.6.2 Webapp Runtime Budget
 
-每个 webapp Node.js 进程最多接纳 8 个 active General ReAct Run；第 9 个请求 fail-fast，不在进程内排队。单 Run 最多 9 个含 Tool 轮次、14 次逻辑 Tool Call、10 次 loop 模型调用和 1 次异常 constrained finalizer，hard deadline 为 270 秒（235 秒 loop + 30 秒 finalizer + 5 秒 terminal reserve）；Tool concurrency、retry 和 per-profile timeout 保持既有行为。数据库连接预算按 `instanceCount x 10` 计算，`@ai-mind/database` 的 PrismaPg pool 固定为 `max=10`、`connectionTimeoutMillis=5000`、`idleTimeoutMillis=30000`，请求结束不得 disconnect process singleton。
+每个 webapp Node.js 进程最多接纳 8 个 active General ReAct Run；第 9 个请求 fail-fast，不在进程内排队。单 Run 最多 9 个含 Tool 轮次、21 次逻辑 Tool Call、10 次 loop 模型调用和 1 次异常 constrained finalizer，hard deadline 为 270 秒（235 秒 loop + 30 秒 finalizer + 5 秒 terminal reserve）；Tool concurrency、retry 和 per-profile timeout 保持既有行为。数据库连接预算按 `instanceCount x 10` 计算，`@ai-mind/database` 的 PrismaPg pool 固定为 `max=10`、`connectionTimeoutMillis=5000`、`idleTimeoutMillis=30000`，请求结束不得 disconnect process singleton。
 
 生产 webapp 如启用 Web Search/Extract，使用 server-only `AI_MIND_WEB_PROVIDER=tavily|zhipu` 静态选择，未设置时默认 Tavily。Tavily 使用 `TAVILY_API_KEY`；选择智谱时必须使用 `AI_MIND_ZHIPU_API_KEY` 且 `AI_MIND_ZHIPU_SEARCH_ENGINE=search_std`。所选 provider 的 key 缺失、selector/engine 非法时 Web Tool fail-closed，不得自动切到另一 provider。两类 key 与 provider config 均不得写入 `NEXT_PUBLIC_*`、浏览器、stream payload、Trace、Memory、snapshot 或日志；external smoke 分 provider 显式执行，普通测试使用 fake provider。
+
+v0.6.2 的高德地图 MCP 使用固定托管 HTTPS endpoint 和 server-only `AI_MIND_AMAP_MCP_KEY`。Key 缺失时九项地图 Tool 都不绑定给模型；不得用任意可配置 URL 或动态 `tools/list` 扩展权限。用户和模型的业务参数都在 Provider 前经历 schema、GCJ-02/范围和 remote-readonly outbound-secret 检查；Key、带 Key URL 与原始 MCP payload/error 不得写入 public StreamEvent、Trace、日志、Memory 或 snapshot。完整地址、坐标、路线详情与 POI 原始字段由地图 Tool 在写入 public StreamEvent/Trace 前排除，其他存储继续遵循现有通用 Tool 策略。`amap-maps` 在每个 webapp 进程内以三条一批、整批 settled 后冷却 800ms 的队列控制短时调用节奏；这不替代多个实例共用 Key 时的账号级 QPS/配额治理。800ms 是比已通过的 500ms 外部 smoke 更保守的配置。轮换 Key 后重启 webapp。现有每 Run Tool 预算不能代表高德账号级总量控制，账号权限、配额、QPS、计费和服务条款由上线负责人在公开部署前核实。
 
 ## Repository And Server Path Mapping
 

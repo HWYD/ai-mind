@@ -14,7 +14,7 @@ import type {
  * MCP 协议层公共类型定义。
  * 该文件负责统一 server 定义、client 返回结构与 host 默认配置。
  */
-export type MCPServerId = 'project-assistant-service' | 'project-docs-server' | 'weather-server'
+export type MCPServerId = 'amap-maps' | 'project-assistant-service' | 'project-docs-server' | 'weather-server'
 
 export type MCPTransportKind = 'stdio' | 'streamable-http'
 export type MCPProviderKind = 'mcp'
@@ -39,6 +39,15 @@ export interface MCPClientTimeoutConfig {
     requestMs: number
 }
 
+/**
+ * 某些远端 MCP 对短时间内的连续请求更敏感时，可在 server definition 声明进程内批次节流。
+ * 它只控制该 server 的 tools/call 发起时机，不改变 Runtime 的并发、重试或 deadline 策略。
+ */
+export interface MCPToolCallBatchPolicy {
+    cooldownMs: number
+    maxBatchSize: number
+}
+
 export interface MCPNoAuthConfig {
     type: 'none'
 }
@@ -51,7 +60,14 @@ export interface MCPBearerTokenAuthConfig {
     headerName?: string
 }
 
-export type MCPAuthConfig = MCPBearerTokenAuthConfig | MCPNoAuthConfig
+export interface MCPQueryKeyAuthConfig {
+    type: 'query-key'
+    keyEnv: string
+    queryParamName?: string
+    requireExplicitKeyInProduction?: boolean
+}
+
+export type MCPAuthConfig = MCPBearerTokenAuthConfig | MCPNoAuthConfig | MCPQueryKeyAuthConfig
 
 /**
  * server definition 基础字段。
@@ -64,6 +80,7 @@ interface MCPBaseServerDefinition {
     location: MCPServerLocation
     providerKind: MCPProviderKind
     serverId: MCPServerId
+    toolCallBatchPolicy?: MCPToolCallBatchPolicy
 }
 
 export interface MCPStdioServerDefinition extends MCPBaseServerDefinition {

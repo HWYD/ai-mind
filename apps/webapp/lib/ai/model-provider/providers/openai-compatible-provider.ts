@@ -82,14 +82,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
         const maxOutputTokens =
             options.maxOutputTokens != null ? Math.min(options.maxOutputTokens, configMaxOutputTokens) : configMaxOutputTokens
         const modelName = resolvedModelSelection.providerModel
+        const supportsThinking =
+            (this.provider === 'deepseek' || this.provider === 'doubao') &&
+            resolvedModelSelection.catalogItem.capabilities.reasoning === true
         const modelKwargs =
             this.provider === 'qwen' && options.enableReasoning != null
                 ? {
                       enable_thinking: options.enableReasoning,
                   }
-                : (this.provider === 'deepseek' || this.provider === 'doubao') && options.enableReasoning === false
+                : supportsThinking && options.enableReasoning != null
                   ? {
-                        thinking: { type: 'disabled' },
+                        thinking: { type: options.enableReasoning ? 'enabled' : 'disabled' },
                     }
                   : undefined
 
@@ -107,7 +110,6 @@ export class OpenAICompatibleProvider implements ModelProvider {
             streaming: options.streaming ?? true,
             temperature,
             timeout: options.timeoutMs ?? config.timeoutMs,
-            // 当前 Qwen / DeepSeek capability 未声明 reasoning；enableReasoning 与 Ollama 特有 think 均不透传。
         })
     }
 

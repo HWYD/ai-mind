@@ -99,7 +99,27 @@ function createToolValidationErrorMessage(toolCall: ToolCall, error: ZodError | 
         return error
     }
 
-    const issueMessage = error.issues.map(issue => issue.message).join('；')
+    const issueMessage = [...new Set(error.issues.map(toSafeValidationIssueMessage))].join('；')
 
-    return `模型生成的 ${toolCall.name} 工具参数不合法：${issueMessage || '请检查 tool call 参数。'}`
+    return `工具参数校验失败：${issueMessage || '请检查调用参数。'}。请按 schema 调整后重新调用。`
+}
+
+function toSafeValidationIssueMessage(issue: ZodError['issues'][number]) {
+    const field = issue.path.length > 0 ? issue.path.map(String).join('.') : '参数'
+    const code = String(issue.code)
+
+    switch (code) {
+        case 'invalid_type':
+            return `${field} 缺失或类型不正确`
+        case 'unrecognized_keys':
+            return '包含 schema 未允许的字段'
+        case 'too_small':
+        case 'too_big':
+            return `${field} 不符合长度或范围限制`
+        case 'invalid_format':
+        case 'invalid_string':
+            return `${field} 格式不正确`
+        default:
+            return `${field} 不符合 schema 约束`
+    }
 }

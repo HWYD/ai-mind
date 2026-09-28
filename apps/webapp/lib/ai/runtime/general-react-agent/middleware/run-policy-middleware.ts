@@ -257,7 +257,7 @@ export function createGeneralReActRunPolicyMiddleware(
             if (state._startedAtMs > 0) {
                 return
             }
-            return createGeneralReActInitialState(runtime.context.clock.now(), state.messages, runtime.context.trustedUserUrls)
+            return createGeneralReActInitialState(runtime.context.clock.now())
         },
         beforeModel: {
             canJumpTo: ['end'],

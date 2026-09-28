@@ -59,7 +59,7 @@ describe('General ReAct action batch admission', () => {
             batchId: 'batch-last-slot',
             callIds: ['call-9', 'call-10', 'call-11'],
             observationCharsUsed: 30_000,
-            toolCallsUsed: 12,
+            toolCallsUsed: 19,
         })
 
         expect(admission.reservedToolCallCount).toBe(2)
@@ -164,8 +164,7 @@ describe('General ReAct parallel state reducers', () => {
         ])
     })
 
-    it('wires URL, source and fingerprint collections as ReducedValue fields', () => {
-        expect(ReducedValue.isInstance(generalReActAgentStateSchema.fields._authorizedUrls)).toBe(true)
+    it('wires source and fingerprint collections as ReducedValue fields', () => {
         expect(ReducedValue.isInstance(generalReActAgentStateSchema.fields._sources)).toBe(true)
         expect(ReducedValue.isInstance(generalReActAgentStateSchema.fields._callFingerprints)).toBe(true)
     })

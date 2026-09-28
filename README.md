@@ -6,7 +6,7 @@ AI Mind 是一个持续演进的 **AI Native Runtime Skeleton**。它通过一�
 
 ![AI Mind General ReAct 流式 Trace 演示](./assets/screenshots/ai-mind-v0.6.0.png)
 
-> 当前代码版本为 v0.6.1 General ReAct Agent Streaming。本地验收收口已完成，尚未创建 Git tag 或 GitHub Release。
+> 当前代码版本为 v0.6.2 AMap MCP Tools。本地验收收口已完成，尚未创建 Git tag 或 GitHub Release。
 
 ## 项目定位与边界
 
@@ -93,14 +93,14 @@ flowchart TD
 
 ## 当前状态与能力
 
-| 领域               | 当前可用范围                                                                                                                                                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 普通聊天           | General ReAct Agent、流式 Markdown、public-safe Tool Trace、可恢复流、受控 normal / constrained 收口。                                                                                          |
-| Tool 与 Capability | web-search、read-url、calculator、datetime、text-transform、unit-convert、city-weather；Tasklist scope 另有 validate_tasklist_structure，Reader scope 可使用 remote MCP check_doc_consistency。 |
-| Skill 与 MCP       | utility-skill、reader-skill；local stdio MCP 与 remote Streamable HTTP MCP 的 Tool / Resource / Prompt 最小闭环。                                                                               |
-| 专用 Agent         | Tasklist Agent、Controlled Delivery Manager 与 Image Generation Agent 均使用明确命令入口、有限步骤和独立运行时边界。                                                                            |
-| 会话与记忆         | browser-session 会话恢复、服务器短期 ThreadState、token-aware compaction 与受限 UserMemory semantic retrieval。                                                                                 |
-| 工程化             | pnpm + Turborepo workspace、stream-core 共享协议、数据库集成验证、容器化与 GitHub Actions 交付基线。                                                                                            |
+| 领域               | 当前可用范围                                                                                                                                                                                                                   |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 普通聊天           | General ReAct Agent、流式 Markdown、public-safe Tool Trace、可恢复流、受控 normal / constrained 收口；已完成的 constrained Run 仍展示为“已完成思考”。                                                                          |
+| Tool 与 Capability | web-search、read-url、calculator、datetime、text-transform、unit-convert、city-weather，以及九项固定高德地图只读 Tool；Tasklist scope 另有 validate_tasklist_structure，Reader scope 可使用 remote MCP check_doc_consistency。 |
+| Skill 与 MCP       | utility-skill、reader-skill；local stdio MCP 与 remote Streamable HTTP MCP 的 Tool / Resource / Prompt 最小闭环。                                                                                                              |
+| 专用 Agent         | Tasklist Agent、Controlled Delivery Manager 与 Image Generation Agent 均使用明确命令入口、有限步骤和独立运行时边界。                                                                                                           |
+| 会话与记忆         | browser-session 会话恢复、服务器短期 ThreadState、token-aware compaction 与受限 UserMemory semantic retrieval。                                                                                                                |
+| 工程化             | pnpm + Turborepo workspace、stream-core 共享协议、数据库集成验证、容器化与 GitHub Actions 交付基线。                                                                                                                           |
 
 桌面侧提供 Electron Desktop Host，支持 Windows x64 与 macOS arm64，并通过固定 Origin 承载在线 Webapp；公开预览为未签名实验版，不提供自动更新。
 
@@ -117,8 +117,9 @@ flowchart TD
 
 - **v0.6.0 General ReAct Agent MVP**：普通 routeType=chat 统一进入受控 General ReAct Runtime，建立固定 base tools、public-safe Trace、可恢复流和专用 Agent 隔离。
 - **v0.6.1 General ReAct Agent Streaming**：自然无 Tool 正文在同一模型轮次直接成为最终回答；agent-text-\* 区分 pending、commentary、final answer，并以 normal / constrained 表达安全收口边界。
+- **v0.6.2 AMap MCP Tools**：增加九项固定高德地图只读 Tool，以 server-only Key、统一 schema/安全参数校验与安全 Trace 接入普通 General ReAct 聊天。
 
-详细设计与交付记录见 [v0.6.0 Version](./docs/versions/v0.6.0-general-react-agent-mvp.md)、[v0.6.0 Release](./docs/releases/v0.6.0.md)、[v0.6.1 Version](./docs/versions/v0.6.1-general-react-agent-streaming.md)、[v0.6.1 Release](./docs/releases/v0.6.1.md) 和 [ADR-0019](./docs/adr/0019-general-react-agent-runtime.md)。
+详细设计与交付记录见 [v0.6.0 Version](./docs/versions/v0.6.0-general-react-agent-mvp.md)、[v0.6.0 Release](./docs/releases/v0.6.0.md)、[v0.6.1 Version](./docs/versions/v0.6.1-general-react-agent-streaming.md)、[v0.6.1 Release](./docs/releases/v0.6.1.md)、[v0.6.2 Version](./docs/versions/v0.6.2-amap-mcp-tools.md)、[v0.6.2 Release](./docs/releases/v0.6.2.md) 和 [ADR-0020](./docs/adr/0020-amap-mcp-tool-boundary.md)。
 
 ## 快速开始
 
@@ -235,6 +236,7 @@ AI Mind 采用小版本渐进式演进，每个版本只解决一个明确的运
 | v0.5.4  | Token-aware Memory Compaction                      | 用模型感知 token budget 替代固定消息数压缩，统一完整输入 preflight、失败回退与 128K/32K 运行窗口，并收口虚拟滚动、Composer 用量和全局反馈体验                                   |
 | v0.6.0  | General ReAct Agent MVP                            | 普通聊天统一进入受控 ReAct loop，补齐 base tools、public-safe Trace、durable batching、backpressure、8-run admission 和专用 Agent 隔离                                          |
 | v0.6.1  | General ReAct Agent Streaming                      | 自然无 Tool 正文在同一模型轮次收口；agent-text-\* 将可见正文、Tool Trace、最终答案、Memory 与恢复边界统一为可回放的 phase-aware 语义                                            |
+| v0.6.2  | AMap MCP Tools                                     | 普通聊天增加九项固定高德地图只读 Tool，以 server-only Key、静态 allowlist、统一 schema/安全参数校验和 public-safe Trace 接入受控 Tool Runtime                                   |
 
 完整版本设计、发布记录和任务清单见 [docs](./docs)。
 
