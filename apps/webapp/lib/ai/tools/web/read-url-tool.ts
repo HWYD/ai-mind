@@ -7,13 +7,13 @@ import { createConfiguredWebProvider } from '@/lib/ai/tools/web/web-provider-fac
 
 export const readUrlToolSchema = z
     .object({
-        url: z.string().url().describe('当前请求中由用户提供或 web-search 返回的一个已授权 HTTP(S) URL。'),
+        url: z.string().url().describe('需要读取的公开 HTTP(S) URL；可来自用户或模型候选，执行前必须通过 URL 安全策略。'),
     })
     .strict()
 
 export function createReadUrlToolDefinition(provider: WebProvider): ChatToolDefinition<z.infer<typeof readUrlToolSchema>> {
     const readUrlTool = tool(async ({ url }, config) => provider.read({ url, signal: config?.signal }), {
-        description: '读取当前请求中已授权的一个公开网页。URL 必须来自用户当前消息或本轮 web-search 结果。',
+        description: '读取通过公开 URL 安全策略的网页。URL 可来自用户或模型候选。',
         name: 'read-url',
         schema: readUrlToolSchema,
     })
@@ -28,7 +28,7 @@ const configuredReadUrlTool = tool(
         return provider.read({ url, signal: config?.signal })
     },
     {
-        description: '读取当前请求中已授权的一个公开网页。URL 必须来自用户当前消息或本轮 web-search 结果。',
+        description: '读取通过公开 URL 安全策略的网页。URL 可来自用户或模型候选。',
         name: 'read-url',
         schema: readUrlToolSchema,
     }

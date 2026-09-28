@@ -1,4 +1,3 @@
-import { BaseMessage, HumanMessage } from '@langchain/core/messages'
 import { ReducedValue, StateSchema } from '@langchain/langgraph'
 import { z } from 'zod'
 
@@ -9,16 +8,6 @@ import { actionBatchAdmissionSchema, mergeKeyedUnion, mergeStringUnion, sumNonNe
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from './runtime-config'
 
 const nonNegativeInteger = z.number().int().nonnegative()
-const authorizedUrlSchema = z
-    .object({
-        canonicalUrl: z.string().url(),
-        grantCallId: z.string().min(1).nullable(),
-        grantedAtRound: nonNegativeInteger,
-        grantedBy: z.enum(['user', 'web-search']),
-        host: z.string().min(1),
-    })
-    .strict()
-
 const sourceRecordSchema = z
     .object({
         originTool: z.enum(['web-search', 'read-url']),
@@ -39,22 +28,9 @@ function createCounter(maximum: number = Number.MAX_SAFE_INTEGER) {
     })
 }
 
-type AuthorizedUrl = z.infer<typeof authorizedUrlSchema>
 type SourceRecord = z.infer<typeof sourceRecordSchema>
 
 export const MAX_TRUSTED_USER_URLS = 8
-
-function resolveAuthorizedUrl(left: AuthorizedUrl, right: AuthorizedUrl): AuthorizedUrl {
-    if (left.grantedBy !== right.grantedBy) {
-        return left.grantedBy === 'user' ? left : right
-    }
-
-    if (left.grantedAtRound !== right.grantedAtRound) {
-        return left.grantedAtRound < right.grantedAtRound ? left : right
-    }
-
-    return (left.grantCallId ?? '') <= (right.grantCallId ?? '') ? left : right
-}
 
 const sourceStatusRank = {
     discovered: 0,
@@ -74,13 +50,6 @@ export const generalReActAgentStateSchema = new StateSchema({
     _loopDeadlineAtMs: nonNegativeInteger.default(0),
     _loopModelCallCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls),
     _toolBearingRoundCount: createCounter(GENERAL_REACT_RUNTIME_DEFAULTS.maxToolBearingRounds),
-    _authorizedUrls: new ReducedValue(
-        z.array(authorizedUrlSchema).default(() => []),
-        {
-            inputSchema: z.array(authorizedUrlSchema),
-            reducer: (current, delta) => mergeKeyedUnion(current, delta, value => value.canonicalUrl, resolveAuthorizedUrl),
-        }
-    ),
     _callFingerprints: new ReducedValue(
         z.array(z.string().min(1)).default(() => []),
         {
@@ -130,11 +99,7 @@ export const generalReActAgentStateSchema = new StateSchema({
 export type GeneralReActAgentState = typeof generalReActAgentStateSchema.State
 export type GeneralReActAgentStateUpdate = typeof generalReActAgentStateSchema.Update
 
-export function createGeneralReActInitialState(
-    startedAtMs: number,
-    messages: readonly BaseMessage[] = [],
-    trustedUserUrls: readonly string[] = []
-): GeneralReActAgentState {
+export function createGeneralReActInitialState(startedAtMs: number): GeneralReActAgentState {
     if (!Number.isSafeInteger(startedAtMs) || startedAtMs < 0) {
         throw new TypeError('General ReAct startedAtMs must be a non-negative safe integer')
     }
@@ -143,7 +108,6 @@ export function createGeneralReActInitialState(
         _loopDeadlineAtMs: startedAtMs + GENERAL_REACT_RUNTIME_DEFAULTS.loopDeadlineMs,
         _loopModelCallCount: 0,
         _toolBearingRoundCount: 0,
-        _authorizedUrls: collectUserAuthorizedUrls(messages, trustedUserUrls),
         _callFingerprints: [],
         _currentActionBatch: null,
         _executedToolCallCount: 0,
@@ -179,31 +143,4 @@ export function collectSafePublicUserUrls(text: string): string[] {
     }
 
     return [...urls]
-}
-
-function collectUserAuthorizedUrls(
-    messages: readonly BaseMessage[],
-    trustedUserUrls: readonly string[]
-): Array<z.infer<typeof authorizedUrlSchema>> {
-    const latestUserMessage = [...messages].reverse().find(message => HumanMessage.isInstance(message))
-    const grants = new Map<string, z.infer<typeof authorizedUrlSchema>>()
-
-    const addGrants = (urls: readonly string[]) => {
-        for (const canonicalUrl of urls) {
-            grants.set(canonicalUrl, {
-                canonicalUrl,
-                grantCallId: null,
-                grantedAtRound: 0,
-                grantedBy: 'user',
-                host: new URL(canonicalUrl).hostname,
-            })
-        }
-    }
-
-    if (latestUserMessage) {
-        addGrants(collectSafePublicUserUrls(latestUserMessage.text))
-    }
-    addGrants(trustedUserUrls.slice(0, MAX_TRUSTED_USER_URLS).flatMap(url => collectSafePublicUserUrls(url)))
-
-    return [...grants.values()]
 }

@@ -95,6 +95,50 @@ describe('stream-event-projector', () => {
         expect(events.at(-1)).toMatchObject({ terminal: true, terminalState: 'completed' })
     })
 
+    it('persists the high德 Tool public projection without internal map observation fields', async () => {
+        await projector.projectChunks([
+            {
+                chunk: {
+                    action: 'query',
+                    input: '高德地图请求',
+                    location: 'remote',
+                    partId: 'amap-tool-1',
+                    serverId: 'amap-maps',
+                    source: 'mcp',
+                    title: '高德地图',
+                    toolName: 'amap-poi-search',
+                    type: 'tool-start',
+                },
+                ownerSessionHash,
+                runId,
+            },
+            {
+                chunk: {
+                    action: 'query',
+                    input: '高德地图请求',
+                    location: 'remote',
+                    output: '地点查询已完成（1 项）。',
+                    partId: 'amap-tool-1',
+                    serverId: 'amap-maps',
+                    source: 'mcp',
+                    title: '高德地图',
+                    toolName: 'amap-poi-search',
+                    type: 'tool-end',
+                },
+                ownerSessionHash,
+                runId,
+            },
+        ])
+
+        const persistedPayload = JSON.stringify(fakeStore.batches[0]?.map(event => event.payload))
+        expect(persistedPayload).toContain('高德地图请求')
+        expect(persistedPayload).toContain('地点查询已完成')
+        expect(persistedPayload).not.toContain('原始完整地址')
+        expect(persistedPayload).not.toContain('116.397128,39.916527')
+        expect(persistedPayload).not.toContain('poi-current-run')
+        expect(persistedPayload).not.toContain('原始路线详情')
+    })
+
     it('maps finish and error chunks to terminal stream states', async () => {
         await expect(
             projector.projectChunk({

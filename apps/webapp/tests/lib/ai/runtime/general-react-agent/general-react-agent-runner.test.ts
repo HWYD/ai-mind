@@ -8,6 +8,7 @@ import { tool } from '@langchain/core/tools'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
+import { callAmapMcpTool } from '@/lib/ai/mcp/adapters/amap-mcp-tool-adapter'
 import { createGeneralReActRunContext } from '@/lib/ai/runtime/general-react-agent/agent-context'
 import {
     GeneralReActAgentRunError,
@@ -15,7 +16,19 @@ import {
     type GeneralReActRunnerInput,
 } from '@/lib/ai/runtime/general-react-agent/general-react-agent-runner'
 import { RetryPermitPool } from '@/lib/ai/runtime/general-react-agent/retry-permit-pool'
+import { amapGeocodeToolDefinition, amapReverseGeocodeToolDefinition } from '@/lib/ai/tools/amap/amap-geocode-tools'
+import { amapPoiDetailToolDefinition, amapPoiSearchToolDefinition } from '@/lib/ai/tools/amap/amap-poi-tools'
+import {
+    amapRouteBicyclingToolDefinition,
+    amapRouteDrivingToolDefinition,
+    amapRouteTransitToolDefinition,
+    amapRouteWalkingToolDefinition,
+} from '@/lib/ai/tools/amap/amap-route-tools'
 import type { ChatToolDefinition } from '@/lib/ai/tools/registry'
+
+vi.mock('@/lib/ai/mcp/adapters/amap-mcp-tool-adapter', () => ({
+    callAmapMcpTool: vi.fn(),
+}))
 
 class ScriptedModel extends BaseChatModel {
     private invocationIndex = 0
@@ -233,7 +246,7 @@ describe('general-react-agent runner', () => {
                 ],
                 [[], ['第一个结果已拿到，', '再查第二项。'], ['两项结果已经汇总。']]
             ),
-            toolDefinitionMap: new Map([
+            toolDefinitionMap: new Map<string, ChatToolDefinition>([
                 [firstTool.name, firstTool],
                 [secondTool.name, secondTool],
             ]),
@@ -255,6 +268,242 @@ describe('general-react-agent runner', () => {
                 expect.objectContaining({ outcome: 'final_answer', status: 'completed' }),
             ])
         )
+    })
+
+    it('POI 搜索后可继续查询详情，且 Trace 不公开原始字段', async () => {
+        const mapCall = vi.mocked(callAmapMcpTool)
+        mapCall.mockImplementation(async name => {
+            if (name === 'amap-poi-search') {
+                return {
+                    cities: ['北京'],
+                    coordinates: [],
+                    facts: [{ address: '原始完整地址', id: 'poi-current-run', name: '国家博物馆' }],
+                    kind: 'poi-search',
+                    poiIds: ['poi-current-run'],
+                }
+            }
+
+            return {
+                cities: ['北京'],
+                coordinates: [],
+                facts: [{ address: '原始完整地址', id: 'poi-current-run', name: '国家博物馆' }],
+                kind: 'poi-detail',
+                poiIds: ['poi-current-run'],
+            }
+        })
+        const harness = createHarness({
+            loopModel: new ScriptedModel([
+                () =>
+                    new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            {
+                                args: { city: '北京', keywords: '博物馆' },
+                                id: 'amap-search-1',
+                                name: 'amap-poi-search',
+                                type: 'tool_call',
+                            },
+                        ],
+                    }),
+                () =>
+                    new AIMessage({
+                        content: '',
+                        tool_calls: [{ args: { id: 'poi-current-run' }, id: 'amap-detail-1', name: 'amap-poi-detail', type: 'tool_call' }],
+                    }),
+                () => new AIMessage('已根据本轮地点查询结果整理。'),
+            ]),
+            toolDefinitionMap: new Map<string, ChatToolDefinition>([
+                [amapPoiSearchToolDefinition.name, amapPoiSearchToolDefinition],
+                [amapPoiDetailToolDefinition.name, amapPoiDetailToolDefinition],
+            ]),
+        })
+
+        const result = await runHarness(harness, {
+            context: harness.context,
+            messages: [new HumanMessage('在北京找博物馆并查看详情')],
+            runId: 'run-amap-poi-chain',
+            threadId: 'thread-amap-poi-chain',
+        })
+
+        expect(result).toMatchObject({ assistantText: '已根据本轮地点查询结果整理。', source: 'tool', toolCallCount: 2 })
+        expect(mapCall).toHaveBeenCalledTimes(2)
+        const publicTranscript = JSON.stringify([
+            ...chunksOfType(harness.chunks, 'tool-start'),
+            ...chunksOfType(harness.chunks, 'tool-end'),
+        ])
+        expect(publicTranscript).toContain('地图查询请求')
+        expect(publicTranscript).not.toContain('高德')
+        expect(publicTranscript).toContain('地点查询已完成')
+        expect(publicTranscript).not.toContain('原始完整地址')
+        expect(publicTranscript).not.toContain('poi-current-run')
+    })
+
+    it('模型可在 schema 失败 observation 后修正地图参数，且只执行修正后的调用', async () => {
+        const mapCall = vi.mocked(callAmapMcpTool)
+        mapCall.mockClear()
+        mapCall.mockResolvedValue({
+            cities: ['北京'],
+            coordinates: ['116.397128,39.916527'],
+            facts: [{ address: '原始完整地址' }],
+            kind: 'reverse-geocode',
+            poiIds: [],
+        })
+        const harness = createHarness({
+            loopModel: new ScriptedModel([
+                () =>
+                    new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            {
+                                args: { location: '北京天安门' },
+                                id: 'amap-regeo-invalid',
+                                name: 'amap-reverse-geocode',
+                                type: 'tool_call',
+                            },
+                        ],
+                    }),
+                () =>
+                    new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            {
+                                args: { location: '116.397128,39.916527' },
+                                id: 'amap-regeo-corrected',
+                                name: 'amap-reverse-geocode',
+                                type: 'tool_call',
+                            },
+                        ],
+                    }),
+                () => new AIMessage('已根据地图返回结果完成查询。'),
+            ]),
+            toolDefinitionMap: new Map<string, ChatToolDefinition>([
+                [amapReverseGeocodeToolDefinition.name, amapReverseGeocodeToolDefinition],
+            ]),
+        })
+
+        const result = await runHarness(harness, {
+            context: harness.context,
+            messages: [new HumanMessage('天安门附近是什么地址？')],
+            runId: 'run-amap-parameter-repair',
+            threadId: 'thread-amap-parameter-repair',
+        })
+
+        expect(result).toMatchObject({
+            assistantText: '已根据地图返回结果完成查询。',
+            executedToolCallCount: 1,
+            source: 'tool',
+            toolCallCount: 2,
+        })
+        expect(mapCall).toHaveBeenCalledTimes(1)
+        expect(mapCall).toHaveBeenCalledWith('amap-reverse-geocode', { location: '116.397128,39.916527' }, expect.anything())
+        expect(chunksOfType(harness.chunks, 'error')).toEqual(
+            expect.arrayContaining([expect.objectContaining({ message: '工具请求未执行。', scope: 'tool' })])
+        )
+    })
+
+    it('地址编码结果可在同一 Run 供逆地理编码与四类路线使用，公开 Trace 仍保持固定摘要', async () => {
+        const mapCall = vi.mocked(callAmapMcpTool)
+        mapCall.mockClear()
+        mapCall.mockImplementation(async name => {
+            if (name === 'amap-geocode') {
+                return {
+                    cities: ['北京'],
+                    coordinates: ['116.397128,39.916527'],
+                    facts: [{ address: '原始完整地址', location: '116.397128,39.916527' }],
+                    kind: 'geocode',
+                    poiIds: [],
+                }
+            }
+            if (name === 'amap-reverse-geocode') {
+                return {
+                    cities: ['北京'],
+                    coordinates: ['116.397128,39.916527'],
+                    facts: [{ address: '原始完整地址' }],
+                    kind: 'reverse-geocode',
+                    poiIds: [],
+                }
+            }
+            return {
+                cities: [],
+                coordinates: ['116.397128,39.916527', '116.407128,39.926527'],
+                facts: [],
+                kind: 'route',
+                poiIds: [],
+                route: { distance: '1200', duration: '900', summary: '原始路线详情' },
+            }
+        })
+        const routeDefinitions = [
+            amapRouteWalkingToolDefinition,
+            amapRouteDrivingToolDefinition,
+            amapRouteBicyclingToolDefinition,
+            amapRouteTransitToolDefinition,
+        ]
+        const harness = createHarness({
+            loopModel: new ScriptedModel([
+                () =>
+                    new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            { args: { address: '北京市东城区景山前街4号' }, id: 'amap-geo-1', name: 'amap-geocode', type: 'tool_call' },
+                        ],
+                    }),
+                () =>
+                    new AIMessage({
+                        content: '',
+                        tool_calls: [
+                            {
+                                args: { location: '116.397128,39.916527' },
+                                id: 'amap-regeo-1',
+                                name: 'amap-reverse-geocode',
+                                type: 'tool_call',
+                            },
+                            ...routeDefinitions.map((definition, index) => ({
+                                args: {
+                                    destination: '116.407128,39.926527',
+                                    ...(definition.name === 'amap-route-transit' ? { city: '北京', cityd: '北京' } : {}),
+                                    origin: '116.397128,39.916527',
+                                },
+                                id: `amap-route-${index + 1}`,
+                                name: definition.name,
+                                type: 'tool_call' as const,
+                            })),
+                        ],
+                    }),
+                () => new AIMessage('已给出本轮可验证的路线摘要。'),
+            ]),
+            toolDefinitionMap: new Map<string, ChatToolDefinition>([
+                [amapGeocodeToolDefinition.name, amapGeocodeToolDefinition],
+                [amapReverseGeocodeToolDefinition.name, amapReverseGeocodeToolDefinition],
+                ...routeDefinitions.map(definition => [definition.name, definition] as const),
+            ]),
+        })
+
+        const result = await runHarness(harness, {
+            context: harness.context,
+            messages: [new HumanMessage('从北京市东城区景山前街4号出发，比较到 116.407128,39.926527 的路线')],
+            runId: 'run-amap-geocode-route-chain',
+            threadId: 'thread-amap-geocode-route-chain',
+        })
+
+        expect(result).toMatchObject({ assistantText: '已给出本轮可验证的路线摘要。', toolCallCount: 6 })
+        expect(mapCall.mock.calls.map(([name]) => name)).toEqual([
+            'amap-geocode',
+            'amap-reverse-geocode',
+            'amap-route-walking',
+            'amap-route-driving',
+            'amap-route-bicycling',
+            'amap-route-transit',
+        ])
+        const publicTranscript = JSON.stringify([
+            ...chunksOfType(harness.chunks, 'tool-start'),
+            ...chunksOfType(harness.chunks, 'tool-end'),
+        ])
+        expect(publicTranscript).toContain('地图查询请求')
+        expect(publicTranscript).not.toContain('高德')
+        expect(publicTranscript).toContain('路线规划已完成。')
+        expect(publicTranscript).not.toContain('北京市东城区景山前街4号')
+        expect(publicTranscript).not.toContain('116.397128,39.916527')
+        expect(publicTranscript).not.toContain('原始路线详情')
     })
 
     it('空的自然 no-Tool 结果进入一次无 Tool constrained finalizer，且不写入 Memory', async () => {

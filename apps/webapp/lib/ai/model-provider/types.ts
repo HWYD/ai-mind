@@ -17,6 +17,7 @@ export interface AiMindModelCatalogItem {
         chat: boolean
         embedding: boolean
         jsonOutput: boolean
+        reasoning?: boolean
         streaming: boolean
         tasklist: boolean
         toolCalling: boolean

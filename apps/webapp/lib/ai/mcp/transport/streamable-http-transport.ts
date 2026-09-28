@@ -1,6 +1,6 @@
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-import type { MCPBearerTokenAuthConfig, MCPStreamableHttpServerDefinition } from '@/lib/ai/mcp/protocol/types'
+import type { MCPBearerTokenAuthConfig, MCPQueryKeyAuthConfig, MCPStreamableHttpServerDefinition } from '@/lib/ai/mcp/protocol/types'
 
 /**
  * 解析远程 MCP 的 Bearer Token。
@@ -20,6 +20,34 @@ export function resolveBearerToken(authConfig: MCPBearerTokenAuthConfig, env: Re
     }
 
     return explicitToken || fallbackToken
+}
+
+/**
+ * 仅从服务端进程环境读取远程 MCP 的查询 Key。
+ * 调用方不得把 Key 传入模型上下文、请求参数或公开事件。
+ */
+export function resolveMCPKey(authConfig: MCPQueryKeyAuthConfig, env: Record<string, string | undefined> = process.env) {
+    const key = env[authConfig.keyEnv]?.trim()
+
+    if (key) {
+        return key
+    }
+
+    if (authConfig.requireExplicitKeyInProduction && env.NODE_ENV === 'production') {
+        throw new Error('Remote MCP key must be configured explicitly in production.')
+    }
+
+    throw new Error('Remote MCP key must be configured.')
+}
+
+/**
+ * 在 transport 边界添加查询 Key，避免业务层持有带 Key 的 URL。
+ */
+export function createKeyQueryServerUrl(baseUrl: string, authConfig: MCPQueryKeyAuthConfig, key: string) {
+    const url = new URL(baseUrl)
+    url.searchParams.set(authConfig.queryParamName?.trim() || 'key', key)
+
+    return url
 }
 
 /**
@@ -55,7 +83,12 @@ function createRequestHeaders(serverDefinition: MCPStreamableHttpServerDefinitio
  * 这里不做业务层重试与错误映射，只负责 transport 构建。
  */
 export function createStreamableHttpClientTransport(serverDefinition: MCPStreamableHttpServerDefinition) {
-    return new StreamableHTTPClientTransport(new URL(serverDefinition.baseUrl), {
+    const serverUrl =
+        serverDefinition.auth?.type === 'query-key'
+            ? createKeyQueryServerUrl(serverDefinition.baseUrl, serverDefinition.auth, resolveMCPKey(serverDefinition.auth))
+            : new URL(serverDefinition.baseUrl)
+
+    return new StreamableHTTPClientTransport(serverUrl, {
         requestInit: {
             headers: createRequestHeaders(serverDefinition),
         },

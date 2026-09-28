@@ -47,7 +47,7 @@ describe('general-react-agent runtime policy matrix', () => {
         })
     })
 
-    it('keeps duplicate calls invalid and admits only the first fourteen logical calls', () => {
+    it('keeps duplicate calls invalid and admits only the first twenty-one logical calls', () => {
         const state = createGeneralReActInitialState(0)
         const duplicate = evaluateAfterModelPolicy({
             batchId: 'duplicate-batch',
@@ -64,13 +64,14 @@ describe('general-react-agent runtime policy matrix', () => {
 
         const admission = createActionBatchAdmission({
             actionRound: 1,
-            batchId: 'fourteen-calls',
-            callIds: Array.from({ length: 15 }, (_, index) => `call-${index + 1}`),
+            batchId: 'twenty-one-calls',
+            callIds: Array.from({ length: 22 }, (_, index) => `call-${index + 1}`),
             observationCharsUsed: 0,
             toolCallsUsed: 0,
         })
         expect(admission.reservedToolCallCount).toBe(GENERAL_REACT_RUNTIME_DEFAULTS.maxLogicalToolCalls)
-        expect(admission.admissions['call-15']).toMatchObject({ admitted: false, blockedReason: 'tool_call_limit' })
+        expect(admission.admissions['call-21']).toMatchObject({ admitted: true, blockedReason: null })
+        expect(admission.admissions['call-22']).toMatchObject({ admitted: false, blockedReason: 'tool_call_limit' })
     })
 
     it('stops at explicit loop/model/deadline budgets while reserving exactly one finalizer call', () => {

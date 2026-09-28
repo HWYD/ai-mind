@@ -1,8 +1,133 @@
 import { MCPHostError } from '@/lib/ai/mcp/protocol/errors'
-import type { MCPConnectionState, MCPServerId } from '@/lib/ai/mcp/protocol/types'
+import type { MCPConnectionState, MCPServerId, MCPToolCallBatchPolicy } from '@/lib/ai/mcp/protocol/types'
 import { mcpServerRegistry } from '@/lib/ai/mcp/registry/mcp-server-registry'
 
 import { MCPClient } from './mcp-client'
+
+interface QueuedToolCall {
+    abortListener?: () => void
+    operation: () => Promise<unknown>
+    reject: (reason?: unknown) => void
+    resolve: (value: unknown) => void
+    signal?: AbortSignal
+}
+
+/**
+ * 按单个 server 的静态策略串联批次。每批中的请求同时启动，下一批只在前一批全部结束且
+ * 冷却期结束后才启动；这样不会干预 General ReAct 的全局 Tool 并发或重试语义。
+ */
+class MCPToolCallBatchScheduler {
+    private activeBatch = false
+    private closed = false
+    private cooldownTimer: NodeJS.Timeout | null = null
+    private nextBatchAllowedAt = 0
+    private queuedCalls: QueuedToolCall[] = []
+    private startScheduled = false
+
+    constructor(private readonly policy: MCPToolCallBatchPolicy) {}
+
+    enqueue<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+        if (this.closed) {
+            return Promise.reject(new MCPHostError('NOT_CONNECTED', 'MCP Server 已关闭，待执行的 Tool 调用未发送。'))
+        }
+
+        if (signal?.aborted) {
+            return Promise.reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
+        }
+
+        return new Promise<T>((resolve, reject) => {
+            const queuedCall: QueuedToolCall = {
+                operation,
+                reject,
+                resolve,
+                signal,
+            }
+            if (signal) {
+                queuedCall.abortListener = () => {
+                    const index = this.queuedCalls.indexOf(queuedCall)
+
+                    if (index < 0) {
+                        return
+                    }
+
+                    this.queuedCalls.splice(index, 1)
+                    this.removeAbortListener(queuedCall)
+                    reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'))
+                }
+                signal.addEventListener('abort', queuedCall.abortListener, { once: true })
+            }
+            this.queuedCalls.push(queuedCall)
+            this.scheduleStart()
+        })
+    }
+
+    close() {
+        this.closed = true
+        if (this.cooldownTimer) {
+            clearTimeout(this.cooldownTimer)
+            this.cooldownTimer = null
+        }
+
+        const error = new MCPHostError('NOT_CONNECTED', 'MCP Server 已关闭，待执行的 Tool 调用未发送。')
+        this.queuedCalls.splice(0).forEach(queuedCall => {
+            this.removeAbortListener(queuedCall)
+            queuedCall.reject(error)
+        })
+    }
+
+    private removeAbortListener(queuedCall: QueuedToolCall) {
+        if (queuedCall.signal && queuedCall.abortListener) {
+            queuedCall.signal.removeEventListener('abort', queuedCall.abortListener)
+        }
+    }
+
+    private scheduleStart() {
+        if (this.closed || this.startScheduled || this.activeBatch || this.queuedCalls.length === 0) {
+            return
+        }
+
+        this.startScheduled = true
+        queueMicrotask(() => {
+            this.startScheduled = false
+            this.startNextBatch()
+        })
+    }
+
+    private startNextBatch() {
+        if (this.closed || this.activeBatch || this.queuedCalls.length === 0) {
+            return
+        }
+
+        const remainingCooldownMs = this.nextBatchAllowedAt - Date.now()
+        if (remainingCooldownMs > 0) {
+            if (!this.cooldownTimer) {
+                this.cooldownTimer = setTimeout(() => {
+                    this.cooldownTimer = null
+                    this.scheduleStart()
+                }, remainingCooldownMs)
+            }
+            return
+        }
+
+        const batch = this.queuedCalls.splice(0, this.policy.maxBatchSize)
+        this.activeBatch = true
+        const operations = batch.map(queuedCall => {
+            this.removeAbortListener(queuedCall)
+            try {
+                return Promise.resolve(queuedCall.operation()).then(queuedCall.resolve, queuedCall.reject)
+            } catch (error) {
+                queuedCall.reject(error)
+                return Promise.resolve()
+            }
+        })
+
+        void Promise.allSettled(operations).finally(() => {
+            this.activeBatch = false
+            this.nextBatchAllowedAt = Date.now() + this.policy.cooldownMs
+            this.scheduleStart()
+        })
+    }
+}
 
 /**
  * `MCPClientManager` 负责按 `serverId` 复用 `MCPClient`。
@@ -17,6 +142,7 @@ export class MCPClientManager {
      */
     private clientMap = new Map<MCPServerId, MCPClient>()
     private toolListPromiseMap = new Map<MCPServerId, Promise<Awaited<ReturnType<MCPClient['listTools']>>>>()
+    private toolCallBatchSchedulerMap = new Map<MCPServerId, MCPToolCallBatchScheduler>()
 
     /**
      * 对外暴露 MCP Tool 调用入口。
@@ -24,17 +150,25 @@ export class MCPClientManager {
      */
     async callTool(serverId: MCPServerId, ...args: Parameters<MCPClient['callTool']>) {
         const client = this.getOrCreateClient(serverId)
+        const policy = mcpServerRegistry.get(serverId)?.toolCallBatchPolicy
 
-        return client.callTool(...args)
+        if (!policy) {
+            return client.callTool(...args)
+        }
+
+        return this.getOrCreateToolCallBatchScheduler(serverId, policy).enqueue(() => client.callTool(...args), args[1]?.signal)
     }
 
     /**
      * 关闭指定 server 对应的 client，并把它从缓存中移除。
      */
     async close(serverId: MCPServerId) {
+        this.toolCallBatchSchedulerMap.get(serverId)?.close()
+        this.toolCallBatchSchedulerMap.delete(serverId)
         const client = this.clientMap.get(serverId)
 
         if (!client) {
+            this.toolListPromiseMap.delete(serverId)
             return
         }
 
@@ -48,7 +182,9 @@ export class MCPClientManager {
      * 这通常用于进程结束前的统一清理。
      */
     async closeAll() {
-        await Promise.all([...this.clientMap.keys()].map(serverId => this.close(serverId)))
+        const serverIds = new Set([...this.clientMap.keys(), ...this.toolCallBatchSchedulerMap.keys()])
+
+        await Promise.all([...serverIds].map(serverId => this.close(serverId)))
     }
 
     /**
@@ -158,6 +294,19 @@ export class MCPClientManager {
         this.clientMap.set(serverId, client)
 
         return client
+    }
+
+    private getOrCreateToolCallBatchScheduler(serverId: MCPServerId, policy: MCPToolCallBatchPolicy) {
+        const existingScheduler = this.toolCallBatchSchedulerMap.get(serverId)
+
+        if (existingScheduler) {
+            return existingScheduler
+        }
+
+        const scheduler = new MCPToolCallBatchScheduler(policy)
+        this.toolCallBatchSchedulerMap.set(serverId, scheduler)
+
+        return scheduler
     }
 }
 

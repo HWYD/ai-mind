@@ -2,12 +2,18 @@ import {
     BrainCircuit,
     Calculator,
     CalendarDays,
+    Car,
     FileSearch,
+    FileText,
     GitBranchPlus,
+    Globe,
     ImagePlus,
     ListChecks,
     type LucideIcon,
+    MapPin,
     Network,
+    Puzzle,
+    Search,
     ShieldCheck,
 } from 'lucide-react'
 
@@ -26,9 +32,9 @@ export interface EmptyStateSuggestion {
 export const generalReActDemoSuggestion: EmptyStateSuggestion = {
     icon: BrainCircuit,
     tag: 'ReAct Agent',
-    label: '搜索并解读 React 19 教程',
-    description: '先搜索掘金或知乎上的中文教程，再选择一篇读取正文，提炼关键上手步骤。',
-    text: '帮我搜一下「React 19 服务端组件」怎么上手，选一篇掘金或知乎上的中文教程读一下，总结关键步骤。',
+    label: '搜索并总结最新资料',
+    description: 'Agent 先搜索公开网页拿到候选来源，再自主读取一篇正文，最后综合多轮工具反馈提炼结论。',
+    text: '帮我搜下广州体育西路附近有哪些必吃的茶餐厅，再查从体育西地铁站步行过去要多久',
 }
 
 const demoReadmeReference = {
@@ -202,4 +208,50 @@ export const emptyStateSuggestions: EmptyStateSuggestion[] = [
         description: '读取 remote MCP 的项目上下文 mock。',
         text: '总结当前项目状态',
     },
+]
+
+// ---- 空状态精选问题（大卡片展示） ----
+
+export interface FeaturedQuestion {
+    icon: LucideIcon
+    text: string
+}
+
+/**
+ * 空状态首屏展示的 3 个精选推荐问题，覆盖三类典型场景：
+ * 1. 搜索 + 网页读取（信息检索类）
+ * 2. 地图位置查询（高德 MCP 位置类）
+ * 3. 路线规划（高德 MCP 出行类）
+ */
+export const featuredQuestions: FeaturedQuestion[] = [
+    {
+        icon: Search,
+        text: '搜索「AI Agent 的 Tool Calling 与 MCP 区别」并总结最新的几篇资料',
+    },
+    {
+        icon: MapPin,
+        text: '帮我搜下广州体育西路附近有哪些必吃的茶餐厅，给出探店攻略',
+    },
+    {
+        icon: Car,
+        text: '帮我搜索整理一份北京旅游攻略，再查从广州开车到北京大概需要多久',
+    },
+]
+
+// ---- 空状态能力标签 ----
+
+export interface CapabilityTag {
+    icon: LucideIcon
+    label: string
+}
+
+/**
+ * 空状态标题下方展示的能力标签行，
+ * 用极简方式传达 Agent 当前具备的核心能力。
+ */
+export const capabilityTags: CapabilityTag[] = [
+    { icon: BrainCircuit, label: 'ReAct Agent' },
+    { icon: Globe, label: 'Web Search' },
+    { icon: FileText, label: '网页读取' },
+    { icon: Puzzle, label: 'MCP' },
 ]

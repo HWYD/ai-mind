@@ -3,6 +3,7 @@ import { tool, type ToolRuntime } from '@langchain/core/tools'
 import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
+import { MCPHostError } from '@/lib/ai/mcp/protocol/errors'
 import { RetryPermitPool } from '@/lib/ai/runtime/general-react-agent/retry-permit-pool'
 import {
     executeToolCall,
@@ -378,13 +379,12 @@ describe('runtime/tool-runtime executeToolCall', () => {
 
     it.each([
         ['5xx', Object.assign(new Error('temporary provider failure'), { status: 503 })],
-        ['4xx', Object.assign(new Error('bad gateway request'), { status: 400 })],
+        ['MCP timeout', new MCPHostError('TIMEOUT', '地图服务请求失败。')],
         [
             'Web provider connection typed error',
             new WebProviderError('WEB_CONNECTION_ERROR', 'connection failed', { provider: 'tavily', retryable: true }),
         ],
-        ['unknown error', new Error('unexpected provider failure')],
-    ] as const)('retry-safe 远端 Tool 对 %s 执行失败重试并保持一个逻辑 transcript', async (_label, firstError) => {
+    ] as const)('retry-safe 远端 Tool 仅对可重试执行失败重试并保持一个逻辑 transcript', async (_label, firstError) => {
         vi.useFakeTimers()
         const retryPermitPool = new RetryPermitPool()
         const invoke = vi.fn<() => Promise<string>>().mockRejectedValueOnce(firstError).mockResolvedValue('recovered')
@@ -426,7 +426,9 @@ describe('runtime/tool-runtime executeToolCall', () => {
     it('retry-safe 远端 Tool 在连续失败后最多执行三次并只产生一个最终错误', async () => {
         vi.useFakeTimers()
         const retryPermitPool = new RetryPermitPool()
-        const invoke = vi.fn<() => Promise<string>>().mockRejectedValue(new Error('persistent provider failure'))
+        const invoke = vi
+            .fn<() => Promise<string>>()
+            .mockRejectedValue(Object.assign(new Error('persistent provider failure'), { status: 503 }))
         const remoteSchema = z.object({ query: z.string() })
         const toolDefinition: ChatToolDefinition<z.infer<typeof remoteSchema>> = {
             executionPolicy: {
@@ -461,6 +463,90 @@ describe('runtime/tool-runtime executeToolCall', () => {
         expect(writeChunk.mock.calls.map(([chunk]) => chunk.type)).toEqual(['tool-start', 'error'])
     })
 
+    it('未分类的只读 MCP isError 只允许一次同参兜底重试', async () => {
+        vi.useFakeTimers()
+        const retryPermitPool = new RetryPermitPool()
+        const opaqueMcpFailure = Object.assign(new MCPHostError('REQUEST_FAILED', '地图服务请求失败。'), {
+            retryLimit: 1,
+            retryable: true,
+        })
+        const invoke = vi.fn<() => Promise<string>>().mockRejectedValue(opaqueMcpFailure)
+        const remoteSchema = z.object({ query: z.string() })
+        const toolDefinition: ChatToolDefinition<z.infer<typeof remoteSchema>> = {
+            executionPolicy: {
+                attemptTimeoutMs: 20000,
+                kind: 'standard-tool',
+                profile: 'remote-readonly',
+                retrySafe: true,
+            },
+            name: 'opaque-mcp-tool',
+            schema: remoteSchema,
+            tool: tool(invoke, {
+                description: 'Opaque MCP retry test tool.',
+                name: 'opaque-mcp-tool',
+                schema: remoteSchema,
+            }),
+        }
+
+        const resultPromise = executeToolCall(createToolCall('opaque-mcp-tool', { query: 'hello' }), {}, vi.fn(), {
+            actionDeadlineAtMs: Date.now() + 60000,
+            hardDeadlineAtMs: Date.now() + 70000,
+            retryPermitPool,
+            toolDefinitionMap: new Map([[toolDefinition.name, toolDefinition]]),
+        })
+        await vi.runAllTimersAsync()
+        const result = await resultPromise
+        vi.useRealTimers()
+
+        expect(result).toMatchObject({ attemptCount: 2, failureCategory: 'unknown', success: false })
+        expect(invoke).toHaveBeenCalledTimes(2)
+        expect(retryPermitPool.snapshot()).toHaveLength(1)
+    })
+
+    it('retry-safe 远端 Tool 对 4xx 参数错误不重发同一请求', async () => {
+        const invoke = vi.fn<() => Promise<string>>().mockRejectedValue(Object.assign(new Error('bad request'), { status: 400 }))
+        const remoteSchema = z.object({ query: z.string() })
+        const toolDefinition: ChatToolDefinition<z.infer<typeof remoteSchema>> = {
+            executionPolicy: { attemptTimeoutMs: 20000, kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+            name: 'remote-invalid-request-tool',
+            schema: remoteSchema,
+            tool: tool(invoke, { description: 'Remote invalid request tool.', name: 'remote-invalid-request-tool', schema: remoteSchema }),
+        }
+
+        const result = await executeToolCall(createToolCall(toolDefinition.name, { query: 'hello' }), {}, vi.fn(), {
+            actionDeadlineAtMs: Date.now() + 60000,
+            hardDeadlineAtMs: Date.now() + 70000,
+            retryPermitPool: new RetryPermitPool(),
+            toolDefinitionMap: new Map([[toolDefinition.name, toolDefinition]]),
+        })
+
+        expect(result).toMatchObject({ attemptCount: 1, failureCategory: 'invalid-request', retryable: false, success: false })
+        expect(invoke).toHaveBeenCalledTimes(1)
+    })
+
+    it('显式标记不可重试的 MCP 429 不会按通用限流规则重发', async () => {
+        const invoke = vi
+            .fn<() => Promise<string>>()
+            .mockRejectedValue(new MCPHostError('REQUEST_FAILED', '地图服务请求失败。', { retryable: false, status: 429 }))
+        const remoteSchema = z.object({ query: z.string() })
+        const toolDefinition: ChatToolDefinition<z.infer<typeof remoteSchema>> = {
+            executionPolicy: { attemptTimeoutMs: 20000, kind: 'standard-tool', profile: 'remote-readonly', retrySafe: true },
+            name: 'remote-known-quota-tool',
+            schema: remoteSchema,
+            tool: tool(invoke, { description: 'Known quota test tool.', name: 'remote-known-quota-tool', schema: remoteSchema }),
+        }
+
+        const result = await executeToolCall(createToolCall(toolDefinition.name, { query: 'hello' }), {}, vi.fn(), {
+            actionDeadlineAtMs: Date.now() + 60000,
+            hardDeadlineAtMs: Date.now() + 70000,
+            retryPermitPool: new RetryPermitPool(),
+            toolDefinitionMap: new Map([[toolDefinition.name, toolDefinition]]),
+        })
+
+        expect(result).toMatchObject({ attemptCount: 1, failureCategory: 'unknown', retryable: false, success: false })
+        expect(invoke).toHaveBeenCalledTimes(1)
+    })
+
     it('规范化 retry 分类并优先采用合法 Retry-After，否则使用有界指数抖动', () => {
         const rateLimit = normalizeToolExecutionError({ retryAfterMs: 3000, status: 429 })
         const invalidRequest = normalizeToolExecutionError({ status: 400 })
@@ -478,5 +564,25 @@ describe('runtime/tool-runtime executeToolCall', () => {
                 new WebProviderError('WEB_CONNECTION_ERROR', '网页服务连接失败。', { provider: 'tavily', retryable: true })
             )
         ).toMatchObject({ category: 'connection', retryable: true })
+    })
+
+    it('保留安全 MCP Host 失败类别，以便远端只读 Tool 重试临时故障', () => {
+        expect(normalizeToolExecutionError(new MCPHostError('TIMEOUT', '地图服务请求失败。'))).toMatchObject({
+            category: 'timeout',
+            retryable: true,
+        })
+        expect(normalizeToolExecutionError(new MCPHostError('CONNECT_FAILED', '地图服务请求失败。'))).toMatchObject({
+            category: 'connection',
+            retryable: true,
+        })
+        expect(
+            normalizeToolExecutionError(Object.assign(new MCPHostError('EXECUTION_FAILED', '地图服务请求失败。'), { status: 429 }))
+        ).toMatchObject({ category: 'rate-limit', retryable: true })
+        expect(
+            normalizeToolExecutionError(new MCPHostError('REQUEST_FAILED', '地图服务请求失败。', { retryable: false, status: 429 }))
+        ).toMatchObject({
+            category: 'unknown',
+            retryable: false,
+        })
     })
 })

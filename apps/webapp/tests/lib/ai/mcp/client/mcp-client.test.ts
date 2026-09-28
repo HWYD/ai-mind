@@ -35,7 +35,10 @@ vi.mock('@/lib/ai/mcp/transport/stdio-transport', () => ({
     createStdioClientTransport: vi.fn(),
 }))
 
+import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+
 import { MCPClient } from '@/lib/ai/mcp/client/mcp-client'
+import { MCPHostError } from '@/lib/ai/mcp/protocol/errors'
 
 describe('MCPClient cancellation recovery', () => {
     beforeEach(() => {
@@ -109,6 +112,85 @@ describe('MCPClient cancellation recovery', () => {
         await expect(client.callTool({ arguments: {}, name: 'remote-tool' })).rejects.toMatchObject({ code: 'TIMEOUT' })
         expect(requestSignal?.aborted).toBe(true)
         expect(sdkMocks.clients).toHaveLength(1)
+        expect(sdkMocks.transports[0]!.close).not.toHaveBeenCalled()
+    })
+
+    it('高德 MCP 的底层错误不会把含 Key URL 写入 Host 错误消息', async () => {
+        const client = new MCPClient({
+            auth: {
+                keyEnv: 'AI_MIND_AMAP_MCP_KEY',
+                type: 'query-key',
+            },
+            baseUrl: 'https://mcp.amap.com/mcp',
+            capabilities: { prompts: false, resources: false, tools: true },
+            displayName: '高德地图 MCP',
+            location: 'remote',
+            providerKind: 'mcp',
+            serverId: 'amap-maps',
+            transport: 'streamable-http',
+        })
+        sdkMocks.clients[0]!.callTool.mockRejectedValueOnce(new Error('request failed: https://mcp.amap.com/mcp?key=server-only-key'))
+
+        const failure = await client
+            .callTool({ arguments: {}, name: 'remote-map-tool' }, { allowSessionRecovery: false })
+            .catch(error => error)
+
+        expect(failure).toMatchObject({
+            code: 'EXECUTION_FAILED',
+            message: '高德地图 MCP Tool 调用失败。',
+        })
+        expect(failure.message).not.toContain('server-only-key')
+    })
+
+    it('高德 MCP 在保留安全 HTTP 状态时仍不暴露底层错误文本', async () => {
+        const client = new MCPClient({
+            auth: {
+                keyEnv: 'AI_MIND_AMAP_MCP_KEY',
+                type: 'query-key',
+            },
+            baseUrl: 'https://mcp.amap.com/mcp',
+            capabilities: { prompts: false, resources: false, tools: true },
+            displayName: '高德地图 MCP',
+            location: 'remote',
+            providerKind: 'mcp',
+            serverId: 'amap-maps',
+            transport: 'streamable-http',
+        })
+        sdkMocks.clients[0]!.callTool.mockRejectedValueOnce(new StreamableHTTPError(429, 'https://mcp.amap.com/mcp?key=server-only-key'))
+
+        const failure = await client
+            .callTool({ arguments: {}, name: 'remote-map-tool' }, { allowSessionRecovery: false })
+            .catch(error => error)
+
+        expect(failure).toMatchObject({
+            code: 'EXECUTION_FAILED',
+            message: '高德地图 MCP Tool 调用失败。',
+            status: 429,
+        })
+        expect(failure.message).not.toContain('server-only-key')
+        expect(failure.cause).toBeUndefined()
+    })
+
+    it('高德 MCP 即使调用方未传选项也不会进行 session recovery', async () => {
+        const client = new MCPClient({
+            auth: {
+                keyEnv: 'AI_MIND_AMAP_MCP_KEY',
+                type: 'query-key',
+            },
+            baseUrl: 'https://mcp.amap.com/mcp',
+            capabilities: { prompts: false, resources: false, tools: true },
+            displayName: '高德地图 MCP',
+            location: 'remote',
+            providerKind: 'mcp',
+            serverId: 'amap-maps',
+            transport: 'streamable-http',
+        })
+        sdkMocks.clients[0]!.callTool.mockRejectedValueOnce(new Error('session not found'))
+
+        await expect(client.callTool({ arguments: {}, name: 'remote-map-tool' })).rejects.toMatchObject({ code: 'NOT_FOUND' })
+
+        expect(sdkMocks.clients).toHaveLength(1)
+        expect(sdkMocks.clients[0]!.callTool).toHaveBeenCalledTimes(1)
         expect(sdkMocks.transports[0]!.close).not.toHaveBeenCalled()
     })
 })

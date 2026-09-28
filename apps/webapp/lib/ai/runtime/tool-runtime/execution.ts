@@ -3,6 +3,7 @@ import { type ToolCall, ToolMessage } from '@langchain/core/messages'
 
 import { createId } from '@/lib/ai/create-id'
 import { isAbortError } from '@/lib/ai/error-utils'
+import { MCPHostError } from '@/lib/ai/mcp/protocol/errors'
 import { type ToolExecutionPolicy, toolExecutionProfiles, type ToolRuntimeScope, toolSupportsRuntimeScope } from '@/lib/ai/tools'
 
 import { throwIfAborted, writeStreamErrorChunk } from '../stream-errors'
@@ -26,6 +27,7 @@ export interface NormalizedToolExecutionError {
     category: ToolExecutionFailureCategory
     message: string
     retryAfterMs?: number
+    retryLimit?: 1 | 2
     retryable: boolean
 }
 
@@ -92,6 +94,10 @@ function normalizeRetryAfterMs(value: unknown) {
     return retryAfterMs !== undefined && retryAfterMs >= 1000 && retryAfterMs <= 10000 ? Math.floor(retryAfterMs) : undefined
 }
 
+function normalizeRetryLimit(value: unknown) {
+    return value === 1 || value === 2 ? value : undefined
+}
+
 export function normalizeToolExecutionError(error: unknown): NormalizedToolExecutionError {
     if (error instanceof ToolAttemptTimeoutError) {
         return {
@@ -106,6 +112,11 @@ export function normalizeToolExecutionError(error: unknown): NormalizedToolExecu
     const code = typeof errorRecord.code === 'string' ? errorRecord.code.toUpperCase() : ''
     const message = error instanceof Error && error.message ? error.message : '工具执行失败。'
     const retryAfterMs = normalizeRetryAfterMs(errorRecord.retryAfterMs)
+    const retryLimit = normalizeRetryLimit(errorRecord.retryLimit)
+
+    if (error instanceof MCPHostError && error.retryable === false) {
+        return { category: 'unknown', message, retryable: false }
+    }
 
     if (code === 'WEB_CONNECTION_ERROR') {
         return { category: 'connection', message, retryAfterMs, retryable: true }
@@ -117,6 +128,24 @@ export function normalizeToolExecutionError(error: unknown): NormalizedToolExecu
 
     if (status !== undefined && status >= 500 && status <= 599) {
         return { category: 'server', message, retryAfterMs, retryable: true }
+    }
+
+    if (error instanceof MCPHostError) {
+        if (error.code === 'TIMEOUT') {
+            return { category: 'timeout', message, retryAfterMs, retryable: true }
+        }
+
+        if (error.code === 'CONNECT_FAILED' || error.code === 'NOT_CONNECTED') {
+            return { category: 'connection', message, retryAfterMs, retryable: true }
+        }
+
+        if (error.code === 'UNAUTHORIZED' || error.code === 'FORBIDDEN') {
+            return { category: 'permission', message, retryable: false }
+        }
+
+        if (error.code === 'NOT_FOUND') {
+            return { category: 'invalid-request', message, retryable: false }
+        }
     }
 
     if (['ETIMEDOUT', 'ESOCKETTIMEDOUT'].includes(code) || (error instanceof DOMException && error.name === 'TimeoutError')) {
@@ -133,6 +162,16 @@ export function normalizeToolExecutionError(error: unknown): NormalizedToolExecu
 
     if (status !== undefined && status >= 400 && status <= 499) {
         return { category: 'invalid-request', message, retryable: false }
+    }
+
+    if (error instanceof MCPHostError && error.retryable === true) {
+        return {
+            category: 'unknown',
+            message,
+            retryAfterMs,
+            ...(retryLimit !== undefined ? { retryLimit } : {}),
+            retryable: true,
+        }
     }
 
     return { category: 'unknown', message, retryable: false }
@@ -568,12 +607,13 @@ export async function executeToolCall(
             lastError = normalizeToolExecutionError(error)
             const nextRetryOrdinal = (retryOrdinal + 1) as 1 | 2 | 3
             const policy = toolDefinition.executionPolicy
-            // retrySafe 远端只读 Tool 对执行阶段的所有异常统一重试；错误分类只用于最终安全摘要与观测。
+            // 仅临时性执行异常可用同一参数重试；参数、权限和安全拒绝必须交由模型重新生成候选参数。
             const mayRetry =
-                nextRetryOrdinal <= 2 &&
+                nextRetryOrdinal <= (lastError.retryLimit ?? 2) &&
                 policy.kind === 'standard-tool' &&
                 policy.profile === 'remote-readonly' &&
                 policy.retrySafe &&
+                lastError.retryable &&
                 options.retryPermitPool
 
             if (!mayRetry) break

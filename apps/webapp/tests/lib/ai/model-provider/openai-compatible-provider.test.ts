@@ -31,6 +31,7 @@ function createDeepSeekSelection(overrides: Partial<ResolvedModelSelection> = {}
                 chat: true,
                 embedding: false,
                 jsonOutput: true,
+                reasoning: true,
                 streaming: true,
                 tasklist: true,
                 toolCalling: true,
@@ -296,6 +297,20 @@ describe('OpenAICompatibleProvider', () => {
             }) as { modelKwargs?: Record<string, unknown> }
 
             expect(model.modelKwargs).toEqual({ thinking: { type: 'disabled' } })
+        })
+
+        it('Doubao 路由的 DeepSeek 推理模型在明确开启推理时透传 thinking enabled', () => {
+            const provider = new OpenAICompatibleProvider('doubao', deepseekCapabilities)
+            const model = provider.createModel({
+                config: createTestConfig({
+                    doubao: { apiKey: 'ark-test-key', baseURL: 'https://ark.cn-beijing.volces.com/api/v3' },
+                }),
+                enableReasoning: true,
+                resolvedModelSelection: createDeepSeekSelection({ provider: 'doubao' }),
+                routeType: 'chat',
+            }) as { modelKwargs?: Record<string, unknown> }
+
+            expect(model.modelKwargs).toEqual({ thinking: { type: 'enabled' } })
         })
 
         it.each([

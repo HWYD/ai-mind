@@ -74,7 +74,10 @@ export function createChatModel(options: CreateChatModelOptions): AiMindChatMode
     const model = provider.createModel(createOptions)
 
     const handle: AiMindChatModelHandle = {
-        capabilities: provider.capabilities,
+        capabilities: {
+            ...provider.capabilities,
+            reasoning: resolvedModelSelection.catalogItem.capabilities.reasoning ?? provider.capabilities.reasoning,
+        },
         model,
         modelId: resolvedModelSelection.modelId,
         normalizeError: (error: unknown) => provider.normalizeError(error),

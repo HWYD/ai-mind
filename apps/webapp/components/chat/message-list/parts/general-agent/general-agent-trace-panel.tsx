@@ -11,16 +11,20 @@ import { useMessageDisclosureState } from '../../message-disclosure-state'
 import { GeneralAgentTraceRow } from './general-agent-trace-row'
 import { buildGeneralAgentTraceView, type GeneralAgentTraceStatus } from './general-agent-trace-view'
 
-function getTitle(status: GeneralAgentTraceStatus, finalAnswerStarted: boolean, finalizationMode?: AgentRunPart['finalizationMode']) {
+function getTitle(status: GeneralAgentTraceStatus, finalAnswerStarted: boolean) {
     if (status === 'cancelled') {
         return '已停止思考'
     }
 
-    if (status === 'failed' || finalizationMode === 'constrained') {
+    if (status === 'failed') {
         return '处理未完成'
     }
 
-    return finalAnswerStarted ? '已完成思考' : '正在思考'
+    if (status === 'completed' || finalAnswerStarted) {
+        return '已完成思考'
+    }
+
+    return '正在思考'
 }
 
 export function GeneralAgentTracePanel({
@@ -52,7 +56,7 @@ export function GeneralAgentTracePanel({
         wasFinalAnswerStartedRef.current = finalAnswerStarted
     }, [finalAnswerStarted, isConstrainedFinalizer, setOpen])
 
-    const title = getTitle(status, finalAnswerStarted, run?.finalizationMode)
+    const title = getTitle(status, finalAnswerStarted)
     const hasDetails = view.hasFoldableDetails
     const titleClassName =
         'flex h-[30px] w-fit items-center gap-1.5 text-left text-[15px] font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50'

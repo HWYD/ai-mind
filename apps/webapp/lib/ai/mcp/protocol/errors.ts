@@ -11,6 +11,14 @@ export type MCPHostErrorCode =
     | 'UNAUTHORIZED'
     | 'UNSUPPORTED_TRANSPORT'
 
+export interface MCPHostErrorOptions {
+    cause?: unknown
+    retryAfterMs?: number
+    retryLimit?: 1 | 2
+    retryable?: boolean
+    status?: number
+}
+
 /**
  * MCP Host 统一错误类型。
  * 上层可基于 code 做稳定映射，不必依赖底层 SDK 原始异常文案。
@@ -18,12 +26,26 @@ export type MCPHostErrorCode =
 export class MCPHostError extends Error {
     cause?: unknown
     code: MCPHostErrorCode
+    retryAfterMs?: number
+    retryLimit?: 1 | 2
+    retryable?: boolean
+    status?: number
 
-    constructor(code: MCPHostErrorCode, message: string, options?: { cause?: unknown }) {
+    constructor(code: MCPHostErrorCode, message: string, options?: MCPHostErrorOptions) {
         super(message)
         this.name = 'MCPHostError'
         this.code = code
         this.cause = options?.cause
+        this.status =
+            typeof options?.status === 'number' && Number.isInteger(options.status) && options.status >= 100 && options.status <= 599
+                ? options.status
+                : undefined
+        this.retryAfterMs =
+            typeof options?.retryAfterMs === 'number' && Number.isFinite(options.retryAfterMs) && options.retryAfterMs >= 0
+                ? Math.floor(options.retryAfterMs)
+                : undefined
+        this.retryLimit = options?.retryLimit === 1 || options?.retryLimit === 2 ? options.retryLimit : undefined
+        this.retryable = typeof options?.retryable === 'boolean' ? options.retryable : undefined
     }
 }
 

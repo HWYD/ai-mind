@@ -44,7 +44,7 @@ Capability Surface 不意味着所有能力都以同一种方式执行。Tool、
 
 ## Tool Capability
 
-Tool capability 表示可执行动作。v0.6.1 的 General ReAct 由独立 `GeneralToolPolicy` 从显式登记的 Tool Definition 解析本轮 active tools；Skill 选择不参与绑定。
+Tool capability 表示可执行动作。v0.6.2 的 General ReAct 由独立 `GeneralToolPolicy` 从显式登记的 Tool Definition 解析本轮 active tools；Skill 选择不参与绑定。
 
 示例：
 
@@ -172,12 +172,18 @@ Capability Model 统一能力描述，不能把 Tool 权限回流给 Skill。
 
 它不会抹平 Tool、Resource、Prompt 的执行差异。这样可以让 Skill 消费能力更稳定，同时避免过早进入 Agent 或 workflow 架构。
 
-# v0.6.1 General Tool Policy
+# v0.6.2 General Tool Policy
 
-普通聊天的 effective tools 固定为 `calculator`、`datetime`、`text-transform`、`unit-convert`、`read-url`、`web-search` 与 `city-weather`。`GeneralToolPolicy` 在本轮开始时按 Tool Registry 的 availability、`general-react-agent` scope 与 `standard-tool` policy 冻结 allowlist；`agent-tool`、未登记 remote MCP Tool 与任何写入能力都 fail-closed。
+普通聊天的 effective tools 固定为 `calculator`、`datetime`、`text-transform`、`unit-convert`、`read-url`、`web-search`、`city-weather` 和九项高德地图只读 Tool。`GeneralToolPolicy` 在本轮开始时按 Tool Registry 的 availability、`general-react-agent` scope 与 `standard-tool` policy 冻结 allowlist；`agent-tool`、未登记 remote MCP Tool 与任何写入能力都 fail-closed。高德 Key 缺失时这九项 Tool 全部从 active map 移除。
 
 Web Provider 仅是 `web-search` / `read-url` 的 server-side adapter：部署静态选择 Tavily 或智谱 Search-Std，不产生新 Capability、Skill 权限、客户端选择器或模型可填参数。所选配置不可用时只移除这两个 Web Tool，绝不以另一 provider 自动替代。
 
 Skill 只提供系统提示词和输出风格，不再叠加 Tool、Resource 或 Prompt selector。Composer 显式命令和 `@resource` 仍可先形成安全 observation/message 再进入同一个 General ReAct loop；自然语言或 Skill 命中不会自动读取 remote MCP Resource/Prompt，也不会 discovery remote MCP Tool。
 
 Skill/MCP 的模型可见 schema 不包含 timeout、retry、provider config 或凭据。Dynamic MCP object schema 递归使用 strict 校验，public Tool input/output 不回退 raw payload；General ReAct 调用传播 run-scoped `AbortSignal` 并关闭 MCP client session recovery。所有执行继续经过 server-side Tool Definition、scope、schema、outbound secret guard 和 run-local budget，retry 只由 Tool Runtime 拥有。
+
+## v0.6.2 AMap MCP Boundary
+
+v0.6.2 通过高德官方托管 Streamable HTTP MCP 增加 POI 关键词/周边/详情、地理/逆地理编码、步行/驾车/骑行/公交路线九项静态只读 Tool。远端名称和 schema 已由受控 `tools/list` 与低频 contract call 核验；远端列表不授予模型权限。用户和模型均可生成业务参数候选，但只能通过固定 allowlist、schema、GCJ-02/范围、公开 URL policy 与出站密钥防护进入 Provider；成功 observation 才能支持事实。Key 只在服务端，地图结果继续经过 Tool Runtime 的预算、取消和安全投影：timeout、连接、429、5xx 与 adapter 识别的短时频率限制最多重试两次，已通过 schema 但无法归类的只读 MCP `isError` 最多重试一次，参数、权限、已识别额度、空与 malformed 结果不重发。跨层错误只保留稳定 code、状态和受限 retry 元数据；原始 `isError` 仅在 adapter 内存中短暂归类，明确空 POI 是成功的 `no-result` observation。为避免同一 Key 的短时突发，只有 `amap-maps` 在 MCP Client Manager 中按 server definition 使用进程内批次队列：每批最多 3 条，整批 settled 后冷却 800ms；它不改变全局 Tool 并发、其他 MCP server 或 StreamEvent，也不是跨实例账号限流。800ms 是在已经通过的 500ms 真实 smoke 上采用的更保守配置。不增加地图视图或 public stream 类型。`city-weather` 本版未改变。
+
+设计与验收见 [v0.6.2 spec](../../specs/v0.6.2-amap-mcp-tools/spec.md)、[ADR-0020](../adr/0020-amap-mcp-tool-boundary.md)。

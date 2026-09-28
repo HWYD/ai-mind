@@ -21,6 +21,50 @@ describe('tool calling prompt policy', () => {
         expect(resultPrompt).toContain('未找到')
     })
 
+    it('为地图 Tool 说明用途、候选参数与事实边界', () => {
+        const toolPrompt = getToolUseSystemPrompt(['amap-poi-search', 'amap-geocode', 'amap-reverse-geocode', 'amap-route-driving'])
+
+        expect(toolPrompt).toContain('地点搜索')
+        expect(toolPrompt).toContain('地址转坐标')
+        expect(toolPrompt).toContain('坐标转地址')
+        expect(toolPrompt).toContain('驾车路线规划')
+        expect(toolPrompt).toContain('用户提供或模型为完成任务生成的候选参数')
+        expect(toolPrompt).toContain('工具 observation 才能作为外部事实依据')
+    })
+
+    it('根据用户场景选择最少必要地图调用，并给出真实场景示例', () => {
+        const toolPrompt = getToolUseSystemPrompt([
+            'web-search',
+            'amap-poi-search',
+            'amap-poi-detail',
+            'amap-geocode',
+            'amap-route-driving',
+        ])
+
+        expect(toolPrompt).toContain('先根据用户问题确定需要哪些地图事实')
+        expect(toolPrompt).toContain('只调用获得这些事实所需的最少工具')
+        expect(toolPrompt).toContain('三里屯附近评分最高的日料')
+        expect(toolPrompt).toContain('天安门开车到三里屯')
+        expect(toolPrompt).toContain('找附近的日料')
+        expect(toolPrompt).toContain('参数校验失败')
+    })
+
+    it('把工具调用结果作为事实依据，不以模型补写失败或缺失的地图信息', () => {
+        const resultPrompt = getToolResultSystemPrompt(['web-search', 'amap-poi-search', 'amap-route-driving'])
+
+        expect(resultPrompt).toContain('工具调用结果是即时、精确或外部事实的依据')
+        expect(resultPrompt).toContain('不要用模型常识、估算、同类候选或工具调用顺序补齐')
+        expect(resultPrompt).toContain('已确认、未确认和下一步')
+        expect(resultPrompt).toContain('不得依据坐标、直线距离、道路经验或同类路线推算')
+    })
+
+    it('地图查询明确未找到时不对同一候选参数重复调用', () => {
+        const resultPrompt = getToolResultSystemPrompt(['amap-poi-nearby'])
+
+        expect(resultPrompt).toContain("resultStatus='no-result'")
+        expect(resultPrompt).toContain('归一化后相同参数')
+    })
+
     it('Answer policy 保护用户表达优先级和不可信资料边界', () => {
         const answerPrompt = getAnswerSystemPrompt()
 

@@ -1,3 +1,11 @@
+import { amapGeocodeToolDefinition, amapReverseGeocodeToolDefinition } from './amap/amap-geocode-tools'
+import { amapPoiDetailToolDefinition, amapPoiNearbyToolDefinition, amapPoiSearchToolDefinition } from './amap/amap-poi-tools'
+import {
+    amapRouteBicyclingToolDefinition,
+    amapRouteDrivingToolDefinition,
+    amapRouteTransitToolDefinition,
+    amapRouteWalkingToolDefinition,
+} from './amap/amap-route-tools'
 import { calculatorToolDefinition } from './calculator-tool'
 import { cityWeatherToolDefinition } from './city-weather-tool'
 import { datetimeToolDefinition } from './datetime-tool'
@@ -9,6 +17,15 @@ import { readUrlToolDefinition } from './web/read-url-tool'
 import { webSearchToolDefinition } from './web/web-search-tool'
 
 const chatToolDefinitions: ChatToolDefinition[] = [
+    amapPoiSearchToolDefinition,
+    amapPoiNearbyToolDefinition,
+    amapPoiDetailToolDefinition,
+    amapGeocodeToolDefinition,
+    amapReverseGeocodeToolDefinition,
+    amapRouteWalkingToolDefinition,
+    amapRouteDrivingToolDefinition,
+    amapRouteBicyclingToolDefinition,
+    amapRouteTransitToolDefinition,
     calculatorToolDefinition,
     cityWeatherToolDefinition,
     datetimeToolDefinition,
@@ -43,6 +60,15 @@ export function getChatToolDefinition(toolName: string): ChatToolDefinition | un
 }
 
 export {
+    amapPoiSearchToolDefinition,
+    amapPoiNearbyToolDefinition,
+    amapPoiDetailToolDefinition,
+    amapGeocodeToolDefinition,
+    amapReverseGeocodeToolDefinition,
+    amapRouteWalkingToolDefinition,
+    amapRouteDrivingToolDefinition,
+    amapRouteBicyclingToolDefinition,
+    amapRouteTransitToolDefinition,
     calculatorToolDefinition,
     cityWeatherToolDefinition,
     datetimeToolDefinition,

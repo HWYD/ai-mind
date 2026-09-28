@@ -33,12 +33,13 @@ describe('web-provider-factory', () => {
         expect(createConfiguredWebProvider({ env: { AI_MIND_WEB_PROVIDER: 'zhipu', TAVILY_API_KEY: 'tavily-key' } })).toBeNull()
     })
 
-    it('始终把两类 provider key 作为 outbound known secret', () => {
+    it('始终把 provider 与地图服务 key 作为 outbound known secret', () => {
         expect(
             resolveOutboundKnownSecrets({
+                AI_MIND_AMAP_MCP_KEY: 'amap-key',
                 AI_MIND_ZHIPU_API_KEY: 'zhipu-key',
                 TAVILY_API_KEY: 'tavily-key',
             })
-        ).toEqual(expect.arrayContaining(['tavily-key', 'zhipu-key']))
+        ).toEqual(expect.arrayContaining(['amap-key', 'tavily-key', 'zhipu-key']))
     })
 })

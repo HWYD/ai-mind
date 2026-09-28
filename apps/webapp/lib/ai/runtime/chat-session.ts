@@ -102,9 +102,12 @@ export async function createChatSession(request: ChatRequest, resolvedModelSelec
         toolUseSystemPrompt,
         toolResultSystemPrompt,
     ].filter((prompt): prompt is string => Boolean(prompt))
-    const finalizerSystemPrompts = [getCoreResponseSystemPrompt(), skillOutputPolicyPrompt, getAnswerSystemPrompt()].filter(
-        (prompt): prompt is string => Boolean(prompt)
-    )
+    const finalizerSystemPrompts = [
+        getCoreResponseSystemPrompt(),
+        skillOutputPolicyPrompt,
+        getAnswerSystemPrompt(),
+        toolResultSystemPrompt,
+    ].filter((prompt): prompt is string => Boolean(prompt))
     const langChainMessages = toLangChainMessages(getLatestUserMessageOnly(request))
 
     return {

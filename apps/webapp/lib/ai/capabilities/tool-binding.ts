@@ -10,6 +10,15 @@ import { toCapabilityDefinition } from './catalog'
  * 后续新增工具需要同时评审安全性、可观测性与 General ReAct 适配性，再显式加入此策略。
  */
 const GENERAL_REACT_TOOL_NAMES = new Set([
+    'amap-poi-search',
+    'amap-poi-nearby',
+    'amap-poi-detail',
+    'amap-geocode',
+    'amap-reverse-geocode',
+    'amap-route-walking',
+    'amap-route-driving',
+    'amap-route-bicycling',
+    'amap-route-transit',
     'calculator',
     'datetime',
     'text-transform',
