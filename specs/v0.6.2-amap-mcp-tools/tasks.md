@@ -154,6 +154,14 @@
 - [x] T056 **Canonical synchronization**：把当前 FR-018、SC-010、data model、D-022、architecture、ADR 和 acceptance 当前事实更新为 21；保留 T050–T053 的 18-call 历史证据。
 - [x] T057 **Verification and convergence**：General ReAct 定向 Vitest 5 files / 54 tests、webapp typecheck、lint、`speckit-analyze` 等价一致性检查、`speckit-converge` 等价收口检查与 `git diff --check` 均通过；不调用真实 AMap 服务，不提交、tag、发布或部署。
 
+## Phase 15: General ReAct constrained-finalizer unbounded output (2026-10-08)
+
+**Purpose**: 将整轮时间边界限定在正文收口前：保留 235 秒 loop 与 5 秒 handoff reserve，把 pre-finalization budget 设为 240 秒；仅 constrained finalizer 的正文流式输出取消应用内/项目 Provider timeout，并保留显式取消与既有 resumable execution。
+
+- [x] T058 **Test gate**：在 General ReAct runner、chat service、chat session 与 OpenAI-compatible Provider 测试中先复现旧行为：finalizer 获得剩余 deadline、270 秒外层 abort 会结束可恢复流、`null` 仍回退到 Provider 配置 timeout。新测试要求 240 秒仅作为 pre-finalization context、finalizer `timeoutMs: null`、跨越旧 270 秒仍可完成，且显式取消仍终止流。
+- [x] T059 **Runtime implementation**：将 `GeneralReActRuntimeConfig`/state/ChatExecutionContext 改为 `preFinalizationDeadlineMs=240_000`，保留 235 秒 loop 与 5 秒 handoff reserve；移除 Chat Service 全局 abort/projection deadline，finalizer 不创建本地 timer 并向 Provider 传递 `null`，Provider 仅在 `undefined` 时回退到配置 timeout。普通 loop、Tool、并发、重试和 public stream 不变。
+- [x] T060 **Synchronization and verification**：同步同一 canonical spec/plan/data-model/contract/decisions/research/acceptance，运行 General ReAct 定向 Vitest、webapp typecheck、lint、Spec Kit analyze/converge 与 `git diff --check`；不调用外部服务，不修改 stream DTO、数据库或 Provider 路由。
+
 ## Dependencies & Execution Order
 
 - T001 是九项静态映射的外部契约门：Key 安全可用后应优先执行，且必须在 T007 前完成；它不是实现后的普通 smoke。T001 可使用不绑定模型权限的受控 provider probe；若复用 T004/T005 的固定连接实现，T004/T005 可先执行，但不改变 T001 先于 T007 的门槛。T002 依赖 T001 的映射证据；T003～T006 可并行推进。T006 的测试先于 T007 实现，T007 先于 T008 绑定；T001 与 T006–T008 构成进入 User Story 前的核心安全门。T021 的九项真实 smoke 是实现后的发布验收，不替代 T001 的映射核验。

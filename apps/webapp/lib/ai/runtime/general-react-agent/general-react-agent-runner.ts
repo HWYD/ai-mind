@@ -60,11 +60,11 @@ export type GeneralReActRunnerInput = {
 export class GeneralReActAgentRunner {
     async run(input: GeneralReActRunnerInput): Promise<GeneralReActRunResult> {
         const startedAtMs =
-            input.context.executionContext.runDeadlineAtMs === undefined
+            input.context.executionContext.preFinalizationDeadlineAtMs === undefined
                 ? input.context.clock.now()
-                : input.context.executionContext.runDeadlineAtMs - GENERAL_REACT_RUNTIME_DEFAULTS.hardDeadlineMs
+                : input.context.executionContext.preFinalizationDeadlineAtMs - GENERAL_REACT_RUNTIME_DEFAULTS.preFinalizationDeadlineMs
         const initialState = createGeneralReActInitialState(startedAtMs)
-        const signalScope = createRunSignalScope(input.context, initialState._hardDeadlineAtMs)
+        const signalScope = createRunSignalScope(input.context)
         const eventLoopHistogram = monitorEventLoopDelay({ resolution: 10 })
         eventLoopHistogram.enable()
         const runContext = createGeneralReActRunContext({ ...input.context, runSignal: signalScope.signal })
@@ -78,9 +78,7 @@ export class GeneralReActAgentRunner {
         if (runContext.runSignal.aborted) {
             recordEventLoopDelay(eventLoopHistogram)
             signalScope.cleanup()
-            const runError = signalScope.deadlineSignal.aborted
-                ? new GeneralReActAgentRunError('RUN_DEADLINE', 'Agent 运行时间已到。')
-                : new GeneralReActAgentRunError('REQUEST_CANCELLED', '请求已取消。')
+            const runError = new GeneralReActAgentRunError('REQUEST_CANCELLED', '请求已取消。')
             generalReActObserver.recordStopReason(stopReasonForRunError(runError))
             generalReActObserver.recordCleanup({ failed: true })
             throw runError
@@ -268,9 +266,6 @@ export class GeneralReActAgentRunner {
                             } else if (streamedDelta && !loopPhaseScope.signal.aborted) {
                                 await publishModelText(streamedDelta)
                             }
-                            if (runContext.clock.now() >= initialState._hardDeadlineAtMs) {
-                                this.assertRunCanFinalize(runContext, initialState._hardDeadlineAtMs, signalScope.deadlineSignal)
-                            }
                             const publicChunk = adapter.projectPublicRuntimeChunk(candidate)
                             if (publicChunk) {
                                 await loopContext.publishChunk(publicChunk)
@@ -326,7 +321,7 @@ export class GeneralReActAgentRunner {
                       }
             }
 
-            this.assertRunCanFinalize(runContext, initialState._hardDeadlineAtMs, signalScope.deadlineSignal)
+            this.assertRunIsActive(runContext)
             const usage = deriveGeneralReActMessageUsage(state.messages.slice(input.messages.length))
             const terminalModelMessage = getLatestCurrentRunModelMessage(state.messages, input.messages.length)
             const terminalFinish = terminalModelMessage ? normalizeModelTurnFinish(terminalModelMessage) : undefined
@@ -359,8 +354,6 @@ export class GeneralReActAgentRunner {
                 assistantText = await this.runConstrainedFinalizer({
                     adapter,
                     context: runContext,
-                    deadlineSignal: signalScope.deadlineSignal,
-                    hardDeadlineAtMs: initialState._hardDeadlineAtMs,
                     messages: getFinalizerMessages(
                         state.messages.slice(input.messages.length),
                         input.finalizerMessages,
@@ -413,7 +406,7 @@ export class GeneralReActAgentRunner {
             }
         } catch (error) {
             runFailed = true
-            const runError = this.normalizeRunError(error, runContext, signalScope.deadlineSignal)
+            const runError = this.normalizeRunError(error, runContext)
             generalReActObserver.recordStopReason(stopReasonForRunError(runError))
             const textEnd = adapter.endModelText({ outcome: 'commentary', status: 'interrupted' })
             if (textEnd) {
@@ -434,20 +427,12 @@ export class GeneralReActAgentRunner {
     private async runConstrainedFinalizer(input: {
         adapter: GeneralReActStreamAdapter
         context: GeneralReActRunContext
-        deadlineSignal: AbortSignal
-        hardDeadlineAtMs: number
         messages: BaseMessage[]
     }): Promise<string> {
-        this.assertRunCanFinalize(input.context, input.hardDeadlineAtMs, input.deadlineSignal)
-        const availableMs = Math.min(
-            GENERAL_REACT_RUNTIME_DEFAULTS.maxFinalizerMs,
-            input.hardDeadlineAtMs - input.context.clock.now() - GENERAL_REACT_RUNTIME_DEFAULTS.terminalReserveMs
-        )
-        if (availableMs <= 0) {
-            throw new GeneralReActAgentRunError('RUN_DEADLINE', 'Agent 运行时间已到。')
-        }
-
-        const finalizerPhaseScope = createPhaseSignalScope(input.context.runSignal, Math.floor(availableMs))
+        this.assertRunIsActive(input.context)
+        // constrained finalizer 的正文输出不受项目内 deadline 或 Provider 默认 timeout 限制；
+        // 唯一主动中断来源是上游/用户取消 signal。
+        const finalizerPhaseScope = createPhaseSignalScope(input.context.runSignal)
         let text = ''
 
         try {
@@ -455,7 +440,7 @@ export class GeneralReActAgentRunner {
                 maxRetries: 0,
                 phase: 'finalizer',
                 signal: finalizerPhaseScope.signal,
-                timeoutMs: Math.floor(availableMs),
+                timeoutMs: null,
             })
             let finalizerIterator: AsyncIterator<unknown> | undefined
             const consumeFinalizerStream = (async () => {
@@ -464,7 +449,7 @@ export class GeneralReActAgentRunner {
                 for (;;) {
                     const next = await finalizerIterator.next()
                     if (next.done) return
-                    this.assertRunCanFinalize(input.context, input.hardDeadlineAtMs, input.deadlineSignal)
+                    this.assertRunIsActive(input.context)
                     if (hasToolCallData(next.value)) {
                         throw new GeneralReActAgentRunError('AGENT_CONTRACT_VIOLATION', '受限收口模型返回了不允许的工具调用。')
                     }
@@ -480,18 +465,14 @@ export class GeneralReActAgentRunner {
             try {
                 await Promise.race([consumeFinalizerStream, finalizerPhaseScope.timeoutPromise])
             } catch (error) {
-                if (error instanceof GeneralReActPhaseTimeoutError) {
+                if (input.context.runSignal.aborted) {
                     const settled = await stopPhaseExecution({ execution: consumeFinalizerStream, iterator: finalizerIterator })
                     if (!settled) {
                         throw new GeneralReActAgentRunError(
                             'RUN_EXECUTION_UNKNOWN',
-                            '受限收口阶段已超时，底层操作状态未知；未使用迟到结果。'
+                            '受限收口阶段已取消，底层操作状态未知；未使用迟到结果。'
                         )
                     }
-                    if (text.trim()) {
-                        throw new GeneralReActAgentRunError('RUN_FAILED', '受限收口阶段在输出不完整回答后超时。')
-                    }
-                    throw new GeneralReActAgentRunError('RUN_FAILED', '受限收口阶段在未生成完整回答前超时。')
                 }
                 throw error
             } finally {
@@ -514,24 +495,15 @@ export class GeneralReActAgentRunner {
         throw new GeneralReActAgentRunError('RUN_FAILED', '受限收口阶段未生成可用回答。')
     }
 
-    private assertRunCanFinalize(context: GeneralReActRunContext, hardDeadlineAtMs: number, deadlineSignal?: AbortSignal): void {
-        if (deadlineSignal?.aborted || isRunDeadlineAbortReason(context.runSignal.reason)) {
-            throw new GeneralReActAgentRunError('RUN_DEADLINE', 'Agent 运行时间已到。')
-        }
+    private assertRunIsActive(context: GeneralReActRunContext): void {
         if (context.runSignal.aborted) {
             throw new GeneralReActAgentRunError('REQUEST_CANCELLED', '请求已取消。')
         }
-        if (context.clock.now() >= hardDeadlineAtMs) {
-            throw new GeneralReActAgentRunError('RUN_DEADLINE', 'Agent 运行时间已到。')
-        }
     }
 
-    private normalizeRunError(error: unknown, context: GeneralReActRunContext, deadlineSignal: AbortSignal): GeneralReActAgentRunError {
+    private normalizeRunError(error: unknown, context: GeneralReActRunContext): GeneralReActAgentRunError {
         if (error instanceof GeneralReActAgentRunError) {
             return error
-        }
-        if (deadlineSignal.aborted || isRunDeadlineAbortReason(context.runSignal.reason)) {
-            return new GeneralReActAgentRunError('RUN_DEADLINE', 'Agent 运行时间已到。', { cause: error })
         }
         if (context.runSignal.aborted) {
             return new GeneralReActAgentRunError('REQUEST_CANCELLED', '请求已取消。', { cause: error })
@@ -560,7 +532,6 @@ function stopReasonForRunError(error: GeneralReActAgentRunError): string {
     }
 }
 
-const RUN_DEADLINE_ABORT_REASON = Symbol('GENERAL_REACT_RUN_DEADLINE')
 const PHASE_DEADLINE_ABORT_REASON = Symbol('GENERAL_REACT_PHASE_DEADLINE')
 const PHASE_CLEANUP_GRACE_MS = 50
 
@@ -571,13 +542,9 @@ class GeneralReActPhaseTimeoutError extends Error {
     }
 }
 
-function createRunSignalScope(context: GeneralReActRunContext, hardDeadlineAtMs: number) {
+function createRunSignalScope(context: GeneralReActRunContext) {
     const controller = new AbortController()
-    let deadlineTimer: ReturnType<typeof setTimeout> | undefined
     let inputAbortListener: (() => void) | undefined
-
-    const abortForDeadline = () => controller.abort(RUN_DEADLINE_ABORT_REASON)
-    const remainingMs = hardDeadlineAtMs - context.clock.now()
 
     if (context.runSignal.aborted) {
         controller.abort(context.runSignal.reason)
@@ -586,32 +553,14 @@ function createRunSignalScope(context: GeneralReActRunContext, hardDeadlineAtMs:
         context.runSignal.addEventListener('abort', inputAbortListener, { once: true })
     }
 
-    if (remainingMs <= 0) {
-        abortForDeadline()
-    } else {
-        deadlineTimer = setTimeout(abortForDeadline, remainingMs)
-    }
-
     return {
         cleanup() {
-            if (deadlineTimer) {
-                clearTimeout(deadlineTimer)
-            }
             if (inputAbortListener) {
                 context.runSignal.removeEventListener('abort', inputAbortListener)
             }
         },
-        deadlineSignal: {
-            get aborted() {
-                return isRunDeadlineAbortReason(controller.signal.reason)
-            },
-        } as AbortSignal,
         signal: controller.signal,
     }
-}
-
-function isRunDeadlineAbortReason(reason: unknown): boolean {
-    return reason === RUN_DEADLINE_ABORT_REASON || (reason instanceof DOMException && reason.name === 'TimeoutError')
 }
 
 async function stopPhaseExecution(input: { execution: Promise<unknown>; iterator?: AsyncIterator<unknown> }): Promise<boolean> {
@@ -624,7 +573,7 @@ async function stopPhaseExecution(input: { execution: Promise<unknown>; iterator
     return settled
 }
 
-function createPhaseSignalScope(parentSignal: AbortSignal, timeoutMs: number) {
+function createPhaseSignalScope(parentSignal: AbortSignal, timeoutMs?: number) {
     const controller = new AbortController()
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     let parentAbortListener: (() => void) | undefined
@@ -648,7 +597,7 @@ function createPhaseSignalScope(parentSignal: AbortSignal, timeoutMs: number) {
         parentSignal.addEventListener('abort', parentAbortListener, { once: true })
     }
 
-    if (!settled) {
+    if (!settled && timeoutMs !== undefined) {
         timeoutId = setTimeout(() => {
             if (settled) return
             settled = true

@@ -194,7 +194,7 @@ describe('runtime/chat-session', () => {
                 maxRetries: 0,
                 phase: 'finalizer',
                 signal,
-                timeoutMs: 654,
+                timeoutMs: null,
             })
         ).toBe(answerModel)
 
@@ -219,7 +219,7 @@ describe('runtime/chat-session', () => {
                 resolvedModelSelection,
                 streaming: true,
                 temperature: undefined,
-                timeoutMs: 654,
+                timeoutMs: null,
             })
         )
     })

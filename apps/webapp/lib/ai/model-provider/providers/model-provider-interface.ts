@@ -20,7 +20,7 @@ export interface ModelProviderCreateOptions {
     routeType: ModelRouteType
     streaming?: boolean
     temperature?: number
-    timeoutMs?: number
+    timeoutMs?: number | null
 }
 
 export interface ModelProvider {

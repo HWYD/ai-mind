@@ -1,7 +1,6 @@
 export interface GeneralReActRuntimeConfig {
-    hardDeadlineMs: number
+    preFinalizationDeadlineMs: number
     loopDeadlineMs: number
-    maxFinalizerMs: number
     maxLogicalToolCalls: number
     maxLoopModelCalls: number
     maxModelCalls: number
@@ -27,17 +26,16 @@ export function createGeneralReActRuntimeConfig<T extends GeneralReActRuntimeCon
     if (config.maxLoopModelCalls !== config.maxToolBearingRounds + 1) {
         throw new RangeError('maxLoopModelCalls must reserve the final no-Tool loop decision.')
     }
-    if (config.loopDeadlineMs + config.maxFinalizerMs + config.terminalReserveMs !== config.hardDeadlineMs) {
-        throw new RangeError('Loop, finalizer, and terminal reserve must equal hardDeadlineMs.')
+    if (config.loopDeadlineMs + config.terminalReserveMs !== config.preFinalizationDeadlineMs) {
+        throw new RangeError('loopDeadlineMs plus terminalReserveMs must equal preFinalizationDeadlineMs.')
     }
 
     return Object.freeze(config)
 }
 
 export const GENERAL_REACT_RUNTIME_DEFAULTS = createGeneralReActRuntimeConfig({
-    hardDeadlineMs: 270_000,
+    preFinalizationDeadlineMs: 240_000,
     loopDeadlineMs: 235_000,
-    maxFinalizerMs: 30_000,
     maxLogicalToolCalls: 21,
     maxLoopModelCalls: 10,
     maxModelCalls: 11,

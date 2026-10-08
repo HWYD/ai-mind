@@ -31,7 +31,7 @@ import type { ChatRequest } from '@/lib/ai/types/chat'
 export type { ChatExecutionContext, ResolvedChatExecutionContext } from '@/lib/ai/runtime/types'
 
 const STREAM_HEARTBEAT_INTERVAL_MS = 15_000
-const GENERAL_REACT_RUN_DEADLINE_MS = GENERAL_REACT_RUNTIME_DEFAULTS.hardDeadlineMs
+const GENERAL_REACT_PRE_FINALIZATION_DEADLINE_MS = GENERAL_REACT_RUNTIME_DEFAULTS.preFinalizationDeadlineMs
 
 interface StreamExecutorOptions {
     deferCleanup: (cleanup: () => void | Promise<void>) => void
@@ -190,7 +190,6 @@ function createResumableWriteChunk(options: ResumableStreamWriterOptions): {
             }
         },
         observer: generalReActObserver,
-        deadlineAtMs: options.context.runDeadlineAtMs,
         signal: options.context.signal,
     })
 
@@ -241,15 +240,12 @@ function createResumableWriteChunk(options: ResumableStreamWriterOptions): {
                 terminalWrite = (async () => {
                     if (terminalOptions?.explicitCancellation && terminalState === 'cancelled') {
                         const recovery = options.context.streamRecovery!
-                        const envelope = await options.getProjector().projectChunk(
-                            {
-                                chunk,
-                                ownerSessionHash: recovery.ownerSessionHash,
-                                runId: recovery.runId,
-                                terminalState,
-                            },
-                            options.context.runDeadlineAtMs === undefined ? undefined : { deadlineAtMs: options.context.runDeadlineAtMs }
-                        )
+                        const envelope = await options.getProjector().projectChunk({
+                            chunk,
+                            ownerSessionHash: recovery.ownerSessionHash,
+                            runId: recovery.runId,
+                            terminalState,
+                        })
 
                         if (!options.writer.isClosed()) {
                             options.writer.writeEnvelope(envelope as unknown as StreamEventEnvelope)
@@ -269,15 +265,12 @@ function createResumableWriteChunk(options: ResumableStreamWriterOptions): {
                     }
 
                     const recovery = options.context.streamRecovery!
-                    const envelope = await options.getProjector().projectChunk(
-                        {
-                            chunk: createProjectionFailureChunk(terminalProjectionError, options.context),
-                            ownerSessionHash: recovery.ownerSessionHash,
-                            runId: recovery.runId,
-                            terminalState: 'failed',
-                        },
-                        options.context.runDeadlineAtMs === undefined ? undefined : { deadlineAtMs: options.context.runDeadlineAtMs }
-                    )
+                    const envelope = await options.getProjector().projectChunk({
+                        chunk: createProjectionFailureChunk(terminalProjectionError, options.context),
+                        ownerSessionHash: recovery.ownerSessionHash,
+                        runId: recovery.runId,
+                        terminalState: 'failed',
+                    })
 
                     if (!options.writer.isClosed()) {
                         options.writer.writeEnvelope(envelope as unknown as StreamEventEnvelope)
@@ -296,8 +289,7 @@ async function createNdjsonStreamResult(
         options: StreamExecutorOptions,
         executionContext: ChatExecutionContext & { resolvedModelSelection?: ResolvedChatExecutionContext['resolvedModelSelection'] }
     ) => Promise<void>,
-    dependencies: ChatServiceDependencies = {},
-    runDeadlineAtMs?: number
+    dependencies: ChatServiceDependencies = {}
 ): Promise<StreamResult> {
     let closed = false
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
@@ -364,8 +356,6 @@ async function createNdjsonStreamResult(
             ) => {
                 const deferredCleanups: Array<() => void | Promise<void>> = []
                 const runController = new AbortController()
-                let deadlineTimer: ReturnType<typeof setTimeout> | undefined
-                let deadlineTriggered = false
                 const onExecutionAbort = () => runController.abort(executionContext.signal?.reason)
 
                 if (executionContext.signal?.aborted) {
@@ -374,17 +364,8 @@ async function createNdjsonStreamResult(
                     executionContext.signal?.addEventListener('abort', onExecutionAbort, { once: true })
                 }
 
-                if (runDeadlineAtMs !== undefined) {
-                    const remainingMs = Math.max(1, runDeadlineAtMs - Date.now() - GENERAL_REACT_RUNTIME_DEFAULTS.terminalReserveMs)
-                    deadlineTimer = setTimeout(() => {
-                        deadlineTriggered = true
-                        runController.abort(new DOMException('General ReAct run deadline exceeded.', 'TimeoutError'))
-                    }, remainingMs)
-                }
-
                 const runExecutionContext = {
                     ...executionContext,
-                    ...(runDeadlineAtMs === undefined ? {} : { runDeadlineAtMs }),
                     signal: runController.signal,
                 }
                 const writerOptions = createResumableWriteChunk({
@@ -419,21 +400,6 @@ async function createNdjsonStreamResult(
 
                     if (cancellationRequested) {
                         await writerOptions.writeTerminalChunk({ type: 'finish' }, 'cancelled', { explicitCancellation: true })
-                        return
-                    }
-
-                    if (deadlineTriggered) {
-                        await writerOptions.writeTerminalChunk(
-                            {
-                                errorCode: 'MODEL_PROVIDER_TIMEOUT',
-                                message: 'Agent 运行时间已到。',
-                                retryable: false,
-                                scope: 'runtime',
-                                stage: 'runtime',
-                                type: 'error',
-                            },
-                            'failed'
-                        )
                         return
                     }
 
@@ -520,7 +486,6 @@ async function createNdjsonStreamResult(
                         }
 
                         closeStream()
-                        if (deadlineTimer) clearTimeout(deadlineTimer)
                         executionContext.signal?.removeEventListener('abort', onExecutionAbort)
                     }
                 }
@@ -627,13 +592,16 @@ async function createChatStreamResult(
     dependencies: ChatServiceDependencies
 ): Promise<StreamResult> {
     const commandName = request.composer?.command?.name
-    const runDeadlineAtMs =
+    const executionContext =
         context.resolvedModelSelection.routeType === 'chat' && commandName !== 'tasklist' && commandName !== 'delivery-chain'
-            ? Date.now() + GENERAL_REACT_RUN_DEADLINE_MS
-            : undefined
+            ? {
+                  ...context,
+                  preFinalizationDeadlineAtMs: Date.now() + GENERAL_REACT_PRE_FINALIZATION_DEADLINE_MS,
+              }
+            : context
 
     return createNdjsonStreamResult(
-        context,
+        executionContext,
         async ({ deferCleanup, isClosed, writeChunk, writeTerminalChunk }, executionContext) => {
             const orchestrator = new ChatOrchestrator({
                 context: executionContext as ResolvedChatExecutionContext,
@@ -646,8 +614,7 @@ async function createChatStreamResult(
 
             await orchestrator.run()
         },
-        dependencies,
-        runDeadlineAtMs
+        dependencies
     )
 }
 

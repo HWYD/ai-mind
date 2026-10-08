@@ -29,7 +29,7 @@ export interface GeneralReActPhaseModelOptions {
     maxRetries: 0
     phase: GeneralReActModelPhase
     signal: AbortSignal
-    timeoutMs: number
+    timeoutMs: number | null
 }
 
 export interface GeneralReActRunContext {

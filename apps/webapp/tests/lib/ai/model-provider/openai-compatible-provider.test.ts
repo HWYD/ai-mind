@@ -362,6 +362,22 @@ describe('OpenAICompatibleProvider', () => {
             expect((model as unknown as { caller: { maxRetries: number } }).caller.maxRetries).toBe(1)
         })
 
+        it('allows the constrained finalizer to bypass the configured Provider timeout', () => {
+            const provider = new OpenAICompatibleProvider('deepseek', deepseekCapabilities)
+
+            const model = provider.createModel({
+                config: createTestConfig({
+                    deepseek: { apiKey: 'sk-test-key', baseURL: 'https://api.deepseek.com' },
+                    timeoutMs: 12_345,
+                }),
+                resolvedModelSelection: createDeepSeekSelection(),
+                routeType: 'chat',
+                timeoutMs: null,
+            })
+
+            expect((model as { timeout?: number }).timeout).toBeUndefined()
+        })
+
         it('keeps chat streaming by default and allows tasklist stages to disable it', () => {
             const provider = new OpenAICompatibleProvider('deepseek', deepseekCapabilities)
             const config = createTestConfig({

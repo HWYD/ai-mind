@@ -109,7 +109,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
             modelKwargs,
             streaming: options.streaming ?? true,
             temperature,
-            timeout: options.timeoutMs ?? config.timeoutMs,
+            timeout: options.timeoutMs === null ? undefined : (options.timeoutMs ?? config.timeoutMs),
         })
     }
 

@@ -7,11 +7,10 @@ import { createGeneralReActInitialState, generalReActAgentStateSchema } from '@/
 import { GENERAL_REACT_RUNTIME_DEFAULTS } from '@/lib/ai/runtime/general-react-agent/runtime-config'
 
 describe('General ReAct state and runtime defaults', () => {
-    it('freezes the v0.6.2 loop and finalizer budgets', () => {
+    it('freezes the v0.6.2 pre-finalization and loop budgets', () => {
         expect(GENERAL_REACT_RUNTIME_DEFAULTS).toMatchObject({
-            hardDeadlineMs: 270_000,
+            preFinalizationDeadlineMs: 240_000,
             loopDeadlineMs: 235_000,
-            maxFinalizerMs: 30_000,
             maxLogicalToolCalls: 21,
             maxLoopModelCalls: 10,
             maxModelCalls: 11,
@@ -25,9 +24,8 @@ describe('General ReAct state and runtime defaults', () => {
 
     it('freezes the fixed v0.6.2 server-owned budgets', () => {
         expect(GENERAL_REACT_RUNTIME_DEFAULTS).toEqual({
-            hardDeadlineMs: 270_000,
+            preFinalizationDeadlineMs: 240_000,
             loopDeadlineMs: 235_000,
-            maxFinalizerMs: 30_000,
             maxLogicalToolCalls: 21,
             maxLoopModelCalls: 10,
             maxModelCalls: 11,
@@ -56,7 +54,7 @@ describe('General ReAct state and runtime defaults', () => {
             _currentActionBatch: null,
             _executedToolCallCount: 0,
             _finalizationMode: null,
-            _hardDeadlineAtMs: 280_000,
+            _preFinalizationDeadlineAtMs: 250_000,
             _modelRetryCount: 0,
             _noProgressRounds: 0,
             _observationChars: 0,

@@ -15,9 +15,9 @@
 **Testing**: Vitest contract/unit/integration；真实 Key 的手动/受控 smoke；typecheck、lint、build、现有回归
 **Target Platform**: 现有 Web/桌面宿主共享的服务端 webapp，服务端 HTTPS 出网
 **Project Type**: pnpm/Turborepo workspace
-**Performance Goals**: 单次地图调用遵守 `remote-readonly` profile 的 20s attempt ceiling 与 General ReAct 的 270s Run hard deadline；不新增 UI 轮询
-**Constraints**: 固定只读 allowlist、server-only Key、GCJ-02 `longitude,latitude` 坐标语义、public-safe DTO、strict schema、对齐 `web-search` / `read-url` 的 `remote-readonly + retrySafe: true` 策略、无动态 Tool grant、无新 stream/API
-**Scale/Scope**: 普通 `routeType=chat`；九项语义能力须全部通过才发布；每 Run 最多 21 次 logical Tool Calls，九个 Tool-bearing rounds 内累计计算而非每轮 21 次；并发、重试、deadline 与 observation 总预算保持不变；账号级 QPS/总量由用户依据控制台另行评估，不在本版新增限流实现
+**Performance Goals**: 单次地图调用遵守 `remote-readonly` profile 的 20s attempt ceiling；General ReAct 收口前阶段最多 240s，constrained finalizer 正文不设应用内时限；不新增 UI 轮询
+**Constraints**: 固定只读 allowlist、server-only Key、GCJ-02 `longitude,latitude` 坐标语义、public-safe DTO、strict schema、对齐 `web-search` / `read-url` 的 `remote-readonly + retrySafe: true` 策略、无动态 Tool grant、无新 stream/API；finalizer 保留显式取消但绕过项目 Provider timeout
+**Scale/Scope**: 普通 `routeType=chat`；九项语义能力须全部通过才发布；每 Run 最多 21 次 logical Tool Calls，九个 Tool-bearing rounds 内累计计算而非每轮 21 次；收口前 deadline、并发、重试与 observation 总预算保持不变；账号级 QPS/总量由用户依据控制台另行评估，不在本版新增限流实现
 
 ## Constitution Check
 
@@ -48,6 +48,7 @@
 8. **Completed constrained finalizer presentation**: `AgentRun.status` 是面向用户的总状态事实；`completed` 即使携带 `finalizationMode='constrained'` 也显示“已完成思考”，`constrained` 继续用于保持 Trace 展开、运行审计和禁止写入 Memory。受限 finalizer 接收与 loop 相同的 Tool result facts rule；路线空结果不能基于坐标或经验补充距离、时长或路线事实。
 9. **AMap safe failure and no-result projection**: `MCPHostError` 只携带 stable code、HTTP status、retryable 标记与受限 retry limit 等非敏感分类；Amap client/adapter 不保留 raw error、URL 或 response body。adapter 只在内存中读取 MCP `isError` 的结构化字段或错误文本：明确的 timeout、connection、429、5xx 和短时频率限制沿用 Runtime 最多两次指数退避；无法归类、但已通过 schema 的只读 `isError` 最多同参兜底一次；权限、额度耗尽、参数、空或 malformed result 不重试。adapter 与 MCP client 不自行等待、重试或 session recovery。逆地理编码 allowlist 投影国家、省、市、区；只有明确空 POI 数组成为 `no-result` observation。提示词将 no-result 视为成功的当前 Run 事实，禁止同参数重复调用。
 10. **AMap request batch pacing**: 在 MCP Client Manager 的 `callTool` 边界实现可选的、按 `serverId` 共享的进程内批次调度；该机制只在 server definition 显式声明时启用。`amap-maps` 配置每批最多 3 条，当前批次全部 settled 后冷却 800ms，随后才允许下一批启动。队列等待响应既有 AbortSignal 与 Tool attempt deadline；取消或 deadline 到期的队列项不外发。保持 Tool Runtime 的全局并发、20 秒 attempt、retry permit 与错误分类 owner，不在 adapter、前端、StreamEvent、数据库或模型 prompt 中增加专用逻辑。受控真实验证已证明更短的 500ms 冷却下三批各三条详情调用为 9/9 成功；用户将实际配置调整为更保守的 800ms，因此只同步实现与确定性断言，不重复外部调用。该调度器只覆盖单个 Webapp 进程；多实例共用 Key 的分布式限流留待后续运营/基础设施决策。
+11. **Constrained finalizer unbounded output**: `preFinalizationDeadlineMs=240_000` 仅限正文收口前的行动阶段，维持 235 秒 loop deadline 与 5 秒 handoff reserve。进入 constrained finalizer 后不创建本地 deadline timer，且以 `timeoutMs: null` 显式绕过项目 Provider 默认 timeout；取消仍经父 signal 传播并停止未完成的流。chat service 不得保留 270 秒外层 abort 或将 pre-finalization deadline 传给 durable projection，因此可恢复执行会在 HTTP 客户端断线后继续。普通无 Tool 最终回答没有进入 finalizer，仍在 loop 预算内；Tool、重试、并发、observation 与 public stream/API/DTO 均不变。
 
 ## Project Structure
 

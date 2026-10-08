@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { callAmapMcpTool } from '@/lib/ai/mcp/adapters/amap-mcp-tool-adapter'
-import { createGeneralReActRunContext } from '@/lib/ai/runtime/general-react-agent/agent-context'
+import { createGeneralReActRunContext, type GeneralReActRunContext } from '@/lib/ai/runtime/general-react-agent/agent-context'
 import {
     GeneralReActAgentRunError,
     GeneralReActAgentRunner,
@@ -86,6 +86,81 @@ class PartialThenProviderErrorFinalizer extends BaseChatModel {
     }
 }
 
+class DeferredFinalizer extends BaseChatModel {
+    private releaseStream!: () => void
+    private signalStarted!: () => void
+    readonly started: Promise<void>
+    private readonly streamReleased = new Promise<void>(resolve => {
+        this.releaseStream = resolve
+    })
+
+    constructor() {
+        super({})
+        this.started = new Promise<void>(resolve => {
+            this.signalStarted = resolve
+        })
+    }
+
+    _llmType() {
+        return 'general-react-runner-deferred-finalizer'
+    }
+
+    bindTools(): never {
+        throw new Error('Constrained finalizer must not bind tools')
+    }
+
+    release() {
+        this.releaseStream()
+    }
+
+    async *_streamResponseChunks() {
+        this.signalStarted()
+        await this.streamReleased
+        const delta = '跨越旧硬截止后的完整受限回答。'
+        yield new ChatGenerationChunk({ message: new AIMessageChunk({ content: delta }), text: delta })
+    }
+
+    async _generate(): Promise<ChatResult> {
+        throw new Error('The stream must be consumed directly')
+    }
+}
+
+class CancellationAwareFinalizer extends BaseChatModel {
+    private signalStarted!: () => void
+    readonly started: Promise<void>
+
+    constructor() {
+        super({})
+        this.started = new Promise<void>(resolve => {
+            this.signalStarted = resolve
+        })
+    }
+
+    _llmType() {
+        return 'general-react-runner-cancellation-aware-finalizer'
+    }
+
+    bindTools(): never {
+        throw new Error('Constrained finalizer must not bind tools')
+    }
+
+    async *_streamResponseChunks(_messages: BaseMessage[], options: { signal?: AbortSignal }) {
+        this.signalStarted()
+        await new Promise<void>((_resolve, reject) => {
+            if (options.signal?.aborted) {
+                reject(options.signal.reason)
+                return
+            }
+            options.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })
+        })
+        yield new ChatGenerationChunk({ message: new AIMessageChunk({ content: '' }), text: '' })
+    }
+
+    async _generate(): Promise<ChatResult> {
+        throw new Error('The stream must be consumed directly')
+    }
+}
+
 function createToolDefinition(input: { execute: (args: { value: string }) => Promise<string> | string; name: string }): ChatToolDefinition {
     const schema = z.object({ value: z.string() }).strict()
     return {
@@ -102,12 +177,14 @@ function createToolDefinition(input: { execute: (args: { value: string }) => Pro
 }
 
 function createHarness(input: {
+    executionContext?: GeneralReActRunContext['executionContext']
     finalizerModel?: BaseChatModel
     loopModel: BaseChatModel
+    runSignal?: AbortSignal
     toolDefinitionMap?: Map<string, ChatToolDefinition>
 }) {
     const chunks: unknown[] = []
-    const createPhaseModel = vi.fn(({ phase }: { phase: string }) => {
+    const createPhaseModel = vi.fn(({ phase }: { phase: string; timeoutMs: number | null }) => {
         if (phase === 'loop') return input.loopModel
         if (phase === 'finalizer') return input.finalizerModel ?? new ScriptedModel([() => new AIMessage('受限收口回答。')])
         throw new Error(`Unexpected model phase: ${phase}`)
@@ -115,14 +192,14 @@ function createHarness(input: {
     const context = createGeneralReActRunContext({
         clock: { now: () => Date.now() },
         createPhaseModel: createPhaseModel as never,
-        executionContext: { resolvedModelSelection: {} } as never,
+        executionContext: input.executionContext ?? ({ resolvedModelSelection: {} } as never),
         isTransportClosed: () => false,
         normalizeModelError: () => ({ code: 'MODEL_ERROR', logMeta: {}, message: '模型调用失败。', retryable: false }),
         publishChunk: async chunk => {
             chunks.push(chunk)
         },
         retryPermitPool: new RetryPermitPool(),
-        runSignal: new AbortController().signal,
+        runSignal: input.runSignal ?? new AbortController().signal,
         toolDefinitionMap: input.toolDefinitionMap ?? new Map(),
     })
 
@@ -526,12 +603,101 @@ describe('general-react-agent runner', () => {
             modelCallCount: 2,
         })
         expect(harness.createPhaseModel.mock.calls.map(call => call[0].phase)).toEqual(['loop', 'finalizer'])
+        const finalizerOptions = harness.createPhaseModel.mock.calls.find(call => call[0].phase === 'finalizer')?.[0]
+        expect(finalizerOptions?.timeoutMs).toBeNull()
         expect(harness.chunks).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ type: 'agent-text-end', outcome: 'final_answer', status: 'completed' }),
                 expect.objectContaining({ type: 'agent-run-end', finalizationMode: 'constrained', status: 'completed' }),
             ])
         )
+    })
+
+    it('constrained finalizer 不受应用内 hard deadline 限制，并显式关闭 Provider 默认超时', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(0)
+        const finalizer = new DeferredFinalizer()
+        const harness = createHarness({
+            finalizerModel: finalizer,
+            loopModel: new ScriptedModel([() => new AIMessage('')]),
+        })
+
+        try {
+            const resultPromise = runHarness(harness, {
+                context: harness.context,
+                messages: [new HumanMessage('请回答')],
+                runId: 'run-unbounded-finalizer',
+                threadId: 'thread-unbounded-finalizer',
+            })
+
+            await finalizer.started
+            await vi.advanceTimersByTimeAsync(300_000)
+            finalizer.release()
+
+            await expect(resultPromise).resolves.toMatchObject({
+                assistantText: '跨越旧硬截止后的完整受限回答。',
+                finalizationMode: 'constrained',
+            })
+            const finalizerOptions = harness.createPhaseModel.mock.calls.find(call => call[0].phase === 'finalizer')?.[0]
+            expect(finalizerOptions?.timeoutMs).toBeNull()
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('从 235 秒 handoff 进入的 finalizer 跨越 pre-finalization 边界后仍可收口', async () => {
+        vi.useFakeTimers()
+        vi.setSystemTime(235_000)
+        const finalizer = new DeferredFinalizer()
+        const harness = createHarness({
+            executionContext: { preFinalizationDeadlineAtMs: 240_000, resolvedModelSelection: {} } as never,
+            finalizerModel: finalizer,
+            loopModel: new ScriptedModel([() => new AIMessage('不应进入 loop')]),
+        })
+
+        try {
+            const resultPromise = runHarness(harness, {
+                context: harness.context,
+                messages: [new HumanMessage('请回答')],
+                runId: 'run-prefinalization-handoff-finalizer',
+                threadId: 'thread-prefinalization-handoff-finalizer',
+            })
+
+            await finalizer.started
+            await vi.advanceTimersByTimeAsync(35_001)
+            finalizer.release()
+
+            await expect(resultPromise).resolves.toMatchObject({
+                assistantText: '跨越旧硬截止后的完整受限回答。',
+                finalizationMode: 'constrained',
+            })
+            expect(harness.createPhaseModel.mock.calls.map(call => call[0].phase)).toEqual(['finalizer'])
+            expect(harness.createPhaseModel.mock.calls[0]?.[0].timeoutMs).toBeNull()
+        } finally {
+            vi.useRealTimers()
+        }
+    })
+
+    it('constrained finalizer 保留显式取消，并停止未完成的流', async () => {
+        const cancellation = new AbortController()
+        const finalizer = new CancellationAwareFinalizer()
+        const harness = createHarness({
+            finalizerModel: finalizer,
+            loopModel: new ScriptedModel([() => new AIMessage('')]),
+            runSignal: cancellation.signal,
+        })
+        const resultPromise = runHarness(harness, {
+            context: harness.context,
+            messages: [new HumanMessage('请回答')],
+            runId: 'run-finalizer-cancelled',
+            threadId: 'thread-finalizer-cancelled',
+        })
+
+        await finalizer.started
+        cancellation.abort(new DOMException('Request cancelled.', 'AbortError'))
+
+        await expect(resultPromise).rejects.toMatchObject({ code: 'REQUEST_CANCELLED' })
+        expect(chunksOfType(harness.chunks, 'agent-run-end')).toContainEqual(expect.objectContaining({ status: 'cancelled' }))
     })
 
     it('明确 length 正文不能成为 normal final，而是进入一次 constrained finalizer', async () => {

@@ -39,8 +39,12 @@
 
 - Q: 高德详情查询出现短时连续失败时，如何保持与现有 Tool 的三并发策略一致？ → A: General ReAct 的全局 `maxToolConcurrency=3` 不变；仅 `amap-maps` 在 MCP Client Manager 中使用进程内、按 `serverId` 共享的批次调度。每批最多三条 Tool 请求，上一批全部 settled 后冷却 800ms 再启动下一批。排队等待服从既有取消与 20 秒 Tool attempt deadline；不新增 adapter 私有重试、StreamEvent 字段或账号级限流。
 - Q: 为什么把已验证的 500ms 调整为 800ms？ → A: 受控 server-only 验证以真实搜索返回的 POI ID 执行三批各三条详情调用，批次完成后冷却 500ms，结果 9/9 成功。800ms 是用户指定的更保守配置；由于它比已通过的冷却更长，本次只改配置与确定性断言，不重复真实调用。
-- Q: 将 `maxLogicalToolCalls` 从 14 调整为 18，会不会使九个 Tool-bearing rounds 各执行 18 次？ → A: 不会。18 是单个 Run 内所有 admitted logical Tool Calls 的累计上限；九个 Tool-bearing rounds 只是模型最多可发起带 Tool Action 的轮数。并发、每 Run retry permits、20 秒 attempt、235 秒 loop deadline、270 秒 hard deadline 和 48,000 字符 observation 总预算均不调整。
-- Q: 是否将累计上限由 18 继续提升到 21？ → A: 是。21 仍是单个 Run 的累计上限，不按九个 Tool-bearing rounds 相乘；它是 3 的倍数，地图请求可形成七批每批三条的调度。保持 3 并发、4 个 retry permits、800ms 地图批次冷却、20 秒 attempt、235/270 秒 deadline 和 48,000 字符 observation 总预算不变。
+- Q: 将 `maxLogicalToolCalls` 从 14 调整为 18，会不会使九个 Tool-bearing rounds 各执行 18 次？ → A: 不会。18 是单个 Run 内所有 admitted logical Tool Calls 的累计上限；九个 Tool-bearing rounds 只是模型最多可发起带 Tool Action 的轮数。并发、每 Run retry permits、20 秒 attempt、235 秒 loop deadline、240 秒 pre-finalization deadline 和 48,000 字符 observation 总预算均不调整。
+- Q: 是否将累计上限由 18 继续提升到 21？ → A: 是。21 仍是单个 Run 的累计上限，不按九个 Tool-bearing rounds 相乘；它是 3 的倍数，地图请求可形成七批每批三条的调度。保持 3 并发、4 个 retry permits、800ms 地图批次冷却、20 秒 attempt、235 秒 loop / 240 秒 pre-finalization deadline 和 48,000 字符 observation 总预算不变。
+
+### Session 2026-10-08
+
+- Q: 受限收口的正文回答是否应保留独立 30 秒或整轮剩余时限？ → A: 不保留。`preFinalizationDeadlineMs=240_000` 只约束正文收口前的总阶段；其中 `loopDeadlineMs=235_000` 与 5 秒 handoff reserve 保持不变。进入 constrained finalizer 后不再设置应用内 timer 或项目 Provider timeout，普通无 Tool 正文仍在 loop 阶段内。finalizer 保留显式取消 signal；上游 Provider、网关或进程自身的外部限制不属于本 Runtime 可解除的预算。
 
 ## Summary
 
@@ -135,7 +139,8 @@ AI Mind 的普通聊天需要在用户提出地点或出行问题时使用高德
 - **FR-015**: MCP client 与 AMap adapter 只能向 Tool Runtime 传递非敏感失败分类：稳定 MCP Host code、HTTP status、retryable 标记与受限 retry limit。高德 adapter 可仅在内存中检查 `isError` 的结构化字段或错误文本，并立即丢弃原始内容。明确的 timeout、connection、429、5xx 或短时频率限制沿用最多两次同参指数退避；已通过 schema 但无法归类的高德只读 `isError` 最多同参兜底一次。401/403、Key/权限问题、已识别的额度耗尽、4xx 参数错误、缺失或 malformed result 不可重试；模型可在后续 Action 使用新参数修正参数问题。不得把原始错误、请求 URL、响应正文、Key 或其派生信息写入 `StreamEvent`、Trace、Memory、快照或普通日志。
 - **FR-016**: 逆地理编码仅投影远端明确返回的 `country`、`province`、`city`、`district` 行政区字段，不拼接或猜测完整地址、坐标或当前位置。POI 搜索/周边搜索只有在远端明确返回空 `pois`/`results` 数组时才输出结构化 `no-result` observation；缺失字段、错误类型或非空但不可投影记录必须作为安全失败。`no-result` 是当前 Run 的成功事实，模型不得用相同 Tool 与归一化后相同参数再次查询。
 - **FR-017**: `amap-maps` 的 MCP Tool 请求必须在单一 Webapp 进程内按 `serverId` 共用批次队列：每批最多 3 条，当前批次所有请求 settled 后冷却 800ms 才可启动下一批。调度只作用于该 server 的 `callTool`，不得改变 General ReAct 的全局并发、其他 MCP server、Tool schema、adapter 映射、公开 stream/Trace DTO 或既有 retry 分类。排队请求收到 abort 或 deadline signal 后不得外发。
-- **FR-018**: General ReAct 的 `maxLogicalToolCalls` 为单个 Run 所有 admitted logical Tool Calls 的累计上限 21，不按九个 Tool-bearing rounds 相乘。每个 batch 只可取得剩余累计 slots，超出第 21 次的调用在 Provider 前以既有 `tool_call_limit` 拒绝。`maxToolBearingRounds=9`、`maxToolConcurrency=3`、`maxToolRetries=4`、20 秒 attempt、235 秒 loop deadline、270 秒 hard deadline 与 observation 预算保持不变。
+- **FR-018**: General ReAct 的 `maxLogicalToolCalls` 为单个 Run 所有 admitted logical Tool Calls 的累计上限 21，不按九个 Tool-bearing rounds 相乘。每个 batch 只可取得剩余累计 slots，超出第 21 次的调用在 Provider 前以既有 `tool_call_limit` 拒绝。`maxToolBearingRounds=9`、`maxToolConcurrency=3`、`maxToolRetries=4`、20 秒 attempt、235 秒 loop deadline、240 秒 pre-finalization deadline 与 observation 预算保持不变。
+- **FR-019**: 仅 constrained finalizer 的正文输出不设应用内 phase 时限。General ReAct 的行动/Tool/loop 阶段整体在 `preFinalizationDeadlineMs=240_000` 前结束，`loopDeadlineMs=235_000` 与 5 秒 handoff reserve 保持不变；进入 finalizer 后不得创建本地 deadline timer，也不得把项目 Provider 默认 timeout 重新施加到模型调用。finalizer 必须传递显式取消 signal；普通无 Tool 正文仍受 loop 预算约束。HTTP 客户端断线继续由既有 resumable execution 协调，不得因本预算变化中断后台执行。
 
 ## Success Criteria _(mandatory)_
 
@@ -151,6 +156,7 @@ AI Mind 的普通聊天需要在用户提出地点或出行问题时使用高德
 - **SC-008**: 自动化测试证明 AMap 的 timeout、connection、429、5xx 与已识别的短时频率限制仅以安全类别进入 Runtime 并可重试；已通过 schema 的无法归类 `isError` 最多只重试一次；4xx、权限、额度耗尽、空或 malformed result 不重试。行政区事实与明确空 POI 的 `no-result` 可被模型消费，所有 public Trace、StreamEvent、Memory/snapshot 测试断言中均不含原始错误、URL、Key、地址或坐标。
 - **SC-009**: 确定性测试证明 `amap-maps` 不会启动超过 3 条并发 Tool 请求，下一批在前一批全部 settled 后至少等待 800ms，取消/过期队列项不外发；受控 server-only external smoke 的三批各三条真实 POI 详情调用通过，记录不含 Key、URL、POI ID、地址、坐标或原始错误。800ms 是在已通过 500ms 外部证据上的更保守配置，本次不重复外部调用。
 - **SC-010**: 自动化测试证明单 batch 的前 21 个 logical Tool Calls 可被 admission，第 22 个在 Provider 前被 `tool_call_limit` 拒绝；在第九个 Tool-bearing round 之前已使用 19 次调用时，同一累计上限只再准入两次，不能形成 `21 × 9` 次调用。并发、重试、deadline 和 observation 预算断言保持原值。
+- **SC-011**: 自动化测试证明 chat route 只注入 240 秒 pre-finalization deadline；受限 finalizer 传递 `timeoutMs: null`、可跨越旧 270 秒边界完成、不会把该 deadline 传给 durable projection，并能被显式取消中断。普通 loop、Tool、重试、并发、Stream DTO 和可恢复断线语义保持兼容。
 
 ## Assumptions
 

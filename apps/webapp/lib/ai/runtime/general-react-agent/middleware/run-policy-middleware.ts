@@ -132,7 +132,6 @@ export function evaluateBeforeModelPolicy(input: {
             effectiveState._observationChars >= GENERAL_REACT_RUNTIME_DEFAULTS.maxObservationChars ||
             Object.values(admissions).some(admission => admission.blockedReason === 'observation_limit'),
         requestCancelled: input.runAborted,
-        runDeadline: input.nowMs >= effectiveState._hardDeadlineAtMs,
         toolCallLimit: Object.values(admissions).some(admission => admission.blockedReason === 'tool_call_limit'),
     })
 
@@ -173,7 +172,6 @@ export function evaluateAfterModelPolicy(input: {
                 ? null
                 : selectGeneralReActStopReason({
                       actionDeadline: input.nowMs >= input.state._loopDeadlineAtMs,
-                      runDeadline: input.nowMs >= input.state._hardDeadlineAtMs,
                   })
         if (deadlineStopReason) {
             return stopUpdate(deadlineStopReason)
@@ -209,7 +207,6 @@ export function evaluateAfterModelPolicy(input: {
             : selectGeneralReActStopReason({
                   actionDeadline: nowMs >= input.state._loopDeadlineAtMs,
                   modelCallLimit: previousUsage.actionModelCallCount + 1 >= GENERAL_REACT_RUNTIME_DEFAULTS.maxLoopModelCalls,
-                  runDeadline: nowMs >= input.state._hardDeadlineAtMs,
               })
     if (stopReason) {
         return stopUpdate(stopReason)

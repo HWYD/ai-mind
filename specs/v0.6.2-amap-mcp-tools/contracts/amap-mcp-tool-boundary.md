@@ -39,6 +39,7 @@ T001 在受控 server-only 环境完成 `initialize`、`tools/list` 和每项一
 3. 服务端先执行 strict schema、坐标/长度/范围与 outbound-secret 检查。坐标统一为 GCJ-02 的 `longitude,latitude` 十进制度数，范围为 longitude `[-180, 180]`、latitude `[-90, 90]`，每项最多六位小数；明确标注 WGS-84/GPS、BD-09 或其他体系时拒绝外发并要求提供 GCJ-02 坐标或地址。用户和模型均可生成地址、坐标、城市和 POI ID 候选；候选不要求逐字来自当前 turn 或此前结果，也不构成地点/路线事实。缺少用户意图锚点时澄清，且不得从 IP、浏览器、Profile 或 Memory 推断当前位置。任何 remote-readonly 参数在 Provider 前检查 known secret；`read-url` 还须通过公开 HTTP(S) URL policy。
 4. Tool Runtime 产生逻辑调用及其预算、取消、deadline、失败 Trace 和重试行为；高德 Tool 对齐 `web-search` / `read-url` 的 `remote-readonly + retrySafe: true`。明确的 timeout、connection、429、5xx 或短时频率限制在 permit、预算和 deadline 允许时最多重试两次同参；已通过 schema、但不能归类的高德 `isError` 最多同参兜底一次。schema、已分类 4xx、权限、额度耗尽、空或 malformed 结果只给模型返回不含原始值/远端错误的 repair hint，由后续 Action 使用新参数修正。adapter 只在内存中解析 `isError` 并传递稳定分类；它使用固定高德 server 与固定远端工具名发 `tools/call`，关闭隐式 session recovery，且不自行等待或重试。
 5. MCP 返回 `isError`、空结果、异常类型或非法字段时视为失败/无结果，不能回填成功 observation。adapter 与 MCP client 不得自行重试；重试仍由 Tool Runtime 统一控制。
+6. General ReAct 的 Tool/action 阶段使用 240 秒 pre-finalization boundary；constrained finalizer 仅消费已完成 observation，正文调用传递取消 signal 且显式绕过项目 Provider timeout，不继承该边界。此改变不新增 Tool 参数、MCP 调用、public DTO 或 Trace 字段；HTTP 断线仍由既有 resumable execution 处理。
 
 ## Output Contract
 

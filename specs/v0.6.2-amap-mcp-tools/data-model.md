@@ -4,7 +4,7 @@
 
 - `maxLogicalToolCalls=21` 是每个 Run 的累计 admission 上限；`_toolCallCount` 汇总所有 Tool-bearing rounds 已预占的 logical calls，不能按 `maxToolBearingRounds=9` 相乘。
 - `ActionBatchAdmission` 依据 `21 - _toolCallCount` 分配当前 batch 的剩余 slots；第 22 个及其后的调用保持既有 `tool_call_limit` public-safe failure，不进入 Provider。
-- 本次不改变 `_toolBearingRoundCount`（9）、`_toolRetryCount`（4）、`maxToolConcurrency`（3）、deadline 或 observation counter/DTO；不新增 StreamEvent、数据库或地图存储字段。
+- 本次保留 `_toolBearingRoundCount`（9）、`_toolRetryCount`（4）、`maxToolConcurrency`（3）与 observation counter/DTO；`_preFinalizationDeadlineAtMs` 固定为 Run 起点后 240 秒，仅供行动/Tool 阶段截止，constrained finalizer 不携带该 deadline；不新增 StreamEvent、数据库或地图存储字段。
 
 ## Summary
 

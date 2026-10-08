@@ -10,7 +10,7 @@ import type { ChatRequest } from '@/lib/ai/types/chat'
 import type { GeneralReActPhaseModelOptions } from './general-react-agent/agent-context'
 
 export interface ChatExecutionContext {
-    runDeadlineAtMs?: number
+    preFinalizationDeadlineAtMs?: number
     sessionId?: string
     setCookie?: string | null
     signal?: AbortSignal

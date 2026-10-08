@@ -191,7 +191,7 @@ describe('createChatService', () => {
         vi.restoreAllMocks()
     })
 
-    it('只给 General ReAct 请求分配贯穿 preparation 与 projection 的 absolute deadline', async () => {
+    it('只给 General ReAct 请求分配 pre-finalization deadline', async () => {
         vi.setSystemTime(10_000)
         runtimeMocks.run.mockResolvedValue(undefined)
 
@@ -221,12 +221,12 @@ describe('createChatService', () => {
         await readAllChunks(tasklistResponse)
 
         const contexts = runtimeMocks.chatOrchestratorOptions.map(
-            options => (options as { context: ResolvedChatExecutionContext & { runDeadlineAtMs?: number } }).context
+            options => (options as { context: ResolvedChatExecutionContext & { preFinalizationDeadlineAtMs?: number } }).context
         )
-        expect(contexts.map(context => context.runDeadlineAtMs)).toEqual([280_000, 280_000, undefined])
+        expect(contexts.map(context => context.preFinalizationDeadlineAtMs)).toEqual([250_000, 250_000, undefined])
     })
 
-    it('把 General ReAct absolute deadline 传给 durable batch projection', async () => {
+    it('不把 pre-finalization deadline 传给 durable batch projection', async () => {
         vi.setSystemTime(10_000)
         runtimeMocks.run.mockImplementation(async (options: unknown) => {
             await (options as { writeChunk: (chunk: ChatStreamChunk) => Promise<void> }).writeChunk({
@@ -255,57 +255,36 @@ describe('createChatService', () => {
         }).streamChat({ conversationId: 'deadline', messages: [] }, withStreamRecovery(createResolvedChatContext(), 'run-deadline'))
         await readAllChunks(response)
 
-        expect(projectChunks).toHaveBeenCalledWith(expect.any(Array), { deadlineAtMs: 280_000 })
+        expect(projectChunks).toHaveBeenCalledWith(expect.any(Array), undefined)
     })
 
-    it('在 270 秒硬截止前预留 5 秒完成失败终态投影', async () => {
+    it('不会用 pre-finalization 或旧的全局硬截止中断可恢复执行', async () => {
         vi.setSystemTime(0)
+        let finishRun: (() => void) | undefined
         runtimeMocks.run.mockImplementation(
             (options: unknown) =>
-                new Promise<void>((_resolve, reject) => {
+                new Promise<void>((resolve, reject) => {
                     const signal = (options as { context: ResolvedChatExecutionContext }).context.signal!
                     signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+                    finishRun = resolve
                 })
         )
-        const terminalProjectionTimes: number[] = []
-        const terminalProjectionOptions: Array<{ deadlineAtMs?: number } | undefined> = []
-        const projectChunk = vi.fn(
-            async (
-                input: { chunk: ChatStreamChunk; runId: string; terminalState?: StreamEventEnvelopeDto['terminalState'] },
-                options?: { deadlineAtMs?: number }
-            ): Promise<StreamEventEnvelopeDto> => {
-                terminalProjectionTimes.push(Date.now())
-                terminalProjectionOptions.push(options)
-
-                return {
-                    eventId: 'evt_run_deadline',
-                    eventKind: 'terminal',
-                    payload: input.chunk as StreamEventEnvelopeDto['payload'],
-                    protocolVersion: 1,
-                    runId: input.runId,
-                    sequence: 1,
-                    terminal: true,
-                    terminalState: input.terminalState ?? 'failed',
-                }
-            }
+        const response = await createTestChatService().streamChat(
+            { conversationId: 'run-deadline', messages: [] },
+            withStreamRecovery(createResolvedChatContext(), 'run-deadline')
         )
-
-        const response = await createChatService({
-            streamEventProjector: { projectChunk },
-            streamExecutionCoordinator: {
-                getCancelRequestedAt: async () => null,
-                startExecution: async ({ execute }) =>
-                    execute({ executionOwnerId: 'execution-owner-run-deadline', signal: new AbortController().signal }),
-            },
-        }).streamChat({ conversationId: 'run-deadline', messages: [] }, withStreamRecovery(createResolvedChatContext(), 'run-deadline'))
         const ndjsonPromise = readAllChunks(response)
+        let streamFinished = false
+        void ndjsonPromise.then(() => {
+            streamFinished = true
+        })
 
-        await vi.advanceTimersByTimeAsync(270_000)
-        const ndjson = await ndjsonPromise
+        await vi.advanceTimersByTimeAsync(300_000)
+        await Promise.resolve()
 
-        expect(terminalProjectionTimes).toEqual([265_000])
-        expect(terminalProjectionOptions).toEqual([{ deadlineAtMs: 270_000 }])
-        expect(ndjson).toContain('"terminalState":"failed"')
+        expect(streamFinished).toBe(false)
+        finishRun?.()
+        await expect(ndjsonPromise).resolves.toMatch(/^\n*$/)
     })
 
     it('长时间没有业务 chunk 时写入透明心跳，并在请求结束后清理定时器', async () => {
@@ -598,7 +577,7 @@ describe('createChatService', () => {
 
         expect(ndjson).toContain('"terminalState":"failed"')
         expect(ndjson).not.toContain('"terminalState":"completed"')
-        expect(projectChunk).toHaveBeenLastCalledWith(expect.objectContaining({ terminalState: 'failed' }), expect.anything())
+        expect(projectChunk).toHaveBeenLastCalledWith(expect.objectContaining({ terminalState: 'failed' }))
     })
 
     it('显式取消在投影缓冲区中止后仍只持久化 cancelled terminal', async () => {

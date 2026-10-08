@@ -127,7 +127,7 @@ export async function executeGeneralReActToolCall(input: {
         },
         {
             actionDeadlineAtMs: input.state._loopDeadlineAtMs,
-            hardDeadlineAtMs: input.state._hardDeadlineAtMs,
+            hardDeadlineAtMs: input.state._preFinalizationDeadlineAtMs,
             retryPermitPool: input.context.retryPermitPool,
             runtimeScope: 'general-react-agent',
             toolDefinitionMap: input.context.toolDefinitionMap as Map<string, typeof definition>,

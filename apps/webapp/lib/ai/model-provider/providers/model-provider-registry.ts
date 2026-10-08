@@ -26,7 +26,7 @@ export interface CreateChatModelOptions {
     resolvedModelSelection: ResolvedModelSelection
     streaming?: boolean
     temperature?: number
-    timeoutMs?: number
+    timeoutMs?: number | null
 }
 
 /**

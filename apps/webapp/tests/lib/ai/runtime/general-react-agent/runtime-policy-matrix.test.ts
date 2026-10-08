@@ -74,7 +74,7 @@ describe('general-react-agent runtime policy matrix', () => {
         expect(admission.admissions['call-22']).toMatchObject({ admitted: false, blockedReason: 'tool_call_limit' })
     })
 
-    it('stops at explicit loop/model/deadline budgets while reserving exactly one finalizer call', () => {
+    it('stops the pre-final action phase at its loop budget while reserving exactly one finalizer call', () => {
         const state = createGeneralReActInitialState(1_000)
         expect(
             evaluateBeforeModelPolicy({
@@ -94,13 +94,6 @@ describe('general-react-agent runtime policy matrix', () => {
                 state,
             })
         ).toMatchObject({ _stopReason: 'action_deadline', jumpTo: 'end' })
-        expect(
-            evaluateBeforeModelPolicy({
-                nowMs: 1_000 + GENERAL_REACT_RUNTIME_DEFAULTS.hardDeadlineMs,
-                runAborted: false,
-                state,
-            })
-        ).toMatchObject({ _stopReason: 'run_deadline', jumpTo: 'end' })
         expect(
             evaluateBeforeModelPolicy({
                 nowMs: 2_000,
@@ -126,7 +119,7 @@ describe('general-react-agent runtime policy matrix', () => {
         })
     })
 
-    it('does not enter the finalizer phase after cancellation or the hard deadline', () => {
+    it('does not enter the finalizer phase after cancellation', () => {
         const state = createGeneralReActInitialState(1_000)
         expect(
             evaluateBeforeModelPolicy({
@@ -135,13 +128,6 @@ describe('general-react-agent runtime policy matrix', () => {
                 state,
             })
         ).toMatchObject({ _runPhase: 'cancelled', _stopReason: 'request_cancelled', jumpTo: 'end' })
-        expect(
-            evaluateBeforeModelPolicy({
-                nowMs: 1_000 + GENERAL_REACT_RUNTIME_DEFAULTS.hardDeadlineMs,
-                runAborted: false,
-                state,
-            })
-        ).toMatchObject({ _runPhase: 'failed', _stopReason: 'run_deadline', jumpTo: 'end' })
     })
 
     it('allocates at most two retries per call and four retries per run', () => {

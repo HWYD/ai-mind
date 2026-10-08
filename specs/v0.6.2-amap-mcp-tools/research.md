@@ -106,3 +106,10 @@
 ## Delegability
 
 本任务为 Level C/D 跨边界规划，已将官方资料调研委派给独立只读 agent；本 agent 负责代码基线、各规格文件与最终整合。当前文档彼此强耦合，采用单一 owner 写入，后续以独立审阅进行一致性检查；没有并发写同一文件。
+
+## Constrained finalizer deadline re-evaluation (2026-10-08)
+
+- 运行证据显示地图场景的 finalizer 首 token 已消耗约 24.6 秒；固定 30 秒 phase timer 使正文仅输出约 5 秒即被终止。将 finalizer 延长到剩余 270 秒只能缓解早结束 loop，仍会在长前置阶段或长正文时截断。
+- 评估过“保留 270 秒整轮 timer、仅移除 30 秒 finalizer cap”和“收口前 240 秒、constrained finalizer 不设应用内 timer”两种方案。前者仍让 Chat Service abort 与 durable projection deadline 在正文阶段失败，不能满足正文无时间上限；后者保持 Tool/action 的 235 秒 loop、5 秒 handoff reserve、20 秒 attempt、并发和 retry 边界，同时不人为截断已进入收口的正文，因此采纳后者。
+- `timeoutMs: null` 是跨 Provider 边界的显式语义：`undefined` 继续使用 `AI_MIND_LLM_TIMEOUT_MS`，`null` 表示当前 constrained finalizer 不向 OpenAI-compatible client 传入项目 timeout。父 AbortSignal 仍传入模型流；HTTP client 断线继续由既有 StreamExecutionCoordinator 的后台 resumable 执行处理。Provider、网关、负载均衡器或进程自身的独立限制不在此改动的承诺范围。
+- 该改动涉及同一条 chat-service → General ReAct → model-provider 主链，拆分并发写入会增加共享边界冲突；由单一 owner 整合，测试覆盖作为独立验证而非并发修改。
